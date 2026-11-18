@@ -19,12 +19,12 @@ describe("Inbox", () => {
   it("lists what waits for the person once, grouped by kind, longest wait first", async () => {
     mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE, ONB], conversations: [CONV] }, attention: [] }) }) });
     mount(<InboxView />);
-    expect(await screen.findByText("Spec approved")).toBeTruthy();
+    expect(await screen.findByText("Approve spec")).toBeTruthy();
     expect(document.getElementById("inbox-count")?.textContent).toBe("3");
     expect(screen.getByText("Merge onboarding pull request search-service#3")).toBeTruthy();
     // a tab shows one kind
     fireEvent.click(screen.getByRole("tab", { name: /Questions/ }));
-    await waitFor(() => expect(screen.queryByText("Spec approved")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Approve spec")).toBeNull());
     // a question row: the work order links to its record, an Awaiting answer chip, Answer opens the thread
     expect(await screen.findByText("Awaiting answer")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Answer" })).toBeTruthy();
@@ -38,7 +38,7 @@ describe("Inbox", () => {
       "GET /api/v1/work-orders/WO-1005": () => ({ body: { id: "WO-1005", project: "payments", version: 1, allowed: { approve: { gate: "G0G1", allowed: true, reason: "", needs: "" } } } }),
     });
     mount(<InboxView />);
-    expect(await screen.findByText("Brief confirmed")).toBeTruthy();
+    expect(await screen.findByText("Confirm brief")).toBeTruthy();
     expect(screen.queryByText(/Classified as Docs/)).toBeNull();
     expect(document.getElementById("inb-gate-WO-1005-G0G1")?.textContent).toContain("WO-1005");
     fireEvent.click(screen.getByRole("tab", { name: /Questions/ }));
@@ -79,7 +79,7 @@ describe("Inbox", () => {
     await waitFor(() => expect(ok.getAttribute("aria-disabled")).not.toBe("true"));
     fireEvent.click(ok);
     // the prototype's dialog first; the decision is sent when it is confirmed
-    expect(await screen.findByText("Approve G2 for WO-2398")).toBeTruthy();
+    expect(await screen.findByText("Approve spec · G2 for WO-2398")).toBeTruthy();
     expect(cs.some((c) => c.method === "POST")).toBe(false);
     fireEvent.click(within(document.querySelector<HTMLElement>(".dlg")!).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(cs.some((c) => c.method === "POST" && c.path.startsWith("/api/v1/gate-instances/"))).toBe(true));
@@ -161,7 +161,7 @@ describe("Inbox", () => {
   it("Questions and Blocked lists have no search or project filter (the prototype filters Approvals only)", async () => {
     mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [CONV, { ...CONV, wo: "WO-2417", stuck: { state: "blocked", station: "build", reason: "x", actions: [] } }] }, attention: [] }) }) });
     mount(<InboxView />);
-    await screen.findByText("Spec approved");
+    await screen.findByText("Approve spec");
     expect(document.getElementById("inbox-search")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: /Questions/ }));
     await screen.findByText("Awaiting answer");
@@ -175,11 +175,11 @@ describe("Inbox", () => {
   it("the filtered-empty approvals state says to loosen the search and offers Clear filters", async () => {
     mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] }, attention: [] }) }) });
     mount(<InboxView />);
-    await screen.findByText("Spec approved");
+    await screen.findByText("Approve spec");
     fireEvent.change(document.getElementById("inbox-search") as HTMLInputElement, { target: { value: "zzzz" } });
     expect(await screen.findByText("Loosen the search or clear the filters.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(await screen.findByText("Spec approved")).toBeTruthy();
+    expect(await screen.findByText("Approve spec")).toBeTruthy();
   });
 
   it("Open Trust goes to Trust with ?tab=proposals", async () => {

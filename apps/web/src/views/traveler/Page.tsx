@@ -11,6 +11,7 @@ import { Loading } from "../../ui/async";
 import { useActors } from "../../ui/actors";
 import { splitQuery } from "../dossier/hashQuery";
 import { fmtDate, minutes, plainName } from "../dossier/time";
+import { useOpenTraveler } from "../../shell/useTraveler";
 import { useRecordData } from "../record/data";
 import { clsName } from "./model";
 
@@ -57,6 +58,7 @@ export default function TravelerPage() {
   const actor = useActors();
   const id = splitQuery(hash.param).id.toUpperCase();
   const d = useRecordData(id || null);
+  const openTraveler = useOpenTraveler();
   if (!id || (!d.loading && (d.error || !d.wo || !d.project || !d.cat))) {
     return (
       <div className="view rec-view" id="trv-missing">
@@ -93,7 +95,7 @@ export default function TravelerPage() {
         kicker={<span style={{ display: "inline-flex", gap: 8 }}><a href="#work-orders" onClick={(e) => { e.preventDefault(); navigate("work-orders", null, wo.project); }}>Work orders</a><span aria-hidden="true">/</span><a href={`#record/${wo.id}`} onClick={(e) => { e.preventDefault(); navigate("record", wo.id, wo.project); }}>{wo.id}</a><span aria-hidden="true">/</span><span>Traveler</span></span>}
         title={`Traveler · ${wo.id}`}
         sub={wo.title}
-        actions={<><Btn label="Record" id="trv-page-record" onClick={() => navigate("record", wo.id, wo.project)} /><Btn label="Print" icon="dl" id="trv-page-print" onClick={() => window.print()} /></>}
+        actions={<><Btn label="Journey, documents and activity" icon="list" id="trv-page-drawer" onClick={() => openTraveler(wo.id)} /><Btn label="Record" id="trv-page-record" onClick={() => navigate("record", wo.id, wo.project)} /><Btn label="Print" icon="dl" id="trv-page-print" onClick={() => window.print()} /></>}
       />
       <Panel title="Route">
         <div>

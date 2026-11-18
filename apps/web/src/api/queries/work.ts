@@ -105,3 +105,19 @@ export const useGuidelines = () => useQuery({ queryKey: qk.guidelines(), queryFn
 
 /** The four writes a gate decision can make (approve, confirm the brief, reject, decline it), for the Approve and Reject dialogs; views run them through useCommand. */
 export const gateOps = { approveGate: ops.approveGate, confirmBrief: ops.confirmBrief, rejectGate: ops.rejectGate, decline: ops.decline };
+
+/* ---------- prompt records (GET /prompt-calls, GET /prompt-traces/:ref; project.view on the call's project, else a 404) ---------- */
+
+export interface PromptCall {
+  requestId: string | null; run: string | null; wo: string | null; project: string | null; surface: string | null; station: string | null; turn: string | null;
+  model: string; inputTokens: number; outputTokens: number; costMicros: number; promptHash: string | null; trace: string | null; outcome: string; at: string;
+}
+export interface PromptPart { kind: string; name: string; source?: string; version: number | null; sha256: string; bytes: number }
+export interface PromptManifestRead { hash?: string; kind?: string; parts?: PromptPart[]; handoff?: { bytes: number; sha256: string }; conversation?: { messages: number; bytes: number }; compact?: boolean }
+export interface PromptTrace { v?: number; kind?: string; model?: string; vendor?: string; status?: number; manifest?: PromptManifestRead | null; request?: unknown; response?: unknown }
+/** The recorded model calls of one work order (newest first, at most 200). */
+export const usePromptCalls = (woId: string | null | undefined) =>
+  useQuery({ queryKey: qk.promptCalls(woId ?? ""), queryFn: async () => (await get<{ calls?: PromptCall[] }>(api("prompt-calls"), { wo: woId ?? "" })).calls ?? [], enabled: !!woId });
+/** One stored trace: the manifest of what the model was given, and the request and answer. */
+export const usePromptTrace = (ref: string | null | undefined) =>
+  useQuery({ queryKey: qk.promptTrace(ref ?? ""), queryFn: async () => (await get<{ trace: PromptTrace }>(api(`prompt-traces/${encodeURIComponent(ref ?? "")}`))).trace, enabled: !!ref, staleTime: Infinity });

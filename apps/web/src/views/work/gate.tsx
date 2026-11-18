@@ -11,7 +11,13 @@ import { Btn, Field, TextArea, TextInput, type Decision } from "../../ui/primiti
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
 import { useCatalog } from "../projects/kit";
+import { gatePendingName, gatePendingTitle } from "@gantry/domain";
 import type { Approval } from "../home/data";
+
+/** What a person does at a waiting gate ("Approve spec"), from the domain wording, for the approval's gate. */
+export const pendingName = (a: Pick<Approval, "gate" | "gateName">): string => gatePendingName({ id: a.gate ?? "", name: a.gateName ?? a.gate ?? "" });
+/** "Approve spec · G2": the pending title of the approval's gate. */
+export const pendingTitle = (a: Pick<Approval, "gate" | "gateName" | "gateLabel">): string => gatePendingTitle({ id: a.gate ?? "", name: a.gateName ?? a.gate ?? "", label: a.gateLabel ?? a.gate ?? "" });
 
 const CHECKING: Decision = { allowed: false, reason: "Checking what you may decide here.", needs: "" };
 
@@ -47,7 +53,7 @@ export function GateActions({ a, idPrefix, size = "sm" }: { a: Approval; idPrefi
   const open = (kind: "approve" | "reject") =>
     ui.open((close) => (
       <DecisionDialog
-        title={`${kind === "approve" ? "Approve" : "Reject"} ${label} for ${wo}`}
+        title={kind === "approve" ? `${pendingTitle(a)} for ${wo}` : `Reject ${label} for ${wo}`}
         danger={kind === "reject"}
         intro={kind === "approve" ? (purpose ?? `${a.gateName ?? "This gate"} passes and the work order moves on.`) : brief ? "The work order moves to Declined and the submitter is told why. The reason is recorded." : 'The work order is parked in "Needs a person" until someone picks it up. The reason is shown to the agent and recorded.'}
         field={kind === "approve" ? { label: "Note (optional)", min: 0, area: false } : { label: "Reason", min: 8, area: true, hint: "Say what must change." }}

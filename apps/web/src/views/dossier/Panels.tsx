@@ -6,6 +6,13 @@ import { DataTable, type Col } from "../../ui/SortTable";
 import { useActors } from "../../ui/actors";
 import type { TWo } from "../traveler/model";
 import { ago, minutes, plainName } from "./time";
+import { PromptsPanel } from "./Prompts";
+import { useUI } from "../../ui/overlay-context";
+import { Dialog } from "../../ui/Overlay";
+import { RunTimelineView } from "../documents/Timeline";
+import { DocViewer } from "../documents/DocViewer";
+import { GateDetail } from "../work/GateDetail";
+import { gatePendingTitle } from "@gantry/domain";
 
 const label = (k: string): string => k.replace(/([A-Z])/g, " $1");
 
@@ -80,20 +87,32 @@ export function GatesPanel({ wo, cat }: { wo: TWo; cat: Catalog }) {
   const cols: Col<(typeof rows)[number]>[] = [
     { key: "k", label: "Gate", render: (g) => <span className="pri-cell"><b className="mono">{g.k}</b><span className="sub">{def(g.k)?.name}</span></span> },
     { key: "kind", label: "Kind", render: (g) => def(g.k)?.kind ?? "" },
+    { key: "n", label: "Approvals", render: (g) => { const p = wo.gateProgress?.[g.k]; return def(g.k)?.kind === "auto" ? "—" : p ? <span className="num" id={`gt-count-${g.k}`}>{`${p.have} of ${p.need} approvals`}</span> : "—"; } },
     { key: "s", label: "Status", render: (g) => <Chip text={g.status} cls={g.status === "passed" ? "ok" : g.status === "waiting" ? "warn" : g.status === "failed" ? "bad" : "plain"} /> },
     { key: "by", label: "Decided by", render: (g) => { const d = g.approvals[0] ?? g.rejections[0]; return d ? actor(d.by).name : g.decision?.mode === "auto" ? "Automatic" : g.decision?.mode === "trust" ? "Under trust" : "—"; } },
     { key: "at", label: "When", render: (g) => { const d = g.approvals[0] ?? g.rejections[0]; return d ? ago(d.at) : "—"; } },
     { key: "a", label: "", align: "end", render: (g) => (g.status === "waiting" && wo.state === "waiting" && decide.length ? <div className="row" style={{ justifyContent: "flex-end" }}>{decide.map((a) => <Btn key={a.key} label={a.label} small {...(a.kind ? { kind: a.kind } : {})} id={`gt-${a.key}-${g.k}`} guard={a.guard} onClick={a.onClick} />)}</div> : null) },
   ];
   return (
-    <Panel title="Gate decisions" flush>
-      <DataTable id="dz-gates" caption={`Gate decisions for ${wo.id}`} columns={cols} rows={rows} rowKey={(g) => g.k} pageSize={20} range />
-    </Panel>
+    <div className="stack">
+      <Panel title="Gate decisions" flush>
+        <DataTable id="dz-gates" caption={`Gate decisions for ${wo.id}`} columns={cols} rows={rows} rowKey={(g) => g.k} pageSize={20} range />
+      </Panel>
+      {rows.filter((g) => g.status === "waiting").map((g) => {
+        const d = def(g.k);
+        return (
+          <Panel key={g.k} title={d ? gatePendingTitle(d) : g.k} id={`gt-open-${g.k}`}>
+            <GateDetail woId={wo.id} gate={g.k} project={wo.project} />
+          </Panel>
+        );
+      })}
+    </div>
   );
 }
 
 export function RunsPanel({ wo, cat }: { wo: TWo; cat: Catalog }) {
   const actor = useActors();
+  const ui = useUI();
   const cols: Col<TWo["history"][number]>[] = [
     { key: "station", label: "Station", render: (x) => cat.stations.find((s) => s.id === x.station)?.name ?? x.station },
     { key: "agent", label: "Agent", render: (x) => plainName(actor(x.agent).name) + (x.agentVersion ? ` v${x.agentVersion}` : "") },
@@ -104,8 +123,20 @@ export function RunsPanel({ wo, cat }: { wo: TWo; cat: Catalog }) {
     { key: "o", label: "Outcome", render: (x) => (x.outcome ? <Chip text={x.outcome} cls={x.outcome === "passed" ? "ok" : "bad"} /> : <Chip text="active" cls="info" />) },
   ];
   return (
-    <Panel title="Station runs" flush>
-      <DataTable id="dz-runs" caption={`Station runs for ${wo.id}`} columns={cols} rows={wo.history} rowKey={(x) => `${x.station}-${x.startedAt}`} pageSize={20} range />
-    </Panel>
+    <div className="stack">
+      <Panel
+        title="Station runs"
+        flush
+        tools={
+          <>
+            <Btn label="Run timeline" small icon="clock" id="dz-run-timeline" onClick={() => void ui.open((close) => <Dialog wide title={`Run timeline · ${wo.id}`} sub="The files each run read, the pages it fetched, what it wrote and what it cost." onClose={close} body={<RunTimelineView woId={wo.id} />} />)} />
+            <Btn label="Station documents" small icon="record" id="dz-run-docs" onClick={() => void ui.open((close) => <Dialog wide title={`Station documents · ${wo.id}`} onClose={close} body={<DocViewer woId={wo.id} project={wo.project} />} />)} />
+          </>
+        }
+      >
+        <DataTable id="dz-runs" caption={`Station runs for ${wo.id}`} columns={cols} rows={wo.history} rowKey={(x) => `${x.station}-${x.startedAt}`} pageSize={20} range />
+      </Panel>
+      <PromptsPanel woId={wo.id} />
+    </div>
   );
 }

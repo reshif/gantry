@@ -13,7 +13,7 @@ import { useUI } from "../ui/overlay-context";
 import { hashFor, navigate, useHash } from "../lib/router";
 import { setProject } from "../lib/prefs";
 import { gotoWithQuery, useUrlParam } from "../lib/urlState";
-import { GateActions } from "./work/gate";
+import { GateActions, pendingName } from "./work/gate";
 import { agoMs } from "./work/format";
 import { useItems, type Group, type Item } from "./work/items";
 import { useScope } from "./work/scope";
@@ -53,7 +53,7 @@ function GateTable({ rows }: { rows: GateIt[] }) {
   const sort: SortState = { key: k, dir: d === "desc" ? -1 : 1 };
   const cols: Col<GateIt>[] = [
     { key: "id", label: "Work order", sort: (r) => r.a.wo ?? "", render: (r) => <div><a className="pri mono" href={WO_LINK(r.a.wo ?? "", r.project)} id={`inb-wo-${r.a.wo}`}>{r.a.wo}</a><span className="sub trunc" style={{ maxWidth: 340 }}>{r.a.title}</span></div> },
-    { key: "gate", label: "Gate", render: (r) => <div><Chip text={r.a.gateLabel ?? r.a.gate ?? ""} cls="warn" /><span className="sub">{r.a.gateName}</span></div> },
+    { key: "gate", label: "Gate", render: (r) => <div><Chip text={r.a.gateLabel ?? r.a.gate ?? ""} cls="warn" /><span className="sub">{pendingName(r.a)}</span></div> },
     { key: "project", label: "Project", render: (r) => r.projectName },
     // oldest first is ascending by the time the gate opened, as the prototype sorts it
     { key: "wait", label: "Waiting", sort: (r) => -r.waitMs, render: (r) => WaitText(r.waitMs) },

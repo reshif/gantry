@@ -1,4 +1,6 @@
 /** Station and gate detail drawers of the floor (legacy floor.js openStation / openGate). They always show the live floor. */
+import { GateDetail } from "../work/GateDetail";
+import { useOpenTraveler } from "../../shell/useTraveler";
 import { useState, type ReactNode } from "react";
 import { gateDef, gateKind } from "@gantry/domain";
 import { useAgents, useWorkOrder } from "../../api/queries";
@@ -84,6 +86,22 @@ function ApproveBtn({ w, gid, label, primary, id, after }: { w: WorkOrder; gid: 
   );
 }
 
+/** One work order waiting at a gate: its approvals so far ("1 of 1 approvals"), Approve, and the approver rule with what is still open. */
+function WaitingRow({ w, gid, project, close }: { w: WorkOrder; gid: string; project: string; close: () => void }) {
+  const [more, setMore] = useState(false);
+  const prog = (useWorkOrder(w.id).data as { gateProgress?: Record<string, { have: number; need: number }> } | undefined)?.gateProgress?.[gid];
+  return (
+    <li key={w.id} data-wo={w.id} className="fl-waiting" style={{ flexWrap: "wrap" }}>
+      <a className="pri mono" href={hashFor("record", w.id, project)}>{w.id}</a>
+      <span className="grow trunc">{w.title}</span>
+      {prog ? <span className="small muted num" id={`floor-gcount-${w.id}`}>{`${prog.have} of ${prog.need} approvals`}</span> : null}
+      <Btn label={more ? "Hide rule" : "Who may approve"} small id={`floor-grule-${w.id}`} aria-expanded={more} onClick={() => setMore((x) => !x)} />
+      <ApproveBtn w={w} gid={gid} label="Approve" id={`floor-gapp-${w.id}`} after={close} />
+      {more ? <div className="fl-waiting-more" style={{ flexBasis: "100%" }}><GateDetail woId={w.id} gate={gid} project={project} onNavigate={close} /></div> : null}
+    </li>
+  );
+}
+
 export function GateDrawer({ gid, close }: { gid: string; close: () => void }) {
   const ctx = useFloorCtx();
   const g = gateDef(ctx.cat, gid);
@@ -108,11 +126,7 @@ export function GateDrawer({ gid, close }: { gid: string; close: () => void }) {
         {waiting.length ? (
           <ul className="list fl-bordered" id="floor-gate-waiting">
             {waiting.map((w) => (
-              <li key={w.id} data-wo={w.id}>
-                <a className="pri mono" href={hashFor("record", w.id, p.id)}>{w.id}</a>
-                <span className="grow trunc">{w.title}</span>
-                <ApproveBtn w={w} gid={gid} label="Approve" id={`floor-gapp-${w.id}`} after={close} />
-              </li>
+              <WaitingRow key={w.id} w={w} gid={gid} project={p.id} close={close} />
             ))}
           </ul>
         ) : (
@@ -175,6 +189,7 @@ export function StationDrawer({ sid, close }: { sid: string; close: () => void }
 export function WoDrawer({ woId, close }: { woId: string; close: () => void }) {
   const ctx = useFloorCtx();
   const actor = useActors();
+  const openTraveler = useOpenTraveler();
   const w: FWo | undefined = ctx.wos.find((x) => x.id === woId);
   if (!w) return null;
   const p = ctx.project;
@@ -186,7 +201,7 @@ export function WoDrawer({ woId, close }: { woId: string; close: () => void }) {
         <>
           {gid ? <ApproveBtn w={w} gid={gid} label={`Approve ${gid}`} primary id="floor-wo-approve" after={close} /> : null}
           <a className="btn" id="floor-wo-record" href={hashFor("record", w.id, p.id)} onClick={close}>Open record</a>
-          <a className="btn" id="floor-wo-traveler" href={hashFor("traveler", w.id, p.id)} onClick={close}>Traveler</a>
+          <Btn label="Traveler" id="floor-wo-traveler" onClick={() => { close(); openTraveler(w.id); }} />
         </>
       }
     >

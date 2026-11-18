@@ -138,6 +138,20 @@ describe("Floor: belt", () => {
     expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
   });
 
+  it("shows the approvals count and, on click, the approver rule for each work order waiting at the gate", async () => {
+    mockApi({
+      "GET /api/v1/work-orders/WO-2408": () => ({ body: { ...WOS.find((w) => w.id === "WO-2408"), version: 3, gateProgress: { G3d: { have: 1, need: 2 } }, allowed: { approve: { allowed: true, reason: "", needs: "", gate: "G3d", instance: "WO-2408:G3d:1" }, moves: {}, can: {} } } }),
+      "GET /api/v1/work-orders/WO-2408/gates/G3d/approvers": () => ({ body: { gate: "G3d", label: "G3d", name: "Design", rule: { text: "Needs 2 approvals from Line Lead", required: 2, base: 2, sod: true, roles: [], people: [], conditions: [] }, progress: { have: 1, need: 2, approvals: [], unmet: [], onlyRequester: false }, eligible: [], overrides: [], satisfiable: true, warning: "", viewerCanOverride: false, can: { editRule: false, editWhy: "", grantRole: false, grantWhy: "" } } }),
+      "GET /api/v1/work-orders/WO-2408/dialogue": () => ({ body: { questions: [], assumptions: [], objections: [] } }),
+    });
+    mount(<FloorView />);
+    await screen.findAllByText("PAY");
+    fireEvent.click(document.getElementById("floor-gate-G3d") as HTMLElement);
+    expect(await screen.findByText("1 of 2 approvals")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Who may approve" }));
+    expect(await screen.findByText("Needs 2 approvals from Line Lead")).toBeTruthy();
+  });
+
   it("locks Approve with the server's reason when this person may not approve (separation of duties)", async () => {
     mockApi({
       "GET /api/v1/work-orders/WO-2408": () => ({ body: { ...WOS.find((w) => w.id === "WO-2408"), version: 3, allowed: { approve: { allowed: false, reason: "Separation of duties on G3d: the author cannot approve.", needs: "Someone other than the author", gate: "G3d", instance: "WO-2408:G3d:1" }, moves: {}, can: {} } } }),
@@ -225,7 +239,7 @@ describe("Floor: prototype drawers and links", () => {
 
   it("opens a work order tag as the compact drawer: Approve G, Open record and Traveler", async () => {
     mockApi({
-      "GET /api/v1/work-orders/WO-2398": () => ({ body: { ...WOS.find((w) => w.id === "WO-2398"), version: 3, allowed: { approve: { allowed: true, reason: "", needs: "", gate: "G0G1", instance: "WO-2398:G0G1:1" }, moves: {}, can: {} } } }),
+      "GET /api/v1/work-orders/WO-2398": () => ({ body: { ...WOS.find((w) => w.id === "WO-2398"), version: 3, route: ["intake", "spec"], history: [], gates: {}, gateProgress: {}, allowed: { approve: { allowed: true, reason: "", needs: "", gate: "G0G1", instance: "WO-2398:G0G1:1" }, moves: {}, can: {} } } }),
     });
     mount(<FloorView />);
     await screen.findAllByText("PAY");
@@ -234,8 +248,11 @@ describe("Floor: prototype drawers and links", () => {
     expect(Array.from(document.querySelectorAll("#floor-wo-kv dt")).map((d) => d.textContent)).toEqual(["Station", "Requested by", "Created", "Progress", "Diff", "PR"]);
     expect(screen.getByRole("button", { name: "Approve G0G1" })).toBeTruthy();
     expect(document.getElementById("floor-wo-record")?.getAttribute("href")).toBe("#/p/payments/record/WO-2398");
-    expect(document.getElementById("floor-wo-traveler")?.getAttribute("href")).toBe("#/p/payments/traveler/WO-2398");
-    expect(screen.queryByText("Journey")).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Journey" })).toBeNull();
+    // the Traveler button opens the traveler drawer, which holds Journey, Documents and Run
+    fireEvent.click(document.getElementById("floor-wo-traveler") as HTMLElement);
+    expect(await screen.findByRole("tab", { name: "Journey" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Documents" })).toBeTruthy();
   });
 
   it("keeps the header to Belt/Board and Submit (no Line control menu), and reads ?view=board from the hash", async () => {

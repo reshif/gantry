@@ -11,7 +11,7 @@ import { Avatar, Btn, Chip, Empty, Panel } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { TrendChart } from "./TrendChart";
 import { hashFor } from "../../lib/router";
-import { GateActions } from "../work/gate";
+import { GateActions, pendingTitle } from "../work/gate";
 import { agoMs } from "../work/format";
 import type { Item } from "../work/items";
 import { Icon } from "../../ui/Icon";
@@ -106,7 +106,7 @@ function GateRow({ a }: { a: Approval }) {
   return (
     <li className="hm-need">
       <div className="grow">
-        <div className="row"><a className="pri mono" href={hashFor("record", wo, a.project)} id={`hm-my-wo-${wo}`}>{wo}</a><Chip text={a.gateLabel ?? a.gate ?? ""} cls="warn" /></div>
+        <div className="row"><a className="pri mono" href={hashFor("record", wo, a.project)} id={`hm-my-wo-${wo}`}>{wo}</a><Chip text={pendingTitle(a)} cls="warn" /></div>
         <div className="trunc hm-need-t">{a.title}</div>
         <div className="small muted">{`${a.projectName} · waiting ${agoMs(a.waitMs ?? 0)}`}</div>
       </div>

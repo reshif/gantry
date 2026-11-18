@@ -266,7 +266,7 @@ describe("Home: by role", () => {
     await waitFor(() => expect(approve.getAttribute("aria-disabled")).toBeNull());
     fireEvent.click(approve);
     // The prototype's dialog first: "Approve G3d for WO-9" with the gate's purpose; Approve there decides.
-    expect(await screen.findByText("Approve G3d for WO-9")).toBeTruthy();
+    expect(await screen.findByText("Review design · G3d for WO-9")).toBeTruthy();
     // the prototype's optional Note field, sent as the reason the server records
     fireEvent.change(screen.getByLabelText("Note (optional)"), { target: { value: "looks right" } });
     fireEvent.click(within(document.querySelector(".dlg, [role=dialog]") as HTMLElement).getByRole("button", { name: "Approve" }));

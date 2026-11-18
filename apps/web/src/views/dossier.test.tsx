@@ -48,9 +48,10 @@ describe("Work order page", () => {
     expect(items[0]).toMatch(/Edit title/);
     expect(items[1]).toMatch(/Change priority/);
     expect(items[2]).toMatch(/Send back/);
-    expect(items[3]).toMatch(/Park in a bay|Resume/);
+    expect(items[3]).toMatch(/Reassign agent/);
+    expect(items[4]).toMatch(/Park in a bay|Resume/);
     expect(items[items.length - 1]).toMatch(/Kill work order/);
-    expect(items).toHaveLength(5);
+    expect(items).toHaveLength(6);
     expect(items.some((t) => /Open conversation|Copy link|Halt repo/.test(t))).toBe(false);
   });
 
