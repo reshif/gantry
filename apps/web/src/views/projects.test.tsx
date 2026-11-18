@@ -429,12 +429,16 @@ describe("Project config", () => {
     expect(Array.from(document.querySelectorAll(".setrow b")).map((b) => b.textContent)).toEqual(["Halt line", "Emergency stop", "Archive project"]);
   });
 
-  it("stations tab is the prototype table (Station, Agent, Slots, Enabled, Gate after, Gate mode); classes and approvers are flush tables", async () => {
+  it("stations tab is two side-by-side panels, one compact row each; classes and approvers are flush tables", async () => {
     withPayments();
     mount(<ProjectConfigView />);
     fireEvent.click(await byId("pcf-tab-stations"));
     await byId("pcf-stations");
-    expect(Array.from(document.querySelectorAll("#pcf-stations thead th")).map((t) => t.textContent?.trim())).toEqual(["Station", "Agent", "Slots", "Enabled", "Gate after", "Gate mode"]);
+    expect(Array.from(document.querySelectorAll("#pcf-stations .card-h h2")).map((t) => t.textContent?.replace(/\s+/g, " ").trim())).toEqual(["§1 Stations", "§2 Gates"]);
+    expect(document.querySelector("#pcf-stations table")).toBeNull();
+    expect(document.querySelectorAll("#pcf-sg-stations .sg-row").length).toBeGreaterThan(5);
+    expect(document.querySelectorAll("#pcf-sg-gates .sg-row").length).toBeGreaterThan(5);
+    expect(document.querySelector("[data-row='S:intake']")!.textContent).toMatch(/Always on/);
     fireEvent.click(await byId("pcf-tab-classes"));
     await byId("pcf-classes");
     expect(Array.from(document.querySelectorAll("#pcf-classes thead th")).map((t) => t.textContent?.trim())).toEqual(["Class", "Default priority", "SLA (h)", "Skips stations", "Enabled"]);
@@ -610,18 +614,31 @@ describe("Fidelity round 2 (projects, onboarding links, project config)", () => 
     expect(window.location.search).toContain("tab=overlay");
   });
 
-  it("stations tab: Slots is plain text and Gate mode reads human, mixed, auto, with no inline editor link", async () => {
-    withPayments();
+  it("stations tab: WIP stepper, plain-language modes, details open in place from the URL, and hover links station and gates", async () => {
+    const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok({ version: 8 }) });
     mount(<ProjectConfigView />);
     fireEvent.click(await byId("pcf-tab-stations"));
     await byId("pcf-stations");
-    expect(document.querySelector("#pcf-stations input[type=number], #pcf-stations input.mono")).toBeNull();
     await byId("pcf-sg-mode-G3d");
     const labels = Array.from(document.querySelectorAll("#pcf-stations select option")).map((o) => o.textContent);
     expect(labels.length).toBeGreaterThan(0);
-    for (const l of labels) expect(["human", "mixed", "auto"]).toContain(l);
-    expect(document.getElementById("pcf-edit-toggle")).toBeNull();
-    expect(document.body.textContent).not.toMatch(/Edit stations, gates and routes/);
+    for (const l of labels) expect(["Person approves", "Automatic check", "Mixed"]).toContain(l);
+    expect(document.querySelector("#pcf-stations .sg-wip-l")!.textContent).toBe("WIP");
+    // the stepper writes the new limit
+    fireEvent.click(await byId("pcf-sg-wip-spec-inc"));
+    await waitFor(() => expect(calls.some((c) => (c.body as { path?: string })?.path === "flow.stations.spec.wip")).toBe(true));
+    // a row opens in place and the URL remembers it
+    const row = document.querySelector("[data-row='S:spec']")!;
+    expect(document.getElementById("pcf-sg-d-spec")).toBeNull();
+    fireEvent.click(row.querySelector(".sg-chev")!);
+    await byId("pcf-sg-d-spec");
+    expect(window.location.search).toContain("row=S%3Aspec");
+    // focusing a station lights the gate after it, and nothing else
+    fireEvent.focus(row.querySelector(".sg-chev")!);
+    expect(document.querySelectorAll("#pcf-sg-gates .sg-row.is-lit").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll("#pcf-sg-gates .sg-row.is-lit").length).toBeLessThan(3);
+    fireEvent.blur(row.querySelector(".sg-chev")!);
+    expect(document.querySelectorAll(".sg-row.is-lit").length).toBe(0);
   });
 
   it("classes tab: the priority tag carries its priority class and skips show station ids; approvers has no Edit rule column", async () => {

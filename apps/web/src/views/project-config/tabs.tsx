@@ -6,7 +6,9 @@
  */
 import { navigate } from "../../lib/router";
 import { useState, type ReactNode } from "react";
-import { flowOf, gateModeLock, type ApproverRule, type GateKind, type Repo } from "@gantry/domain";
+import { approvalText, flowOf, gateExplain, gateLock, gateModeLock, type ApproverRule, type GateKind, type Repo } from "@gantry/domain";
+import { useRouteState } from "../../lib/queryState";
+import { Icon } from "../../ui/Icon";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useFreezes, useKillImpact, useMe, useRepos } from "../../api/queries";
@@ -131,32 +133,154 @@ export function OnCallTab({ p, people }: TabProps) {
 
 /* ------------------------------------------------------------------ Stations and gates ---- */
 
-const MODES = [{ value: "human", label: "human" }, { value: "mixed", label: "mixed" }, { value: "auto", label: "auto" }];
 
-export function StationsTab({ p, cat, edit, setEdit, advanced }: TabProps) {
+export const GATE_MODES = [{ value: "human", label: "Person approves" }, { value: "auto", label: "Automatic check" }, { value: "mixed", label: "Mixed" }];
+
+type Hot = { kind: "S" | "G"; id: string } | null;
+
+/** The names of the classes that travel a station: a compact muted line, or the first few and a "+N". */
+const routeLine = (names: string[]): string => (names.length <= 3 ? names.join(", ") : `${names.slice(0, 3).join(", ")} +${names.length - 3}`);
+
+function StationsPanels({ p, cat, set, edit, setEdit }: TabProps) {
+  const ui = useUI();
   const res = useRes();
   const d = useCan("flow.edit", { project: p.id });
   const f = flowOf(cat, p);
-  const locked = (id: string) => id === "intake" || id === "build";
-  const gateOf = (stationId: string) => f.gates.find((x) => x.after === stationId);
+  const m = metricsOf(p);
+  const [row, setRow] = useRouteState("row", "");
+  const [hot, setHot] = useState<Hot>(null);
+  const toggleRow = (k: string) => setRow(row === k ? "" : k);
+  const nextOf = (id: string) => f.stations[f.stations.findIndex((s) => s.id === id) + 1];
+  const gateAfter = (id: string) => f.gates.filter((g) => g.after === id);
+  const gateBefore = (id: string) => { const i = f.stations.findIndex((s) => s.id === id); return i > 0 ? f.gates.filter((g) => g.after === f.stations[i - 1]!.id) : []; };
+  const stationLit = (id: string): boolean => !!hot && (hot.kind === "S" ? hot.id === id : (() => { const g = f.gates.find((x) => x.id === hot.id); return !!g && (g.after === id || nextOf(g.after)?.id === id); })());
+  const gateLit = (id: string): boolean => !!hot && (hot.kind === "G" ? hot.id === id : [...gateAfter(hot.id), ...gateBefore(hot.id)].some((g) => g.id === id));
+  const hotProps = (kind: "S" | "G", id: string) => ({
+    onMouseEnter: () => setHot({ kind, id }), onMouseLeave: () => setHot(null),
+    onFocus: () => setHot({ kind, id }), onBlur: () => setHot(null),
+  });
+  const chev = (k: string, label: string, open: boolean): ReactNode => (
+    <Btn small kind="ghost" cls="sg-chev" icon="chevron" aria={`${open ? "Hide" : "Show"} details: ${label}`} aria-expanded={open} onClick={() => toggleRow(k)} />
+  );
+  const stepper = (id: string, label: string, value: number, min: number, max: number, onCommit: (v: number) => void) => (
+    <span className="sg-wip" role="group" aria-label={`${label} WIP limit`}>
+      <span className="sg-wip-l">WIP</span>
+      <Btn small kind="ghost" id={`${id}-dec`} aria={`Lower ${label} WIP limit`} label="−" guard={d} disabledReason={d.allowed && value <= min ? `The limit cannot go below ${min}.` : null} onClick={() => onCommit(value - 1)} />
+      <b className="mono sg-wip-v" id={id} aria-live="polite">{value}</b>
+      <Btn small kind="ghost" id={`${id}-inc`} aria={`Raise ${label} WIP limit`} label="+" guard={d} disabledReason={d.allowed && value >= max ? `The limit cannot go above ${max}.` : null} onClick={() => onCommit(value + 1)} />
+    </span>
+  );
+  return (
+    <div className="sg" id="pcf-stations">
+      <div className="sg-cols">
+        <Card title={<><span className="sg-sec mono">§1</span> Stations</>} id="pcf-sg-stations" flush
+          hint="Build cannot be disabled"
+          acts={<Btn small kind="ghost" icon="tool" id="pcf-sg-edit" label="Add, reorder, routes" onClick={() => setEdit(edit === "flow" ? "" : "flow")} />}>
+          <ul className="sg-list" aria-label="Stations">
+            {f.stations.map((st) => {
+              const cfg = p.flow.stations[st.id]!;
+              const k = `S:${st.id}`;
+              const open = row === k;
+              const here = m.byPosition[st.id]?.n ?? 0;
+              const fixed = st.id === "intake";
+              const locked = st.id === "build";
+              const travels = p.flow.classes.filter((c) => c.enabled !== false && !c.skips.includes(st.id)).map((c) => c.name);
+              const onSwitch = (v: boolean) => void (async () => res(await ops.setProject(p.id, `flow.stations.${st.id}.enabled`, v, { ifMatch: p.version }), `${st.name}${v ? " turned on." : " turned off."}`))();
+              return (
+                <li key={st.id} className={`sg-row sg-st${open ? " is-open" : ""}${cfg.enabled ? "" : " is-off"}${stationLit(st.id) ? " is-lit" : ""}`} data-row={k} {...hotProps("S", st.id)}>
+                  <div className="sg-line">
+                    <span className="mono sg-code">{st.no}</span>
+                    <b className="sg-name" title={st.name}>{st.name}{st.custom ? <span className="tag pcf-tag-custom">custom</span> : null}</b>
+                    <span className="sg-agent"><Who id={st.agent} /></span>
+                    {stepper(`pcf-sg-wip-${st.id}`, st.name, cfg.wip, 1, 30, (v) => void (async () => res(await ops.setProject(p.id, `flow.stations.${st.id}.wip`, v, { ifMatch: p.version }), `${st.name} WIP limit set to ${v}.`))())}
+                    <span className="sg-on">
+                      {fixed ? <span className="sg-always"><Icon name="lock" /> Always on</span> : (
+                        <>
+                          <span className="sg-on-l" aria-hidden="true">On</span>
+                          <Toggle id={`pcf-sg-on-${st.id}`} checked={cfg.enabled} decision={locked ? { allowed: false, reason: `${st.name} cannot be disabled.`, needs: "" } : d} label={`${st.name} station on`} onChange={onSwitch} />
+                        </>
+                      )}
+                    </span>
+                    {chev(k, st.name, open)}
+                  </div>
+                  <div className="sg-sub muted small">{travels.length ? `Takes ${routeLine(travels)}` : "Takes no work order class"}</div>
+                  {open ? (
+                    <div className="sg-detail small" id={`pcf-sg-d-${st.id}`}>
+                      <p>{fixed ? "Every work order starts here, so it cannot be turned off." : locked ? "Code is written here, so it cannot be turned off." : cfg.enabled ? "Turning it off skips this station for new work orders. Work already in flight keeps its route." : "Off: new work orders skip this station."}</p>
+                      <dl className="sg-dl">
+                        <dt>Agent</dt><dd><Who id={st.agent} /></dd>
+                        <dt>Work orders here</dt><dd className={here > cfg.wip ? "neg" : ""}>{`${here} of ${cfg.wip}${here > cfg.wip ? " (over the limit)" : ""}`}</dd>
+                        <dt>Takes</dt><dd>{travels.length ? travels.join(", ") : "No class"}</dd>
+                        {st.id === "build" ? <><dt>Coding slots</dt><dd>{stepper("pcf-sg-slots", "Coding slots", p.flow.slots, 1, 8, (v) => void (async () => res(await ops.setProject(p.id, "flow.slots", v, { ifMatch: p.version }), `Coding slots set to ${v}.`))())} {`${m.slotsUsed} in use`}</dd></> : null}
+                      </dl>
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+        <Card title={<><span className="sg-sec mono">§2</span> Gates</>} id="pcf-sg-gates" flush hint="A gate sits between two stations">
+          <ul className="sg-list" aria-label="Gates">
+            {f.gates.map((g) => {
+              const k = `G:${g.id}`;
+              const open = row === k;
+              const on = p.flow.gates[g.id]!.enabled;
+              const lock = gateLock(g, p);
+              const from = f.stations.find((s) => s.id === g.after);
+              const to = nextOf(g.after);
+              const who = approvalText(g, g.mode, p.approvers[g.id], (r) => roleName(cat, r));
+              const opts = GATE_MODES.filter((o) => o.value === g.mode || !gateModeLock(g, o.value as GateKind, p));
+              return (
+                <li key={g.id} className={`sg-row sg-gt${open ? " is-open" : ""}${on ? "" : " is-off"}${gateLit(g.id) ? " is-lit" : ""}`} data-row={k} {...hotProps("G", g.id)}>
+                  <div className="sg-line">
+                    <span className="mono sg-code">{g.label}</span>
+                    <b className="sg-name" title={gateExplain(g, g.mode)}>{g.name}{g.custom ? <span className="tag pcf-tag-custom">custom</span> : null}</b>
+                    <span className="mono muted sg-hint">{`${from?.no ?? "?"} → ${to?.no ?? "end"}`}</span>
+                    <span className="sg-mode"><Select id={`pcf-sg-mode-${g.id}`} aria-label={`Mode ${g.label}`} disabled={!d.allowed || g.id === "G0G1"} options={opts} value={g.mode} onChange={async (v) => res(await ops.setGateMode(p.id, g.id, v, { ifMatch: p.version }), "Saved")} /></span>
+                    <span className="sg-on">
+                      {lock.locked ? <span className="sg-always" title={lock.reason} id={`pcf-sg-lock-${g.id}`}><Icon name="lock" /> Always on<span className="sr">{`. ${lock.reason}`}</span></span> : (
+                        <>
+                          <span className="sg-on-l" aria-hidden="true">On</span>
+                          <Toggle id={`pcf-sg-gon-${g.id}`} checked={on} decision={d} label={`${g.name} gate on`} onChange={async (v) => {
+                            if (!v && g.id !== "G1f") {
+                              const ok = await ui.confirm({ title: `Turn off ${g.name}?`, kicker: `Flow · ${p.name}`, ok: "Turn off", body: `${g.name} (${g.label}) is skipped for new work orders. Work orders already in flight keep the flow they started with. This needs a recent sign-in and is audited.` });
+                              if (!ok) return;
+                            }
+                            res(await ops.setProject(p.id, `flow.gates.${g.id}.enabled`, v, { ifMatch: p.version }), `${g.name}${v ? " turned on." : " turned off."}`);
+                          }} />
+                        </>
+                      )}
+                    </span>
+                    {chev(k, g.name, open)}
+                  </div>
+                  <div className="sg-sub muted small">{who}</div>
+                  {open ? (
+                    <div className="sg-detail small" id={`pcf-sg-d-${g.id}`}>
+                      <p>{gateExplain(g, g.mode)}</p>
+                      <dl className="sg-dl">
+                        <dt>Approvers</dt><dd>{who}</dd>
+                        {g.mode !== "human" && g.checks?.length ? <><dt>Checks</dt><dd>{g.checks.join(", ")}</dd></> : null}
+                        <dt>Turning it off</dt><dd>{lock.locked ? lock.reason : "New work orders skip it. Work in flight keeps the flow it started with."}</dd>
+                      </dl>
+                      {g.mode === "auto" ? null : <Btn small kind="ghost" id={`pcf-sg-ap-${g.id}`} label="Edit approvers" onClick={() => set({ tab: "approvers", gate: g.id })} />}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+export function StationsTab(props: TabProps) {
+  const { edit, setEdit, advanced } = props;
   return (
     <div className="stack">
-      <Card title="Stations and gates" flush hint="Build cannot be disabled">
-        <DataTable<(typeof f.stations)[number]>
-          id="pcf-stations"
-          caption="Stations and gates"
-          rows={f.stations}
-          rowKey={(st) => st.id}
-          columns={[
-            { key: "name", label: "Station", render: (st) => <b>{st.name}</b> },
-            { key: "agent", label: "Agent", render: (st) => <Who id={st.agent} /> },
-            { key: "slots", label: "Slots", align: "end", render: (st) => <span className="mono">{p.flow.stations[st.id]!.wip}</span> },
-            { key: "on", label: "Enabled", render: (st) => <Toggle id={`pcf-sg-on-${st.id}`} checked={p.flow.stations[st.id]!.enabled} decision={locked(st.id) ? { allowed: false, reason: `${st.name} cannot be disabled.`, needs: "" } : d} label={`${st.name} enabled`} onChange={async (v) => res(await ops.setProject(p.id, `flow.stations.${st.id}.enabled`, v, { ifMatch: p.version }), `${st.name}${v ? " enabled" : " disabled"}`)} /> },
-            { key: "gate", label: "Gate after", render: (st) => { const g = gateOf(st.id); return g ? <><span className="mono">{g.label}</span> {g.name}</> : <span className="dim">—</span>; } },
-            { key: "mode", label: "Gate mode", render: (st) => { const g = gateOf(st.id); return g ? <Select id={`pcf-sg-mode-${g.id}`} aria-label={`Mode ${g.label}`} disabled={!d.allowed || g.id === "G0G1"} options={MODES.filter((o) => o.value === g.mode || !gateModeLock(g, o.value as GateKind, p))} value={g.mode} onChange={async (v) => res(await ops.setGateMode(p.id, g.id, v, { ifMatch: p.version }), "Saved")} /> : null; } },
-          ]}
-        />
-      </Card>
+      <StationsPanels {...props} />
       <Editor open={edit === "flow"} label="Edit stations, gates and routes" onClose={() => setEdit("")}>{advanced}</Editor>
     </div>
   );
