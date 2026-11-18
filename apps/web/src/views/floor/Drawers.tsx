@@ -13,6 +13,8 @@ import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
 import { hashFor } from "../../lib/router";
 import { classOf } from "../projects/kit";
+import { stName } from "../traveler/model";
+import { raisedOpen } from "../conversations/model";
 import { FloorCtx, WoChip, isLive, stationIdx, useFloorCtx, useFloorValue, waitingGateId, type FWo } from "./kit";
 
 /** Provides the live floor to a drawer, which renders outside the floor view. */
@@ -196,7 +198,15 @@ export function StationDrawer({ sid, close }: { sid: string; close: () => void }
   );
 }
 
-/** A work order tag opened from the line: the prototype's compact drawer (chips, facts, progress, diff, PR) with Approve, Open record and Traveler. */
+/** Why this work order's conversation needs a person, from its open station question or its parked bay reason; null when nothing waits. */
+export function convWaiting(w: FWo, cat: Parameters<typeof stName>[0]): string | null {
+  const r = w.conv ? raisedOpen(w)[0] : undefined;
+  if (r) return `${stName(cat, r.station)} is waiting for you`;
+  if (w.bay === "person") return w.bayReason || "Waiting for you";
+  return null;
+}
+
+/** A work order tag opened from the line: the prototype's compact drawer (chips, facts, progress, diff, PR) with Approve, Conversation, Open record and Traveler. */
 export function WoDrawer({ woId, close }: { woId: string; close: () => void }) {
   const ctx = useFloorCtx();
   const actor = useActors();
@@ -206,11 +216,14 @@ export function WoDrawer({ woId, close }: { woId: string; close: () => void }) {
   const p = ctx.project;
   const gid = isLive(w) && !w.bay && w.state === "waiting" ? waitingGateId(ctx, w) : null;
   const repoName = ctx.repos.find((r) => r.id === w.repo)?.name ?? "";
+  const waiting = convWaiting(w, ctx.cat);
   return (
     <Frame kicker={w.id} title={w.title} sub={`${p.name} · ${repoName}`} close={close} label="Close work order details"
       footer={
         <>
           {gid ? <ApproveBtn w={w} gid={gid} label={`Approve ${gid}`} primary id="floor-wo-approve" after={close} /> : null}
+          <a className="btn" id="floor-wo-conversation" href={hashFor("conversations", w.id, p.id)} onClick={close} title={waiting ?? undefined} aria-describedby={waiting ? "floor-wo-conv-why" : undefined}>Conversation</a>
+          {waiting ? <span className="small muted" id="floor-wo-conv-why" style={{ flexBasis: "100%", order: 1 }}>{waiting}</span> : null}
           <a className="btn" id="floor-wo-record" href={hashFor("record", w.id, p.id)} onClick={close}>Open record</a>
           <Btn label="Traveler" id="floor-wo-traveler" onClick={() => { close(); openTraveler(w.id); }} />
         </>
