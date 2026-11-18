@@ -119,8 +119,8 @@ export const ops = {
 
   /* ===== gates ===== */
   /** `instance` is the exact opening the person was shown (`WO-1:G2:3`, from `allowed.approve.instance` or Home's approvals). The server refuses a decision that does not name it. */
-  approveGate: (woId: string, gateId: string, instance: string | undefined, via?: Via, v?: Versioned) =>
-    gateDecided(run(["workOrders", "trust"], post(api(`gate-instances/${enc(gateInstanceId(woId, gateId, instance))}/approve`), { via }, opts(v)))),
+  approveGate: (woId: string, gateId: string, instance: string | undefined, via?: Via, v?: Versioned, note?: string) =>
+    gateDecided(run(["workOrders", "trust"], post(api(`gate-instances/${enc(gateInstanceId(woId, gateId, instance))}/approve`), { via, ...(note ? { reason: note } : {}) }, opts(v)))),
   rejectGate: (woId: string, gateId: string, instance: string | undefined, reason: string, via?: Via, v?: Versioned) =>
     gateDecided(run(["workOrders", "trust"], post(api(`gate-instances/${enc(gateInstanceId(woId, gateId, instance))}/reject`), { reason, via }, opts(v)))),
 

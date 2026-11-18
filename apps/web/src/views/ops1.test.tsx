@@ -74,17 +74,102 @@ describe("Inbox (prototype tabs and rows)", () => {
 });
 
 describe("Agents at work (prototype page)", () => {
-  it("has no header actions; the chat features sit in a quiet row under the cards, and the subtitle is the prototype's", async () => {
+  it("is tiles and agent cards only: no Conversations, New chat or Operator buttons, Agents active is info blue, Running runs is ok green", async () => {
     updatePrefs({ project: null });
     mockApi({ "GET /api/v1/agents": () => ({ body: [{ id: "ag-a", name: "Alpha", station: "spec", model: "m", autonomy: "gate", spark: [1, 2, 3], evalScore: 0.9 }] }) });
     mount(<WorkspaceView />);
     expect(await screen.findByText("Who is doing what right now, across the line.")).toBeTruthy();
-    expect(document.querySelector(".ph .acts, .ph .vhead-acts")?.querySelectorAll("button").length ?? 0).toBe(0);
-    const tools = document.querySelector(".ws-tools") as HTMLElement;
-    expect(within(tools).getByRole("button", { name: /Conversations/ })).toBeTruthy();
-    expect(within(tools).getByRole("button", { name: "New chat" })).toBeTruthy();
+    expect(document.querySelector(".ws-tools")).toBeNull();
+    for (const name of [/Conversations/, "New chat", "Operator view"]) expect(screen.queryByRole("button", { name })).toBeNull();
+    const tiles = Array.from(document.querySelectorAll("#ws-stats .stat"));
+    expect(tiles[0]?.className).toContain("info");
+    expect(tiles[1]?.className).toContain("ok");
+    // the whole card is a link to the agent
+    await waitFor(() => expect(document.getElementById("ws-agent-ag-a")).toBeTruthy());
+    expect(document.getElementById("ws-agent-ag-a")?.getAttribute("href")).toBe("#agents/ag-a");
     // the agent card sparkline is the plain polyline (no area fill)
     expect(document.querySelector(".card .spark-area")).toBeNull();
+  });
+});
+
+const many = (n: number) => Array.from({ length: n }, (_, i) => GATE(`WO-${100 + i}`, (i + 1) * 60_000, "P2"));
+
+describe("Inbox (round 2)", () => {
+  it("a prototype link #/inbox?tab=stuck opens the Blocked tab, and the other tab names work too", async () => {
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [], conversations: [{ wo: "WO-9", title: "Stuck one", project: "payments", question: "x", stuck: { state: "blocked", station: "spec", reason: "No agent", actions: [] } }, { wo: "WO-8", title: "Asked", project: "payments", question: "Which?" }] } }) }) });
+    window.location.hash = "#/inbox?tab=stuck";
+    mount(<InboxView />);
+    expect(await screen.findByText("No agent")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /Blocked/ }).getAttribute("aria-selected")).toBe("true");
+    cleanup();
+    window.location.hash = "#/inbox?tab=questions";
+    mount(<InboxView />);
+    expect(await screen.findByText("Awaiting answer")).toBeTruthy();
+  });
+
+  it("Answer goes to the conversation page of that work order", async () => {
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [], conversations: [{ wo: "WO-8", title: "Asked", project: "payments", question: "Which?" }] } }) }) });
+    window.history.replaceState(null, "", "/?tab=questions");
+    mount(<InboxView />);
+    fireEvent.click(await screen.findByRole("button", { name: "Answer" }));
+    expect(window.location.hash).toBe("#/p/payments/conversations/WO-8");
+  });
+
+  it("the table sorts oldest first by default (ascending triangle on Waiting, a faint hint on Work order), sorts by Work order, and keeps the sort in the URL", async () => {
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: many(3), conversations: [] } }) }) });
+    mount(<InboxView />);
+    await screen.findByText("WO-100");
+    const waiting = screen.getByRole("button", { name: /Waiting/ });
+    expect(waiting.textContent).toContain("▲");
+    expect(waiting.closest("th")?.getAttribute("aria-sort")).toBe("ascending");
+    const wo = screen.getByRole("button", { name: /Work order/ });
+    expect(wo.querySelector(".sorthint")?.textContent).toContain("↕");
+    expect(Array.from(document.querySelectorAll("tbody a.pri")).map((a) => a.textContent)).toEqual(["WO-102", "WO-101", "WO-100"]);
+    expect(screen.queryByText("Sort by")).toBeNull();
+    fireEvent.click(wo);
+    await waitFor(() => expect(Array.from(document.querySelectorAll("tbody a.pri")).map((a) => a.textContent)).toEqual(["WO-100", "WO-101", "WO-102"]));
+    expect(window.location.search).toBe("?sort=id%3Aasc");
+  });
+
+  it("pages twelve rows at a time with the prototype footer", async () => {
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: many(17), conversations: [] } }) }) });
+    mount(<InboxView />);
+    await screen.findByText("1–12 of 17");
+    expect(screen.getByText("Page 1 / 2")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Prev" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("13–17 of 17")).toBeTruthy();
+    expect(screen.getByText("Page 2 / 2")).toBeTruthy();
+  });
+});
+
+describe("Gate dialogs (prototype)", () => {
+  const traveler = { id: "WO-100", version: 3, allowed: { approve: { allowed: true, reason: "", needs: "", gate: "G2", instance: "WO-100:G2:1" }, can: {} } };
+  it("Reject: danger intro, hint, inline 'Reason is required.', and the 'Reject and park' button", async () => {
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: many(1), conversations: [] } }) }), "GET /api/v1/work-orders/WO-100": () => ({ body: traveler }) });
+    mount(<InboxView />);
+    const rej = await screen.findByRole("button", { name: /^Reject WO-100/ });
+    await waitFor(() => expect(rej.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(rej);
+    expect(await screen.findByText("Reject G2 for WO-100")).toBeTruthy();
+    expect(screen.getByText(/parked in "Needs a person" until someone picks it up/)).toBeTruthy();
+    expect(screen.getByText("Say what must change.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reject and park" }));
+    expect(await screen.findByText("Reason is required.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: "short" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reject and park" }));
+    expect(await screen.findByText("Reason needs at least 8 characters.")).toBeTruthy();
+  });
+
+  it("Approve: the optional Note field, no eyebrow", async () => {
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: many(1), conversations: [] } }) }), "GET /api/v1/work-orders/WO-100": () => ({ body: traveler }) });
+    mount(<InboxView />);
+    const ok = await screen.findByRole("button", { name: /^Approve WO-100/ });
+    await waitFor(() => expect(ok.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(ok);
+    expect(await screen.findByText("Approve G2 for WO-100")).toBeTruthy();
+    expect(screen.getByLabelText("Note (optional)")).toBeTruthy();
+    expect(document.querySelector(".dlg .kicker, .modal-kicker")).toBeNull();
   });
 });
 

@@ -8,7 +8,7 @@ import { fmt } from "@gantry/domain";
 import { Btn, Empty, Stat, StatRow, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import type { HomeFull } from "./home/data";
-import { ApproversWatch, AttentionStrip, FactoryHealth, InMotion, MineAndDone, ProjectsSummary, RecentActivity, SetupChecklist, TaskSuccess, WaitingOnYou, openNewProject } from "./home/sections";
+import { AttentionStrip, InMotion, RecentActivity, SetupChecklist, TaskSuccess, WaitingOnYou, openNewProject } from "./home/sections";
 import { useItems } from "./work/items";
 import { greetingAt } from "./work/format";
 import { useScope } from "./work/scope";
@@ -60,8 +60,6 @@ export default function HomeView() {
   const hl = s.health;
   const inScope = scope.project ? projects.filter((p) => p.id === scope.project) : projects;
   const inFlight = m ? (scope.project ? inScope.reduce((n, p) => n + metricsOf(p).wip, 0) : m.inFlight) : 0;
-  const factoryWide = !!s.health || !!s.approvers || !!s.setup;
-  const viewerOnly = me.person.roles.length > 0 && me.person.roles.every((g) => g.role === "viewer");
   const showMotion = !!m && (!s.setup || m.inFlight > 0 || m.recentDone.length > 0 || m.mine.length > 0);
   // Task success: the mean of the agents' scorecards (last 7 days); without scorecards, the share of live agent versions passing their suite.
   const scores = Object.values(cards ?? {}).map((c) => c.taskSuccess).filter((x) => typeof x === "number");
@@ -83,7 +81,7 @@ export default function HomeView() {
       {hasStats ? (
         <StatRow id="hm-stats">
           {showWaiting ? <Stat id="hm-stat-waiting" label="Waiting on you" value={String(pending)} sub="gates to approve" href="#inbox" tone={pending ? "wait" : "done"} /> : null}
-          {m ? <Stat id="hm-stat-flight" label="In flight" value={String(inFlight)} sub="across the line" href="#floor" /> : null}
+          {m ? <Stat id="hm-stat-flight" label="In flight" value={String(inFlight)} sub="across the line" href="#floor" tone="info" /> : null}
           {m ? <Stat id="hm-stat-shipped" label="Released" value={String(m.shippedWeek)} sub="work orders closed" tone="done" /> : null}
           {success ? <Stat id="hm-stat-evals" label="Task success" value={fmt.pct(success.v)} sub={success.sub} href="#evals" tone="done" /> : null}
           {hl ? <Stat id="hm-stat-spend" label="Spend MTD" value={fmt.money0(hl.spend.spent)} sub={`of ${fmt.money0(hl.spend.budget)} budget`} href="#models" {...(budgetPct > 0.8 ? { tone: "wait" as const } : {})} /> : null}
@@ -101,14 +99,6 @@ export default function HomeView() {
         <TaskSuccess />
         <RecentActivity />
       </div>
-      {s.health || m ? (
-        <div className="cols" style={{ marginTop: 16 }}>
-          {s.health ? <FactoryHealth health={s.health} /> : null}
-          {m ? <MineAndDone motion={m} /> : null}
-        </div>
-      ) : null}
-      {s.approvers ? <div style={{ marginTop: 16 }}><ApproversWatch data={s.approvers} /></div> : null}
-      {s.projects ? <div style={{ marginTop: 16 }}><ProjectsSummary rows={s.projects} projects={projects} factoryWide={factoryWide} readOnlyNote={viewerOnly} /></div> : null}
     </div>
   );
 }

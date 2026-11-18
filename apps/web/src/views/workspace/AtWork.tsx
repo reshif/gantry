@@ -2,7 +2,6 @@
  * Agents at work (#workspace, no conversation open): who is doing what right now, as the Blueprint prototype draws it. Stat tiles and a grid of
  * agent cards. Conversations (the inbox and every thread) are one click away and keep their own pane.
  */
-import type { ReactNode } from "react";
 import { fmt } from "@gantry/domain";
 import { useAgents, useProjects, useWorkOrdersOf } from "../../api/queries";
 import { useScope } from "../work/scope";
@@ -11,8 +10,8 @@ import { Spark } from "../../ui/charts";
 import { Avatar, Chip, Empty, Meter, Stat, StatRow, ViewHead } from "../../ui/primitives";
 import { useCatalog } from "../projects/kit";
 
-/** `tools` (New chat, Conversations, Operator view) are the working chat features: kept, as a quiet row under the cards, never in the header. */
-export function AtWork({ tools }: { tools: ReactNode }) {
+/** The prototype's page: tiles and the agent grid, nothing else. Conversations, the Console and the Operator view are their own pages. */
+export function AtWork() {
   const agentsQ = useAgents();
   const scope = useScope();
   const projects = useProjects().data;
@@ -30,8 +29,8 @@ export function AtWork({ tools }: { tools: ReactNode }) {
     <div className="view ws-atwork">
       <ViewHead title="Agents at work" kicker={scope.kicker} sub="Who is doing what right now, across the line." />
       <StatRow id="ws-stats">
-        <Stat label="Agents active" value={String(active)} sub={`of ${agents.length}`} />
-        <Stat label="Running runs" value={String(running.length)} sub="work orders" />
+        <Stat label="Agents active" value={String(active)} sub={`of ${agents.length}`} tone="info" />
+        <Stat label="Running runs" value={String(running.length)} sub="work orders" tone="done" />
         <Stat label="Tokens today" value={fmt.k(tokens)} sub="current runs" />
         <Stat label="Autonomy: gate" value={String(agents.filter((a) => a.autonomy === "gate").length)} sub="agents need approval" />
       </StatRow>
@@ -45,9 +44,9 @@ export function AtWork({ tools }: { tools: ReactNode }) {
                   <a key={a.id} className="card" href={`#agents/${encodeURIComponent(a.id)}`} id={`ws-agent-${a.id}`}>
                     <div className="row">
                       <Avatar id={a.id} />
-                      <div className="grow" style={{ minWidth: 0 }}>
+                      <div className="grow">
                         <h3>{a.name}</h3>
-                        <div className="small muted trunc">{a.model}</div>
+                        <div className="small muted" style={{ whiteSpace: "nowrap" }}>{a.model}</div>
                       </div>
                       <Chip text={jobs.length ? "working" : "idle"} cls={jobs.length ? "ok" : "plain"} />
                     </div>
@@ -74,7 +73,6 @@ export function AtWork({ tools }: { tools: ReactNode }) {
           )
         }
       </Async>
-      <div className="row ws-tools" style={{ marginTop: 16 }}>{tools}</div>
     </div>
   );
 }

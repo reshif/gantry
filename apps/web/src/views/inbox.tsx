@@ -4,17 +4,14 @@
  * the server puts in front of this person (trust, learning, MCP and trigger proposals, a factory restore). Every decision is a command the server checks (approver rules, separation of duties).
  */
 import { useMemo, useState, type ReactNode } from "react";
-import { ops } from "../api/ops";
 import { useAgents, useHome, useLearningProposals, useMe, useProjects, useTrustCells } from "../api/queries";
-import { dec, useTravelerWo } from "./traveler/model";
 import { useCan } from "../api/can";
-import { Avatar, Btn, Chip, Empty, FilterBar, Panel, SearchBox, Select, Status, Tabs, ViewHead, type Decision } from "../ui/primitives";
+import { Avatar, Btn, Chip, Empty, FilterBar, Panel, SearchBox, Select, Status, Tabs, ViewHead } from "../ui/primitives";
 import { DataTable, type Col, type SortState } from "../ui/DataTable";
 import { Async } from "../ui/async";
-import { useCommand } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { hashFor, navigate, useHash } from "../lib/router";
-import { setProject, updatePrefs } from "../lib/prefs";
+import { setProject } from "../lib/prefs";
 import { gotoWithQuery, useUrlParam } from "../lib/urlState";
 import { GateActions } from "./work/gate";
 import { agoMs } from "./work/format";
@@ -22,7 +19,6 @@ import { useItems, type Group, type Item } from "./work/items";
 import { useScope } from "./work/scope";
 import { makeStopActions } from "../shell/stopActions";
 import { useOpenTraveler } from "../shell/useTraveler";
-import { useGateApprovers } from "./traveler/Approvers";
 import { goAttention, type HomeFull } from "./home/data";
 
 /** One waiting item as a prototype list row: the work order and a tag, the title, a quiet line, the actions on the right. */
@@ -45,49 +41,26 @@ function Row({ id, tag, project, title, sub, status, children, details, actions 
   );
 }
 
-/** The rule, progress and who else may decide: read from the server for this gate, never worked out here. */
-function GateRule({ wo, gate, project }: { wo: string; gate: string; project: string }) {
-  const q = useGateApprovers(wo, gate);
-  const a = q.data;
-  const go = (route: string, param?: string) => navigate(route, param ?? null, route === "project-config" ? project : undefined);
-  if (!a) return <Async query={q} what="who may approve this gate" id={`inb-rule-${wo}-${gate}`} rows={2}>{() => null}</Async>;
-  return (
-    <div className="inb-rule">
-      <div className="inb-rule-h">Who can approve and why</div>
-      <p className="small">{a.rule.text}</p>
-      {typeof a.rule.classOverride === "number" ? <p className="small muted">{`This work order's class needs ${a.rule.classOverride} instead of the gate's base ${a.rule.base}.`}</p> : null}
-      <p className="small"><strong>{`${a.progress.have} of ${a.progress.need}`}</strong>{a.progress.approvals.length ? ` · approved by ${a.progress.approvals.map((x) => x.name).join(", ")}` : ""}{a.progress.unmet.length ? ` · still needs ${a.progress.unmet.join("; ")}` : ""}</p>
-      {!a.satisfiable ? <p className="small inb-warn" role="alert">{a.warning}</p> : null}
-      {a.eligible.length ? <p className="small muted">{`Can decide: ${a.eligible.map((e) => e.name + (e.away ? " (away)" : "")).join(", ")}.`}</p> : <p className="small muted">Nobody is eligible today.</p>}
-      <div className="inb-rule-acts">
-        <Btn small kind="ghost" label="Edit rule" id={`inb-edit-${wo}-${gate}`} guard={a.can.editRule ? null : { allowed: false, reason: a.can.editWhy || "You may not edit approver rules.", needs: "" }} onClick={() => go("project-config", `approvers/${gate}`)} />
-        <Btn small kind="ghost" label="Grant a role" id={`inb-grant-${wo}-${gate}`} guard={a.can.grantRole ? null : { allowed: false, reason: a.can.grantWhy || "You may not grant roles.", needs: "" }} onClick={() => go("people")} />
-      </div>
-    </div>
-  );
-}
-
-const CHECKING: Decision = { allowed: false, reason: "Checking what you may decide here.", needs: "" };
 const WO_LINK = (wo: string, project: string) => hashFor("record", wo, project);
 const WaitText = (n: number | undefined) => (n ? agoMs(n) : "now");
 
 type GateIt = Extract<Item, { kind: "gate" }>;
 
-/** The gate table: the prototype's columns, sortable, the row opens the work order, Approve and Reject on the right. */
+/** The gate table: the prototype's columns, sortable (the sort is in the URL), the row opens the work order, Approve and Reject on the right. */
 function GateTable({ rows }: { rows: GateIt[] }) {
-  const ui = useUI();
-  const [sort, setSort] = useState<SortState>({ key: "wait", dir: -1 });
-  const details = (it: GateIt) =>
-    ui.dialog({ title: `Who can approve ${it.a.wo}`, kicker: it.a.gateName ?? "Gate decision", body: <GateRule wo={it.a.wo ?? ""} gate={it.a.gate ?? ""} project={it.project} />, actions: [{ label: "Close" }] });
+  const [sortQ, setSortQ] = useUrlParam("sort", "wait:asc");
+  const [k = "wait", d = "asc"] = sortQ.split(":");
+  const sort: SortState = { key: k, dir: d === "desc" ? -1 : 1 };
   const cols: Col<GateIt>[] = [
     { key: "id", label: "Work order", sort: (r) => r.a.wo ?? "", render: (r) => <div><a className="pri mono" href={WO_LINK(r.a.wo ?? "", r.project)} id={`inb-wo-${r.a.wo}`}>{r.a.wo}</a><span className="sub trunc" style={{ maxWidth: 340 }}>{r.a.title}</span></div> },
     { key: "gate", label: "Gate", render: (r) => <div><Chip text={r.a.gateLabel ?? r.a.gate ?? ""} cls="warn" /><span className="sub">{r.a.gateName}</span></div> },
     { key: "project", label: "Project", render: (r) => r.projectName },
-    { key: "wait", label: "Waiting", sort: (r) => r.waitMs, render: (r) => WaitText(r.waitMs) },
+    // oldest first is ascending by the time the gate opened, as the prototype sorts it
+    { key: "wait", label: "Waiting", sort: (r) => -r.waitMs, render: (r) => WaitText(r.waitMs) },
     { key: "p", label: "Priority", render: (r) => (r.a.priority ? <Chip text={r.a.priority} cls={r.a.priority === "P0" || r.a.priority === "P1" ? "bad" : "info"} /> : <span className="muted" title="The server did not send a priority">—</span>) },
-    { key: "a", label: "", align: "end", render: (r) => <div className="row" style={{ justifyContent: "flex-end" }}><GateActions a={r.a} idPrefix="inb" /><Btn label="Rule" aria={`Who can approve ${r.a.wo}`} small kind="ghost" id={`inb-${r.key}-details`} onClick={() => details(r)} /></div> },
+    { key: "a", label: "", align: "end", render: (r) => <div className="row" style={{ justifyContent: "flex-end" }}><GateActions a={r.a} idPrefix="inb" /></div> },
   ];
-  return <DataTable id="inbox-g" caption="Approvals waiting for a decision" columns={cols} rows={rows} rowKey={(r) => r.key} rowId={(r) => `inb-${r.key}`} rowHref={(r) => WO_LINK(r.a.wo ?? "", r.project)} rowLabel={(r) => `Open ${r.a.wo}`} sort={sort} onSort={setSort} pageSize={12} />;
+  return <DataTable proto id="inbox-g" caption="Approvals waiting for a decision" columns={cols} rows={rows} rowKey={(r) => r.key} rowId={(r) => `inb-${r.key}`} rowHref={(r) => WO_LINK(r.a.wo ?? "", r.project)} rowLabel={(r) => `Open ${r.a.wo}`} sort={sort} onSort={(n) => setSortQ(`${n.key}:${n.dir === 1 ? "asc" : "desc"}`)} pageSize={12} />;
 }
 
 function OnboardingItem({ it }: { it: Extract<Item, { kind: "onboarding" }> }) {
@@ -114,20 +87,15 @@ function QuestionItem({ it }: { it: Extract<Item, { kind: "question" }> }) {
         <div className="row"><a className="pri mono" href={WO_LINK(c.wo, c.project)}>{c.wo}</a><Chip text="Awaiting answer" cls="info" /></div>
         <div className="small muted trunc">{c.title}</div>
       </div>
-      <Btn label="Answer" small id={`inb-conv-${c.wo}`} onClick={() => { setProject(c.project); updatePrefs({ openConversation: c.wo }); navigate("workspace", `wo:${c.wo}`); }} />
+      <Btn label="Answer" small id={`inb-conv-${c.wo}`} onClick={() => navigate("conversations", c.wo, c.project)} />
     </li>
   );
 }
 
-/** A failed or blocked work order: the reason in red, Retry (when the server allows this person), Open. */
+/** A failed or blocked work order, as the prototype's row: the work order, the title with the reason in red, Open. */
 function StuckItem({ it }: { it: Extract<Item, { kind: "stuck" }> }) {
   const c = it.c;
   const s = c.stuck!;
-  const q = useTravelerWo(c.wo);
-  const t = q.data;
-  const ifm = t ? { ifMatch: t.version } : undefined;
-  const retry = useCommand(() => ops.retry(c.wo, undefined, ifm), {});
-  const guard: Decision = !t ? CHECKING : dec(t, "sendback");
   return (
     <li id={`inb-${it.key}`} className="inb-row">
       <a className="pri mono" href={WO_LINK(c.wo, c.project)}>{c.wo}</a>
@@ -135,7 +103,6 @@ function StuckItem({ it }: { it: Extract<Item, { kind: "stuck" }> }) {
         <div className="trunc">{c.title}</div>
         <div className="small" style={{ color: "var(--bad)" }}>{s.reason || c.question || "This work order stopped and needs a person."}</div>
       </div>
-      {s.actions.includes("retry") ? <Btn label="Retry" small icon="refresh" id={`inb-retry-${c.wo}`} guard={guard} onClick={() => void retry.run()} /> : null}
       <Btn label="Open" small id={`inb-open-${c.wo}`} onClick={() => navigate("record", c.wo, c.project)} />
     </li>
   );
@@ -189,17 +156,17 @@ const ALIAS: Record<string, string> = { approvals: "gates", blocked: "stuck" };
 function Proposals({ others }: { others: Item[] }) {
   const trust = useTrustCells();
   const learning = useLearningProposals();
-  const agents = useAgents().data ?? [];
-  const tp = (trust.data?.proposals ?? []).filter((p) => p.status === "pending");
-  const lp = (learning.data ?? []).filter((p) => p.status === "proposed");
-  const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? id;
+  const agentsQ = useAgents();
+  const tp = trust.data?.proposals.filter((p) => p.status === "pending");
+  const lp = learning.data?.filter((p) => p.status === "proposed");
+  const nameOf = (id: string) => agentsQ.data?.find((a) => a.id === id)?.name ?? id;
   return (
     <>
       <Panel title="Trust promotions" flush id="inbox-trust">
-        <Async query={trust} what="trust proposals" id="inbox-trust-state" isEmpty={() => !tp.length} empty={<Empty id="inbox-trust-empty" title="No promotions pending" text="Trust proposals appear when an agent meets the criteria." />}>
+        <Async query={trust} what="trust proposals" id="inbox-trust-state" isEmpty={() => !tp?.length} empty={<Empty id="inbox-trust-empty" title="No promotions pending" text="Trust proposals appear when an agent meets the criteria." />}>
           {() => (
             <ul className="list">
-              {tp.map((p) => {
+              {(tp ?? []).map((p) => {
                 const [agent = "", ...rest] = p.cell.split("|");
                 return (
                   <li key={p.id}>
@@ -218,10 +185,10 @@ function Proposals({ others }: { others: Item[] }) {
       </Panel>
       <div style={{ height: 16 }} />
       <Panel title="Learning proposals" flush id="inbox-learning">
-        <Async query={learning} what="learning proposals" id="inbox-learning-state" isEmpty={() => !lp.length} empty={<Empty id="inbox-learning-empty" title="Nothing to review" text="Learning proposals show up here." />}>
+        <Async query={learning} what="learning proposals" id="inbox-learning-state" isEmpty={() => !lp?.length} empty={<Empty id="inbox-learning-empty" title="Nothing to review" text="Learning proposals show up here." />}>
           {() => (
             <ul className="list">
-              {lp.map((p) => (
+              {(lp ?? []).map((p) => (
                 <li key={p.id}>
                   <div className="grow"><b>{p.title}</b><div className="small muted">{p.expected}</div></div>
                   <Btn label="Review" small id={`inb-learn-${p.id}`} onClick={() => navigate("learning")} />
@@ -245,7 +212,7 @@ const PROPOSAL_ROUTES = new Set(["trust", "learning"]);
 
 export default function InboxView() {
   const q = useHome();
-  const home = q.data as unknown as HomeFull | undefined;
+  const home = q.data as HomeFull | undefined;
   const projList = useProjects().data;
   const scope = useScope();
   const names = useMemo(() => new Map((projList ?? []).map((p) => [p.id, p.name] as [string, string])), [projList]);

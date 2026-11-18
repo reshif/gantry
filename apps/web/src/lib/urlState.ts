@@ -17,8 +17,17 @@ const subscribe = (fn: () => void) => {
     window.removeEventListener("hashchange", fn);
   };
 };
+/** The query string the page reads: `?tab=` before the hash, plus a prototype-style `?tab=` after it (`#/inbox?tab=stuck`), which wins. */
 const snap = () => {
-  try { return window.location.search; } catch { return ""; }
+  try {
+    const h = window.location.hash;
+    const i = h.indexOf("?");
+    if (i < 0) return window.location.search;
+    const merged = new URLSearchParams(window.location.search);
+    new URLSearchParams(h.slice(i + 1)).forEach((v, k) => merged.set(k, v));
+    const out = merged.toString();
+    return out ? `?${out}` : "";
+  } catch { return ""; }
 };
 
 /** Writes (or, for an empty value, removes) query keys; notifies readers. */
@@ -26,6 +35,14 @@ export function writeQuery(patch: Record<string, string | null | undefined>): vo
   try {
     const u = new URL(window.location.href);
     for (const [k, v] of Object.entries(patch)) { if (v) u.searchParams.set(k, v); else u.searchParams.delete(k); }
+    // a `?` in the hash (a prototype-style link) would override what is written: the written keys leave it
+    const i = u.hash.indexOf("?");
+    if (i >= 0) {
+      const hq = new URLSearchParams(u.hash.slice(i + 1));
+      for (const k of Object.keys(patch)) hq.delete(k);
+      const rest = hq.toString();
+      u.hash = u.hash.slice(0, i) + (rest ? `?${rest}` : "");
+    }
     if (u.href !== window.location.href) window.history.replaceState(window.history.state, "", u.href);
   } catch { /* a sandboxed frame without history access: the state still works, it is just not in the URL */ }
   window.dispatchEvent(new Event(EVT));

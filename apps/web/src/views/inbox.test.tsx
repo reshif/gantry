@@ -57,34 +57,26 @@ describe("Inbox", () => {
     expect(document.getElementById("inb-q-WO-1007")).toBeNull();
   });
 
-  it("lists a stopped work order with its reason and a Retry the server's decision allows", async () => {
+  it("lists a stopped work order with its reason and Open only (the prototype's row has no Retry)", async () => {
     const STUCK = { wo: "WO-1005", title: "Fix the docs", project: "payments", question: "The run could not be started: workspace seeding failed", stuck: { state: "failed", station: "spec", reason: "workspace seeding failed", actions: ["retry", "assign"] } };
-    const cs = mockApi({
-      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [], conversations: [STUCK] }, attention: [] }) }),
-      "GET /api/v1/work-orders/WO-1005": () => ({ body: { id: "WO-1005", project: "payments", version: 4, allowed: { approve: null, can: { sendback: { allowed: true, reason: "" } } } } }),
-      "POST /api/v1/work-orders/WO-1005/retry": () => ({ body: { ok: true, msg: "WO-1005 is running again." } }),
-    });
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [], conversations: [STUCK] }, attention: [] }) }) });
     mount(<InboxView />);
     fireEvent.click(await screen.findByRole("tab", { name: /Blocked/ }));
     expect(await screen.findByText(/workspace seeding failed/)).toBeTruthy();
     expect(document.getElementById("inb-stuck-WO-1005")?.textContent).toContain("WO-1005");
-    const retry = await screen.findByRole("button", { name: "Retry" });
-    await waitFor(() => expect(retry.getAttribute("aria-disabled")).not.toBe("true"));
-    fireEvent.click(retry);
-    await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/work-orders/WO-1005/retry")).toBe(true));
-    expect(cs.find((c) => c.path.endsWith("/retry"))!.headers["if-match"]).toBe("4");
+    expect(screen.getByRole("button", { name: "Open" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
-  it("shows the rule and who else can decide under Show details, read from the server", async () => {
+  it("approval rows have Approve and Reject only: no Rule button", async () => {
     mockApi({
       "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] } }) }),
       "GET /api/v1/work-orders/WO-2398": () => ({ body: traveler(true) }),
-      "GET /api/v1/work-orders/WO-2398/gates/G2/approvers": () => ({ body: approvers }),
     });
     mount(<InboxView />);
-    fireEvent.click(await screen.findByRole("button", { name: "Who can approve WO-2398" }));
-    expect(await screen.findByText(/Two approvers from Reviewer or Approver/)).toBeTruthy();
-    expect(screen.getByText(/Can decide: Grace Liu/)).toBeTruthy();
+    await screen.findByRole("button", { name: /^Approve WO-2398/ });
+    expect(screen.queryByRole("button", { name: /Who can approve/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Rule" })).toBeNull();
   });
 
   it("approves from the row, and locks Approve with the server's reason when this person may not", async () => {

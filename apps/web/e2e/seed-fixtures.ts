@@ -4,6 +4,7 @@
  * is fed from the same data the prototype draws. Both sides therefore show the same factory.
  * `resolve` answers parameterised and list endpoints; anything it does not know falls through to e2e/fixtures.ts.
  */
+import { DEFAULT_CATALOG } from "@gantry/domain";
 import type { Me } from "../src/api/types";
 import type { Persona } from "./fixtures";
 
@@ -55,10 +56,10 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     const byPosition: Record<string, { n: number; blocked: number }> = {};
     const byGate: Record<string, number> = {};
     for (const w of mine) {
-      const st = stationId(w);
+      const st = w.bay ?? stationId(w); // the server keys a parked work order by its bay, not its station
       byPosition[st] = byPosition[st] ?? { n: 0, blocked: 0 };
       byPosition[st].n += 1;
-      if (w.state === "blocked") byPosition[st].blocked += 1;
+      if (w.state === "blocked" || w.state === "failed") byPosition[st].blocked += 1;
       const g = w.state === "waiting" ? gateInfo(w) : null;
       if (g) byGate[g.id] = (byGate[g.id] ?? 0) + 1;
     }
@@ -66,7 +67,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
   };
   const done = wos.filter((w) => w.state === "done");
   const byStation: Record<string, number> = {};
-  for (const w of live) byStation[stationId(w)] = (byStation[stationId(w)] ?? 0) + 1;
+  for (const w of live) if (!w.bay) byStation[stationId(w)] = (byStation[stationId(w)] ?? 0) + 1;
   const spent = seed.projects.reduce((a: number, p: Seed) => a + (p.budget?.mtd ?? 0), 0);
   const home = {
     approvals,
@@ -207,6 +208,8 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     }
     if (path === "console/status") return { configured: true, vendor: "anthropic", model: "claude-sonnet-5-5", actionsEnabled: false, canUse: true, retentionDays: 90, tools: [], proposals: [], models: [] };
     if (path === "console/threads") return { items: [], retentionDays: 90 };
+    // ops1: the factory catalogue is the built-in line plus the seed's custom stations (the server appends them), so Home's line shows S7.1 where it has work.
+    if (path === "catalog") return { ...DEFAULT_CATALOG, stations: [...DEFAULT_CATALOG.stations, ...(seed.catalog.stations as Seed[]).filter((x) => x.custom)] };
     if (path === "people") return seed.people;
     if (path === "teams") return seed.teams;
     if (path === "templates") return seed.templates;

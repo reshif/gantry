@@ -124,6 +124,14 @@ export interface Option {
   disabled?: boolean;
 }
 
+/** A text input and a multi-line input in the one field style. Put them in a <Field>, which wires the label, hint and error to them. */
+export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement> & { id: string }) {
+  return <input {...props} className={`input${props.className ? ` ${props.className}` : ""}`} />;
+}
+export function TextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { id: string }) {
+  return <textarea {...props} className={`input${props.className ? ` ${props.className}` : ""}`} />;
+}
+
 export function Select({ id, options, value, onChange, ...rest }: { id: string; options: Array<string | Option>; value: string | null | undefined; onChange?: (v: string) => void } & Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "onChange" | "value" | "id">) {
   return (
     <select {...rest} id={id} className="input" value={value ?? ""} onChange={(e) => onChange?.(e.target.value)}>
@@ -350,8 +358,8 @@ export function ViewHead({ kicker, title, status, sub, meta, actions, sheet }: {
 }
 
 /** One stat tile: a quiet label, a big value, an optional note. Put them in <StatRow>. `value` may be the result of qState(). */
-export function Stat({ label, value, sub, tone, icon, id, action, href }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: "wait" | "block" | "done"; icon?: string; id?: string; action?: ReactNode; /** Makes the tile a link (the prototype's tile that opens its page). */ href?: string }) {
-  const t = tone === "wait" ? "warn" : tone === "block" ? "bad" : tone === "done" ? "ok" : "";
+export function Stat({ label, value, sub, tone, icon, id, action, href }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: "wait" | "block" | "done" | "info"; icon?: string; id?: string; action?: ReactNode; /** Makes the tile a link (the prototype's tile that opens its page). */ href?: string }) {
+  const t = tone === "wait" ? "warn" : tone === "block" ? "bad" : tone === "done" ? "ok" : tone === "info" ? "info" : "";
   const Root = (href ? "a" : "div") as "div";
   return (
     <Root className={`stat${t ? ` ${t}` : ""} stat-tile${tone ? ` stat-${tone}` : ""}${href ? " stat-link" : ""}`} id={id} {...(href ? { href } : {})}>

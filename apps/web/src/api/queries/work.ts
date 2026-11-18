@@ -1,6 +1,7 @@
 /** Typed reads for this slice of /api/v1. Keys come from ../keys (`qk`). */
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { api, get, getText } from "../client";
+import { ops } from "../ops";
 import { qk } from "../keys";
 import type { Conversation, EventEntry, FloorData, HomeData, KillImpact, Page, Project, RecordBundle, Repo, SavedView, Template, WorkOrder, OrgGuidelines } from "../types";
 
@@ -72,3 +73,6 @@ export const useKillImpact = (scope: string, id: string | null, enabled = true) 
 export const useRepos = (projectId: string | null | undefined) =>
   useQuery({ queryKey: qk.repos(projectId ?? ""), queryFn: () => get<Repo[]>(api(`projects/${encodeURIComponent(projectId ?? "")}/repos`)), enabled: !!projectId });
 export const useGuidelines = () => useQuery({ queryKey: qk.guidelines(), queryFn: () => get<OrgGuidelines>(api("guidelines")) });
+
+/** The four writes a gate decision can make (approve, confirm the brief, reject, decline it), for the Approve and Reject dialogs; views run them through useCommand. */
+export const gateOps = { approveGate: ops.approveGate, confirmBrief: ops.confirmBrief, rejectGate: ops.rejectGate, decline: ops.decline };

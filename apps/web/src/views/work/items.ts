@@ -38,7 +38,7 @@ export function useItems(home: HomeFull | undefined, names: Map<string, string>)
       out.push({ kind: "question", group: "questions", key: `q-${c.wo}`, project: c.project, projectName, waitMs: 0, c });
     }
     for (const x of s.attention ?? []) if (isDecision(x)) out.push({ kind: "other", group: "other", key: x.id, project: x.act.project ?? "factory", projectName: x.where, waitMs: 0, x });
-    return out.sort((p, q) => q.waitMs - p.waitMs);
+    return out;
   }, [home, names]);
 }
 

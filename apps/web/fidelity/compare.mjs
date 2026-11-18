@@ -136,7 +136,7 @@ async function shoot(kind, route, w, theme) {
     } else {
       await fx.mockApi(page, { persona: fx.personaFromSeed(SEED), resolve: fx.seedResolver(SEED) });
       await page.clock.install({ time: new Date(SEED.NOW) });
-      await page.addInitScript(([t, p]) => { try { localStorage.setItem("gantry.prefs", JSON.stringify({ theme: t, project: p })); } catch { /* */ } }, [theme, cfg.project]);
+      await page.addInitScript(([t, p]) => { try { localStorage.setItem("gantry.prefs", JSON.stringify({ theme: t, project: p })); } catch { /* */ } }, [theme, cfg.projectRoutes.includes(route.split("/")[0]) ? cfg.project : null]);
       await page.goto(`http://127.0.0.1:${REAL_PORT}/${realHash(route)}`);
       await page.waitForSelector("#root > *");
       await page.waitForLoadState("networkidle");

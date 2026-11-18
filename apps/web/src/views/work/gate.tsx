@@ -4,10 +4,11 @@
  * conflict refreshes instead of deciding on stale data. Locked, with the reason, until the server's decision is known.
  */
 import { useState } from "react";
-import { ops } from "../../api/ops";
-import { dec, useTravelerWo } from "../traveler/model";
-import { Btn, type Decision } from "../../ui/primitives";
+import { gateOps } from "../../api/queries";
 import { useCommand } from "../../ui/async";
+import { dec, useTravelerWo } from "../traveler/model";
+import { Btn, Field, TextArea, TextInput, type Decision } from "../../ui/primitives";
+import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
 import { useCatalog } from "../projects/kit";
 import type { Approval } from "../home/data";
@@ -33,37 +34,83 @@ export function GateActions({ a, idPrefix, size = "sm" }: { a: Approval; idPrefi
   const decideBack: Decision = brief && t && base.allowed ? dec(t, "decline") : base;
   const ifm = t ? { ifMatch: t.version } : undefined;
   const instance = ap?.instance ?? a.instance;
-  const approve = useCommand(() => (brief ? ops.confirmBrief(wo, undefined, ifm) : ops.approveGate(wo, gate, instance, undefined, ifm)), {});
+  const decide = useCommand(
+    (kind: "approve" | "reject", text: string) =>
+      kind === "approve"
+        ? brief ? gateOps.confirmBrief(wo, undefined, ifm) : gateOps.approveGate(wo, gate, instance, undefined, ifm, text || undefined)
+        : brief ? gateOps.decline(wo, text, undefined, ifm) : gateOps.rejectGate(wo, gate, instance, text, undefined, ifm),
+    { ok: false, toastFail: false },
+  );
   const [busy, setBusy] = useState(false);
   const purpose = cat?.gates.find((g) => g.id === gate)?.purpose;
   const label = a.gateLabel ?? gate;
-  const onApprove = async () => {
-    const ok = await ui.confirm({ title: `Approve ${label} for ${wo}`, kicker: a.gateName ?? "Gate decision", body: purpose ?? `${a.gateName ?? "This gate"} passes and the work order moves on.`, ok: "Approve" });
-    if (!ok) return;
-    setBusy(true);
-    try { await approve.run(); } finally { setBusy(false); }
-  };
-  const onReject = () =>
-    ui.reasonDialog({
-      title: `Reject ${label} for ${wo}`,
-      kicker: a.gateName ?? "Gate decision",
-      ok: "Reject",
-      kind: "danger",
-      min: 8,
-      label: "Reason",
-      placeholder: brief ? "Why will the factory not do this?" : "What must change before this passes?",
-      sub: brief ? "The work order moves to Declined and the submitter is told why. The reason is recorded." : "The station's agent reworks the step with your reason. The reason is shown to the agent and recorded.",
-      onOk: async (v) => {
-        const r = brief ? await ops.decline(wo, v, undefined, ifm) : await ops.rejectGate(wo, gate, instance, v, undefined, ifm);
-        if (r.ok) ui.toast(r.msg, "ok");
-        return r;
-      },
-    });
+  const open = (kind: "approve" | "reject") =>
+    ui.open((close) => (
+      <DecisionDialog
+        title={`${kind === "approve" ? "Approve" : "Reject"} ${label} for ${wo}`}
+        danger={kind === "reject"}
+        intro={kind === "approve" ? (purpose ?? `${a.gateName ?? "This gate"} passes and the work order moves on.`) : brief ? "The work order moves to Declined and the submitter is told why. The reason is recorded." : 'The work order is parked in "Needs a person" until someone picks it up. The reason is shown to the agent and recorded.'}
+        field={kind === "approve" ? { label: "Note (optional)", min: 0, area: false } : { label: "Reason", min: 8, area: true, hint: "Say what must change." }}
+        submit={kind === "approve" ? "Approve" : brief ? "Reject" : "Reject and park"}
+        onClose={close}
+        onSubmit={async (text) => {
+          setBusy(true);
+          try {
+            const r = await decide.run(kind, text);
+            if (r?.ok) ui.toast(kind === "approve" ? `${wo} approved and moved on` : `${wo} rejected${brief ? " and declined" : " and parked"}`, kind === "approve" ? "ok" : "error");
+            return r ?? undefined;
+          } finally { setBusy(false); }
+        }}
+      />
+    ));
   const cls = size === "sm" ? { small: true } : {};
   return (
     <>
-      <Btn label="Approve" aria={`Approve ${wo} at ${label}`} kind="primary" {...cls} id={`${idPrefix}-ok-${wo}-${gate}`} guard={base} disabledReason={busy ? "Deciding…" : null} onClick={() => void onApprove()} />
-      <Btn label="Reject" aria={`Reject ${wo} at ${label}`} kind="danger" {...cls} id={`${idPrefix}-back-${wo}-${gate}`} guard={decideBack} onClick={onReject} />
+      <Btn label="Approve" aria={`Approve ${wo} at ${label}`} kind="primary" {...cls} id={`${idPrefix}-ok-${wo}-${gate}`} guard={base} disabledReason={busy ? "Deciding…" : null} onClick={() => open("approve")} />
+      <Btn label="Reject" aria={`Reject ${wo} at ${label}`} kind="danger" {...cls} id={`${idPrefix}-back-${wo}-${gate}`} guard={decideBack} onClick={() => open("reject")} />
     </>
+  );
+}
+
+/**
+ * The prototype's decision dialog: an intro line, one field with its hint, the inline reason for a refusal, Cancel and the submit.
+ * An empty required field says "<Label> is required."; one that is too short says how many characters it needs.
+ */
+function DecisionDialog({ title, intro, field, submit, danger, onSubmit, onClose }: {
+  title: string; intro: string; submit: string; danger: boolean; onClose: () => void;
+  field: { label: string; min: number; area: boolean; hint?: string };
+  onSubmit: (text: string) => Promise<{ ok: boolean; msg?: string } | void>;
+}) {
+  const [text, setText] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    if (busy) return;
+    const v = text.trim();
+    if (field.min && !v) return setErr(`${field.label} is required.`);
+    if (field.min && v.length < field.min) return setErr(`${field.label} needs at least ${field.min} characters.`);
+    setBusy(true);
+    const r = await onSubmit(v);
+    setBusy(false);
+    if (r && r.ok === false) return setErr(r.msg ?? "That did not work.");
+    onClose();
+  };
+  return (
+    <Dialog
+      title={title}
+      onClose={onClose}
+      dirty={text.trim() !== ""}
+      body={
+        <div className="dlg-body">
+          <p style={{ marginBottom: 12 }}>{intro}</p>
+          <Field label={field.label} htmlFor="gd-text" {...(field.hint ? { hint: field.hint } : {})} error={err || undefined}>
+            {field.area
+              ? <TextArea id="gd-text" rows={4} value={text} onChange={(e) => { setText(e.target.value); setErr(""); }} />
+              : <TextInput id="gd-text" autoComplete="off" value={text} onChange={(e) => { setText(e.target.value); setErr(""); }} />}
+          </Field>
+        </div>
+      }
+      actions={[{ label: "Cancel" }, { label: submit, kind: danger ? "danger" : "primary", submit: true, id: "gd-ok", onClick: () => void go() }]}
+    />
   );
 }

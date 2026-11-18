@@ -38,7 +38,7 @@ const adminHome = (over: Record<string, unknown> = {}, sections: Record<string, 
   ...over,
 });
 
-interface Call { method: string; path: string }
+interface Call { method: string; path: string; body?: unknown }
 function setup(who: ReturnType<typeof person>, home: unknown, o: { denied?: string[]; killed?: unknown; projects?: unknown[]; extra?: Record<string, Handler> } = {}) {
   const calls: Call[] = [];
   const base: Record<string, Handler> = {
@@ -54,7 +54,7 @@ function setup(who: ReturnType<typeof person>, home: unknown, o: { denied?: stri
     vi.fn(async (url: string, init?: RequestInit) => {
       const u = new URL(url, "http://x");
       const method = init?.method ?? "GET";
-      calls.push({ method, path: u.pathname });
+      calls.push({ method, path: u.pathname, body: typeof init?.body === "string" ? (() => { try { return JSON.parse(init.body); } catch { return null; } })() : null });
       if (u.pathname === "/api/v1/can") {
         const checks = (JSON.parse(String(init?.body)) as { checks: Array<{ action: string }> }).checks;
         return new Response(JSON.stringify({ results: checks.map((c) => ((o.denied ?? []).includes(c.action) ? { allowed: false, reason: "No role holds it.", needs: "Factory Admin", rule: { id: "MATRIX" } } : { allowed: true, reason: "", needs: "" })) }));
@@ -96,7 +96,8 @@ describe("Home: one page", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeTruthy();
     // Attention carries the failing onboarding; the project row says where the repo is; the checklist has the active step.
     expect(await screen.findByText("Nautobot-Jobs onboarding needs you: verification failed")).toBeTruthy();
-    expect(screen.getByText("Nautobot-Jobs: verification failed")).toBeTruthy();
+    // The prototype's page has no Projects card; the project list is the Projects screen.
+    expect(screen.queryByRole("heading", { level: 2, name: /^Projects/ })).toBeNull();
     expect(screen.getByRole("heading", { level: 2, name: /Set up the factory/ })).toBeTruthy();
     expect(document.querySelector('[aria-current="step"]')?.textContent).toContain("Step repo");
     expect(screen.getByText("3 of 5 done")).toBeTruthy();
@@ -134,7 +135,7 @@ describe("Home: one page", () => {
     cleanup();
     setup(VERA, { approvals: [], conversations: [], badges: {}, projectBadges: {}, sections: { attention: [], projects: [{ id: "payments", roles: [{ id: "viewer", name: "Viewer" }], repos: [] }] } });
     mount();
-    await screen.findByText(/Ask a Project Admin for more access/);
+    await screen.findByRole("heading", { level: 1, name: "Home" });
     expect(document.getElementById("hm-stat-waiting")).toBeNull();
     expect(document.getElementById("hm-stat-flight")).toBeNull();
   });
@@ -165,29 +166,34 @@ describe("Home: one page", () => {
     expect(screen.queryByRole("button", { name: /restore/i })).toBeNull();
   });
 
-  it("shows 'No spend yet' instead of a 0% gauge, and shows health as a panel", async () => {
+  it("has only the prototype's panels: Needs you, Line at a glance, Task success, Recent activity (no Factory health, Your work orders, Waiting on approvers or Projects)", async () => {
     setup(ASHA, adminHome({}, { setup: undefined }));
     mount();
-    await screen.findByRole("heading", { level: 2, name: /Factory health/ });
-    expect(text()).toContain("No spend yet");
-    expect(text()).not.toMatch(/0%/);
-    expect(document.querySelector('[role="meter"]')).toBeNull();
+    await screen.findByRole("heading", { level: 2, name: /Needs you/ });
+    const titles = Array.from(document.querySelectorAll("h2")).map((h) => h.textContent ?? "");
+    for (const gone of ["Factory health", "Your work orders", "Waiting on approvers", "Projects"]) expect(titles.some((t) => t.includes(gone))).toBe(false);
+    for (const here of ["Needs you", "Line at a glance", "Task success, 8 weeks", "Recent activity"]) expect(titles.some((t) => t.includes(here))).toBe(true);
   });
 
-  it("reports real eval health, with the failing live versions listed; hides the row without run data", async () => {
-    const evals = { scored: 3, passing: 2, unscored: 0, failing: [{ agent: "ag-spec", name: "Spec agent", version: "1.2.0", suite: "ES-spec", score: 0.7, threshold: 0.85 }] };
-    setup(ASHA, adminHome({}, { setup: undefined, health: { ...HEALTH, spend: { spent: 500, budget: 2000, projects: [] }, evals } }));
+  it("Needs you keeps the server's order and its Approve and Reject buttons sit directly in the row (so the phone layout can wrap them)", async () => {
+    const A = (wo: string, waitMs: number) => ({ wo, title: `T ${wo}`, gate: "G2", gateLabel: "G2", gateName: "Spec", instance: `${wo}:G2:1`, project: "payments", projectName: "Payments", have: 0, need: 1, waitMs });
+    setup(ASHA, adminHome({}, { setup: undefined, attention: [], waiting: { approvals: [A("WO-1", 1000), A("WO-2", 9_000_000)], conversations: [] } }));
     mount();
-    await screen.findByRole("heading", { level: 2, name: /Factory health/ });
-    expect(screen.getByText("2 of 3 live agent versions pass their suite threshold (last run)")).toBeTruthy();
-    expect(screen.getByText("Spec agent 1.2.0: 70% vs 85% on ES-spec")).toBeTruthy();
-    expect(screen.getAllByText("$500 of $2,000", { exact: false })).toHaveLength(1);
-    cleanup();
-    vi.unstubAllGlobals();
-    setup(ASHA, adminHome({}, { setup: undefined }));
+    await screen.findByText("WO-1");
+    expect(Array.from(document.querySelectorAll(".hm-need a.pri")).map((a) => a.textContent)).toEqual(["WO-1", "WO-2"]);
+    const li = document.querySelector(".hm-need") as HTMLElement;
+    expect(Array.from(li.children).filter((c) => c.tagName === "BUTTON").map((b) => b.textContent)).toEqual(["Approve", "Reject"]);
+  });
+
+  it("Task success is the prototype's line chart: gridlines, a dot per week, a dashed second series and a legend", async () => {
+    setup(ASHA, adminHome({}, { setup: undefined, attention: [] }), { extra: { "GET /api/v1/evals/scorecards": () => ({ body: { "ag-a": { taskSuccess: 0.9, firstPass: 0.8, trend: { success: [0.8, 0.85, 0.9, 0.9, 0.92, 0.9, 0.91, 0.93] } } } }) } });
     mount();
-    await screen.findByRole("heading", { level: 2, name: /Factory health/ });
-    expect(screen.queryByText(/live agent versions pass/)).toBeNull();
+    await waitFor(() => expect(document.querySelector("#hm-trend svg.chart")).toBeTruthy());
+    expect(document.querySelectorAll("#hm-trend .gl")).toHaveLength(5);
+    expect(document.querySelectorAll("#hm-trend circle").length).toBeGreaterThanOrEqual(16);
+    expect(document.querySelector("#hm-trend polyline[stroke-dasharray]")).toBeTruthy();
+    expect(document.querySelector("#hm-trend .legend")?.textContent).toContain("Success");
+    expect(document.querySelector("#hm-trend .chart-title")).toBeNull();
   });
 
   it("the setup checklist is gone once the API sends none", async () => {
@@ -221,7 +227,8 @@ describe("Home: one page", () => {
     expect(text()).not.toMatch(/work orders in flight ·/);
     expect(document.getElementById("hm-stat-flight")?.textContent).toContain("3");
     expect(document.getElementById("hm-stat-flight")?.getAttribute("href")).toBe("#floor");
-    expect(document.getElementById("hm-done-WO-5")).toBeTruthy();
+    // the In flight tile is the prototype's info blue
+    expect(document.getElementById("hm-stat-flight")?.className).toContain("info");
   });
 
   it("plural strings: 1 work order, 2 work orders; no 'need' for one item", async () => {
@@ -234,16 +241,14 @@ describe("Home: one page", () => {
 });
 
 describe("Home: by role", () => {
-  it("Auditor: waiting on approvers is read-only, no Waiting on you, no setup, no disabled buttons", async () => {
+  it("Auditor: no Waiting on you, no setup, and Submit work order stays locked with the reason", async () => {
     setup(SAM, adminHome({}, { setup: undefined, waiting: undefined, attention: [], approvers: { count: 2, oldestMs: 7_200_000, late: 1, byProject: [{ id: "payments", name: "Payments Platform", count: 2, oldestMs: 7_200_000 }] } }), { denied: ["project.create", "wo.submit", "restore.factory", "kill.factory"] });
     mount();
-    expect(await screen.findByRole("heading", { level: 2, name: /Waiting on approvers/ })).toBeTruthy();
+    await screen.findByRole("heading", { level: 1, name: "Home" });
     expect(screen.queryByRole("heading", { name: /Waiting on you/ })).toBeNull();
-    expect(screen.getByText(/1 past SLA/)).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: /Waiting on approvers/ })).toBeNull();
     expect(screen.queryByText("New project")).toBeNull();
-    // Submit work order stays on the page, locked with the reason, never hidden.
     await waitFor(() => expect(screen.getByRole("button", { name: "Submit work order" }).getAttribute("aria-disabled")).toBe("true"));
-    expect(screen.getByText("Audit ledger", { exact: false })).toBeTruthy();
   });
 
   it("Engineer: waiting rows and approvals call the API; their work orders show as tokens; no factory health", async () => {
@@ -257,23 +262,24 @@ describe("Home: by role", () => {
     }, { extra: { "GET /api/v1/work-orders/WO-9": () => ({ body: { id: "WO-9", version: 3, allowed: { approve: { allowed: true, reason: "", needs: "", gate: "G3d", instance: "WO-9:G3d:2" }, can: {} } } }), "POST /api/v1/gate-instances/WO-9%3AG3d%3A2/approve": () => ({ body: { ok: true, msg: "G3d approved on WO-9." } }) } });
     mount();
     expect(await screen.findByText("WO-9")).toBeTruthy();
-    expect(document.getElementById("hm-tok-WO-10")).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: /Factory health/ })).toBeNull();
-    expect(screen.getByRole("heading", { level: 2, name: /My projects/ })).toBeTruthy();
     const approve = await screen.findByRole("button", { name: "Approve WO-9 at G3d" });
     await waitFor(() => expect(approve.getAttribute("aria-disabled")).toBeNull());
     fireEvent.click(approve);
     // The prototype's dialog first: "Approve G3d for WO-9" with the gate's purpose; Approve there decides.
     expect(await screen.findByText("Approve G3d for WO-9")).toBeTruthy();
+    // the prototype's optional Note field, sent as the reason the server records
+    fireEvent.change(screen.getByLabelText("Note (optional)"), { target: { value: "looks right" } });
     fireEvent.click(within(document.querySelector(".dlg, [role=dialog]") as HTMLElement).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/approve"))).toBe(true));
-    expect(await screen.findByText("G3d approved on WO-9.")).toBeTruthy();
+    expect(calls.find((c) => c.path.endsWith("/approve"))?.body).toMatchObject({ reason: "looks right" });
+    // the prototype's toast, not the server's sentence
+    expect(await screen.findByText("WO-9 approved and moved on")).toBeTruthy();
   });
 
   it("Viewer: read-only, no Waiting on you section at all, one line on how to get more access", async () => {
     setup(VERA, { approvals: [], conversations: [], badges: {}, projectBadges: {}, sections: { attention: [], motion: MOTION, projects: [{ id: "payments", roles: [{ id: "viewer", name: "Viewer" }], repos: [] }] } }, { denied: ["wo.submit", "project.create"] });
     mount();
-    expect(await screen.findByText(/Ask a Project Admin for more access/)).toBeTruthy();
+    await screen.findByRole("heading", { level: 1, name: "Home" });
     expect(screen.queryByRole("heading", { name: /Waiting on you/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Submit work order" }).getAttribute("aria-disabled")).toBe("true");
   });
