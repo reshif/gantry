@@ -56,13 +56,12 @@ describe("Onboarding session", () => {
     expect(screen.getByText(/Read the repository: 40 files/)).toBeTruthy();
     expect(screen.getAllByText("Proposed onboarding PR").length).toBeGreaterThan(0);
     expect(screen.getByText("Drafted by the Onboarding Agent")).toBeTruthy();
-    const steps = Array.from(document.querySelectorAll("#osx-steps li")).map((li) => [li.textContent, li.className]);
-    expect(steps[0]).toEqual(["Connected", "is-done"]);
-    expect(steps[1]).toEqual(["Assessed", "is-current"]);
+    // the Blueprint's five-stage stepper, the Assess stage current; Findings / Pull request / Settings tabs
+    const steps = Array.from(document.querySelectorAll("#osx-steps > div")).map((d) => [d.textContent, d.className]);
+    expect(steps).toEqual([["1. Connect", "done"], ["2. Assess", "on"], ["3. Pull request", ""], ["4. Merge", ""], ["5. Ready", ""]]);
+    expect(Array.from(document.querySelectorAll('[role="tab"]')).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Findings", "Pull request", "Settings"]);
     expect(document.querySelector("#osx-next")?.textContent).toMatch(/You — review the proposed changes/);
-    expect(document.getElementById("osx-cost")?.textContent).toMatch(/\$0\.12.*\$1\.00 budget/);
-    expect(document.querySelector("#osx-pending")?.textContent).toMatch(/Proposed onboarding PR · 2 files/);
-    expect(document.getElementById("osx-findings")?.textContent).toMatch(/Observed/);
+    expect(document.querySelector(".crumbs, .eyebrow")?.textContent).toMatch(/Onboarding\/acme\/mobile-app/i);
     fireEvent.click(screen.getByText("AGENTS.md").closest("button")!);
     expect(screen.getByLabelText("Added lines of AGENTS.md").textContent).toContain("+ Run vitest run");
   });
@@ -145,7 +144,7 @@ describe("Onboarding session", () => {
     window.location.hash = "#/p/storefront/onboarding";
     api(session());
     mount(<OnboardingView />);
-    fireEvent.click(await byId("onb-row-mobile-app"));
+    fireEvent.click(await byId("onb-open-mobile-app"));
     await waitFor(() => expect(window.location.hash).toMatch(/onboarding\/mobile-app$/));
     expect(await screen.findByText(/Gantry observed two gaps/)).toBeTruthy();
   });

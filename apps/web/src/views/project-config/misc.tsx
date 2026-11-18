@@ -182,13 +182,11 @@ export function HistoryTab({ p }: PcProps) {
 
 export function DangerTab({ p }: PcProps) {
   const ui = useUI();
-  const res = useRes();
   const me = useMe();
   const actor = useActors();
   const imp = useKillImpact("project", p.id).data ?? { workOrders: 0, running: 0, slots: 0, prs: 0 };
   const kd = useCan("kill.project", { project: p.id });
   const rd = useCan("restore.project", { project: p.id });
-  const ad = useCan("project.archive", { project: p.id });
   const archived = p.status === "archived";
   const factoryKilled = !!me?.factory.killed;
   const stop = me ? makeStopActions(ui, me) : null;
@@ -214,6 +212,19 @@ export function DangerTab({ p }: PcProps) {
           </div>
         </div>
       </section>
+      <ArchivePanel p={p} />
+    </div>
+  );
+}
+
+/** Archive and unarchive a project (project.archive), typed confirmation. */
+export function ArchivePanel({ p }: { p: PcProps["p"] }) {
+  const ui = useUI();
+  const res = useRes();
+  const imp = useKillImpact("project", p.id).data ?? { workOrders: 0, running: 0, slots: 0, prs: 0 };
+  const ad = useCan("project.archive", { project: p.id });
+  const archived = p.status === "archived";
+  return (
       <section className="panel pcf-dz" aria-label="Archive project">
         <div className="panel-head"><h2 className="panel-title">{archived ? "Archived" : "Archive this project"}</h2><span className="mono small muted">project.archive</span></div>
         <div className="panel-body form-grid">
@@ -232,6 +243,5 @@ export function DangerTab({ p }: PcProps) {
           )}
         </div>
       </section>
-    </div>
   );
 }
