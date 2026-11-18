@@ -38,7 +38,7 @@ export function ApproversPanel({ woId, gate, project, onNavigate }: { woId: stri
       {!a.satisfiable ? <div className="callout callout-warn small" role="alert" id="apr-warning">{a.warning}</div> : null}
       <p className="small"><strong>{`Eligible (${a.eligible.length})`}</strong></p>
       {a.eligible.length ? <ul className="small apr-list" id="apr-eligible">{a.eligible.map((e) => <li key={e.id}>{e.name}{e.away ? <span className="muted"> · away</span> : null}{e.oncall ? <span className="muted"> · on call</span> : null}<span className="muted">{` · ${e.why}`}</span></li>)}</ul> : <p className="small muted">Nobody is eligible today.</p>}
-      {a.overrides.length ? <p className="small muted">{`Factory Admins may approve as an override with a reason (audited): ${a.overrides.map((o) => o.name).join(", ")}.`}</p> : null}
+      {a.overrides.length ? <p className="small muted">{`Factory Admins are eligible approvers like anyone else. ${a.overrides.map((o) => o.name).join(", ")} wrote this work order, so separation of duties allows only an override with a reason (audited).`}</p> : null}
       <div className="osx-actions">
         <Btn small id="apr-edit-rule" label="Edit rule" disabled={!a.can.editRule} disabledReason={!a.can.editRule ? a.can.editWhy || "You may not edit approver rules." : undefined} onClick={() => go("project-config", `approvers/${gate}`)} />
         <Btn small id="apr-grant" label="Grant a role" disabled={!a.can.grantRole} disabledReason={!a.can.grantRole ? a.can.grantWhy || "You may not grant roles." : undefined} onClick={() => go("people")} />
