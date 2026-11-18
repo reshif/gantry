@@ -561,7 +561,7 @@ describe("Skills screen", () => {
     await waitFor(() => expect(document.getElementById("sk-row-sk-a")).toBeNull());
     expect(document.getElementById("sk-row-sk-b")).not.toBeNull();
     fireEvent.click(await byId("sk-clear"));
-    fireEvent.click((await byId("sk-row-sk-a")).querySelector("a.sk-name")!);
+    fireEvent.click((await byId("sk-row-sk-a")).querySelectorAll("td")[3]!);
     const drawer = await byId("sk-drawer");
     expect(drawer.textContent).toContain("Skill \u00b7 v1.2.0");
     expect(drawer.textContent).toContain("Skill file");
@@ -793,11 +793,12 @@ describe("work1 residual round 2", () => {
     fireEvent.click(await byId("na-ok"));
     await waitFor(() => expect(window.location.hash).toBe("#agents/ag-docs-9"));
   });
-  it("a click on a skill row outside the name does not open the drawer", async () => {
+  it("a click on the skill name opens the skill page, not the drawer", async () => {
     setup();
     mount(<SkillsView />);
     const row = await byId("sk-row-sk-a");
-    fireEvent.click(row.querySelectorAll("td")[3]!);
+    fireEvent.click(row.querySelector("a.sk-name")!);
+    expect(window.location.hash).toBe("#skills/sk-a");
     expect(document.getElementById("sk-drawer")).toBeNull();
   });
 });

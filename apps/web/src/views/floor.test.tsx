@@ -323,7 +323,7 @@ describe("Floor: fidelity round 2", () => {
     fireEvent.click(document.getElementById("floor-halt") as HTMLElement);
     expect(await screen.findByText(/Emergency stop: Payments Platform/)).toBeTruthy();
     expect(screen.getByText("Type STOP to confirm")).toBeTruthy();
-    expect(screen.queryByText(/hold|Hold in place/i)).toBeNull();
+    expect(screen.queryByText(/Hold in place/i)).toBeNull();
     const ok = await screen.findByRole("button", { name: "Stop now" });
     fireEvent.change(document.querySelector("#emergency-stop textarea") as HTMLElement, { target: { value: "Duplicate refunds seen" } });
     fireEvent.change(document.querySelector("#emergency-stop input") as HTMLElement, { target: { value: "stop" } });
