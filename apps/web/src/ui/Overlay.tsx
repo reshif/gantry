@@ -62,9 +62,9 @@ export function Dialog({ title, kicker, sub, wide, cls, dirty, body, actions, on
   const content = typeof body === "function" ? body(onClose) : body;
   return (
     <Modal title={title} kicker={kicker} sub={sub} wide={wide} cls={cls} dirty={dirty || marked} onClose={onClose} onSubmit={onSubmit}
-      footer={(ask) => list.map((a, i) => (
+      footer={list.length ? (ask) => list.map((a, i) => (
         <Btn key={a.id ?? `${a.label}-${i}`} label={a.label} kind={a.kind ?? "ghost"} type={a.submit ? "submit" : "button"} guard={a.guard} icon={a.icon} id={a.id} onClick={a.submit ? undefined : () => (a.onClick ? a.onClick(ask) : ask())} />
-      ))}
+      )) : undefined}
     >
       <DirtyScope.Provider value={scope}>{content}</DirtyScope.Provider>
     </Modal>

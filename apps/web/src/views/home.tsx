@@ -99,7 +99,10 @@ export default function HomeView() {
   const statItems: StatItem[] = [];
   const blocked = inView.reduce((t, p) => t + metricsOf(p).bad, 0);
   const atGates = items.filter((i) => i.kind === "gate").length;
-  if (m) statItems.push({ l: "On the belt", v: m.inFlight, d: `${m.running} running · ${Math.max(0, m.inFlight - m.running)} queued`, tone: "info", spark: buckets });
+  // On the belt follows the scope: the work in progress of the projects in view (the server's factory-wide motion counts only when all projects are in view).
+  const onBelt = scoped.length ? inView.reduce((t, p) => t + metricsOf(p).wip, 0) : (m?.inFlight ?? 0);
+  const runningNow = scoped.length ? Math.min(m?.running ?? 0, onBelt) : (m?.running ?? 0);
+  if (m) statItems.push({ l: "On the belt", v: onBelt, d: `${runningNow} running · ${Math.max(0, onBelt - runningNow)} queued`, tone: "info", spark: buckets });
   if (s.waiting || s.attention) statItems.push({ l: "Waiting for a person", v: waitingN, d: `${atGates} at gates`, tone: waitingN ? "warn" : "ok" });
   if (m) statItems.push({ l: "Released today", v: m.shippedToday, d: "median cycle n/a", tone: "ok" });
   if (projects.length) statItems.push({ l: "Blocked", v: blocked, d: "oldest n/a", tone: "bad" });
@@ -178,10 +181,10 @@ export default function HomeView() {
           <div className="row spread dim mono" style={{ fontSize: 11, margin: "6px 0 0 24px" }}><span>-24h</span><span>-12h</span><span>now</span></div>
         </Card>
       </div>
-      {projects.length ? (
-        <Card title="Projects" flush hint={`${projects.length} in view`} id="hm-projects" >
+      {inView.length ? (
+        <Card title="Projects" flush hint={`${inView.length} in view`} id="hm-projects" >
           <div className="proj-grid">
-            {projects.map((p) => {
+            {inView.map((p) => {
               const mt = metricsOf(p);
               return (
                 <a key={p.id} className="ptile" href={hashFor("project-config", null, p.id)}>

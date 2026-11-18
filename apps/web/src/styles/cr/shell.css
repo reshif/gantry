@@ -47,6 +47,9 @@
 /* the prototype's dialogs: no eyebrow, no close button (Esc and the scrim close) */
 .dlg-plain .kicker,.dlg-plain .dlg-head .icon-btn{display:none}
 .dlg-plain .dlg-b{display:flex;flex-direction:column;gap:var(--s4)}
+/* a dialog body that brings its own stack and footer (the approval decision): no second layer of padding, the footer runs edge to edge under the content */
+.dlg-body>.dlg-b{padding:0;overflow:visible}
+.dlg-body>.dlg-f{margin:var(--s4) calc(var(--s5) * -1) calc(var(--s4) * -1)}
 /* phone: dialogs are bottom sheets */
 @media (max-width:720px){
   .dlg-wrap:not(:has(.pal-cr)){padding:0;align-items:end}

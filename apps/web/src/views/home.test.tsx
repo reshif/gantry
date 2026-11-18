@@ -177,6 +177,17 @@ describe("Home: Control Room", () => {
     expect(tile("Waiting for a person")?.textContent).toMatch(/at gates/);
   });
 
+  it("a picked project scopes the project tiles and the On the belt tile", async () => {
+    updatePrefs({ scopeAll: false, project: "payments" });
+    setup(ASHA, adminHome({}, { attention: [], setup: undefined, waiting: { approvals: [], conversations: [] }, motion: { ...MOTION, inFlight: 40, running: 2 } }), { extra: { "GET /api/v1/me": () => ({ body: { ...me(ASHA), projects: [{ id: "payments", name: "Payments Platform", key: "PAY" }] } }) } });
+    mount();
+    await screen.findByText("Plant overview for Payments Platform. Agents propose, people approve.");
+    expect(document.querySelectorAll(".ptile").length).toBe(1);
+    expect(screen.getByText("On the belt").closest(".stat")?.textContent).toMatch(/3/);
+    expect(screen.getByText("On the belt").closest(".stat")?.textContent).not.toMatch(/40/);
+    updatePrefs({ scopeAll: true });
+  });
+
   it("the sub line says All projects by default", async () => {
     setup(ASHA, adminHome({}, { attention: [], setup: undefined, waiting: { approvals: [], conversations: [] } }));
     mount();
