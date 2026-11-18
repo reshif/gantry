@@ -31,7 +31,7 @@ const GUIDELINES = { version: 3, by: "p-daniel", at: NOW - 86_400_000, items: SE
 
 beforeEach(() => {
   resetApp();
-  updatePrefs({ project: "storefront" });
+  updatePrefs({ scopeAll: false, project: "storefront" });
   window.history.replaceState(null, "", "/?tab=pipeline");
 });
 afterEach(() => {

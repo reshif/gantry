@@ -6,23 +6,38 @@
 import { useState } from "react";
 import { fmt } from "@gantry/domain";
 import { useMe } from "../api/queries";
-import { pickProject } from "../lib/routes";
-import { usePrefs } from "../lib/prefs";
+import { useScope } from "../lib/scope";
+import { Btn, Empty } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { Card, Page } from "../ui/cr";
-import { NewWorkOrderDialog } from "./work-orders/New";
+import { NewWorkOrderDialog, takePendingProject } from "./work-orders/New";
 import { useFloorRead } from "./floor/kit";
 import { useCatalog } from "./projects/kit";
 import { WoStateChip } from "./work-orders/state";
 
 export default function ConsoleSubmitView() {
   const me = useMe();
-  const prefs = usePrefs();
-  const projectId = me ? pickProject(me, prefs.project) : null;
+  const scope = useScope();
+  // Under All projects a work order needs a project: ask, never fall back to the last one.
+  const [chosen, setChosen] = useState<string | null>(() => takePendingProject());
+  const projectId = scope.all ? (scope.projects.some((p) => p.id === chosen) ? chosen : null) : scope.projectId;
   const floor = useFloorRead(projectId);
   const cat = useCatalog();
   const [n, setN] = useState(0);
   if (!me) return null;
+  if (scope.all && !projectId) {
+    return (
+      <Page eyebrow="Operate" title="Console" sub="Submit a work order. Gantry classifies it, routes it and asks only what it needs." cls="console-submit">
+        <Empty
+          id="con-pick-project"
+          icon="projects"
+          title="Pick a project for this work order"
+          text="You are looking at All projects. A work order belongs to one project, so choose which."
+          action={<div className="row" style={{ flexWrap: "wrap", gap: 8, justifyContent: "center" }}>{scope.projects.filter((p) => p.status !== "archived").map((p) => <Btn key={p.id} label={p.name} id={`con-pick-${p.id}`} onClick={() => setChosen(p.id)} />)}</div>}
+        />
+      </Page>
+    );
+  }
   const recent = (floor.data?.workOrders ?? []).slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, 4);
   const aside = (
     <Card title="Recent submissions" flush id="con-recent">
@@ -40,7 +55,7 @@ export default function ConsoleSubmitView() {
   );
   return (
     <Page eyebrow="Operate" title="Console" sub="Submit a work order. Gantry classifies it, routes it and asks only what it needs." cls="console-submit">
-      <NewWorkOrderDialog key={n} variant="page" preset={{ source: "console" }} onClose={() => setN((x) => x + 1)} aside={aside} />
+      <NewWorkOrderDialog key={n} variant="page" preset={{ source: "console", ...(projectId ? { project: projectId } : {}) }} onClose={() => setN((x) => x + 1)} aside={aside} />
     </Page>
   );
 }

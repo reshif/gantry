@@ -6,6 +6,7 @@ import type { Me } from "../api/types";
 import { ROUTES, ROUTE_PERMS, canSeeRoute } from "../lib/routes";
 import { hashFor } from "../lib/router";
 import { usePrefs } from "../lib/prefs";
+import { ALL_PROJECTS, useScope } from "../lib/scope";
 import { CrIcon } from "../ui/cr";
 
 export function useRouteCtx() {
@@ -51,7 +52,9 @@ export function Nav({ me, current, project, onNavigate }: { me: Me; current: str
   const ref = useRef<HTMLElement>(null);
   const [more, setMore] = useState(false);
   // On factory pages the project routes are a shortcut to the last project, never a selector implying scope.
+  const scope = useScope();
   const shown = project ?? (me.projects.find((p) => p.id === prefs.project) ?? me.projects[0] ?? null);
+
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -77,7 +80,7 @@ export function Nav({ me, current, project, onNavigate }: { me: Me; current: str
               return (
                 <a
                   key={it.id}
-                  href={off ? "#projects" : hashFor(it.id, null, it.project ? shown?.id : null)}
+                  href={off ? "#projects" : hashFor(it.id, null, it.project ? (scope.all ? ALL_PROJECTS : shown?.id) : null)}
                   className="navlink"
                   aria-current={active ? "page" : undefined}
                   onClick={onNavigate}

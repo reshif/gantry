@@ -8,7 +8,7 @@ import { api, get } from "../../api/client";
 import { ops } from "../../api/ops";
 import type { WorkOrder } from "../../api/types";
 import { useUI, type MenuItem } from "../../ui/overlay-context";
-import { useFloorCtx, bayName, stationId, type FWo } from "./kit";
+import { useFloorCtx, bayName, projectOf, stationId, type FWo } from "./kit";
 
 export interface MoveCheckResult {
   allowed: boolean;
@@ -105,8 +105,9 @@ export function useMoves() {
       } catch {
         moves = {};
       }
-      const fl = flowOf(ctx.cat, ctx.project);
-      const onRoute = routeOf(ctx.cat, ctx.project, w.cls);
+      const wp = projectOf(ctx, w);
+      const fl = flowOf(ctx.cat, wp);
+      const onRoute = routeOf(ctx.cat, wp, w.cls);
       const cur = w.bay ?? stationId(ctx.cat, w);
       const items: MenuItem[] = [];
       for (const s of fl.stations) {
@@ -123,7 +124,7 @@ export function useMoves() {
       });
       ui.menu(anchor, `Move ${w.id} to`, items);
     },
-    [ctx.cat, ctx.project, perform, ui],
+    [ctx.cat, ctx.project, ctx.projects, perform, ui],
   );
 
   return { perform, menu };

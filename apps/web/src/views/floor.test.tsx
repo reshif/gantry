@@ -7,7 +7,7 @@ import { NOW, WOS, floorRead, mockApi, mount, resetApp, type Call } from "./floo
 
 beforeEach(() => {
   resetApp();
-  updatePrefs({ project: "payments", floorView: "belt", boardSwim: "none", replay: null, collapsedBays: false, activeClass: null, boardFilters: { cls: "all", repo: "all", assignee: "all", prio: "all" } });
+  updatePrefs({ scopeAll: false, project: "payments", floorView: "belt", boardSwim: "none", replay: null, collapsedBays: false, activeClass: null, boardFilters: { cls: "all", repo: "all", assignee: "all", prio: "all" } });
 });
 afterEach(() => {
   cleanup();

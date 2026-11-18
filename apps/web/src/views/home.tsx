@@ -9,8 +9,8 @@ import { useCan } from "../api/can";
 import { useActivity, useHome, useMe, useProjects } from "../api/queries";
 import { eventRows, eventText, hourly, eventTone } from "../lib/eventText";
 import { hashFor, navigate } from "../lib/router";
-import { setProject, usePrefs } from "../lib/prefs";
-import { pickProject } from "../lib/routes";
+import { setProject } from "../lib/prefs";
+import { scopeToken, useScope } from "../lib/scope";
 import { Btn, Chip, Empty } from "../ui/primitives";
 import { useActors } from "../ui/actors";
 import { Async } from "../ui/async";
@@ -31,15 +31,17 @@ export default function HomeView() {
   const projectsData: unknown = useProjects().data;
   const projects = useMemo(() => (Array.isArray(projectsData) ? projectsData : []) as PView[], [projectsData]);
   const cat = useCatalog();
-  const prefs = usePrefs();
-  const activity = useActivity();
+  const scope = useScope();
+  const activity = useActivity(scope.all ? undefined : (scope.projectId ?? undefined));
   const actors = useActors();
   const review = useReviewApproval();
   const submit = useCan("wo.submit");
   const home = q.data as HomeFull | undefined;
   const events = useMemo(() => eventRows(activity.data), [activity.data]);
   const names = useMemo(() => new Map(projects.map((p) => [p.id, p.name] as [string, string])), [projects]);
-  const allItems = useItems(home, names);
+  const everyItem = useItems(home, names);
+  // The server answers factory-wide, by the caller's rights; a picked project narrows what is shown here, All shows every visible project.
+  const allItems = useMemo(() => (scope.all ? everyItem : everyItem.filter((i) => i.project === scope.projectId)), [everyItem, scope.all, scope.projectId]);
   const override = useStateOverride();
 
   if (!me) return null;
@@ -66,10 +68,9 @@ export default function HomeView() {
     );
   }
 
-  const scopeId = pickProject(me, prefs.project);
-  const scoped = projects.filter((p) => p.id === scopeId);
-  const inView = scoped.length ? scoped : projects;
-  const scopeName = scoped[0]?.name ?? "all projects";
+  const scopeId = scopeToken(scope);
+  const inView = scope.all ? projects : projects.filter((p) => p.id === scope.projectId);
+  const scopeName = scope.all ? "All projects" : (inView[0]?.name ?? "this project");
   const nameOf = (id: string | null | undefined) => actors(id).name.replace(" (agent)", "");
   const hr = new Date().getHours();
   const greet = hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";
@@ -79,6 +80,7 @@ export default function HomeView() {
      puts in front of this person, in the inbox's order. Health items (a blocked work order, a halted project) are not approvals: they show in the Blocked tile and the project tiles. */
   const items = allItems.filter((i) => (i.kind === "gate" || i.kind === "onboarding" || i.kind === "other") && !(i.kind === "other" && i.x.restore?.scope === "factory"));
   const att = s.attention ?? [];
+  const labelled = scope.all && projects.length > 1;
   const killBanner = att.find((a) => a.restore?.scope === "factory");
   const waitSub = (ms: number) => (ms ? ` · waiting ${agoShort(ms)}` : "");
   const rows = items.map((i) => {
@@ -87,7 +89,7 @@ export default function HomeView() {
     return {
       key: i.key,
       title: gate ? `${gate.gateLabel ?? gate.gate} ${gate.gateName ?? "gate"} for ${gate.wo}` : String(t.title),
-      sub: `${i.kind === "other" ? i.x.sub || i.x.where : String(t.sub)}${waitSub(i.waitMs)}`,
+      sub: `${labelled && i.project && i.project !== "factory" && i.projectName ? `${i.projectName} · ` : ""}${i.kind === "other" ? i.x.sub || i.x.where : String(t.sub)}${waitSub(i.waitMs)}`,
       it: i,
     };
   });
@@ -99,11 +101,18 @@ export default function HomeView() {
   const statItems: StatItem[] = [];
   const blocked = inView.reduce((t, p) => t + metricsOf(p).bad, 0);
   const atGates = items.filter((i) => i.kind === "gate").length;
-  if (m) statItems.push({ l: "On the belt", v: m.inFlight, d: `${m.running} running · ${Math.max(0, m.inFlight - m.running)} queued`, tone: "info", spark: buckets });
+  // The server's motion figures are factory-wide; a picked project is summed from its own metrics.
+  const startOfDay = new Date().setHours(0, 0, 0, 0);
+  const releasedIn = m ? (scope.all ? m.shippedToday : m.recentDone.filter((w) => w.project === scope.projectId && (w.doneAt ?? 0) >= startOfDay).length) : 0;
+  if (m) statItems.push({ l: "On the belt", v: scope.all ? m.inFlight : inView.reduce((t, p) => t + metricsOf(p).wip, 0), d: scope.all ? `${m.running} running · ${Math.max(0, m.inFlight - m.running)} queued` : `${inView.reduce((t, p) => t + metricsOf(p).gates, 0)} at gates`, tone: "info", spark: buckets });
   if (s.waiting || s.attention) statItems.push({ l: "Waiting for a person", v: waitingN, d: `${atGates} at gates`, tone: waitingN ? "warn" : "ok" });
-  if (m) statItems.push({ l: "Released today", v: m.shippedToday, d: "median cycle n/a", tone: "ok" });
+  if (m) statItems.push({ l: "Released today", v: releasedIn, d: "median cycle n/a", tone: "ok" });
   if (projects.length) statItems.push({ l: "Blocked", v: blocked, d: "oldest n/a", tone: "bad" });
-  if (s.health) statItems.push({ l: "Spend today", v: "n/a", d: `month $${s.health.spend.spent.toFixed(2)} of $${s.health.spend.budget.toFixed(2)}`, tone: "agent" });
+  if (s.health) {
+    const sp = s.health.spend;
+    const mine = scope.all ? null : sp.projects.find((x) => x.id === scope.projectId);
+    statItems.push({ l: "Spend today", v: "n/a", d: `month $${(mine ? mine.v : sp.spent).toFixed(2)} of $${(mine ? mine.b : sp.budget).toFixed(2)}`, tone: "agent" });
+  }
 
   /* belt at a glance: stations across, work in progress per station summed over the projects in view */
   const stations: MiniStation[] = (cat?.stations ?? []).map((st) => {
@@ -178,10 +187,10 @@ export default function HomeView() {
           <div className="row spread dim mono" style={{ fontSize: 11, margin: "6px 0 0 24px" }}><span>-24h</span><span>-12h</span><span>now</span></div>
         </Card>
       </div>
-      {projects.length ? (
-        <Card title="Projects" flush hint={`${projects.length} in view`} id="hm-projects" >
+      {inView.length ? (
+        <Card title="Projects" flush hint={`${inView.length} in view`} id="hm-projects" >
           <div className="proj-grid">
-            {projects.map((p) => {
+            {inView.map((p) => {
               const mt = metricsOf(p);
               return (
                 <a key={p.id} className="ptile" href={hashFor("project-config", null, p.id)}>

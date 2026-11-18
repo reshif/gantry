@@ -3,7 +3,7 @@
  * work-order token, gate state and the small helpers every view of the floor uses. Same DOM and classes as legacy.
  */
 import { createContext, useContext, useMemo } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
 import { DAY, HOUR, MIN, WO_STATES, requiredFor, bayDef, classesOf, fmt, gateAfter, gateDef, gateForWO, gateKind, type Bay, type Catalog, type EventEntry, type Gate, type Project, type Repo, type StateAt, type WorkOrder } from "@gantry/domain";
 import { api, get } from "../../api/client";
 import { useRepos } from "../../api/queries";
@@ -64,13 +64,22 @@ export interface ReplayCtx {
 
 export interface FloorCtxValue {
   cat: Catalog;
+  /** The project on the floor. Under All projects: the merged line (stations by id in catalogue order, slots and WIP summed); never a project to act on. Per-work-order facts come from `projectOf`. */
   project: Project;
+  /** The projects behind the floor: one, or every visible project under All. */
+  projects: Project[];
+  /** The All projects floor: each work order keeps its own project's flow, gates and approvers. */
+  all?: boolean;
   floor: FloorRead;
   wos: FWo[];
   repos: Repo[];
   replay: ReplayCtx | null;
   /** The time everything is drawn at: now, or the replay time. */
   now: number;
+}
+/** The project a work order belongs to (its own flow, gates and approvers), not the merged line. */
+export function projectOf(ctx: Pick<FloorCtxValue, "project" | "projects">, w: { project: string }): Project {
+  return ctx.projects.find((p) => p.id === w.project) ?? ctx.project;
 }
 export const FloorCtx = createContext<FloorCtxValue | null>(null);
 export function useFloorCtx(): FloorCtxValue {
@@ -137,7 +146,7 @@ export function gateStateOf(ctx: FloorCtxValue, gid: string): { state: GateState
 /** How many approvals a waiting work order has at a gate, and how many it needs. */
 export function gateHaveNeed(ctx: FloorCtxValue, w: WorkOrder, gid: string): { have: number; need: number } {
   const row = ctx.floor.gates.find((x) => x.wo === w.id && x.gate === gid);
-  const rule = ctx.project.approvers[gid];
+  const rule = projectOf(ctx, w).approvers[gid];
   return { have: row?.have ?? w.gates?.[gid]?.approvals.length ?? 0, need: row?.need ?? requiredFor(rule, w.cls) };
 }
 
@@ -145,7 +154,7 @@ export function gateHaveNeed(ctx: FloorCtxValue, w: WorkOrder, gid: string): { h
 export function gateText(ctx: FloorCtxValue, w: WorkOrder): { t: string; c: string } {
   if (w.state === "killed") return { t: "Killed", c: "kill" };
   if (w.bay) return { t: bayName(ctx.cat, w.bay), c: "park" };
-  const g = gateForWO(ctx.cat, ctx.project, w);
+  const g = gateForWO(ctx.cat, projectOf(ctx, w), w);
   if (w.state === "waiting" && g) {
     const { have, need } = gateHaveNeed(ctx, w, g.id);
     return { t: `${g.name} waiting${g.id === "G0G1" ? "" : ` ${have}/${need}`}`, c: "wait" };
@@ -169,10 +178,10 @@ export function WoToken({ w, compact, idPrefix = "tok-", halted, onOpen }: { w: 
   const def = (WO_STATES as Record<string, { glyph: string; label: string }>)[st] ?? { glyph: "dots", label: st };
   const live = st !== "done" && st !== "killed";
   const time = st === "done" ? "done" : st === "killed" ? "killed" : fmt.dur(Math.max(0, ctx.now - (w.bay ? (w.bayAt ?? e?.startedAt ?? w.createdAt) : (e?.startedAt ?? w.createdAt))));
-  const g = gateForWO(ctx.cat, ctx.project, w);
+  const g = gateForWO(ctx.cat, projectOf(ctx, w), w);
   const note =
     st === "running" ? null : st === "waiting" && g ? `waiting at ${g.name}` : st === "parked" ? bayName(ctx.cat, w.bay ?? "") : st === "killed" ? "Killed" : st === "blocked" ? "Blocked" : st === "failed" ? "Check failed" : st === "done" ? (w.split ? "Split" : "Shipped") : "";
-  const cls = classOf(ctx.cat, ctx.project, w.cls);
+  const cls = classOf(ctx.cat, projectOf(ctx, w), w.cls);
   return (
     <button
       type="button"
@@ -242,14 +251,78 @@ export function useProjectRepos(projectId: string | null | undefined): Repo[] {
   }, [q.data, f]);
 }
 
+/** The merged line of several projects: stations by id in catalogue order, slots and WIP summed, a gate on when any project has it on. A gate whose mode differs between projects reads as a person's (the safe reading). */
+export function mergeProjects(cat: Catalog, projects: Project[]): Project {
+  const base = projects[0] as Project;
+  if (projects.length === 1) return base;
+  const inAny = (id: string) => projects.some((p) => p.flow.order.includes(id));
+  const order = cat.stations.map((st) => st.id).filter(inAny);
+  const stations: Project["flow"]["stations"] = {};
+  for (const id of order) {
+    const cfgs = projects.filter((p) => p.flow.order.includes(id)).map((p) => p.flow.stations[id] ?? { enabled: true, wip: 5 });
+    stations[id] = { enabled: cfgs.some((c) => c.enabled), wip: cfgs.reduce((n, c) => n + (c.enabled ? c.wip : 0), 0) };
+  }
+  const gates: Project["flow"]["gates"] = {};
+  for (const g of cat.gates) {
+    const cfgs = projects.map((p) => p.flow.gates[g.id]).filter((c): c is NonNullable<typeof c> => !!c);
+    if (!cfgs.length) continue;
+    const modes = new Set(cfgs.map((c) => c.mode));
+    gates[g.id] = { ...cfgs[0]!, enabled: cfgs.some((c) => c.enabled), ...(cfgs.every((c) => c.absent) ? { absent: true } : { absent: false }), mode: modes.size === 1 ? cfgs[0]!.mode : "human" } as Project["flow"]["gates"][string];
+  }
+  const classes: Project["flow"]["classes"] = [];
+  for (const p of projects) for (const c of p.flow.classes) if (!classes.some((x) => x.id === c.id)) classes.push(c);
+  return { ...base, id: "", name: "All projects", key: "ALL", halted: null, killed: null, flow: { ...base.flow, order, slots: projects.reduce((n, p) => n + p.flow.slots, 0), stations, gates, classes } };
+}
+
+/** The floors of several projects as one read (live only). Every row keeps the project it came from. */
+export function mergeFloors(cat: Catalog, reads: FloorRead[]): FloorRead {
+  const project = mergeProjects(cat, reads.map((r) => r.project));
+  const stops: FloorStop[] = [];
+  for (const r of reads) for (const s of r.stops) if (!stops.some((x) => x.id === s.id)) stops.push(s);
+  const top = stops.slice().sort((a, b) => (a.mode === b.mode ? 0 : a.mode === "kill" ? -1 : 1))[0] ?? null;
+  return {
+    project,
+    workOrders: reads.flatMap((r) => r.workOrders),
+    flowVersion: 0,
+    slots: { used: reads.reduce((n, r) => n + r.slots.used, 0), total: reads.reduce((n, r) => n + r.slots.total, 0), holders: reads.flatMap((r) => r.slots.holders) },
+    gates: reads.flatMap((r) => r.gates),
+    queue: reads.flatMap((r) => r.queue),
+    stop: top,
+    stops,
+    at: null,
+  };
+}
+
+/** What the floor of a scope is made of: one project (with an optional replay time) or every visible project. */
+export type FloorSource = { all: false; projectId: string | null | undefined } | { all: true; projectIds: string[] };
+
 export function useFloorState(projectId: string | null | undefined, rp: Omit<ReplayCtx, "state"> | null): { value: FloorCtxValue | null; error: unknown } {
+  return useScopedFloorState({ all: false, projectId }, rp);
+}
+
+/** The floor for a scope. Under All it is each visible project's own floor read (the same read, so the same per-project visibility), merged; replay is project-only. */
+export function useScopedFloorState(src: FloorSource, rp: Omit<ReplayCtx, "state"> | null): { value: FloorCtxValue | null; error: unknown } {
   const cat = useCatalog();
+  const projectId = src.all ? null : src.projectId;
   const floor = useFloorRead(projectId, rp?.at);
+  const ids = src.all ? src.projectIds : [];
+  const many = useQueries({
+    queries: ids.map((id) => ({ queryKey: qk.floor(id, undefined), queryFn: () => get<FloorRead>(api(`projects/${encodeURIComponent(id)}/floor`)), placeholderData: keepPreviousData })),
+  });
   const repos = useProjectRepos(projectId);
+  const manyData = many.map((q) => q.data);
+  const merged = useMemo(() => (src.all && cat && manyData.length && manyData.every(Boolean) ? mergeFloors(cat, manyData as FloorRead[]) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [src.all, cat, ...manyData]);
+  if (src.all) {
+    const failed = many.find((q) => q.isError);
+    if (!cat || !merged) return { value: null, error: failed?.error ?? null };
+    return { value: { cat, project: merged.project, projects: manyData.map((r) => (r as FloorRead).project), all: true, floor: merged, wos: merged.workOrders, repos: [], replay: null, now: Date.now() }, error: null };
+  }
   const f = floor.data;
   if (!cat || !f) return { value: null, error: floor.isError ? floor.error : null };
   const replay: ReplayCtx | null = rp ? { ...rp, state: f.replay ?? { at: rp.at, workOrders: [], halted: null, killed: null, haltedRepos: {} } } : null;
-  return { value: { cat, project: f.project, floor: f, wos: f.workOrders, repos, replay, now: replay ? replay.at : Date.now() }, error: null };
+  return { value: { cat, project: f.project, projects: [f.project], floor: f, wos: f.workOrders, repos, replay, now: replay ? replay.at : Date.now() }, error: null };
 }
 
 export const useFloorValue = (projectId: string | null | undefined, rp: Omit<ReplayCtx, "state"> | null): FloorCtxValue | null => useFloorState(projectId, rp).value;

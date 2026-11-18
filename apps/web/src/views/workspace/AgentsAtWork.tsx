@@ -6,12 +6,12 @@
 import { useMemo } from "react";
 import { fmt } from "@gantry/domain";
 import { ops } from "../../api/ops";
-import { useActivity, useAgents, useMe } from "../../api/queries";
-import { pickProject } from "../../lib/routes";
+import { useActivity, useAgents } from "../../api/queries";
+import { scopeToken, useScope } from "../../lib/scope";
+import { invalidateSlices } from "../../api/keys";
 import { hashFor } from "../../lib/router";
 import { eventRows, eventText } from "../../lib/eventText";
 import { setRouteState, useClearRouteStateOnLeave, useRouteState } from "../../lib/queryState";
-import { usePrefs } from "../../lib/prefs";
 import { useOpenTraveler } from "../../shell/useTraveler";
 import { Async, useCommand } from "../../ui/async";
 import { useUI } from "../../ui/overlay-context";
@@ -22,17 +22,18 @@ import { Page, Stats } from "../../ui/cr";
 import { StateBody, useStateOverride } from "../ops1/stateOverride";
 import { buildBelt, NO_FILTER } from "../floor/conveyor";
 import { useCatalog } from "../projects/kit";
-import { openEntry, useFloorRead, useFloorState, type FWo } from "../floor/kit";
+import { openEntry, projectOf, useScopedFloorState, type FWo } from "../floor/kit";
 
 const short = (m: string) => m.replace(/^claude-/, "");
 const compact = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(Math.round(n)));
 
 export function AgentsAtWork() {
-  const me = useMe();
-  const prefs = usePrefs();
-  const projectId = me ? pickProject(me, prefs.project) : null;
-  const floorQ = useFloorRead(projectId);
-  const { value: ctx } = useFloorState(projectId, null);
+  const scope = useScope();
+  const projectId = scope.projectId;
+  const projectIds = useMemo(() => scope.projects.map((p) => p.id), [scope.projects]);
+  // One project, or every visible project merged (each station's agent works across all of them)
+  const { value: ctx, error: floorErr } = useScopedFloorState(scope.all ? { all: true, projectIds } : { all: false, projectId }, null);
+  const floorQ = { data: ctx ?? undefined, error: floorErr instanceof Error ? floorErr : null, isPending: !ctx && !floorErr, isError: !ctx && !!floorErr, refetch: () => invalidateSlices(["workOrders"]) };
   const actors = useActors();
   const open = useOpenTraveler();
   const [q, setQ] = useRouteState("q", "");
@@ -88,7 +89,7 @@ export function AgentsAtWork() {
       eyebrow="Operate" title="Agents at work" cls="ws-agents"
       sub="What each station's agent is doing right now. You can open a conversation or stop a run."
     >
-      {override ? <StateBody state={override} /> : <Async query={floorQ} what="the agents on this project" id="ws-agents" isEmpty={() => false}>{() => (
+      {override ? <StateBody state={override} /> : <Async query={floorQ} what={scope.all ? "the agents across all projects" : "the agents on this project"} id="ws-agents" isEmpty={() => false}>{() => (
         <>
           <Stats items={[
             { l: "Agents busy", v: `${busy} / ${list.length}`, tone: "info" },
@@ -135,7 +136,7 @@ export function AgentsAtWork() {
                       <div className="row spread ws-f">
                         <span className="mono" style={{ fontSize: 12 }}><span className="muted">{Math.min(running.length, s.slots)}/{s.slots} slots</span>{over ? <> · <span style={{ color: "var(--warn)" }}>+{over} over capacity</span></> : null}</span>
                         <span className="row">
-                          <a className="btn sm" id={`ws-talk-${s.id}`} href={hashFor("conversations", w ? w.id : null, projectId)}>Talk</a>
+                          <a className="btn sm" id={`ws-talk-${s.id}`} href={hashFor("conversations", w ? w.id : null, w && ctx ? projectOf(ctx, w).id : scopeToken(scope))}>Talk</a>
                           {w ? <StopRun woId={w.id} station={s.name} /> : null}
                         </span>
                       </div>

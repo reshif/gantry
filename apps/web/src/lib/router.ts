@@ -7,7 +7,7 @@
  */
 import { useSyncExternalStore } from "react";
 import { getPrefs } from "./prefs";
-import { isProjectRoute } from "./routes";
+import { ALL_PROJECTS, isProjectRoute } from "./routes";
 
 export interface RouteLocation {
   /** The raw id from the hash, "" when empty. */
@@ -66,7 +66,9 @@ export function formatHash(id: string, param?: string | null, project?: string |
 
 /** The hash for a route id: project routes get the current project (last chosen) unless one is given. */
 export function hashFor(id: string, param?: string | null, project?: string | null): string {
-  const pid = isProjectRoute(id) ? (project ?? getPrefs().project) : null;
+  // No hidden default: without a project the link carries the scope the person chose (All, or the one project picked).
+  const prefs = getPrefs();
+  const pid = isProjectRoute(id) ? (project ?? (prefs.scopeAll ? ALL_PROJECTS : prefs.project)) : null;
   return formatHash(id, param, pid);
 }
 

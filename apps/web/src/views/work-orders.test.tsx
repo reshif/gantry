@@ -9,7 +9,7 @@ beforeEach(() => {
   resetApp();
   window.history.replaceState(null, "", "/");
   window.location.hash = "";
-  updatePrefs({ project: "payments" });
+  updatePrefs({ scopeAll: false, project: "payments" });
 });
 afterEach(() => {
   cleanup();

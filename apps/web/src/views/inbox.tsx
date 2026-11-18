@@ -8,6 +8,7 @@ import { useMemo } from "react";
 import { fmt } from "@gantry/domain";
 import { ops } from "../api/ops";
 import { useHome, useProjects } from "../api/queries";
+import { useScope } from "../lib/scope";
 import { useTravelerWo, dec } from "./traveler/model";
 import { Btn, Chip, FilterBar, SearchBox, Select, Tabs, Status, Who, type Decision } from "../ui/primitives";
 import { useActors } from "../ui/actors";
@@ -114,7 +115,10 @@ export default function InboxView() {
   const projList = useMemo(() => (Array.isArray(projData) ? projData : []) as PView[], [projData]);
   const names = useMemo(() => new Map(projList.map((p) => [p.id, p.name] as [string, string])), [projList]);
   const keys = useMemo(() => new Map(projList.map((p) => [p.id, p.key] as [string, string])), [projList]);
-  const items = useItems(home, names);
+  const scope = useScope();
+  const every = useItems(home, names);
+  // factory-wide by the caller's rights; All shows every visible project, a picked project narrows
+  const items = useMemo(() => (scope.all ? every : every.filter((i) => i.project === scope.projectId)), [every, scope.all, scope.projectId]);
   const decided = useDecided();
   const [tab, setTab] = useRouteState("tab", "approvals");
   const [search, setSearch] = useRouteState("q", "");

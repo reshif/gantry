@@ -10,7 +10,7 @@ import { useRepoName } from "../traveler/repo";
 import { beltGateLabels, tokenState } from "./conveyor";
 import { openApproval } from "./Approval";
 import { DrawerRoot } from "./Drawers";
-import { since, useFloorCtx } from "./kit";
+import { projectOf, since, useFloorCtx } from "./kit";
 
 const TONE: Record<string, string> = { running: "info", queued: "idle", gate: "warn", blocked: "bad" };
 const LABEL: Record<string, string> = { running: "Running", queued: "Queued", gate: "At a gate", blocked: "Blocked" };
@@ -47,21 +47,22 @@ function Body({ woId, close }: { woId: string; close: () => void }) {
   const gate = ctx.floor.gates.find((g) => g.wo === w.id);
   const glabel = gate ? (beltGateLabels(ctx).get(gate.gate) ?? gate.gate) : "";
   const gd = gate ? ctx.cat.gates.find((g) => g.id === gate.gate) : undefined;
-  const order = ctx.project.flow.order.map((id) => ctx.cat.stations.findIndex((s) => s.id === id)).filter((i) => i >= 0);
+  const wp = projectOf(ctx, w);
+  const order = wp.flow.order.map((id) => ctx.cat.stations.findIndex((s) => s.id === id)).filter((i) => i >= 0);
   const cur = w.station;
-  const skips = ctx.project.flow.classes.find((c) => c.id === w.cls) as { skips?: string[] } | undefined;
+  const skips = wp.flow.classes.find((c) => c.id === w.cls) as { skips?: string[] } | undefined;
   const st = ctx.cat.stations[cur];
   const agent = w.history[w.history.length - 1]?.agent ?? null;
   const reason = w.blockReason || w.failReason || (w.bay ? w.bayReason : "");
   return (
     <Dr
-      eyebrow={`${w.id} · ${ctx.project.name}`}
+      eyebrow={`${w.id} · ${wp.name}`}
       title={w.title}
       close={close}
       label="Close work order details"
       foot={
         <>
-          {gate && gd ? <Btn label="Review gate" kind="ok" id="floor-tok-review" onClick={() => openApproval(ui, ctx.project.id, w.id, gate.gate, glabel, gd.name)} /> : null}
+          {gate && gd ? <Btn label="Review gate" kind="ok" id="floor-tok-review" onClick={() => openApproval(ui, wp.id, w.id, gate.gate, glabel, gd.name)} /> : null}
           <Btn label="Traveler" id="floor-tok-traveler" onClick={() => { close(); openTraveler(w.id); }} />
           <Btn label="Open record" kind="primary" id="floor-tok-record" onClick={() => { close(); setProject(w.project); navigate("record", w.id); }} />
         </>
@@ -70,7 +71,7 @@ function Body({ woId, close }: { woId: string; close: () => void }) {
       <div className="row">
         <span className={`chip ${TONE[state]}`}>{state === "gate" && gate ? `At gate ${glabel}` : LABEL[state]}</span>
         <span className={`tag pri ${w.priority.toLowerCase()}`} title={`Priority ${w.priority}`}>{w.priority}</span>
-        <span className="tag">{ctx.project.flow.classes.find((c) => c.id === w.cls)?.name ?? w.cls}</span>
+        <span className="tag">{wp.flow.classes.find((c) => c.id === w.cls)?.name ?? w.cls}</span>
       </div>
       <div className="pipe" ref={pipeRef} aria-label="Pipeline" style={{ overflowX: "auto" }}>
         {order.map((si, n) => {
@@ -103,9 +104,9 @@ function Body({ woId, close }: { woId: string; close: () => void }) {
   );
 }
 
-export function TokenDrawer({ projectId, woId, close }: { projectId: string; woId: string; close: () => void }) {
+export function TokenDrawer({ projectId, projectIds, woId, close }: { projectId?: string; projectIds?: string[]; woId: string; close: () => void }) {
   return (
-    <DrawerRoot projectId={projectId}>
+    <DrawerRoot {...(projectIds ? { projectIds } : { projectId: projectId ?? "" })}>
       <Body woId={woId} close={close} />
     </DrawerRoot>
   );

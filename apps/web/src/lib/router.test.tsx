@@ -27,7 +27,7 @@ describe("hash parsing", () => {
     expect(formatHash("record", "WO-1", "payments")).toBe("#/p/payments/record/WO-1");
   });
   it("navigate puts the remembered project into project routes only", () => {
-    updatePrefs({ project: "risk" });
+    updatePrefs({ scopeAll: false, project: "risk" });
     navigate("floor");
     expect(window.location.hash).toBe("#/p/risk/floor");
     navigate("agents");

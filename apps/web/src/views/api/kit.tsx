@@ -5,6 +5,7 @@
 import { useMemo } from "react";
 import type { ApiConfig, ApiKey, IntegrationInstance, Project, RequestLogEntry, Trigger } from "@gantry/domain";
 import { useCanMany } from "../../api/can";
+import { useScope } from "../../lib/scope";
 import { useApiConfig, useApiKeys, useApiRequests, useIntegrationTypes, useIntegrations, useMe, useProjects, useTriggers } from "../../api/queries";
 import { Btn, useCopy, type Decision } from "../../ui/primitives";
 
@@ -62,13 +63,16 @@ export function useApiData(): ApiData {
   const types = useIntegrationTypes().data ?? [];
   const vis = useMemo(() => (me ? projects.filter((p) => me.projects.some((x) => x.id === p.id)) : []), [me, projects]);
   const visIds = vis.map((p) => p.id);
+  // keys and triggers follow the scope: every visible project under All, one project once picked
+  const scope = useScope();
+  const scopeIds = scope.all ? visIds : visIds.filter((id) => id === scope.projectId);
   const raw = logQ.data;
   const items = Array.isArray(raw) ? raw : raw?.items ?? [];
   const extra = (!Array.isArray(raw) && raw ? (raw as unknown as { last24h?: number; limited24h?: number }) : {}) as { last24h?: number; limited24h?: number };
   const day = Date.now() - 86_400_000;
   return {
     me, vis, visIds, pname: (id) => projects.find((p) => p.id === id)?.name ?? id,
-    keys: (keysQ.data ?? []).filter((k) => visIds.includes(k.project)), cfg: cfgQ.data, triggers: (trigQ.data ?? []).filter((t) => visIds.includes(t.project)),
+    keys: (keysQ.data ?? []).filter((k) => scopeIds.includes(k.project)), cfg: cfgQ.data, triggers: (trigQ.data ?? []).filter((t) => scopeIds.includes(t.project)),
     log: items, last24h: extra.last24h ?? items.filter((x) => x.at > day).length, limited24h: extra.limited24h ?? items.filter((x) => x.at > day && x.status === 429).length,
     insts, typeOf: (id) => types.find((t) => t.id === id), loading: keysQ.isPending || trigQ.isPending, keysQ, trigQ, logQ, cfgQ,
   };

@@ -80,6 +80,12 @@ export const hasNoAccess = (me: Me): boolean => !me.projects.length && !me.perso
 
 export const NAV_GROUPS = ["Overview", "Project", "Agents", "Connect", "Govern"] as const;
 
+/** The reserved URL token for the all-projects scope (`#/p/all/floor`). */
+export const ALL_PROJECTS = "all";
+
+/** Project routes that can show every project at once; the others (config, onboarding, a record) are about one project and ask which. */
+export const supportsAll = (id: string): boolean => id === "floor" || id === "work-orders" || id === "conversations";
+
 export const isProjectRoute = (id: string): boolean => !!ROUTES.find((r) => r.id === id)?.project;
 
 export const routeDef = (id: string): RouteDef | undefined => ROUTES.find((r) => r.id === id);

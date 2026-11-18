@@ -30,6 +30,19 @@ export default function NotificationsView() {
   const failed = (Array.isArray(dq.data) ? dq.data : dq.data?.items ?? []).filter((d) => d.status === "failed" && dlStatus(d) === "failed").length;
   if (!nt.me) return null;
   const head = { eyebrow: "Connect", title: "Notifications", sub: "Choose which events reach which channels, and check that they arrived." };
+  if (!p && nt.scopeAll) {
+    return (
+      <Page {...head} cls="nt-view">
+        <Empty
+          id="nt-pick-project"
+          icon="projects"
+          title="Pick a project for Notifications"
+          text="Routes and cards belong to one project, and you are looking at All projects. Choose which."
+          action={<div className="row" style={{ flexWrap: "wrap", gap: 8, justifyContent: "center" }}>{nt.visible.map((x) => <Btn key={x.id} label={x.name} id={`nt-pick-${x.id}`} onClick={() => nt.pick(x.id)} />)}</div>}
+        />
+      </Page>
+    );
+  }
   if (!p) {
     return (
       <Page {...head} cls="nt-view">

@@ -88,7 +88,7 @@ beforeEach(() => {
   canBatcher.clear();
   window.location.hash = "";
   Object.assign(trustUi, { tab: "ladder", project: null, repo: "", sel: null, propFilter: "pending", demoFilter: "all", hiProposal: null });
-  updatePrefs({ project: "payments", trustFocus: null } as never);
+  updatePrefs({ scopeAll: false, project: "payments", trustFocus: null } as never);
 });
 afterEach(() => {
   cleanup();

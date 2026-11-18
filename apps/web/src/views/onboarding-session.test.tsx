@@ -44,7 +44,7 @@ function api(s: ReturnType<typeof session>, extra: Record<string, (c: Call) => {
 }
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
 
-beforeEach(() => { resetApp(); updatePrefs({ project: "storefront" }); window.history.replaceState(null, "", "/?tab=pipeline"); window.location.hash = "#/p/storefront/onboarding/mobile-app"; });
+beforeEach(() => { resetApp(); updatePrefs({ scopeAll: false, project: "storefront" }); window.history.replaceState(null, "", "/?tab=pipeline"); window.location.hash = "#/p/storefront/onboarding/mobile-app"; });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.location.hash = ""; });
 
 describe("Onboarding session", () => {
