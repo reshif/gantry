@@ -188,4 +188,14 @@ describe("Audit", () => {
     fireEvent.click(document.getElementById("aud-verify")!);
     expect(await screen.findByText("Chain intact: 12 entries verified.")).toBeTruthy();
   });
+
+  it("verifies the chain on arrival and shows the Ledger verified banner without a click", async () => {
+    setup(ASHA, {
+      "GET /api/v1/audit": () => ({ body: page([row(1)]) }),
+      "GET /api/v1/audit/verify": () => ({ body: { ok: true, checked: 1, msg: "Chain intact." } }),
+    });
+    mount(<AuditView />);
+    await waitFor(() => expect(document.getElementById("aud-verified")?.textContent).toContain("Ledger verified"));
+    expect(document.getElementById("aud-verified")?.textContent).toContain("no gaps");
+  });
 });

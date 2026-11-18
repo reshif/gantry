@@ -76,15 +76,17 @@ export default function AuditView() {
   ];
   const scoped = !perm.pending && !perm.allowed;
 
-  const runVerify = async () => {
+  const runVerify = async (quiet = false) => {
     setChecking(true);
     const r = await verify.refetch();
     setChecking(false);
     const d = r.data as { ok: boolean; msg?: string } | undefined;
     const res = d ? { ok: d.ok, msg: d.msg ?? (d.ok ? "Chain intact." : "The chain is broken."), at: Date.now() } : { ok: false, msg: "The chain could not be verified.", at: Date.now() };
     setChecked(res);
-    ui.toast(res.msg, res.ok ? "ok" : "error");
+    if (!quiet || !res.ok) ui.toast(res.msg, res.ok ? "ok" : "error");
   };
+  // The prototype shows the verified banner on arrival: check once, quietly, when the person may.
+  useEffect(() => { if (canVerify && !checked) void runVerify(true); }, [canVerify]); // eslint-disable-line react-hooks/exhaustive-deps
   const exportCsv = () => {
     const csv = "id,at,actor,action,target,outcome\n" + rows.map((e) => [e.seq, new Date(e.at).toISOString(), e.actor, e.action, e.target, e.outcome].map(csvCell).join(",")).join("\n");
     try {
@@ -109,7 +111,7 @@ export default function AuditView() {
       sub="An append-only record of every decision and change. Entries are chained; the chain is verified hourly."
       acts={<>
         <Btn label={<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><CrIcon name="dl" />Export CSV</span>} aria="Export CSV" id="aud-export" onClick={exportCsv} />
-        {canVerify ? <Btn label={checking ? "Verifying..." : "Verify chain"} icon="shield" id="aud-verify" guard={checking ? { allowed: false, reason: "Checking the chain now." } : null} onClick={() => void runVerify()} /> : null}
+        {canVerify ? <Btn label={checking ? "Verifying..." : "Verify chain"} icon="shield" id="aud-verify" guard={checking ? { allowed: false, reason: "Checking the chain now." } : null} onClick={() => void runVerify(false)} /> : null}
       </>}
     >
       <div className={`banner ${checked ? (checked.ok ? "ok" : "bad") : "info"}`} role="status" id="aud-verified">
