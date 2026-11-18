@@ -1,4 +1,5 @@
 /** One intake conversation: classification with override, the thread with quick-reply chips and free text, the follow-up question, confirm and decline (legacy G.renderConversation). */
+import { WoActions } from "../work-orders/WoActions";
 import { useEffect, useRef, useState } from "react";
 import { fmt } from "@gantry/domain";
 import { ops } from "../../api/ops";
@@ -15,7 +16,6 @@ import { ConfMeter, ReclassifyDialog } from "../work-orders/intake";
 import { EditBriefDialog } from "./EditBrief";
 import { useProject } from "../../api/queries";
 import { dec as decOf, no, stName, useTravelerWo, type TWo } from "../traveler/model";
-import { useOpenRecordRoute } from "../record/nav";
 import { FU_MAX, atIntake, convStatus, raisedOpen } from "./model";
 
 const drafts: Record<string, string> = {};
@@ -42,7 +42,6 @@ export function ConversationThread({ woId, idPrefix = "conv", head, noActions, n
   const wo = q.data;
   const project = useProject(wo?.project).data;
   const openTraveler = useOpenTraveler();
-  const openRecord = useOpenRecordRoute();
   const [text, setText] = useState(drafts[woId] ?? "");
   const [busy, setBusy] = useState(false);
   const [fu, setFu] = useState<{ text: string; chips: string } | null>(null);
@@ -161,7 +160,7 @@ export function ConversationThread({ woId, idPrefix = "conv", head, noActions, n
           <p className="small muted">{`${wo.repo} · requested by ${actor(wo.requestedBy).name} via ${wo.source} · ${fmt.ago(wo.createdAt, Date.now())}`}</p>
           <div className="conv-head-btns">
             <Btn label="Open traveler" small kind="ghost" icon="page" id={`${pre}trav-${wo.id}`} onClick={() => openTraveler(wo.id)} />
-            <Btn label="Open full record" small kind="ghost" icon="record" id={`${pre}rec-${wo.id}`} onClick={() => openRecord(wo.id, wo.project)} />
+            <WoActions wo={wo} here="conversation" id={`${pre}acts-${wo.id}`} />
           </div>
         </div>
       ) : null}

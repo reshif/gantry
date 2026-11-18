@@ -2,6 +2,7 @@
  * Changes (#changes/WO-x): the prototype's two-column review (files on the left, the selected file's diff on the right), with the
  * plan, commits and the Builder's guardrail kept in the full Changes section below it.
  */
+import { WoActions } from "./work-orders/WoActions";
 import { Fragment, useMemo, useState } from "react";
 import { navigate, useHash } from "../lib/router";
 import { useRouteState } from "../lib/queryState";
@@ -205,6 +206,7 @@ export default function ChangesView() {
       sub={`${pr ? `PR #${pr.number} on ` : ""}${wo.repo}: ${files.length} files, +${sum(files, "plus")} \u2212${sum(files, "minus")}`}
       acts={
         <>
+          <WoActions wo={wo} here="record" id="chg-acts" />
           <Btn label="Back to record" id="chg-back" onClick={() => navigate("record", wo.id, wo.project)} />
           {rg ? <Btn label={`Review ${rg.g.label}`} kind="ok" id="chg-review" guard={rg.ap} onClick={() => void ui.open((close) => <ReviewDialog wo={wo} gate={rg.g} rec={rec} onClose={close} />)} /> : null}
         </>

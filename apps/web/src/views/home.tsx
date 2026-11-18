@@ -19,6 +19,7 @@ import { type HomeFull } from "./home/data";
 import { useReviewApproval } from "./inbox/ApprovalDialog";
 import { agoShort, titleOf, useItems } from "./inbox/kit";
 import { RestoreAction, SetupChecklist, openNewProject } from "./home/sections";
+import { WoActions } from "./work-orders/WoActions";
 import { StateBody, useStateOverride } from "./ops1/stateOverride";
 import { metricsOf, useCatalog, type PView } from "./projects/kit";
 
@@ -158,6 +159,7 @@ export default function HomeView() {
             <div>
               {rows.slice(0, 5).map((r) => (
                 <ListItem key={r.key} tone="warn" title={r.title} sub={r.sub}>
+                  {r.it.kind === "gate" && r.it.a.wo ? <WoActions wo={{ id: r.it.a.wo, project: r.it.a.project }} id={`hm-acts-${r.key}`} /> : null}
                   <Btn label="Review" small kind="primary" id={`hm-review-${r.key}`} onClick={() => { if (r.it.kind === "onboarding") { if (r.it.a.project) setProject(r.it.a.project); navigate("onboarding", r.it.a.repo); } else review(r.it); }} />
                 </ListItem>
               ))}

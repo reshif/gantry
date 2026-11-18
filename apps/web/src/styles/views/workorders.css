@@ -12,8 +12,22 @@
 .wo-table .dtable-wrap { border: 0; border-radius: 0; box-shadow: none; }
 .callout-info { border-color: var(--accent-line); background: var(--accent-soft); display: flex; gap: var(--s3); align-items: flex-start; }
 .callout-info > .ic { flex: none; margin-top: 2px; color: var(--accent); }
-.wo-table td { white-space: nowrap; }
-.wo-table td.wo-title { white-space: normal; }
+.wo-table td { white-space: nowrap; vertical-align: top; }
+.wo-table .wo-title { display: grid; gap: 2px; white-space: normal; min-width: 180px; max-width: 420px; }
+.wo-table .wo-title-t { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; }
+.wo-table .wo-cls, .wo-table .wo-where { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.wo-table .wo-where { flex-direction: column; align-items: flex-start; }
+.wo-table .wo-needs { display: grid; gap: 2px; white-space: normal; min-width: 150px; max-width: 240px; }
+.wo-table .wo-needs-t { font-weight: 500; }
+.wo-table .wo-needs.is-me .wo-needs-t { color: var(--wait); }
+.wo-table .wo-needs-d { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.wo-table .wo-act { display: grid; gap: 2px; }
+.wo-acts { display: inline-flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 210px; }
+.wo-acts .btn { white-space: nowrap; }
+@media (max-width: 639px) {
+  .wo-table .wo-title, .wo-table .wo-needs { max-width: none; min-width: 0; }
+  .wo-acts { justify-content: flex-start; max-width: none; }
+}
 .wo-r-killed .wo-id, .wo-r-killed .wo-title { text-decoration: line-through; color: var(--kill); }
 .wo-r-done { color: var(--ink-2); }
 .wo-ovr { display: inline-flex; margin-left: 4px; color: var(--wait); vertical-align: middle; }

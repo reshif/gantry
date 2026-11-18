@@ -24,6 +24,7 @@ import { StateBody, useStateOverride } from "../ops1/stateOverride";
 import { buildBelt, NO_FILTER } from "../floor/conveyor";
 import { useCatalog } from "../projects/kit";
 import { type HomeFull } from "../home/data";
+import { WoActions } from "../work-orders/WoActions";
 import { openEntry, projectOf, useScopedFloorState, type FWo } from "../floor/kit";
 
 const short = (m: string) => m.replace(/^claude-/, "");
@@ -135,6 +136,7 @@ export function AgentsAtWork() {
                               <div key={i} style={{ opacity: 0.5 + i * 0.25 }}>{`${i === all.length - 1 ? "▸" : "✓"} ${l}`}{i === all.length - 1 ? <span className="caret">▍</span> : null}</div>
                             ))}
                           </div>
+                          {ctx ? <WoActions wo={{ id: w.id, project: projectOf(ctx, w).id }} id={`ws-acts-${s.id}`} /> : null}
                         </>
                       ) : (
                         <div className="ws-idle">

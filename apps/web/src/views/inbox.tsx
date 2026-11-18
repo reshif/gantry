@@ -27,6 +27,7 @@ import { useReviewApproval } from "./inbox/ApprovalDialog";
 import { TYPE_LABEL, agoShort, titleOf, typeOf, useItems, type Item } from "./inbox/kit";
 import type { PView } from "./projects/kit";
 import { StateBody, useStateOverride } from "./ops1/stateOverride";
+import { WoActions } from "./work-orders/WoActions";
 
 const CHECKING: Decision = { allowed: false, reason: "Checking what you may decide here.", needs: "" };
 
@@ -42,7 +43,8 @@ function StuckActions({ c }: { c: Conversation }) {
   return (
     <>
       {s.actions.includes("retry") ? <Btn label="Retry" kind="primary" icon="refresh" id={`inb-retry-${c.wo}`} guard={guard} onClick={() => void retry.run()} /> : null}
-      <Btn label={s.actions.includes("assign") ? "Open to assign an agent" : `Open ${c.wo}`} kind="ghost" id={`inb-open-${c.wo}`} onClick={() => open(c.wo)} />
+      {s.actions.includes("assign") ? <Btn label="Open to assign an agent" kind="ghost" id={`inb-open-${c.wo}`} onClick={() => open(c.wo)} /> : null}
+      <WoActions wo={{ id: c.wo, project: c.project }} id={`inb-acts-stuck-${c.wo}`} />
     </>
   );
 }
@@ -51,7 +53,12 @@ function StuckActions({ c }: { c: Conversation }) {
 /** The prototype's one "Review" button per row: it opens the decision dialog (gates and proposals) or the onboarding session. */
 function ApprovalActions({ it }: { it: Item }) {
   const review = useReviewApproval();
-  if (it.kind === "gate" || it.kind === "other") return <Btn label="Review" kind="primary" small id={`inb-review-${it.key}`} onClick={() => review(it)} />;
+  if (it.kind === "gate") {
+    const wo = it.a.wo;
+    const go = <Btn label="Review" kind="primary" small id={`inb-review-${it.key}`} onClick={() => review(it)} />;
+    return wo ? <WoActions wo={{ id: wo, project: it.a.project }} id={`inb-acts-${it.key}`} next={go} /> : go;
+  }
+  if (it.kind === "other") return <Btn label="Review" kind="primary" small id={`inb-review-${it.key}`} onClick={() => review(it)} />;
   if (it.kind === "onboarding") {
     const a = it.a;
     return <Btn label="Review" kind="primary" small id={`inb-onb-${a.repo}`} onClick={() => { if (a.project) setProject(a.project); navigate("onboarding", a.repo); }} />;
@@ -99,6 +106,7 @@ function QuestionCard({ it }: { it: Extract<Item, { kind: "question" | "stuck" }
           <>
             {(c.options ?? []).map((o) => <Btn key={o} label={o} id={`inb-opt-${c.wo}-${o}`} onClick={() => void send(o, `Answered \u201c${o}\u201d. ${agentName} will continue.`)} />)}
             <Btn label="Write an answer…" kind="ghost" id={`inb-answer-${c.wo}`} onClick={answerFree} />
+            <WoActions wo={{ id: c.wo, project: c.project }} id={`inb-acts-${it.key}`} />
           </>
         )}
       </div>
