@@ -77,7 +77,7 @@ describe("Work order page", () => {
     await show({}, `#record/${W.id}?tab=activity`);
     expect(screen.getByRole("tab", { name: /^Activity/ }).getAttribute("aria-selected")).toBe("true");
     expect(await screen.findByText("Timeline")).toBeTruthy();
-    expect(screen.getByText("Conversation")).toBeTruthy();
+    expect(screen.getAllByText("Conversation").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("tab", { name: /^Gates/ }));
     await waitFor(() => expect(window.location.hash).toContain("tab=gates"));
   });

@@ -76,12 +76,12 @@ describe("Work orders table", () => {
     const many = Array.from({ length: 17 }, (_, k) => ({ ...WOS[0]!, id: `WO-${5000 + k}`, createdAt: 1000 + k }));
     const calls = mockApi({ "GET /api/v1/projects/payments/work-orders": (c) => ({ body: c.query.get("limit") === "1" ? page([], null, 17) : page(many, null, 17) }) });
     mount(<WorkOrdersView />);
-    expect(await screen.findByText("WO-5016")).toBeTruthy();
+    expect(await screen.findByText("WO-5014")).toBeTruthy();
     expect(document.querySelectorAll("#wo-table tbody tr")).toHaveLength(15);
     expect(screen.getByText("1–15 of 17")).toBeTruthy();
     expect(screen.getByText("Page 1 / 2")).toBeTruthy();
-    // default order is created, newest first
-    expect(document.querySelector("#wo-table tbody tr a.pri")?.textContent).toBe("WO-5016");
+    // the default order puts what needs the person first; the sort is in the URL only once it is changed
+    expect(window.location.hash).not.toContain("sort=");
     fireEvent.click(document.getElementById("wo-table-next") as HTMLElement);
     expect(await screen.findByText("16–17 of 17")).toBeTruthy();
     expect(window.location.hash).toContain("page=2");
@@ -99,7 +99,6 @@ describe("Work orders table", () => {
     const link = await screen.findByRole("link", { name: "WO-2398" });
     expect(link.getAttribute("href")).toBe("#/p/payments/record/WO-2398");
     // the prototype's table has no traveler / conversation icon column: the id link and the row are the way in
-    expect(document.getElementById("wo-conv-WO-2398")).toBeNull();
     expect(document.getElementById("wo-trav-WO-2398")).toBeNull();
     fireEvent.click(link.closest("tr") as HTMLElement);
     await waitFor(() => expect(window.location.hash).toBe("#/p/payments/record/WO-2398"));
@@ -143,11 +142,11 @@ describe("Work orders table", () => {
     expect(Array.from(station.options).some((o) => /^Bay:/.test(o.textContent ?? ""))).toBe(false);
   });
 
-  it("is the prototype's panel: eight columns, four filters, no disclosure, no Open column", async () => {
+  it("is the prototype's panel: eight columns (no Project while scoped to one project), four filters, no disclosure, no Open column", async () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": (c) => ({ body: c.query.get("limit") === "1" ? page([], null, 5) : page(WOS.slice(0, 5), null, 5) }) });
     mount(<WorkOrdersView />);
     expect(await screen.findByText("WO-2398")).toBeTruthy();
-    expect(Array.from(document.querySelectorAll("#wo-table thead th")).map((t) => (t.textContent ?? "").replace(/[^A-Za-z ]/g, "").trim())).toEqual(["Work order", "Project", "Station", "State", "Class", "Prio", "Created", "By"]);
+    expect(Array.from(document.querySelectorAll("#wo-table thead th")).map((t) => (t.textContent ?? "").replace(/[^A-Za-z ]/g, "").trim())).toEqual(["Work order", "Station", "Class", "Prio", "Needs", "Last activity", "Cost", "Actions"]);
     expect(document.querySelectorAll(".wo-bar select")).toHaveLength(4);
     expect(document.querySelector(".wo-more, #wo-more-btn, #wo-view-save, #wo-group, #wo-cols-btn")).toBeNull();
   });

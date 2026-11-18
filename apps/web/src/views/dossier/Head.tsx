@@ -9,6 +9,7 @@ import { ago } from "./time";
 import { Btn, Chip, ViewHead } from "../../ui/primitives";
 import { useRepoName } from "../traveler/repo";
 import { Icon } from "../../ui/Icon";
+import { WoActions } from "../work/WoActions";
 import { useUI } from "../../ui/overlay-context";
 import { useActors } from "../../ui/actors";
 import { navigate, hashFor } from "../../lib/router";
@@ -30,6 +31,7 @@ function useBar(wo: TWo) {
   const actions = (
     <div className="row dz-actions" role="toolbar" aria-label="Work order actions">
       {specs.filter((s) => s.group === "decide" || s.key === "retry").map(btn)}
+      <WoActions wo={wo.id} project={wo.project} repo={wo.repo} idPrefix="rec" omit={["primary", "record"]} small={false} />
       <Btn label="Traveler" icon="list" id="rec-traveler" onClick={() => navigate("traveler", wo.id, wo.project)} />
       <Btn label="Changes" icon="branch" id="rec-changes" onClick={() => navigate("changes", wo.id, wo.project)} />
       <Btn label="Actions" icon="down" id="dz-actions" aria="Work order actions" aria-haspopup="menu" onClick={(e) => ui.menu(e.currentTarget, null, [

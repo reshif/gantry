@@ -2,6 +2,7 @@
  * Changes (#changes/WO-x): the files, diff previews and commits of one work order, with its plan and the Builder's guardrail.
  * The content is the same Changes section the work order page shows; this page gives it the whole width.
  */
+import { WoActions } from "./work/WoActions";
 import { navigate, useHash } from "../lib/router";
 import { Btn, Chip, Empty, Panel, Stat, StatRow, ViewHead } from "../ui/primitives";
 import { hashFor } from "../lib/router";
@@ -63,7 +64,7 @@ export default function ChangesView() {
         kicker={<span style={{ display: "inline-flex", gap: 8 }}><a href={hashFor("changes", null, wo.project)} onClick={(e) => { e.preventDefault(); navigate("changes", null, wo.project); }}>Changes</a><span aria-hidden="true">/</span><a href={hashFor("record", wo.id, wo.project)} onClick={(e) => { e.preventDefault(); navigate("record", wo.id, wo.project); }}>{wo.id}</a></span>}
         title={`Changes · ${wo.id}`}
         sub={wo.title}
-        actions={<Btn label={waitingGate ? `Review ${d.cat.gates.find((g) => g.id === waitingGate)?.label ?? waitingGate}` : "Review gates"} icon="branch" id="chg-review" onClick={() => { window.location.hash = `${hashFor("record", wo.id, wo.project)}?tab=gates`; }} />}
+        actions={<><WoActions wo={wo.id} project={wo.project} repo={wo.repo} idPrefix="chg" small={false} /><Btn label={waitingGate ? `Review ${d.cat.gates.find((g) => g.id === waitingGate)?.label ?? waitingGate}` : "Review gates"} icon="branch" id="chg-review" onClick={() => { window.location.hash = `${hashFor("record", wo.id, wo.project)}?tab=gates`; }} /></>}
       />
       <StatRow id="chg-stats">
         <Stat label="Files" value={String(files.length)} />

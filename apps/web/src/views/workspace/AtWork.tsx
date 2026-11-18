@@ -8,6 +8,7 @@ import { useScope } from "../work/scope";
 import { Async } from "../../ui/async";
 import { Spark } from "../../ui/charts";
 import { Avatar, Btn, Chip, Empty, Meter, Stat, StatRow, ViewHead } from "../../ui/primitives";
+import { WoActions } from "../work/WoActions";
 import { useCatalog } from "../projects/kit";
 
 /** The prototype's page: tiles and the agent grid, nothing else. Conversations, the Console and the Operator view are their own pages. */
@@ -44,7 +45,8 @@ export function AtWork({ needs = 0, onInbox, onNew }: { needs?: number; onInbox?
               {agents.map((a) => {
                 const jobs = jobsOf(a.id);
                 return (
-                  <a key={a.id} className="card" href={`#agents/${encodeURIComponent(a.id)}`} id={`ws-agent-${a.id}`}>
+                  <div key={a.id} className="card">
+                    <a className="aw-head" href={`#agents/${encodeURIComponent(a.id)}`} id={`ws-agent-${a.id}`}>
                     <div className="row">
                       <Avatar id={a.id} />
                       <div className="grow">
@@ -53,11 +55,13 @@ export function AtWork({ needs = 0, onInbox, onNew }: { needs?: number; onInbox?
                       </div>
                       <Chip text={jobs.length ? "working" : "idle"} cls={jobs.length ? "ok" : "plain"} />
                     </div>
+                    </a>
                     {jobs.length ? (
                       jobs.slice(0, 3).map((w) => (
-                        <div key={w.id} className="small trunc">
-                          <span className="mono">{w.id}</span>{" " + w.title}
+                        <div key={w.id} className="small">
+                          <div className="trunc"><span className="mono">{w.id}</span>{" " + w.title}</div>
                           <div style={{ marginTop: 4 }}><Meter value={w.progress} max={100} label={`${w.id} progress`} /></div>
+                          <div style={{ marginTop: 6 }}><WoActions wo={w.id} project={w.project} repo={w.repo} idPrefix="ws-at" /></div>
                         </div>
                       ))
                     ) : (
@@ -67,7 +71,7 @@ export function AtWork({ needs = 0, onInbox, onNew }: { needs?: number; onInbox?
                       <Spark values={a.spark} w={80} h={22} area={false} />
                       <span>{`success ${fmt.pct(a.evalScore)}`}</span>
                     </div>
-                  </a>
+                  </div>
                 );
               })}
             </div>

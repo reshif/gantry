@@ -4,6 +4,7 @@ import { useCan } from "../../api/can";
 import { useActivity, useMe, useScorecards } from "../../api/queries";
 import { plural } from "../../lib/plural";
 import { hasCommand, runCommand } from "../../lib/commands";
+import { WoActions } from "../work/WoActions";
 import { navigate } from "../../lib/router";
 import { gotoWithQuery } from "../../lib/urlState";
 import { getPrefs, setProject } from "../../lib/prefs";
@@ -109,6 +110,7 @@ function GateRow({ a }: { a: Approval }) {
         <div className="row"><a className="pri mono" href={hashFor("record", wo, a.project)} id={`hm-my-wo-${wo}`}>{wo}</a><Chip text={pendingTitle(a)} cls="warn" /></div>
         <div className="trunc hm-need-t">{a.title}</div>
         <div className="small muted">{`${a.projectName} · waiting ${agoMs(a.waitMs ?? 0)}`}</div>
+        {wo ? <div style={{ marginTop: 6 }}><WoActions wo={wo} project={a.project ?? ""} idPrefix="hm-my" omit={["primary"]} /></div> : null}
       </div>
       <GateActions a={a} idPrefix="hm-my" />
     </li>

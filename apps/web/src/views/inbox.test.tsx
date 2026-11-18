@@ -27,7 +27,7 @@ describe("Inbox", () => {
     await waitFor(() => expect(screen.queryByText("Approve spec")).toBeNull());
     // a question row: the work order links to its record, an Awaiting answer chip, Answer opens the thread
     expect(await screen.findByText("Awaiting answer")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Answer" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Answer/ })).toBeTruthy();
     expect(screen.getByText("WO-2407").getAttribute("href")).toContain("record/WO-2407");
   });
 
@@ -53,7 +53,7 @@ describe("Inbox", () => {
     fireEvent.click(await screen.findByRole("tab", { name: /Blocked/ }));
     expect(await screen.findByText(/workspace seeding failed/)).toBeTruthy();
     expect(document.getElementById("inb-stuck-WO-1005")?.textContent).toContain("WO-1005");
-    expect(screen.getByRole("button", { name: "Open" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Record/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
@@ -80,7 +80,7 @@ describe("Inbox", () => {
     fireEvent.click(ok);
     // the prototype's dialog first; the decision is sent when it is confirmed
     expect(await screen.findByText("Approve spec · G2 for WO-2398")).toBeTruthy();
-    expect(cs.some((c) => c.method === "POST")).toBe(false);
+    expect(cs.some((c) => c.method === "POST" && c.path !== "/api/v1/can")).toBe(false);
     fireEvent.click(within(document.querySelector<HTMLElement>(".dlg")!).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(cs.some((c) => c.method === "POST" && c.path.startsWith("/api/v1/gate-instances/"))).toBe(true));
     cleanup();

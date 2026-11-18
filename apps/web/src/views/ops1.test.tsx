@@ -22,7 +22,7 @@ describe("Inbox (prototype tabs and rows)", () => {
     await waitFor(() => expect(window.location.search).toBe("?tab=stuck"));
     expect(await screen.findByText("No agent")).toBeTruthy();
     // Open goes to the record page
-    expect(screen.getByRole("button", { name: "Open" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Record/ })).toBeTruthy();
   });
 
   it("approval rows: the work order is a link to its record, sorted oldest first, with Priority, Approve and Reject; the count reads '<n> approvals'", async () => {
@@ -111,7 +111,7 @@ describe("Inbox (round 2)", () => {
     mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [], conversations: [{ wo: "WO-8", title: "Asked", project: "payments", question: "Which?" }] } }) }) });
     window.history.replaceState(null, "", "/?tab=questions");
     mount(<InboxView />);
-    fireEvent.click(await screen.findByRole("button", { name: "Answer" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Answer/ }));
     expect(window.location.hash).toBe("#/p/payments/conversations/WO-8");
   });
 

@@ -1,4 +1,5 @@
 /** Station and gate detail drawers of the floor (legacy floor.js openStation / openGate). They always show the live floor. */
+import { WoActions } from "../work/WoActions";
 import { RequestChangesBtn } from "../work/gate";
 import { GateDetail } from "../work/GateDetail";
 import { useOpenTraveler } from "../../shell/useTraveler";
@@ -222,9 +223,8 @@ export function WoDrawer({ woId, close }: { woId: string; close: () => void }) {
       footer={
         <>
           {gid ? <ApproveBtn w={w} gid={gid} label={`Approve ${gid}`} primary id="floor-wo-approve" after={close} /> : null}
-          <a className="btn" id="floor-wo-conversation" href={hashFor("conversations", w.id, p.id)} onClick={close} title={waiting ?? undefined} aria-describedby={waiting ? "floor-wo-conv-why" : undefined}>Conversation</a>
+          <WoActions wo={w.id} project={p.id} repo={w.repo} idPrefix="floor-wo" small={false} />
           {waiting ? <span className="small muted" id="floor-wo-conv-why" style={{ flexBasis: "100%", order: 1 }}>{waiting}</span> : null}
-          <a className="btn" id="floor-wo-record" href={hashFor("record", w.id, p.id)} onClick={close}>Open record</a>
           <Btn label="Traveler" id="floor-wo-traveler" onClick={() => { close(); openTraveler(w.id); }} />
         </>
       }
