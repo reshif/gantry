@@ -91,6 +91,34 @@ describe("Inbox", () => {
     expect(screen.getByLabelText("Comment")).toBeTruthy();
   });
 
+  it("opens the Review dialog without crashing when the rule read has no progress yet", async () => {
+    mockApi({
+      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] } }) }),
+      "GET /api/v1/work-orders/WO-2398": () => ({ body: traveler(true) }),
+      "GET /api/v1/work-orders/WO-2398/gates/G2/approvers": () => ({ body: {} }),
+    });
+    mount(<InboxView />);
+    await review();
+    expect(await screen.findByRole("button", { name: "Request changes" })).toBeTruthy();
+    expect(screen.queryByText("Gantry hit a problem")).toBeNull();
+  });
+
+  it("sorts on the Waiting column (key at) and shows the prototype's neutral arrow on the other sortable headers", async () => {
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] } }) }) });
+    mount(<InboxView />);
+    await screen.findByText("Add idempotency keys", { exact: false });
+    expect(document.getElementById("t-inbox-sort-at")).toBeTruthy();
+    expect(document.getElementById("t-inbox-sort-title")?.textContent).toContain("\u2195");
+  });
+
+  it("?state=error shows the shared error state under the Inbox header", async () => {
+    window.history.replaceState(null, "", "/?state=error");
+    mockApi({ "GET /api/v1/home": () => ({ body: home({}) }) });
+    mount(<InboxView />);
+    expect(await screen.findByText("This view failed to load")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Inbox" })).toBeTruthy();
+  });
+
   it("approves from the row, and locks Approve with the server's reason when this person may not", async () => {
     const cs = mockApi({
       "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] } }) }),

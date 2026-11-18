@@ -56,19 +56,21 @@ function GateBody({ it, close }: { it: Extract<Item, { kind: "gate" }>; close: (
   };
   const rejectGuard: Decision = back;
   const changesGuard: Decision = brief ? { allowed: false, reason: "The brief is confirmed or declined; use Reject to decline it.", needs: "" } : back;
-  const r = rule.data;
+  // The rule read can come back without its progress (a gate with no votes yet, an older server): show what is there, never throw.
+  const r = rule.data && rule.data.rule && rule.data.progress ? rule.data : undefined;
+  const readFailed = rule.isError || (!!rule.data && !r);
   return (
     <>
       <div className="dlg-b">
         {!base.allowed && t ? (
           <div className="banner warn"><CrIcon name="lock" /><div className="grow">{base.reason || "You are not allowed to decide this."}</div></div>
         ) : null}
-        <div><div className="label" style={{ marginBottom: 4 }}>Evidence</div><p>{a.title ?? ""}{r ? ` Progress: ${r.progress.have} of ${r.progress.need} approvals${r.progress.approvals.length ? `, by ${r.progress.approvals.map((x) => x.name).join(", ")}` : ""}.` : ""}</p></div>
+        <div><div className="label" style={{ marginBottom: 4 }}>Evidence</div><p>{a.title ?? ""}{r ? ` Progress: ${r.progress.have} of ${r.progress.need} approvals${r.progress.approvals?.length ? `, by ${(r.progress.approvals ?? []).map((x) => x.name).join(", ")}` : ""}.` : ""}</p></div>
         <dl className="kv" style={{ margin: 0 }}>
           <dt>Rule</dt>
-          <dd>{r ? `${r.rule.text}${typeof r.rule.classOverride === "number" ? ` This class needs ${r.rule.classOverride} instead of the gate's base ${r.rule.base}.` : ""} (${r.progress.have} of ${r.progress.need} so far)` : (rule.isError ? "Could not read the rule." : "Reading the rule…")}</dd>
+          <dd>{r ? `${r.rule.text}${typeof r.rule.classOverride === "number" ? ` This class needs ${r.rule.classOverride} instead of the gate's base ${r.rule.base}.` : ""} (${r.progress.have} of ${r.progress.need} so far)` : (readFailed ? "Could not read the rule." : "Reading the rule…")}</dd>
           <dt>Eligible</dt>
-          <dd>{r ? (r.eligible.length ? r.eligible.map((e) => e.name + (e.away ? " (away)" : "")).join(", ") : "Nobody is eligible today.") : "…"}{r && !r.satisfiable ? <span className="inb-warn" role="alert"> {r.warning}</span> : null}</dd>
+          <dd>{r ? (r.eligible?.length ? (r.eligible ?? []).map((e) => e.name + (e.away ? " (away)" : "")).join(", ") : "Nobody is eligible today.") : "…"}{r && r.satisfiable === false ? <span className="inb-warn" role="alert"> {r.warning}</span> : null}</dd>
           <dt>Waiting</dt>
           <dd>{a.waitMs ? fmt.ago(Date.now() - a.waitMs, Date.now()) : "just now"}</dd>
           <dt>Work order</dt>

@@ -95,7 +95,7 @@ describe("Home: one page", () => {
   it("never shows a kill or restore control on Home", async () => {
     setup(ASHA, adminHome());
     mount();
-    await screen.findByText("Nautobot-Jobs onboarding needs you: verification failed");
+    await screen.findByText("Needs your attention");
     expect(document.getElementById("hm-kill")).toBeNull();
     expect(screen.queryByRole("button", { name: /kill/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /restore/i })).toBeNull();
@@ -105,7 +105,7 @@ describe("Home: one page", () => {
     const killed = { id: "i", sev: 0, icon: "st-kill", title: "Factory killed", where: "Factory", sub: "Leaked token · 1 min ago · restore approvals 1 of 2", act: { label: "Open Security", route: "security" }, restore: { scope: "factory", id: null, approvals: [{ by: "p-omar", at: 1 }], needs: 2 } };
     setup(ASHA, adminHome({}, { attention: [killed], setup: undefined }));
     mount();
-    expect(await screen.findByText("Factory killed")).toBeTruthy();
+    expect(await screen.findByRole("alert")).toBeTruthy();
     expect(screen.getAllByText(/restore approvals 1 of 2/).length).toBeGreaterThan(0);
     expect(screen.getByRole("alert").textContent).toMatch(/Factory stopped\./);
     expect(screen.getByRole("alert").textContent).toMatch(/Restore needs two Factory Admins/);
@@ -115,7 +115,7 @@ describe("Home: one page", () => {
     canBatcher.clear();
     setup(SAM, adminHome({}, { attention: [killed], setup: undefined, approvers: { count: 0, oldestMs: 0, late: 0, byProject: [] }, waiting: undefined }), { denied: ["restore.factory"] });
     mount();
-    expect(await screen.findByText("Factory killed")).toBeTruthy();
+    expect(await screen.findByRole("alert")).toBeTruthy();
     await waitFor(() => expect(canBatcher.get({ action: "restore.factory" })).not.toBeNull());
     expect(screen.queryByRole("button", { name: /restore/i })).toBeNull();
   });
@@ -125,6 +125,19 @@ describe("Home: one page", () => {
 
 
 
+});
+
+describe("Home: ?state=", () => {
+  for (const [state, text] of [["error", "This view failed to load"], ["forbidden", "You do not have access to this"], ["empty", "Nothing here yet"], ["conflict", "Conflict."]] as const) {
+    it(`?state=${state} renders the shared ${state} state under the Home header`, async () => {
+      window.history.replaceState(null, "", `/?state=${state}`);
+      setup(ASHA, adminHome());
+      mount();
+      expect(await screen.findByText(text)).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Home" })).toBeTruthy();
+      window.history.replaceState(null, "", "/");
+    });
+  }
 });
 
 describe("Home: by role", () => {
@@ -143,8 +156,9 @@ describe("Home: Control Room", () => {
   it("shows what needs a person, the live feed, the belt at a glance and the projects, once each", async () => {
     setup(ASHA, adminHome(), { extra: { "GET /api/v1/activity": () => ({ body: [] }) } });
     mount();
-    expect(await screen.findByText("Nautobot-Jobs onboarding needs you: verification failed")).toBeTruthy();
-    expect(screen.getAllByText("Nautobot-Jobs onboarding needs you: verification failed")).toHaveLength(1);
+    await screen.findByText("Needs your attention");
+    // health items (a failed onboarding) are not approvals: the attention card lists approvals only
+    expect(screen.queryByText("Nautobot-Jobs onboarding needs you: verification failed")).toBeNull();
     for (const t of ["Needs your attention", "Live activity", "Belt at a glance", "Throughput, last 24 hours", "Projects"]) expect(screen.getByRole("heading", { name: t })).toBeTruthy();
     expect(document.querySelectorAll(".minibelt .mb-st").length).toBe(DEFAULT_CATALOG.stations.length);
     expect(document.querySelectorAll(".proj-grid .ptile").length).toBe(2);
@@ -167,8 +181,11 @@ describe("Home: Control Room", () => {
     setup(ASHA, adminHome({}, { attention: [], setup: undefined, waiting: { approvals: [gate], conversations: [] } }), { extra: { "GET /api/v1/work-orders/WO-9": () => ({ body: { id: "WO-9", project: "payments", version: 1, allowed: { approve: { gate: "G2", instance: "WO-9:G2:1", allowed: true, reason: "", needs: "" } } } }), "GET /api/v1/work-orders/WO-9/gates/G2/approvers": () => ({ body: { label: "Spec", rule: { text: "One approver.", conditions: [] }, progress: { have: 0, need: 1, approvals: [], unmet: [] }, satisfiable: true, warning: "", eligible: [], overrides: [], viewerCanOverride: false, can: { editRule: false, editWhy: "", grantRole: false, grantWhy: "" } } }) } });
     mount();
     expect(await screen.findByText(/Plant overview for .*\. Agents propose, people approve\./)).toBeTruthy();
-    await waitFor(() => expect(document.querySelector("#hm-projects #hm-new-project")).toBeTruthy());
-    expect(screen.getByText("WO-9 · Add limits · waiting 1h 00m ago")).toBeTruthy();
+    expect(await screen.findByText("G2 Spec approved for WO-9")).toBeTruthy();
+    expect(document.querySelector("#hm-projects #hm-new-project")).toBeNull();
+    expect(screen.getByText("WO-9 · Add limits · waiting 1h 00m")).toBeTruthy();
+    const submit = document.getElementById("hm-my-new") as HTMLAnchorElement;
+    expect(submit.getAttribute("href")).toBe("#console");
     fireEvent.click(await screen.findByRole("button", { name: "Review" }));
     expect(await screen.findByRole("button", { name: "Request changes" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
@@ -178,8 +195,8 @@ describe("Home: Control Room", () => {
     const wait = { approvals: [{ repo: "nautobot-jobs", repoName: "Nautobot-Jobs", project: "nautobot", projectName: "Nautobot-Jobs", pr: 4 }], conversations: [] };
     setup(ASHA, adminHome({ approvals: wait.approvals }, { waiting: wait }));
     mount();
-    await screen.findByText("Needs your attention");
-    expect(screen.queryByText(/Merge onboarding PR/)).toBeNull();
+    expect(await screen.findByText(/Merge onboarding pull request Nautobot-Jobs#4/)).toBeTruthy();
+    expect(screen.getByText("1 open")).toBeTruthy();
   });
 
   it("shows the setup checklist only while the API sends one", async () => {

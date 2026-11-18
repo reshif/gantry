@@ -42,6 +42,27 @@ describe("Agents at work (prototype workspace)", () => {
     await waitFor(() => expect(document.querySelectorAll(".ws-card").length).toBeLessThan(all));
   });
 
+  it("matches the prototype: no Conversations action, Cost per hour tile, and Talk opens that work order's conversation", async () => {
+    mockApi();
+    mount(<AgentsAtWork />);
+    await waitFor(() => expect(document.querySelectorAll(".ws-card").length).toBeGreaterThan(5));
+    expect(document.getElementById("ws-open-chats")).toBeNull();
+    expect(screen.getByText("Cost per hour")).toBeTruthy();
+    expect(screen.queryByText("Cost so far")).toBeNull();
+    expect(screen.getByText("Tokens in flight").closest(".stat")?.textContent).toMatch(/last hour/);
+    expect(document.querySelector(".ws-card .tok-stream")?.children.length).toBe(3);
+    fireEvent.click(document.querySelector("[id^=ws-talk-]")!);
+    await waitFor(() => expect(window.location.hash).toMatch(/conversations(\/WO-|$)/));
+  });
+
+  it("?state=loading shows the shared loading skeleton", async () => {
+    window.history.replaceState(null, "", "/?state=loading");
+    mockApi();
+    mount(<AgentsAtWork />);
+    expect(await screen.findByLabelText("Loading")).toBeTruthy();
+    expect(document.querySelectorAll(".ws-card").length).toBe(0);
+  });
+
   it("says the floor is not visible on a 403, instead of showing no agents", async () => {
     mockApi({ "GET /api/v1/projects/payments/floor": () => ({ status: 403, body: { ok: false, msg: "Needs a role on this project." } }) });
     mount(<AgentsAtWork />);

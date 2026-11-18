@@ -29,7 +29,9 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total, neutralArrow }: {
+  /** Show the prototype's dim up/down arrow on sortable headers that are not the active sort. */
+  neutralArrow?: boolean;
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -148,7 +150,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                   <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.width ? { width: c.width } : undefined} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
                       <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
-                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
+                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : neutralArrow ? <span style={{ opacity: 0.4 }}>↕</span> : ""}</span>
                       </button>
                     ) : c.label}
                   </th>

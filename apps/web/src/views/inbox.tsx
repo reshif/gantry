@@ -23,6 +23,7 @@ import type { Conversation, HomeFull } from "./home/data";
 import { useReviewApproval } from "./inbox/ApprovalDialog";
 import { TYPE_LABEL, titleOf, typeOf, useItems, type Item } from "./inbox/kit";
 import type { PView } from "./projects/kit";
+import { StateBody, useStateOverride } from "./ops1/stateOverride";
 
 const CHECKING: Decision = { allowed: false, reason: "Checking what you may decide here.", needs: "" };
 
@@ -111,6 +112,7 @@ export default function InboxView() {
   const [sortKey, setSortKey] = useRouteState("sort", "");
   const [sortDir, setSortDir] = useRouteState("dir", "asc");
   useClearRouteStateOnLeave(KEYS);
+  const override = useStateOverride();
   const approvals = items.filter((i) => i.group === "gate" || i.group === "onboarding" || i.group === "other");
   const questions = items.filter((i): i is Extract<Item, { kind: "question" | "stuck" }> => i.kind === "question" || i.kind === "stuck");
   const needle = search.trim().toLowerCase();
@@ -127,7 +129,7 @@ export default function InboxView() {
   const tag = (i: Item) => (i.project && i.project !== "factory" ? <span className="tag">{keys.get(i.project) ?? i.projectName}</span> : <span className="dim">factory</span>);
   return (
     <Page eyebrow="Operate" title="Inbox" sub="Everything waiting for a person: gates, proposals, questions." cls="inbox">
-      <Async query={q} what="your inbox" id="inbox" isEmpty={() => false}>{() => (
+      {override ? <StateBody state={override} /> : <Async query={q} what="your inbox" id="inbox" isEmpty={() => false}>{() => (
         <>
           <Tabs idPrefix="inbox-tab" active={tab} onChange={setTab} items={[{ id: "approvals", label: "Approvals", count: approvals.length }, { id: "questions", label: "Questions", count: questions.length }, { id: "decided", label: "Decided", count: decided.length }]} />
           <span className="sr-only" id="inbox-count">{items.length}</span>
@@ -144,6 +146,7 @@ export default function InboxView() {
                 rowKey={(i) => i.key}
                 rowId={(i) => `inb-${i.key}`}
                 pageSize={10}
+                neutralArrow
                 pager
                 sort={sort}
                 onSort={(s) => { setSortKey(s.key); setSortDir(s.dir === -1 ? "desc" : "asc"); }}
@@ -152,7 +155,7 @@ export default function InboxView() {
                   { key: "title", label: "Request", sort: (i) => String(titleOf(i).title), render: (i) => { const t = titleOf(i); return (<><ReviewLink it={i}>{t.title}</ReviewLink><span className="dim ell" style={{ fontSize: 12 }}>{t.sub}</span></>); } },
                   { key: "type", label: "Type", sort: (i) => typeOf(i), render: (i) => { const t = titleOf(i); return <Chip text={t.type} cls={t.tone} />; } },
                   { key: "project", label: "Project", sort: (i) => keys.get(i.project) ?? i.projectName, render: tag },
-                  { key: "wait", label: "Waiting", sort: (i) => i.waitMs, render: (i) => <span className="mono">{agoOf(i.waitMs)}</span> },
+                  { key: "at", label: "Waiting", sort: (i) => i.waitMs, render: (i) => <span className="mono">{agoOf(i.waitMs)}</span> },
                   { key: "votes", label: "Votes", render: (i) => <span className="mono">{(i.kind === "gate" || i.kind === "onboarding") && i.a.need ? `${i.a.have ?? 0}/${i.a.need}` : "—"}</span> },
                   { key: "act", label: "", align: "end", render: (i) => <ApprovalActions it={i} /> },
                 ]}
@@ -174,7 +177,7 @@ export default function InboxView() {
             <div className="card"><CrEmpty icon="check" title="No decisions yet this session" text="Approve or reject something and it will be listed here." /></div>
           )}
         </>
-      )}</Async>
+      )}</Async>}
     </Page>
   );
 }

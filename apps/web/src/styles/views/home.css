@@ -132,3 +132,6 @@
 .hm-hu-down { color: var(--block); font-size: 10px; }
 /* rows layout: secondary figures sit under the main number so the table fits beside the nav at 1440 */
 
+
+/* ops1 (Home, Inbox, Agents at work): the prototype's KPI tiles are flat bordered cards, with its own radius and padding */
+.page.hm .stat, .page.ws-agents .stat, .page.inbox .stat, #state-loading .stat { box-shadow: none; border-radius: var(--r-lg); padding: var(--s3) var(--s4); }
