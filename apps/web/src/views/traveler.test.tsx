@@ -120,7 +120,7 @@ describe("Traveler drawer", () => {
     const path = `/api/v1/work-orders/${W.id}/send-back`;
     const calls = await show({ [`POST ${path}`]: () => ({ body: { ok: true, msg: "Sent back." } }) });
     fireEvent.click(await screen.findByRole("button", { name: /Send back/ }));
-    fireEvent.change(await screen.findByLabelText("Note for the agent"), { target: { value: "Cover the retry case" } });
+    fireEvent.change(await screen.findByLabelText("What to fix (required)"), { target: { value: "Cover the retry case" } });
     fireEvent.click(document.getElementById("sb-submit") as HTMLElement);
     await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
     expect(posts(calls, path)[0]!.body).toMatchObject({ note: "Cover the retry case" });
@@ -131,7 +131,7 @@ describe("Traveler drawer", () => {
     const path = `/api/v1/work-orders/${W.id}/park`;
     const calls = await show({ [`POST ${path}`]: () => ({ body: { ok: true, msg: "Moved." } }) });
     fireEvent.click(await screen.findByRole("button", { name: /Move to bay/ }));
-    fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Waiting for the vendor" } });
+    fireEvent.change(await screen.findByLabelText("Reason (required)"), { target: { value: "Waiting for the vendor" } });
     fireEvent.click(document.getElementById("park-submit") as HTMLElement);
     await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
     expect(posts(calls, path)[0]!.body).toMatchObject({ reason: "Waiting for the vendor" });

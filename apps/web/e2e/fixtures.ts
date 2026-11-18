@@ -90,7 +90,11 @@ export async function mockApi(page: Page, o: MockOptions = {}): Promise<string[]
     const h = o.overrides?.[`${method} ${path}`] ?? o.overrides?.[path];
     if (h) return h(route);
     const computed = o.resolve?.(method, path, url);
-    if (computed !== undefined) return json(route, computed);
+    if (computed !== undefined) {
+      const failed = computed as { __status?: number; body?: unknown } | null;
+      if (failed && typeof failed === "object" && typeof failed.__status === "number") return json(route, failed.body ?? { ok: false, msg: "Not found" }, failed.__status);
+      return json(route, computed);
+    }
     if (path === "me") return persona ? json(route, persona.me) : json(route, { ok: false, msg: "Not signed in", config: { demoAccounts: false } }, 401);
     if (path === "can") {
       const checks = (route.request().postDataJSON() as { checks: Array<{ action: string }> }).checks;

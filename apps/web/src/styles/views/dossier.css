@@ -107,7 +107,6 @@
   .dz-head > .body { padding: 12px; }
   .dz-sbody, .dz-sec > details > summary { padding-inline: 12px; }
   .dz-sbody .rec-kv { grid-template-columns: 96px minmax(0, 1fr); }
-  .dz-actions .btn { flex: 1 1 auto; justify-content: center; }
   .dz-tabbar { padding: 0 8px; }
 }
 
@@ -146,3 +145,8 @@
 
 /* a long text value in a stat tile (prototype .v.txtv): smaller, one line */
 .stat .v .txtv-in { display: block; font-size: 19px; line-height: 31px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Header actions stay compact and inline at phone width, as in the prototype (no full-width touch-target stretching). */
+@media (pointer: coarse) {
+  .dz-head .dz-actions .btn { min-height: 0; }
+}

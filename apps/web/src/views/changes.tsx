@@ -22,7 +22,7 @@ export default function ChangesView() {
   const files: RecFile[] = useMemo(() => {
     if (!d.wo || !d.rec) return [];
     const planFiles = (d.wo.files ?? []) as RecFile[];
-    const real = ch?.files ?? d.rec.code.files;
+    const real = ch?.files ?? d.rec.code?.files ?? [];
     const byPath = new Map(planFiles.map((f) => [f.path, f]));
     const out: RecFile[] = real.map((f) => ({ ...(byPath.get(f.path) ?? {}), ...f }) as RecFile);
     for (const f of planFiles) if (!out.some((x) => x.path === f.path)) out.push(f);
@@ -44,8 +44,8 @@ export default function ChangesView() {
   }
   const { wo, rec } = d;
   const sel = files.find((f) => f.path === fileQ) ?? files[0];
-  const commits = ch?.commits ?? rec.code.commits.map((x) => ({ sha: x.sha, message: x.message, author: x.author }));
-  const pr = rec.code.pullRequests[0] ?? null;
+  const commits = ch?.commits ?? (rec.code?.commits ?? []).map((x) => ({ sha: x.sha, message: x.message, author: x.author }));
+  const pr = rec.code?.pullRequests?.[0] ?? null;
   return (
     <div className="view rec-view dz">
       <ViewHead

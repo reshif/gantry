@@ -138,10 +138,10 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
   };
   return (
     <Dialog
-      title={`Kill ${label}`}
-      kicker={`Kill switch · ${scope}`}
+      title={scope === "workorder" ? `Kill ${id ?? ""}?` : `Kill ${label}`}
+      {...(scope === "workorder" ? {} : { kicker: `Kill switch · ${scope}` })}
       wide
-      sub={`A kill is a hard stop. Agents stop, coding slots are freed, and new submissions are refused${scope === "workorder" ? " for this work order." : " until someone restores it."}`}
+      sub={scope === "workorder" ? "The work order stops and cannot restart." : "A kill is a hard stop. Agents stop, coding slots are freed, and new submissions are refused until someone restores it."}
       onClose={close}
       body={
         <div className="form-grid">
@@ -179,7 +179,7 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
       }
       actions={[
         { label: "Cancel" },
-        { label: `Kill ${scope === "workorder" ? (id ?? "") : scope === "project" ? "project" : "factory"}`, kind: "danger", icon: "st-kill", submit: true, id: "kill-ok", guard: d.pending ? null : d, onClick: () => void submit() },
+        { label: scope === "workorder" ? "Kill" : `Kill ${scope === "project" ? "project" : "factory"}`, kind: "danger", icon: "st-kill", submit: true, id: "kill-ok", guard: d.pending ? null : d, onClick: () => void submit() },
       ]}
     />
   );

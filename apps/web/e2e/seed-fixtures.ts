@@ -176,7 +176,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     }
     if (seg[0] === "work-orders" && seg[1]) {
       const w = byId.get(seg[1]);
-      if (!w) return undefined;
+      if (!w) return { __status: 404, body: { ok: false, msg: "Work order not found" } };
       return seg[2] === "record" ? recordOf(w) : seg[2] === "gates" && seg[4] === "approvers" ? approversOf(w, seg[3]!) : seg[2] === "session" ? sessionOf(w) : seg[2] === "changes" ? changesOf(w) : seg[2] ? undefined : travelerOf(w);
     }
     if (path === "work-order-sessions") {

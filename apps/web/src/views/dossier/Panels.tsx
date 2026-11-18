@@ -1,6 +1,7 @@
 /** The Document tab's first panels and the Gates and Runs tabs of a work order page (Blueprint prototype: Brief, Acceptance criteria, Plan; Gate decisions; Station runs). */
 import { fmt, type Catalog } from "@gantry/domain";
-import { Chip, Empty, Panel } from "../../ui/primitives";
+import { Btn, Chip, Empty, Panel } from "../../ui/primitives";
+import { useActionSpecs } from "../traveler/Actions";
 import { DataTable, type Col } from "../../ui/SortTable";
 import { useActors } from "../../ui/actors";
 import type { TWo } from "../traveler/model";
@@ -72,6 +73,8 @@ export function PlanPanel({ wo }: { wo: TWo }) {
 
 export function GatesPanel({ wo, cat }: { wo: TWo; cat: Catalog }) {
   const actor = useActors();
+  const specs = useActionSpecs(wo, true);
+  const decide = (specs ?? []).filter((x) => x.group === "decide");
   const rows = Object.entries(wo.gates ?? {}).map(([k, g]) => ({ k, ...g }));
   const def = (k: string) => cat.gates.find((x) => x.id === k);
   const cols: Col<(typeof rows)[number]>[] = [
@@ -80,6 +83,7 @@ export function GatesPanel({ wo, cat }: { wo: TWo; cat: Catalog }) {
     { key: "s", label: "Status", render: (g) => <Chip text={g.status} cls={g.status === "passed" ? "ok" : g.status === "waiting" ? "warn" : g.status === "failed" ? "bad" : "plain"} /> },
     { key: "by", label: "Decided by", render: (g) => { const d = g.approvals[0] ?? g.rejections[0]; return d ? actor(d.by).name : g.decision?.mode === "auto" ? "Automatic" : g.decision?.mode === "trust" ? "Under trust" : "—"; } },
     { key: "at", label: "When", render: (g) => { const d = g.approvals[0] ?? g.rejections[0]; return d ? ago(d.at) : "—"; } },
+    { key: "a", label: "", align: "end", render: (g) => (g.status === "waiting" && wo.state === "waiting" && decide.length ? <div className="row" style={{ justifyContent: "flex-end" }}>{decide.map((a) => <Btn key={a.key} label={a.label} small {...(a.kind ? { kind: a.kind } : {})} id={`gt-${a.key}-${g.k}`} guard={a.guard} onClick={a.onClick} />)}</div> : null) },
   ];
   return (
     <Panel title="Gate decisions" flush>

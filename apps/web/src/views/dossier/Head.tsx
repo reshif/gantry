@@ -25,7 +25,7 @@ function useBar(wo: TWo) {
   if (!specs) return { actions: null, notes: null };
   const by = (k: string) => specs.find((s) => s.key === k);
   const item = (a: ActionSpec | undefined, label?: string) => (a ? [{ label: label ?? a.label, icon: a.icon, ...(a.kind ? { kind: a.kind } : {}), guard: a.guard, onClick: a.onClick }] : []);
-  const btn = (a: ActionSpec) => <Btn key={a.key} label={a.label} {...(a.kind ? { kind: a.kind } : {})} icon={a.icon} id={a.id} {...(a.aria ? { aria: a.aria } : {})} guard={a.guard} onClick={a.onClick} />;
+  const btn = (a: ActionSpec) => <Btn key={a.key} label={a.label} small={a.group === "decide"} {...(a.kind ? { kind: a.kind } : {})} icon={a.icon} id={a.id} {...(a.aria ? { aria: a.aria } : {})} guard={a.guard} onClick={a.onClick} />;
   const why = specs.find((s) => s.why);
   const actions = (
     <div className="row dz-actions" role="toolbar" aria-label="Work order actions">

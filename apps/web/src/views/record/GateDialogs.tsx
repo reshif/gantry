@@ -67,11 +67,11 @@ export function RejectGateDialog({ wo, gate, guard, run, onClose }: { wo: TWo; g
       body={
         <div className="form-grid">
           <LockNote decision={guard} what="Rejecting" />
-          <Field label="Reason" htmlFor="rj-reason" required hint="Say what must change."><TextArea id="rj-reason" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
+          <Field label="Reason (required)" htmlFor="rj-reason" hint="Say what must change."><TextArea id="rj-reason" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
           <Err text={err} />
         </div>
       }
-      actions={[{ label: "Cancel" }, { label: "Reject and park", kind: "danger", submit: true, id: "rj-submit", guard, onClick: () => void submit() }]}
+      actions={[{ label: "Cancel" }, { label: "Reject", kind: "danger", submit: true, id: "rj-submit", guard, onClick: () => void submit() }]}
     />
   );
 }
@@ -91,7 +91,7 @@ export function EditTitleDialog({ wo, onClose }: { wo: TWo; onClose: () => void 
       body={
         <div className="form-grid">
           <LockNote decision={d} what="Editing the title" />
-          <Field label="Title" htmlFor="et-title" required><TextInput id="et-title" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
+          <Field label="Title (required)" htmlFor="et-title"><TextInput id="et-title" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
           <Err text={err} />
         </div>
       }
@@ -114,7 +114,7 @@ export function PriorityDialog({ wo, onClose }: { wo: TWo; onClose: () => void }
         <div className="form-grid">
           <LockNote decision={d} what="Changing the priority" />
           <Field label="Priority" htmlFor="cp-prio"><Select id="cp-prio" options={["P0", "P1", "P2", "P3"]} value={prio} onChange={setPrio} /></Field>
-          <Field label="Reason" htmlFor="cp-why" required><TextInput id="cp-why" value={why} onChange={(e) => setWhy(e.target.value)} /></Field>
+          <Field label="Reason (required)" htmlFor="cp-why"><TextInput id="cp-why" value={why} onChange={(e) => setWhy(e.target.value)} /></Field>
           <Err text={err} />
         </div>
       }

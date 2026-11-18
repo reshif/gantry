@@ -130,7 +130,8 @@ describe("Work order page: links, viewers and kills", () => {
     await waitFor(() => expect(screen.queryByLabelText(/Note \(optional\)/)).toBeNull());
     fireEvent.click(reject);
     expect(await screen.findByText(/Say what must change\./)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Reject and park" })).toBeTruthy();
+    expect(document.getElementById("rj-submit")?.textContent).toMatch(/^Reject$/);
+    expect(screen.getByLabelText(/Reason \(required\)/)).toBeTruthy();
   });
 
   it("opens the Edit title and Change priority dialogs from the Actions menu", async () => {
@@ -149,7 +150,26 @@ describe("Work order page: links, viewers and kills", () => {
     await show();
     fireEvent.click(document.getElementById("dz-actions") as HTMLElement);
     fireEvent.click(await screen.findByRole("menuitem", { name: /Send back to a station/ }));
-    expect(await screen.findByLabelText(/Note for the agent/)).toBeTruthy();
+    expect(await screen.findByLabelText(/What to fix \(required\)/)).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: /^Send back$/ })).toBeTruthy();
+    expect(screen.getByLabelText("Station")).toBeTruthy();
+  });
+
+  it("opens the prototype Kill confirm: 'Kill WO-x?' with a danger Kill button", async () => {
+    await show();
+    fireEvent.click(document.getElementById("dz-actions") as HTMLElement);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Kill work order/ }));
+    expect(await screen.findByText(/The work order stops and cannot restart\./)).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: new RegExp(`^Kill ${W.id}\\?$`) })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Kill" })).toBeTruthy();
+  });
+
+  it("puts Approve and Reject on the waiting gate row of the Gates tab", async () => {
+    await show({}, `#record/${W.id}?tab=gates`);
+    await screen.findByText(/^1–\d+ of \d+$/);
+    const row = Array.from(document.querySelectorAll("#dz-gates tbody tr")).find((r) => r.querySelector('[id^="gt-approve-"]'));
+    expect(row).toBeTruthy();
+    expect(row?.querySelector('[id^="gt-reject-"]')).toBeTruthy();
   });
 
   it("shows gate kinds in lower case with the 1-n of N footer", async () => {
@@ -185,6 +205,14 @@ describe("Changes page", () => {
     mount(<ChangesView />);
     expect(await screen.findByText("That work order does not exist.", {}, { timeout: 4000 })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Work orders" })).toBeTruthy();
+  });
+
+  it("does not crash when the record arrives without a code section", async () => {
+    mockApi({ ...readsFor(W), [`GET /api/v1/work-orders/${W.id}/record`]: () => ({ body: {} }), [`GET /api/v1/work-orders/${W.id}/changes`]: () => ({ status: 404, body: { ok: false, msg: "none" } }) });
+    window.location.hash = `#changes/${W.id}`;
+    mount(<ChangesView />);
+    await waitFor(() => expect(screen.queryByText(/failed to render/i)).toBeNull());
+    expect(await screen.findByRole("heading", { name: /Changes/ }, { timeout: 4000 })).toBeTruthy();
   });
 
   it("without an id shows the Changes index with search, a Checks filter and a count", async () => {
