@@ -623,7 +623,7 @@ export async function recordDecision(fx: Fx, w: Wo, inst: { id: string; opened_a
       JSON.stringify({
         mode: "human", channel: by.channel, via: by.via, reason: o.reason ?? "", reasonCode: decision === "approved" ? "approved" : "rejected", timeToDecideMs: fx.now.getTime() - (ms(inst.opened_at) ?? fx.now.getTime()),
         voters: votes.map((v) => ({ by: v.voter, vote: v.vote, at: ms(v.at) })), approvals: o.approvals ?? votes.filter((v) => v.vote === "approve").length, riskTags: inst.basis.riskTags ?? [], samplingReason: inst.basis.forcedHuman ? "risk-triggered" : inst.basis.sampled ? "sampled" : "gated", artefactEdited: await editedByPeople(fx.tx, fx.orgId, w.id), reviewSurface: null, policies, trustLevelNum: lvl.effective, trustGranted: lvl.granted, trustCell: lvl.cellId,
-        ...(o.override ? { override: true, overrideBy: "factory_admin" } : {}),
+        override: !!o.override, ...(o.override ? { overrideBy: "factory_admin" } : {}),
       }),
       fx.now,
       lvl.grantId,

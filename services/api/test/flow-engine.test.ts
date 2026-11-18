@@ -246,6 +246,30 @@ d("flow engine: guarantees F1 to F6", () => {
       expect((await w.get(id)).gates[gate].status).not.toBe("waiting");
     });
 
+    it("Factory Admin is a normal approver: no reason needed, recorded as override false, and counted toward N of M; a person with no role is still refused", async () => {
+      const { id, gate } = await atGate("FA normal", "p-tomas", rule({ sod: true, required: 1, roles: ["line_lead"] }));
+      const overridesBefore = (await w.events("gate.override")).length;
+      const nobody = await vote("p-rui", id, gate);
+      expect(nobody.status).toBe(403);
+      expect(nobody.body.needs).not.toBe("override_reason");
+      const ok = await vote("p-asha", id, gate);
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect(ok.body.passed).toBe(true);
+      const dec = (await w.q(`select * from gate_decisions where gate_instance_id = $1`, [`${id}:${gate}:1`]))[0];
+      expect(dec.detail).toMatchObject({ override: false });
+      expect(dec.detail.reason).toBe("");
+      expect((await w.events("gate.override")).length).toBe(overridesBefore);
+    });
+
+    it("Factory Admin counts as one vote of two: a plain vote below N of M is not an override", async () => {
+      const { id, gate } = await atGate("FA one of two", "p-tomas", rule({ sod: true, required: 2 }));
+      const a = await vote("p-asha", id, gate);
+      expect(a.status, JSON.stringify(a.body)).toBe(200);
+      expect(a.body).toMatchObject({ passed: false, have: 1, need: 2 });
+      const b = await vote("p-priya", id, gate);
+      expect(b.body).toMatchObject({ passed: true, have: 2 });
+    });
+
     it("A8: approve and reject must name the open instance; a bare id is 428 with the instance, a stale number is 409, the right number works", async () => {
       const { id, gate } = await atGate("Pinned decisions", "p-meera", rule({ required: 1, sod: true, roles: ["line_lead", "reviewer"] }));
       const bare = (verb: "approve" | "reject") => w.call("p-priya", "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:${gate}`)}/${verb}`, { reason: "Needs a rework of the refunds" });
