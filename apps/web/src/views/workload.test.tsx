@@ -83,7 +83,8 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
 }
 
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
-function mount() {
+function mount(detail = true) {
+  window.history.replaceState(null, "", detail ? "/?wview=detail" : "/");
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider><WorkloadView /></OverlayProvider></QueryClientProvider>);
@@ -96,6 +97,7 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
+  window.history.replaceState(null, "", "/");
 });
 afterEach(() => {
   cleanup();
@@ -114,10 +116,8 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     setup();
     mount();
     const t = await byId("wl-people");
-    expect(document.body.textContent).toContain("Gates waiting3");
-    expect(document.body.textContent).toContain("Median wait1h 35m");
-    expect(document.body.textContent).toContain("After hours33%");
-    expect(document.body.textContent).toContain("Human minutes61");
+    expect(document.body.textContent).toContain("Approvals waiting3");
+    expect(document.body.textContent).toContain("Median wait at gates1h 35m");
     expect(document.querySelector(".wl-bus")?.textContent).toContain("2 of 3 waiting gates have exactly one eligible approver; 1 have nobody eligible except break-glass. That person is the bus factor for that work.");
     const priya = t.querySelector("tr[data-key='p-priya']")!;
     await waitFor(() => expect(priya.textContent).toContain("Priya Nair"));
@@ -146,11 +146,8 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     expect(reads(calls)[0]!.query.get("days")).toBe("7");
     type(await byId("wl-project"), "risk");
     await waitFor(() => expect(reads(calls).some((c) => c.query.get("scope") === "risk")).toBe(true));
-    fireEvent.click(document.getElementById("wl-days-1")!);
+    type(await byId("wl-days"), "1");
     await waitFor(() => expect(reads(calls).some((c) => c.query.get("days") === "1" && c.query.get("scope") === "risk")).toBe(true));
-    const before = reads(calls).length;
-    fireEvent.click(await byId("wl-refresh"));
-    await waitFor(() => expect(reads(calls).length).toBe(before + 1));
   });
 
   it("lists suggestions with the top five, and a link to show them all", async () => {
@@ -264,5 +261,36 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     fireEvent.click(await byId("wl-tab-teams"));
     fireEvent.click(await byId("wl-tab-people"));
     expect(Array.from(document.querySelectorAll("#wl-people tbody tr")).map((r) => r.getAttribute("data-key"))).toEqual(["p-meera", "p-priya"]);
+  });
+});
+
+describe("Workload: Control room prototype layout (gov1)", () => {
+  it("has the matrix and agent utilisation, person names link to the person page, no header actions", async () => {
+    setup();
+    mount(false);
+    await byId("wl-matrix");
+    expect(document.getElementById("wl-agents-card")).not.toBeNull();
+    await waitFor(() => expect(document.querySelector("#wl-matrix a")?.getAttribute("href")).toBe("#person/p-asha"));
+    expect(document.body.textContent).toContain("Approvals waiting");
+    expect(document.body.textContent).toContain("Agent utilisation");
+    expect(document.getElementById("wl-q")).not.toBeNull();
+  });
+
+  it("the overview has no Project or Window filter, no suggestions, no detail tabs and no link to the detail view", async () => {
+    setup();
+    mount(false);
+    await byId("wl-matrix");
+    expect(document.getElementById("wl-project")).toBeNull();
+    expect(document.getElementById("wl-days")).toBeNull();
+    expect(document.getElementById("wl-sugg-card")).toBeNull();
+    expect(document.getElementById("wl-tab-panel")).toBeNull();
+    expect(document.body.textContent).not.toContain("n=");
+    expect(document.getElementById("wl-view-link")).toBeNull(); // the header sub is plain text, as in the prototype
+    expect(document.querySelector(".ph")?.textContent).not.toContain("Suggestions, teams and minutes");
+    cleanup();
+    mount(true); // the detail view is still reachable by its address (?wview=detail)
+    await byId("wl-sugg-card");
+    expect(document.getElementById("wl-matrix")).toBeNull();
+    expect(document.getElementById("wl-project")).not.toBeNull();
   });
 });

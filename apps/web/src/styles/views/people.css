@@ -135,3 +135,7 @@
 @media (max-width: 560px) { .acct-kv > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 .person-stack .caps-grid { grid-template-columns: repeat(auto-fill, minmax(min(210px, 100%), 1fr)); }
 .person-stack .caps li > span { min-width: 0; overflow-wrap: anywhere; }
+
+/* gov1: a dialog panel sits above its own scrim (the prototype scrim carries z-index 100; the panel is not positioned) */
+.dlg-wrap > .scrim { z-index: 0; }
+.dlg-wrap > .dlg { position: relative; z-index: 1; }

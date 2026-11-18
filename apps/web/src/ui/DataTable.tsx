@@ -29,13 +29,15 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total, selected, onSelect, page: pageProp, onPage, sortHints, neutralArrow, sortGlyphs, idleGlyph }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total, selected, onSelect, page: pageProp, onPage, sortHints, neutralArrow, sortGlyphs, idleGlyph, sortHint }: {
   /** Show the prototype's dim up/down arrow on sortable headers that are not the active sort. */
   neutralArrow?: boolean;
   /** Additive: show a faint two-way arrow on every sortable column that is not the current sort (Control Room prototype). */
   sortHints?: boolean;
   /** Show the prototype's faint two-way arrow on sortable headers that are not the active sort. */
   idleGlyph?: boolean;
+  /** Show a two-way arrow on sortable headers that are not the active sort (gov1). */
+  sortHint?: boolean;
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -58,6 +60,11 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   pageSize?: number;
   /** Prototype pager: "1-12 of 66", Prev, "1 / 6", Next (instead of "Show more"). Needs pageSize. */
   pager?: boolean;
+  /** Optional controlled page (0-based) so a view can keep the page in the URL. With onPage. */
+  page?: number;
+  onPage?: (page: number) => void;
+  /** Show the dim two-way glyph on sortable headers that are not the active sort (prototype look). */
+  sortHint?: boolean;
   /** A leading checkbox column with select-all (selection is local to the table). */
   selectable?: boolean;
   empty?: { title: string; text?: string; action?: ReactNode };
@@ -86,6 +93,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
     setSeen(`${pageSize ?? 0}:${rows.length}`);
     setShown(pageSize ?? 0);
     setOwnPage(0);
+    if (onPage && pageProp) queueMicrotask(() => onPage(0));
   }
   const [ownPicked, setOwnPicked] = useState<Set<string>>(new Set());
   const picked: ReadonlySet<string> = selected ?? ownPicked;
