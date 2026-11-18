@@ -9,6 +9,7 @@ import { makeStopActions } from "../../shell/stopActions";
 import { useCatalog } from "../projects/kit";
 import { useProjectRepos } from "../floor/kit";
 import { ReclassifyDialog } from "../work-orders/intake";
+import { ApproveGateDialog, RejectGateDialog } from "../record/GateDialogs";
 import { ParkDialog, ReassignDialog, SendBackDialog } from "./Dialogs";
 import { bayLabel, dec, isClosed, no, ok, stName, type TDecision, type TWo } from "./model";
 
@@ -28,7 +29,7 @@ export interface ActionSpec {
 }
 
 /** The actions of a work order with their locks and handlers; both the traveler drawer and the dossier toolbar render them. */
-export function useActionSpecs(wo: TWo): ActionSpec[] | null {
+export function useActionSpecs(wo: TWo, page = false): ActionSpec[] | null {
   const ui = useUI();
   const me = useMe();
   const cat = useCatalog();
@@ -61,24 +62,31 @@ export function useActionSpecs(wo: TWo): ActionSpec[] | null {
     if (dA.allowed && halted) dA = no(`${halted.reason} Resume first.`);
     out.push({
       key: "approve",
-      label: g.id === "G0G1" ? "Confirm brief" : g.id === "G6" ? "Confirm release" : `Approve ${g.label}`,
+      label: page ? "Approve" : g.id === "G0G1" ? "Confirm brief" : g.id === "G6" ? "Confirm release" : `Approve ${g.label}`,
       kind: "primary",
-      icon: g.id === "G6" ? "rocket" : "check",
+      icon: page ? "" : g.id === "G6" ? "rocket" : "check",
       id: "trv-approve",
       guard: dA,
       group: "decide",
       ...(!dA.allowed ? { why: `${dA.reason}${dA.needs ? ` Needs: ${dA.needs}.` : ""}` } : {}),
-      onClick: () => void (g.id === "G0G1" ? ops.confirmBrief(wo.id, undefined, ifm) : ops.approveGate(wo.id, g.id, ap.instance, undefined, ifm)).then((r) => res(r)),
+      onClick: () => {
+        const run = () => void (g.id === "G0G1" ? ops.confirmBrief(wo.id, undefined, ifm) : ops.approveGate(wo.id, g.id, ap.instance, undefined, ifm)).then((r) => res(r));
+        // the work order page asks first (prototype Approve dialog: the gate's purpose and an optional note); the drawer decides in one press
+        if (!page) return run();
+        void ui.open((close) => <ApproveGateDialog wo={wo} gate={g} guard={dA} run={(note) => (g.id === "G0G1" ? ops.confirmBrief(wo.id, undefined, ifm) : ops.approveGate(wo.id, g.id, ap.instance, undefined, ifm, note || undefined))} onClose={close} />);
+      },
     });
     const dR: TDecision = g.id === "G0G1" ? (stop ? no(stopWhy) : dec(wo, "decline")) : ap;
     out.push({
       key: "reject",
-      label: g.id === "G0G1" ? "Decline" : `Reject ${g.label}`,
-      icon: "x",
+      label: page ? "Reject" : g.id === "G0G1" ? "Decline" : `Reject ${g.label}`,
+      ...(page ? { kind: "danger" } : {}),
+      icon: page ? "" : "x",
       id: "trv-reject",
       guard: dR,
       group: "decide",
-      onClick: () =>
+      onClick: () => {
+        if (page) return void ui.open((close) => <RejectGateDialog wo={wo} gate={g} guard={dR} run={(v) => (g.id === "G0G1" ? ops.decline(wo.id, v, undefined, ifm) : ops.rejectGate(wo.id, g.id, ap.instance, v, undefined, ifm))} onClose={close} />);
         ui.reasonDialog({
           title: `${g.id === "G0G1" ? "Decline " : `Reject ${g.label} on `}${wo.id}`,
           kicker: `${g.label} ${g.name}`,
@@ -92,7 +100,8 @@ export function useActionSpecs(wo: TWo): ActionSpec[] | null {
             if (r.ok) ui.toast(r.msg, "ok");
             return r;
           },
-        }),
+        });
+      },
     });
   }
   void approveGate;
@@ -105,7 +114,7 @@ export function useActionSpecs(wo: TWo): ActionSpec[] | null {
     const back = wo.bayFrom || stationId;
     out.push({
       key: "unpark",
-      label: `Return to ${stName(cat, back)}`,
+      label: page ? "Resume" : `Return to ${stName(cat, back)}`,
       kind: "primary",
       icon: "undo",
       id: "trv-unpark",
@@ -127,7 +136,7 @@ export function useActionSpecs(wo: TWo): ActionSpec[] | null {
         }),
     });
   } else
-    out.push({ key: "park", label: "Move to bay", icon: "st-park", id: "trv-park", guard: closed ? no(closedWhy) : stop ? no(stopWhy) : dec(wo, "park"), group: "move", onClick: () => void ui.open((close) => <ParkDialog woId={wo.id} onClose={close} />) });
+    out.push({ key: "park", label: page ? "Park in a bay" : "Move to bay", icon: "st-park", id: "trv-park", guard: closed ? no(closedWhy) : stop ? no(stopWhy) : dec(wo, "park"), group: "move", onClick: () => void ui.open((close) => <ParkDialog woId={wo.id} onClose={close} />) });
   const first = wo.route.indexOf(stationId) <= 0;
   out.push(
     {

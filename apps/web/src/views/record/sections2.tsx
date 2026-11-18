@@ -155,7 +155,7 @@ export function Changes({ c }: { c: Ctx }) {
           </div>
           <div className="small muted">{`${cm.author ? name(cm.author) : "unknown"} · ${when(cm.at)}`}</div>
           <ul className="rec-tree rec-tree-flat">
-            {cm.files.map((p) => {
+            {(cm.files ?? []).map((p) => {
               const f = files.find((x) => x.path === p.path);
               return f ? <FileRow key={p.path} f={f} c={c} k={`${pre}c${cm.sha}-`} /> : <li key={p.path} className="mono small">{p.path}</li>;
             })}

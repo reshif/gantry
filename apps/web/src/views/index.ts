@@ -16,6 +16,7 @@ export const VIEWS: Record<string, LazyExoticComponent<ComponentType>> = {
   record: lazyRetry(() => import("./record")),
   traveler: lazyRetry(() => import("./traveler/Page")),
   changes: lazyRetry(() => import("./changes")),
+  dossier: lazyRetry(() => import("./dossier")),
   agents: lazyRetry(() => import("./agents")),
   skills: lazyRetry(() => import("./skills")),
   models: lazyRetry(() => import("./models")),

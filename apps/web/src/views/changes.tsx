@@ -4,54 +4,62 @@
  */
 import { navigate, useHash } from "../lib/router";
 import { Btn, Chip, Empty, Panel, Stat, StatRow, ViewHead } from "../ui/primitives";
+import { hashFor } from "../lib/router";
 import { useMemo } from "react";
 import { useActors } from "../ui/actors";
-import { useQueryParam } from "./floor/urlState";
+import { splitQuery, useHashQuery } from "./dossier/hashQuery";
 import { Loading } from "../ui/async";
-import { Picker } from "./record/Picker";
-import { Changes } from "./record/sections2";
+import { ChangesIndex } from "./changes/Index";
 import { useChangesRead, useRecordData, sum, type RecFile } from "./record/data";
 
 export default function ChangesView() {
   const hash = useHash();
-  const id = (hash.param || "").toUpperCase();
+  const id = splitQuery(hash.param).id.toUpperCase();
   const d = useRecordData(id || null);
   const ch = useChangesRead(id || null).data;
-  const [fileQ, setFile] = useQueryParam("file");
+  const [fileQ, setFile] = useHashQuery("file");
   const actor = useActors();
   const files: RecFile[] = useMemo(() => {
     if (!d.wo || !d.rec) return [];
     const planFiles = (d.wo.files ?? []) as RecFile[];
-    const real = ch?.files ?? d.rec.code.files;
+    const real = ch?.files ?? d.rec.code?.files ?? [];
     const byPath = new Map(planFiles.map((f) => [f.path, f]));
     const out: RecFile[] = real.map((f) => ({ ...(byPath.get(f.path) ?? {}), ...f }) as RecFile);
     for (const f of planFiles) if (!out.some((x) => x.path === f.path)) out.push(f);
     return out;
   }, [ch, d.wo, d.rec]);
-  if (!id) return <Picker />;
+  if (!id) return <ChangesIndex />;
   if (d.loading) return <div className="view rec-view"><Loading id="chg-loading" label="the changes" /></div>;
   if (d.error || !d.wo || !d.rec || !d.project || !d.cat) {
     const status = (d.error as { status?: number } | null)?.status;
-    return <Picker note={status === 403 || status === 404 ? `${id} was not found, or it belongs to a project outside your access. Pick a work order you can see.` : `Could not load the changes of ${id}.`} />;
+    const missing = status === 403 || status === 404 || !d.error;
+    return (
+      <div className="view rec-view" id="chg-missing">
+        <ViewHead plain title="Changes" />
+        <Panel>
+          <Empty title="Nothing to show" text={missing ? "That work order does not exist." : `Could not load the changes of ${id}.`} action={<Btn label="Work orders" id="chg-missing-wos" onClick={() => navigate("work-orders")} />} />
+        </Panel>
+      </div>
+    );
   }
-  const { wo, rec, project, cat } = d;
+  const { wo, rec } = d;
   const sel = files.find((f) => f.path === fileQ) ?? files[0];
-  const commits = ch?.commits ?? rec.code.commits.map((x) => ({ sha: x.sha, message: x.message, author: x.author }));
-  const pr = rec.code.pullRequests[0] ?? null;
+  const commits = ch?.commits ?? (rec.code?.commits ?? []).map((x) => ({ sha: x.sha, message: x.message, author: x.author }));
+  const pr = rec.code?.pullRequests?.[0] ?? null;
   return (
     <div className="view rec-view dz">
       <ViewHead
-        kicker={<span style={{ display: "inline-flex", gap: 8 }}><a href="#changes" onClick={(e) => { e.preventDefault(); navigate("changes"); }}>Changes</a><span aria-hidden="true">/</span><span>{wo.id}</span></span>}
+        plain
+        kicker={<span style={{ display: "inline-flex", gap: 8 }}><a href={hashFor("changes", null, wo.project)} onClick={(e) => { e.preventDefault(); navigate("changes", null, wo.project); }}>Changes</a><span aria-hidden="true">/</span><a href={hashFor("record", wo.id, wo.project)} onClick={(e) => { e.preventDefault(); navigate("record", wo.id, wo.project); }}>{wo.id}</a></span>}
         title={`Changes · ${wo.id}`}
         sub={wo.title}
-        actions={<Btn label={`Back to ${wo.id}`} icon="back" id="chg-back" onClick={() => navigate("record", wo.id, wo.project)} />}
       />
       <StatRow id="chg-stats">
         <Stat label="Files" value={String(files.length)} />
         <Stat label="Added" value={`+${sum(files, "plus")}`} tone="done" />
         <Stat label="Removed" value={`−${sum(files, "minus")}`} tone="block" />
-        <Stat label="Tests passed" value={String(rec.code.tests.passed)} sub={`${rec.code.tests.added} added`} />
-        <Stat label="PR" value={pr ? `#${pr.number}` : "—"} sub={pr ? `${pr.state}${pr.draft ? " · draft" : ""}` : "none"} />
+        <Stat label="Tests passed" value={String(rec.code.tests.passed)} sub={`${rec.code.tests.added} added`} tone="info" />
+        <Stat label="PR" value={pr ? `#${pr.number}` : "—"} sub={pr ? `${pr.state} · ${wo.pr ? wo.pr.checks : "no checks"}` : "none"} />
       </StatRow>
       <div className="cols w12">
         <Panel title="Files" flush>
@@ -59,7 +67,7 @@ export default function ChangesView() {
             <ul className="list" id="chg-files">
               {files.map((f) => (
                 <li key={f.path} style={f.path === sel?.path ? { background: "var(--accent-soft)" } : undefined}>
-                  <Btn label={f.path} kind="ghost" small cls="pri trunc grow mono" style={{ justifyContent: "flex-start", textAlign: "left", minWidth: 0, flex: "1 1 0" }} aria-current={f.path === sel?.path ? "true" : undefined} onClick={() => setFile(f.path)} />
+                  <a className="pri trunc grow mono small" href={`${hashFor("changes", wo.id, wo.project)}?file=${encodeURIComponent(f.path)}`} aria-current={f.path === sel?.path ? "true" : undefined} title={f.path} onClick={(e) => { e.preventDefault(); setFile(f.path); }}>{f.path}</a>
                   <Chip text={f.status} cls={f.status === "added" ? "ok" : "plain"} />
                   <span className="num small">{`+${f.plus}/−${f.minus}`}</span>
                 </li>
@@ -89,10 +97,6 @@ export default function ChangesView() {
           </Panel>
         </div>
       </div>
-      <details className="dz-replay" id="chg-full">
-        <summary>Full change review: file tree, guardrail and plan</summary>
-        <Changes c={{ wo, rec, project, cat, pre: "chg-", compact: false, page: true }} />
-      </details>
     </div>
   );
 }

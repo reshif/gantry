@@ -53,23 +53,22 @@ export function SendBackDialog({ woId, onClose }: { woId: string; onClose: () =>
   };
   return (
     <Dialog
-      title={`Send ${wo.id} back`}
-      kicker="Rework"
-      sub="The station's agent picks it up again with your note. Gates after that station reset and need approving again."
+      title="Send back"
+      sub="Choose an earlier station. Its agent restarts with your note."
       onClose={onClose}
       body={
         <div className="form-grid">
           <LockNote decision={d} what="Sending work back" />
-          <Field label="Back to station" htmlFor="sb-to" hint={`Only earlier stations on the ${cat.classes.find((c) => c.id === wo.cls)?.name ?? wo.cls} route.`}>
+          <Field label="Station" htmlFor="sb-to">
             <Select id="sb-to" options={opts} value={pick} onChange={setTo} />
           </Field>
-          <Field label="Note for the agent" htmlFor="sb-note">
+          <Field label="What to fix (required)" htmlFor="sb-note">
             <textarea id="sb-note" className="input" rows={3} placeholder="What needs to change?" value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
           <Err text={err} />
         </div>
       }
-      actions={[{ label: "Cancel" }, { label: "Send back", kind: "primary", icon: "undo", submit: true, id: "sb-submit", guard: d, onClick: () => void submit() }]}
+      actions={[{ label: "Cancel" }, { label: "Save", kind: "primary", submit: true, id: "sb-submit", guard: d, onClick: () => void submit() }]}
     />
   );
 }
@@ -180,9 +179,7 @@ export function ParkDialog({ woId, onClose }: { woId: string; onClose: () => voi
   };
   return (
     <Dialog
-      title={`Move ${wo.id} to a bay`}
-      kicker="Off the main belt"
-      sub={`Work in a bay stops. It returns to ${stName(cat, cat.stations[wo.station]?.id)} when someone releases it.`}
+      title="Park work order"
       onClose={onClose}
       body={
         <div className="form-grid">
@@ -190,13 +187,13 @@ export function ParkDialog({ woId, onClose }: { woId: string; onClose: () => voi
           <Field label="Bay" htmlFor="park-bay" hint={chosen?.disabled ? chosen.why : "Declined needs Decline rights. Queue is only for work about to build."}>
             <Select id="park-bay" options={opts} value={sel} onChange={setBay} />
           </Field>
-          <Field label="Reason" htmlFor="park-reason">
+          <Field label="Reason (required)" htmlFor="park-reason">
             <textarea id="park-reason" className="input" rows={3} placeholder="Why does it leave the belt?" value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
           <Err text={err} />
         </div>
       }
-      actions={[{ label: "Cancel" }, { label: "Move to bay", kind: "primary", icon: "st-park", submit: true, id: "park-submit", guard: d, onClick: () => void submit() }]}
+      actions={[{ label: "Cancel" }, { label: "Save", kind: "primary", submit: true, id: "park-submit", guard: d, onClick: () => void submit() }]}
     />
   );
 }

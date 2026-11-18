@@ -5,28 +5,36 @@
  */
 import { useCallback, useEffect, useRef } from "react";
 import { navigate } from "../../lib/router";
-import { Tabs } from "../../ui/primitives";
-import { Icon } from "../../ui/Icon";
+import { Btn, Empty, Panel, Tabs, ViewHead } from "../../ui/primitives";
 import { Loading } from "../../ui/async";
 import { reducedMotion } from "../../lib/prefs";
 import { WoSessionPage } from "../conversations/Session";
 import { useWoSession } from "../conversations/session-api";
-import { Scrubber, Sections } from "../record/Lifecycle";
+import { Meter, Scrubber, Sections, useCopyMarkdown, useExportRecord } from "../record/Lifecycle";
 import { useRecordData, type SectionId } from "../record/data";
 import { journeyOf, toRecEvent } from "../traveler/model";
-import { Picker } from "../record/Picker";
+import { useHashQuery } from "./hashQuery";
+import { useActors } from "../../ui/actors";
+import { fmtDate, plainName } from "./time";
 import { DossierHead } from "./Head";
-import { Props, waitingOnYou } from "./Props";
+import { Props } from "./Props";
 import { BriefPanel, CriteriaPanel, GatesPanel, PlanPanel, RunsPanel } from "./Panels";
 
 export type DossierTab = "document" | "activity" | "gates" | "runs";
 
-export function Dossier({ id, tab }: { id: string; tab: DossierTab }) {
+export function Dossier({ id, tab: pathTab }: { id: string; tab: DossierTab }) {
+  // the tab is view state in the URL (?tab=activity); an old #record/WO-x/activity path still opens the same tab
+  const [q, setQ] = useHashQuery("tab");
+  const tab: DossierTab = q === "activity" || q === "gates" || q === "runs" || q === "document" ? q : pathTab;
+  const [full] = useHashQuery("full");
+  const copyMd = useCopyMarkdown();
+  const exportRec = useExportRecord();
+  const actor = useActors();
   const d = useRecordData(id);
   const sess = useWoSession(id);
   const session = sess.data;
   const root = useRef<HTMLDivElement>(null);
-  const setTab = useCallback((t: DossierTab) => navigate("record", t === "document" ? id : `${id}/${t}`), [id]);
+  const setTab = useCallback((t: DossierTab) => { setQ(t === "document" ? null : t); }, [setQ]);
   const scroll = (el: HTMLElement | null, focus?: HTMLElement | null) => {
     el?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
     focus?.setAttribute("tabindex", "-1");
@@ -66,8 +74,19 @@ export function Dossier({ id, tab }: { id: string; tab: DossierTab }) {
   if (d.loading) return <div className="view rec-view"><Loading id="rec-loading" label="the record" /></div>;
   const status = (d.error as { status?: number } | null)?.status;
   if (d.error || !d.wo || !d.rec || !d.project || !d.cat) {
-    if (status === 401) return <Picker />;
-    return <Picker note={status === 403 || status === 404 ? `${id} was not found, or it belongs to a project outside your access. Pick a record you can see.` : `Could not load ${id}.`} />;
+    const missing = status === 403 || status === 404 || (!d.error && !d.wo);
+    return (
+      <div className="view rec-view" id="dz-missing">
+        <ViewHead plain title={missing ? "Work order not found" : "Work order could not be loaded"} />
+        <Panel>
+          <Empty
+            title={missing ? `${id} does not exist` : `Could not load ${id}`}
+            text={status === 403 ? "It belongs to a project outside your access." : missing ? "Pick one from the register." : "The server did not answer. Try again in a moment."}
+            action={<Btn label="Work orders" id="dz-missing-wos" onClick={() => navigate("work-orders")} />}
+          />
+        </Panel>
+      </div>
+    );
   }
   const { wo, rec, project, cat } = d;
   const c = { wo, rec, project, cat, pre: "rec-", compact: false, doc: true };
@@ -76,45 +95,57 @@ export function Dossier({ id, tab }: { id: string; tab: DossierTab }) {
     if (tab !== "document") setTab("document");
     else scrollToSection();
   };
-  const decide = () => {
-    const b = document.getElementById("trv-approve");
-    scroll(document.getElementById("dz-head"), b);
-  };
-  const waiting = waitingOnYou(wo, cat, session).length;
   const events = journeyOf(rec.events.map(toRecEvent));
+  const tone = (t: string) => (/Approved|Released/.test(t) ? "ok" : /Reject|Killed|fail/i.test(t) ? "bad" : "");
+  const timeline = (wo.log ?? []).slice().reverse();
   return (
     <div className="view rec-view dz" id="dz" ref={root}>
       <DossierHead wo={wo} cat={cat} project={project} session={session} onActivity={() => toActivity()} />
-      <div className="dz-tabbar">
-        <Tabs idPrefix="dz-tab" items={[{ id: "document", label: "Document" }, { id: "activity", label: "Activity", count: wo.log?.length ?? 0 }, { id: "gates", label: "Gates", count: Object.keys(wo.gates ?? {}).length }, { id: "runs", label: "Runs", count: wo.history.length }]} active={tab} onChange={(t) => setTab(t as DossierTab)} />
-        {waiting ? (
-          <button type="button" className="dz-tabnote need" onClick={() => (waitingOnYou(wo, cat, session)[0]?.go === "decide" ? decide() : toActivity(waitingOnYou(wo, cat, session)[0]?.target))}>
-            <Icon name="check" />{`Waiting on you (${waiting})`}
-          </button>
-        ) : <span className="dz-tabnote faint"><Icon name="check" />Nothing waits on you</span>}
-      </div>
-      <div className={`dz-grid${tab === "document" || tab === "activity" ? " cols w21" : ""}`}>
-        <div className="dz-main stack" role="tabpanel" aria-labelledby={`dz-tab-${tab}`}>
-          {tab === "document" ? (
-            <>
-              <BriefPanel wo={wo} />
-              <CriteriaPanel wo={wo} />
-              <PlanPanel wo={wo} />
-              <details className="dz-replay">
-                <summary>Step through this work order&apos;s history</summary>
-                <Scrubber c={c} events={events} pre="rec-" />
-              </details>
+      <Tabs idPrefix="dz-tab" items={[{ id: "document", label: "Document" }, { id: "activity", label: "Activity", count: wo.log?.length ?? 0 }, { id: "gates", label: "Gates", count: Object.keys(wo.gates ?? {}).length }, { id: "runs", label: "Runs", count: wo.history.length }]} active={tab} onChange={(t) => setTab(t as DossierTab)} />
+      <div className="dz-pane" role="tabpanel" aria-labelledby={`dz-tab-${tab}`}>
+        {tab === "document" ? (
+          <>
+            <div className="cols w21">
+              <div className="stack">
+                <BriefPanel wo={wo} />
+                <CriteriaPanel wo={wo} />
+                <PlanPanel wo={wo} />
+              </div>
+              <Props wo={wo} cat={cat} project={project} />
+            </div>
+            {full === "1" ? <details className="dz-replay" id="dz-docs" open>
+              <summary>Station documents and full history</summary>
+              <div className="dz-exp">
+                <Btn label="Copy as Markdown" small icon="copy" id="rec-copy" onClick={() => void copyMd(wo.id)} />
+                <Btn label="Export" small icon="ledger" id="rec-export" onClick={() => void exportRec(wo.id)} />
+              </div>
+              <Meter rec={rec} pre="rec-" onJump={jump} />
+              <Scrubber c={c} events={events} pre="rec-" />
               <Sections c={c} />
-            </>
-          ) : tab === "gates" ? (
-            <GatesPanel wo={wo} cat={cat} />
-          ) : tab === "runs" ? (
-            <RunsPanel wo={wo} cat={cat} />
-          ) : (
-            <WoSessionPage woId={id} bare back={() => setTab("document")} />
-          )}
-        </div>
-        {tab === "document" || tab === "activity" ? <Props wo={wo} rec={rec} cat={cat} project={project} session={session} onJump={jump} onActivity={toActivity} onDecide={decide} /> : null}
+            </details> : null}
+          </>
+        ) : tab === "gates" ? (
+          <GatesPanel wo={wo} cat={cat} />
+        ) : tab === "runs" ? (
+          <RunsPanel wo={wo} cat={cat} />
+        ) : (
+          <div className="cols w21">
+            <Panel title="Timeline">
+              {timeline.length ? (
+                <ol className="tl">
+                  {timeline.map((l, i) => (
+                    <li key={i} className={tone(l.text)}><time>{fmtDate(l.at)}</time><div><b>{plainName(actor(l.who).name)}</b>{` ${l.text}`}</div></li>
+                  ))}
+                </ol>
+              ) : <Empty title="No events yet" text="Events appear here as the work order moves." />}
+            </Panel>
+            <Panel title="Conversation" flush>
+              <div className="dz-main dz-conv">
+                <WoSessionPage woId={id} bare back={() => setTab("document")} />
+              </div>
+            </Panel>
+          </div>
+        )}
       </div>
     </div>
   );

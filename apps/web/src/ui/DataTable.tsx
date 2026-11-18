@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, pager, glyphs, mobileSort = true, proto }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, pager, glyphs, mobileSort = true, proto, range }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -63,6 +63,8 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   mobileSort?: boolean;
   /** The Blueprint prototype's list: triangle sort glyphs with a faint hint on sortable headers, no "Sort by" select, and a paged footer ("1–12 of 17", Prev, Page 1 / 2, Next) instead of "Show more". Needs `pageSize`. */  /** The Blueprint prototype's list: triangle sort glyphs with a faint hint, no "Sort by" select, and a paged footer when `pageSize` is set (or `pager` is given). */
   proto?: boolean;
+  /** Prototype footer: always show the "1–n of N" range under the table. */
+  range?: boolean;
 }) {
   const uid = useId().replace(/:/g, "");
   const [own, setOwn] = useState<SortState | null | undefined>(undefined);
@@ -195,6 +197,9 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
           </tbody>
         </table>
       </div>
+      {range && !(clientMore || hasMore) ? (
+        <div className="tfoot dtable-range"><span role="status">{`1–${visible.length} of ${total ?? rows.length}`}</span></div>
+      ) : null}
       {size ? (
         <div className="tfoot dtable-more">
           <span className="dtable-count" role="status">{`${pageAt * size + 1}–${pageAt * size + visible.length} of ${list.length}`}</span>
@@ -206,9 +211,11 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
             </div>
           ) : null}
         </div>
+      ) : range && !(clientMore || hasMore) ? (
+        <div className="tfoot dtable-range"><span role="status">{`1–${visible.length} of ${total ?? rows.length}`}</span></div>
       ) : clientMore || hasMore ? (
         <div className="tfoot dtable-more">
-          <span className="dtable-count" role="status">{total ? `Showing ${visible.length} of ${total}` : `Showing ${visible.length}${clientMore ? ` of ${rows.length}` : ""}`}</span>
+          <span className="dtable-count" role="status">{range ? `1–${visible.length} of ${total ?? rows.length}` : total ? `Showing ${visible.length} of ${total}` : `Showing ${visible.length}${clientMore ? ` of ${rows.length}` : ""}`}</span>
           {clientMore ? (
             <button type="button" className="btn sm btn-sm" id={`${id ?? "dt"}-more`} onClick={() => setShown(shown + (pageSize ?? 0))}>{`Show ${Math.min(pageSize ?? 0, rows.length - shown)} more of ${rows.length - shown}`}</button>
           ) : (

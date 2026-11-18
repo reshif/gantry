@@ -288,7 +288,7 @@ export function Lifecycle({ woId, compact = false }: { woId: string; compact?: b
         </div>
         <div className="lc-btns">
           <Btn label="Copy as Markdown" small icon="copy" id={`${pre}copy-${d.wo.id}`} onClick={() => void copy(d.wo!.id)} />
-          <Btn label="Open full record" small kind="primary" icon="record" id={`${pre}open-${d.wo.id}`} onClick={() => openRecord(d.wo!.id, d.wo!.project, true)} />
+          <Btn label="Open full record" small kind="primary" icon="record" id={`${pre}open-${d.wo.id}`} onClick={() => openRecord(d.wo!.id, d.wo!.project, true, true)} />
         </div>
       </div>
       <KillBanner wo={d.wo} />

@@ -341,7 +341,7 @@ export interface Crumb {
 }
 
 /** Page header (prototype .ph): eyebrow with the sheet's drawing number, one h1, a quiet subtitle, the action cluster. */
-export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, crumbs }: { crumbs?: Crumb[]; sheet?: string; kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
+export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, crumbs, plain }: { crumbs?: Crumb[]; /** Crumb headers (prototype): no drawing number before the crumb. */ plain?: boolean; sheet?: string; kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
   const loc = useHash();
   const hashId = loc.id || "home";
   const route = sheet ?? hashId;
@@ -362,8 +362,8 @@ export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, cru
             ))
           ) : (
             <>
-              <span title="Drawing number">{drawingNo(route)}</span>
-              <span aria-hidden="true">·</span>
+              {plain ? null : <span title="Drawing number">{drawingNo(route)}</span>}
+              {plain ? null : <span aria-hidden="true">·</span>}
               <span>{key ?? "ALL LINES"}</span>
             </>
           )}
