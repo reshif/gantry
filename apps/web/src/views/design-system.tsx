@@ -86,8 +86,8 @@ function ExampleForm({ box }: { box: { name: string; setErr: (e: string) => void
   const [err, setErr] = useState("");
   box.setErr = setErr;
   return (
-    <Field label="Name" required error={err || undefined}>
-      <TextInput id="ds-dlg-name" value={name} onChange={(v) => { setName(v); box.name = v; if (v.trim()) setErr(""); }} />
+    <Field label={<>Name<span className="muted"> (required)</span></>} error={err || undefined}>
+      <TextInput id="ds-dlg-name" aria-required="true" value={name} onChange={(v) => { setName(v); box.name = v; if (v.trim()) setErr(""); }} />
     </Field>
   );
 }
@@ -168,11 +168,17 @@ function Gallery({ sc }: { sc: string }) {
       <Panel title="Filter bar and table" flush>
         <FilterBar count={q || auto ? `${rows.length} agents of ${AGENTS.length}` : `${rows.length} agents`} actions={q || auto ? <Btn small kind="ghost" label="Clear" onClick={() => { setQ(""); setAuto(""); }} /> : null}>
           <SearchBox value={q} onChange={setQ} placeholder="Search…" label="Search agents" />
-          <Field label="Autonomy">
-            <Select id={`ds-auto-${sc}`} value={auto} onChange={setAuto} options={[{ value: "", label: "All" }, "auto", "gate"]} />
-          </Field>
+          {/* eslint-disable-next-line jsx-a11y/label-has-associated-control -- the Select primitive is the control */}
+          <label>
+            <span>Autonomy</span>
+            <Select id={`ds-auto-${sc}`} aria-label="Autonomy" value={auto} onChange={setAuto} options={[{ value: "", label: "All" }, "auto", "gate"]} />
+          </label>
         </FilterBar>
         <DataTable
+          sortHint
+          sortSelect={false}
+          rowHref={(a) => `#/agents/${a.id}`}
+          rowLabel={(a) => a.name}
           id={`ds-table-${sc}`}
           caption="Sample agents"
           rows={rows}
@@ -181,7 +187,7 @@ function Gallery({ sc }: { sc: string }) {
           pager="pages"
           empty={{ title: "Nothing matches these filters", text: "Loosen the search or clear the filters.", action: <Btn small label="Clear filters" onClick={() => { setQ(""); setAuto(""); }} /> }}
           columns={[
-            { key: "name", label: "Agent", sort: true, render: (a) => <a className="pri" href={`#agents/${a.id}`}>{a.name}</a> },
+            { key: "name", label: "Agent", sort: true, render: (a) => <a className="pri" href={`#/agents/${a.id}`}>{a.name}</a> },
             { key: "model", label: "Model", render: (a) => <span className="mono small">{a.model}</span> },
             { key: "autonomy", label: "Autonomy", render: (a) => <Chip text={a.autonomy} cls={a.autonomy === "auto" ? "info" : "warn"} /> },
             { key: "eval", label: "Eval", align: "end", sort: true, render: (a) => `${Math.round(a.eval * 100)}%` },
@@ -189,15 +195,18 @@ function Gallery({ sc }: { sc: string }) {
         />
       </Panel>
       <Panel title="Form fields">
-        <Field label="Title" required hint="Helper text sits under the field." error={titleErr || undefined}>
-          <TextInput id={`ds-title-${sc}`} value={title} onChange={(v) => { setTitle(v); if (v.trim()) setTitleErr(""); }} />
+        <Field label={<>Title<span className="muted"> (required)</span></>} hint="Helper text sits under the field." error={titleErr || undefined}>
+          <TextInput id={`ds-title-${sc}`} aria-required="true" value={title} onChange={(v) => { setTitle(v); if (v.trim()) setTitleErr(""); }} />
         </Field>
         <Field label="Priority">
           <Select id={`ds-prio-${sc}`} value="P0" options={["P0", "P1", "P2"]} />
         </Field>
-        <Field label="Notify me" htmlFor={`ds-notify-${sc}`}>
-          <Toggle id={`ds-notify-${sc}`} checked={on} onChange={setOn} label="Notify me" />
-        </Field>
+        <div className="field">
+          <label className="check" htmlFor={`ds-notify-${sc}`}>
+            <Toggle id={`ds-notify-${sc}`} checked={on} onChange={setOn} />
+            <span>Notify me</span>
+          </label>
+        </div>
         <Btn label="Validate" onClick={() => { if (!title.trim()) { setTitleErr("Title is required."); document.getElementById(`ds-title-${sc}`)?.focus(); } else setTitleErr(""); }} />
       </Panel>
       <Panel title="Overlays">

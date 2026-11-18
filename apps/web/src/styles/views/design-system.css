@@ -1,2 +1,13 @@
 /* Design system sheet: the section numbers continue from the paper drawing into the blueprint (the shell resets the counter per [data-scope]). */
 .cols > [data-scope] { counter-reset: none; }
+
+/* The paper-drawing scope keeps paper tokens even when the app theme is dark (the token sheet only forces them for a light app theme). */
+[data-scope="light"] {
+  color-scheme: light;
+  --bg:#f2f0e9; --grid:rgba(30,70,120,.07); --grid2:rgba(30,70,120,.13);
+  --surface:#fbfaf6; --surface2:#f6f4ec; --sunk:#ebe8dd;
+  --ink:#10223a; --ink2:#3a4b63; --ink3:#566478; --line:#b9c2cf; --line2:#8c9aae;
+  --accent:#0b62a0; --accent-ink:#ffffff; --accent-soft:#dcebf6;
+  --ok:#1c6b3f; --ok-bg:#dff0e4; --warn:#8a5200; --warn-bg:#f8ead0; --bad:#a8261f; --bad-bg:#f8e0dd;
+  --plate:rgba(16,34,58,.16); --focus:#0b62a0; --scrim:rgba(16,34,58,.45);
+}

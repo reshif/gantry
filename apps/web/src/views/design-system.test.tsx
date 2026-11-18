@@ -19,9 +19,25 @@ describe("Sign-in card", () => {
     expect(screen.getByRole("button", { name: "Theme" })).toBeTruthy();
     expect(container.querySelector('a.skip[href="#main"]')).toBeTruthy();
   });
+  it("is a form with Work email, Password, a Sign in submit and an SSO button, like the prototype", () => {
+    const { container } = render(<SignIn config={null} />);
+    expect(container.querySelector("main.signin > form.panel")).toBeTruthy();
+    expect(screen.getByLabelText("Work email")).toBeTruthy();
+    expect((screen.getByLabelText("Password") as HTMLInputElement).type).toBe("password");
+    expect((screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement).type).toBe("submit");
+    expect(screen.getByRole("button", { name: "Continue with SSO" })).toBeTruthy();
+  });
   it("shows a sign-in failure as a bad callout", () => {
     render(<SignIn config={null} error="denied" />);
     expect(within(screen.getByRole("alert")).getByText("denied")).toBeTruthy();
+  });
+});
+
+describe("Design system tokens", () => {
+  it("forces paper tokens on the light scope whatever the app theme", async () => {
+    const { readFileSync } = await import("node:fs");
+    const css = readFileSync("src/styles/views/design-system.css", "utf8");
+    expect(css).toMatch(/\[data-scope="light"\][^}]*--bg:#f2f0e9/);
   });
 });
 
@@ -44,7 +60,12 @@ describe("Design system sheet", () => {
     expect(screen.getAllByRole("button", { name: "Palette" })).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: "Icon button" })).toHaveLength(2);
     expect(container.querySelectorAll('[aria-busy="true"]')).toHaveLength(2);
-    expect(container.querySelector('a.pri[href="#agents/ag-intake"]')).toBeTruthy();
+    expect(container.querySelector('a.pri[href="#/agents/ag-intake"]')).toBeTruthy();
+    expect(container.querySelector('tr.rowtr a.pri[href="#/agents/ag-intake"]')).toBeTruthy();
+    expect(container.querySelectorAll(".sorthint").length).toBeGreaterThan(0);
+    expect(container.querySelector(".dtable-sortsel")).toBeNull();
+    expect(container.querySelector(".field-req")).toBeNull();
+    expect(container.querySelector("label.check .switch")).toBeTruthy();
     fireEvent.click(screen.getAllByRole("button", { name: "Validate" })[0]!);
     expect(screen.getByText("Title is required.")).toBeTruthy();
     expect(screen.getByText("All lines")).toBeTruthy();

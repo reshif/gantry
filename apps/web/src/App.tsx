@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { ApiError, setUnauthorizedHandler } from "./api/client";
 import { bindQueryClient, invalidateSlices } from "./api/keys";
@@ -36,6 +36,13 @@ function Root() {
   const session = deriveSession(meState);
   const signedIn = session.state === "in";
   const me = meState.data?.status === "in" ? meState.data.me : null;
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const on = () => setHash(window.location.hash);
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
+  const onSigninRoute = hash === "#/signin" || hash === "#signin";
 
   useSessionLifecycle(client, meState.data);
   useClearDraftsOnUserSwitch(meState.data?.status === "in" ? meState.data.me.person.id : null);
@@ -50,6 +57,10 @@ function Root() {
   useEffect(() => startConnectionWatch(), []);
 
   // Branch on data FIRST: a failed refetch of /me must never unmount a signed-in app.
+  if (me && onSigninRoute) {
+    // the prototype keeps #/signin reachable while signed in: it draws the sign-in card (a route of its own, no redirect to Home)
+    return <SignIn config={null} error={null} needs={null} />;
+  }
   if (me) {
     return (
       <>

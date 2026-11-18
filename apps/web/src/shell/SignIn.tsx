@@ -1,7 +1,8 @@
 /**
  * Sign-in screen in the Blueprint prototype's markup: one centred card (main.signin > .panel). Sign-in is delegated to
  * the identity provider: the buttons leave the SPA for /auth/login. Demo accounts appear only when the API config says
- * demoAccounts is on. There is no email/password form because the API offers no password login (backend gap).
+ * demoAccounts is on. The card carries the prototype's Work email / Password fields: the email goes to the identity provider as a
+ * login hint, the password is asked by the provider itself (the API offers no password login: backend gap), so that field is shown disabled.
  */
 import { useState } from "react";
 import type { PublicConfig } from "../api/types";
@@ -9,7 +10,7 @@ import { loginUrlWithReturn as loginUrl } from "../lib/session/returnTo";
 import { DEMO_ACCOUNTS } from "../lib/demo";
 import { applyTheme, updatePrefs, usePrefs } from "../lib/prefs";
 import { Icon, Logo } from "../ui/Icon";
-import { Btn } from "../ui/primitives";
+import { Btn, Field, TextInput } from "../ui/primitives";
 
 function Brand({ sub }: { sub: string }) {
   return (
@@ -55,12 +56,13 @@ export function SignIn({ config, error, needs }: { config: PublicConfig | null; 
   const demo = !!config?.demoAccounts;
   const accounts = config?.demoAccountList?.length ? config.demoAccountList : DEMO_ACCOUNTS;
   const [pending, setPending] = useState<"sso" | "github" | null>(null);
+  const [email, setEmail] = useState("");
   const go = (method: "sso" | "github") => { setPending(method); window.location.assign(loginUrl(method)); };
   return (
     <>
       <a className="skip" href="#main">Skip to content</a>
       <main className="signin" id="main">
-        <div className="panel" style={{ width: "min(420px,100%)" }}>
+        <form className="panel" style={{ width: "min(420px,100%)" }} onSubmit={(e) => { e.preventDefault(); if (needs !== "mfa_setup" && !pending) { setPending("sso"); window.location.assign(loginUrl("sso", email.trim() || undefined)); } }}>
           <div className="body">
             {needs === "mfa_setup" ? <MfaSetup /> : (
               <>
@@ -71,13 +73,20 @@ export function SignIn({ config, error, needs }: { config: PublicConfig | null; 
                     {error}
                   </div>
                 ) : null}
-                <Btn label={pending === "sso" ? "Opening your identity provider..." : "Sign in with SSO"} kind="primary" id="auth-sso-go" icon="key" cls="block" disabledReason={pending ? "Signing in" : null} onClick={() => go("sso")} />
-                <div className="row auth-or" style={{ margin: "12px 0" }}>
+                <Field label="Work email">
+                  <TextInput id="auth-email" type="email" value={email} onChange={setEmail} autoComplete="username" placeholder="you@company.com" />
+                </Field>
+                <Field label="Password" hint="Your identity provider asks for the password on its own page.">
+                  <TextInput id="auth-pw" type="password" value="" disabled autoComplete="current-password" placeholder="Asked by your identity provider" />
+                </Field>
+                <Btn label={pending === "sso" ? "Opening your identity provider..." : "Sign in"} kind="primary" type="submit" id="auth-sso-go" cls="block" disabledReason={pending ? "Signing in" : null} />
+                <div className="row" style={{ margin: "12px 0" }}>
                   <hr style={{ flex: 1, border: 0, borderTop: "1px solid var(--line)" }} />
                   <span className="small muted">or</span>
                   <hr style={{ flex: 1, border: 0, borderTop: "1px solid var(--line)" }} />
                 </div>
-                <Btn label="Continue with GitHub" id="auth-gh" icon="github" cls="block" disabledReason={config?.githubLogin === false ? "GitHub sign-in is turned off in Security settings." : pending ? "Signing in" : null} onClick={() => go("github")} />
+                <Btn label="Continue with SSO" id="auth-sso" cls="block" disabledReason={pending ? "Signing in" : null} onClick={() => go("sso")} />
+                <Btn label="Continue with GitHub" id="auth-gh" cls="block" disabledReason={config?.githubLogin === false ? "GitHub sign-in is turned off in Security settings." : pending ? "Signing in" : null} onClick={() => go("github")} />
                 {demo ? (
                   <div className="auth-demo" style={{ marginTop: 12 }}>
                     <h2 className="micro auth-demo-h">Demo accounts · development only</h2>
@@ -100,13 +109,13 @@ export function SignIn({ config, error, needs }: { config: PublicConfig | null; 
                   </div>
                 ) : null}
                 <p className="small muted" style={{ marginTop: 12 }}>
-                  {demo ? "MFA is required for admins. Development sign-in is on: use it only on a local stack." : "MFA is required for admins. Sign-in is handled by your organisation's identity provider."}
+                  {demo ? "MFA is required for admins. Development sign-in is on: use it only on a local stack." : "MFA is required for admins. Your organisation's identity provider checks the password and the second factor."}
                 </p>
                 <div className="row" style={{ marginTop: 8 }}><ThemeBtn /></div>
               </>
             )}
           </div>
-        </div>
+        </form>
       </main>
     </>
   );

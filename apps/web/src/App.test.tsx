@@ -66,7 +66,7 @@ describe("signed out", () => {
     await screen.findByText("Continue with SSO");
     expect(screen.getByText("Continue with GitHub")).toBeTruthy();
     expect(screen.queryByText(/Demo accounts/)).toBeNull();
-    expect(document.querySelector(".auth-belt li")).toBeTruthy(); // stations from the catalogue
+    expect(screen.getByLabelText("Work email")).toBeTruthy();
   });
 
   it("shows the guided two-step setup screen when the server says a Factory Admin needs a second factor", async () => {
@@ -114,9 +114,18 @@ describe("signed out", () => {
     const assign = vi.fn();
     vi.stubGlobal("location", { ...window.location, assign, hash: "", search: "" });
     render(<App />);
-    fireEvent.click(await screen.findByText("Continue with SSO"));
-    fireEvent.click(screen.getByText("Continue with GitHub"));
-    expect(assign.mock.calls).toEqual([["/auth/login?method=sso"], ["/auth/login?method=github"]]);
+    fireEvent.click(await screen.findByText("Continue with GitHub"));
+    expect(assign.mock.calls).toEqual([["/auth/login?method=github"]]);
+  });
+
+  it("the Sign in form sends the work email to the identity provider as a login hint", async () => {
+    mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "x" } }) });
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign, hash: "", search: "" });
+    render(<App />);
+    fireEvent.change(await screen.findByLabelText("Work email"), { target: { value: "asha@acme.dev" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(assign.mock.calls).toEqual([["/auth/login?login_hint=asha%40acme.dev"]]);
   });
 });
 
