@@ -112,6 +112,16 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     expect(document.getElementById("wl-hidden")?.textContent).toContain("Needs workload.view.");
   });
 
+  it("stays loading while people are pending: no empty matrix or '0 of 0' stands in for it", async () => {
+    setup();
+    const real = globalThis.fetch;
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => (String(url).includes("/api/v1/people") ? new Promise<Response>(() => undefined) : real(url, init)));
+    mount(false);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(document.querySelector("#wl-loading, .async-loading")).not.toBeNull();
+    expect(document.body.textContent).not.toContain("0 of 0");
+  });
+
   it("shows the title block, the bus-factor note and the people table with counts beside every rate", async () => {
     setup();
     mount();

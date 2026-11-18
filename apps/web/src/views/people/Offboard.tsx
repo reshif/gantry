@@ -11,7 +11,6 @@ import { useUI } from "../../ui/overlay-context";
 import { Icon } from "../../ui/Icon";
 import { Field, LockNote, type Decision } from "../../ui/primitives";
 import { usePeopleLoad } from "../govern/load";
-import { useOutcome } from "../govern/data";
 
 type OpenWork = OpenWorkItem & { why?: string };
 
@@ -63,7 +62,7 @@ function WorkList({ work, projects, onGo }: { work: OpenWork[]; projects: Projec
 export function DeactivateForm({ p, projects, perm, onDone, registerSubmit }: {
   p: Person; projects: Project[]; perm: Decision; onDone: (r: { keep: boolean; work: OpenWork[] | null }) => void; registerSubmit: (fn: () => void) => void;
 }) {
-  const outcome = useOutcome();
+  const ui = useUI();
   const keysQ = useApiKeys();
   const load = usePeopleLoad(projects);
   const lists = useQueries({
@@ -87,6 +86,7 @@ export function DeactivateForm({ p, projects, perm, onDone, registerSubmit }: {
   registerSubmit(() => {
     if (busy) return;
     const text = reason.trim();
+    if (!text) return setErr("Reason is required.");
     if (text.length < MIN_REASON) return setErr(`Give a reason of at least ${MIN_REASON} characters.`);
     setErr("");
     setRule("");
@@ -100,7 +100,7 @@ export function DeactivateForm({ p, projects, perm, onDone, registerSubmit }: {
         setRule(r.rule ? `${r.rule.name ? `${r.rule.name} ` : ""}[${r.rule.id}]` : "");
         return;
       }
-      outcome(r, `${p.name} deactivated`);
+      ui.toast(`${p.name} deactivated`, "warn");
       onDone({ keep, work: r.openWork ?? null });
     })();
   });
@@ -156,6 +156,8 @@ export function useOffboard(args: { perm: Decision; projects: Project[]; roleNam
         sub: "They are signed out everywhere and cannot sign in.",
         body: (close) => <DeactivateForm p={p} projects={args.projects} perm={guard} registerSubmit={(fn) => (submit = fn)} onDone={(r) => {
           close();
+          // The toast already said it; a result dialog appears only when the server lists open work left for someone to reassign.
+          if (!r.work?.length) return;
           ui.dialog({
             title: `${p.name} is deactivated`, kicker: "People", wide: true,
             body: (c) => <DeactivatedResult p={p} keep={r.keep} work={r.work} projects={args.projects} onGo={c} />,

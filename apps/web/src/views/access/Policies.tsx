@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { DAYS, type Action, type Policy, type Project, type Role } from "@gantry/domain";
+import { DAYS, type Action, type Freeze, type Policy, type Project, type Role } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { DataTable } from "../../ui/DataTable";
@@ -156,8 +156,12 @@ export function usePolicyDialog(args: { perm: Decision; roles: Role[]; actions: 
 
 const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 /** "Tue–Thu 10:00–16:00": days as a range when they run on, the hours as given, "always" for no window (as the prototype words it). */
-function whenText(p: Policy): string {
-  if (p.effect === "deny" && p.where.freeze) return "while a freeze is active";
+function whenText(p: Policy, freezes: Freeze[] = []): string {
+  if (p.effect === "deny" && p.where.freeze) {
+    // The freeze policy reads as the freeze window itself ("Dec 20 – Jan 5"), from the freeze list; the next whole-factory freeze that has not ended.
+    const f = freezes.filter((x) => x.repos === "all" && x.to > Date.now()).sort((a, b) => a.from - b.from)[0];
+    return f ? `${shortDate(f.from)} – ${shortDate(f.to)}` : "while a freeze is active";
+  }
   const w = p.when;
   let text = "always";
   if (w) {
@@ -167,13 +171,15 @@ function whenText(p: Policy): string {
     const hours = w.from === "00:00" && w.to === "24:00" ? "" : `${w.from}–${w.to}`;
     text = [days, hours].filter(Boolean).join(" ") || "always";
   }
-  return p.oncallOnly && !p.when && !p.where.freeze ? text : p.oncallOnly ? `${text}, on call` : text;
+  return p.oncallOnly && text !== "always" ? `${text}, on call` : text;
 }
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const shortDate = (ms: number): string => { const d = new Date(ms); return `${MON[d.getUTCMonth()]} ${d.getUTCDate()}`; };
 /** The projects a policy covers, by id, or "all". */
 const scopeText = (p: Policy): string => (p.where.freeze || !p.where.projects?.length ? "all" : p.where.projects.join(", "));
 
 /** The Policies card body: Policy (name + id), Roles, Scope, When, Effect and an On switch, as in the prototype. The policy name opens the editor. */
-export function PolicyCards({ policies, hl, roles, onEdit }: { policies: Policy[]; hl: string | null; roles: Role[]; onEdit: (p: Policy) => void }) {
+export function PolicyCards({ policies, hl, roles, onEdit, freezes = [] }: { policies: Policy[]; hl: string | null; roles: Role[]; onEdit: (p: Policy) => void; freezes?: Freeze[] }) {
   const ui = useUI();
   const outcome = useOutcome();
   const perm = useCan("policy.edit");
@@ -192,8 +198,8 @@ export function PolicyCards({ policies, hl, roles, onEdit }: { policies: Policy[
         { key: "policy", label: "Policy", render: (p) => <><a className="rl" href="#edit" id={`acc-pol-edit-${p.id}`} onClick={(e) => { e.preventDefault(); if (SPECIAL[p.id]) ui.toast(SPECIAL[p.id]!, "info"); else onEdit(p); }}><b>{p.name}</b></a>{hl === p.id ? <span className="chip accent plain"> deciding rule</span> : null}<span className="mono dim" style={{ display: "block", fontSize: 11 }}>{p.id}</span></> },
         { key: "roles", label: "Roles", render: (p) => roleText(p) },
         { key: "scope", label: "Scope", render: (p) => scopeText(p) },
-        { key: "when", label: "When", render: (p) => <span className="mono">{whenText(p)}</span> },
-        { key: "effect", label: "Effect", render: (p) => <span className={`chip ${p.effect === "deny" ? "bad" : "ok"}`}>{p.effect}</span> },
+        { key: "when", label: "When", render: (p) => <span className="mono" title={p.oncallOnly ? "Only while on call" : undefined}>{whenText(p, freezes)}</span> },
+        { key: "effect", label: "Effect", render: (p) => <span className={`chip plain ${p.effect === "deny" ? "bad" : "ok"}`}>{p.effect}</span> },
         { key: "on", label: "On", render: (p) => <Toggle id={`acc-pol-on-${p.id}`} checked={p.enabled} decision={perm} label={p.name} onChange={async (v) => void outcome(await ops.setPolicyEnabled(p.id, v, ifMatchOf(p)), `${v ? "Enabled" : "Disabled"} ${p.name}`)} /> },
         ...(anyCustom ? [{ key: "acts", label: "", align: "end" as const, render: (p: Policy) => ((p as Policy & { custom?: boolean }).custom ? <Btn label="Delete" small kind="ghost" id={`acc-pol-del-${p.id}`} guard={perm} onClick={async () => void outcome(await ops.deletePolicy(p.id, ifMatchOf(p)))} /> : null) }] : []),
       ]}

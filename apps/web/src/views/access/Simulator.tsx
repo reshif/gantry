@@ -128,7 +128,10 @@ export function Simulator({ roles, people, actions, sim, setSim, evaluated, onEv
                 <b>{rd.allowed ? "Allowed." : "Denied."}</b>{" "}
                 {(() => {
                   const who = people.find((x) => x.id === r.sim.person);
-                  const held = (who?.roles ?? []).filter((g) => g.scope === "factory" || ract.scope === "factory" || g.scope === r.sim.project).map((g) => roles.find((x) => x.id === g.role)?.name ?? g.role);
+                  const grants = who?.roles ?? [];
+                  const inScope = grants.filter((g) => g.scope === "factory" || ract.scope === "factory" || g.scope === r.sim.project);
+                  // Name the roles that settle it: those in scope, else the ones the person holds anywhere, as the prototype words it ("holds <Role>, which includes <perm>").
+                  const held = (inScope.length ? inScope : grants).map((g) => roles.find((x) => x.id === g.role)?.name ?? g.role);
                   const names = [...new Set(held)].join(", ");
                   const byMatrix = rd.rule.kind === "matrix";
                   return (

@@ -163,7 +163,7 @@ export default function AccessView() {
         : (
           <Card title="Policies" flush id="acc-policies-card">
           <PolicyCards
-            policies={policies} hl={hl} roles={roles} onEdit={openPolicy}
+            policies={policies} hl={hl} roles={roles} onEdit={openPolicy} freezes={freezes}
           />
           </Card>
         )
