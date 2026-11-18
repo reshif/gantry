@@ -1,0 +1,4 @@
+# Gantry factory configuration for this repository.
+# No MCP servers are declared: none were found to be needed for development.
+version: 1
+mcp: []
