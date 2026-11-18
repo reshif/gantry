@@ -132,6 +132,21 @@ describe("Onboarding: pipeline", () => {
     await waitFor(() => expect(window.location.hash).toMatch(/onboarding\/new-service$/));
   });
 
+  it("a project with no team connects a repo without inventing one (the server picks the project's team or none)", async () => {
+    const saved = STOREFRONT.teams;
+    STOREFRONT.teams = [];
+    try {
+      const calls = api([GREEN], { "POST /api/v1/projects/storefront/repos": () => ok("Connected.", { repo: { id: "new-service" } }) });
+      mount(<OnboardingView />);
+      fireEvent.click(await byId("onb-start-acme/new-service"));
+      fireEvent.click(await screen.findByRole("button", { name: "Start assessment" }));
+      await waitFor(() => expect(posts(calls, "POST", "/api/v1/projects/storefront/repos")).toHaveLength(1));
+      expect(posts(calls, "POST", "/api/v1/projects/storefront/repos")[0]!.body).toMatchObject({ name: "acme/new-service", team: null });
+    } finally {
+      STOREFRONT.teams = saved;
+    }
+  });
+
   it("the Guidelines tab is in the URL, lists one switch per guideline and says what the agent may never do", async () => {
     const calls = api([GREEN], { "PUT /api/v1/guidelines": () => ok("Saved.") });
     mount(<OnboardingView />);

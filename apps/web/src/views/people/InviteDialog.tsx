@@ -23,7 +23,7 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
   const [email, setEmail] = useState("");
   const [title, setTitle] = useState("");
   const [role, setRole] = useState(roles.find((r) => r.id === "engineer")?.id ?? roles[0]?.id ?? "");
-  const [team, setTeam] = useState(preset.team ?? teams.find((t) => t.name.toLowerCase() === "platform")?.id ?? teams[0]?.id ?? "");
+  const [team, setTeam] = useState(preset.team ?? teams[0]?.id ?? "");
   // The prototype asks only for a role and a team. A project role needs a project: the one open in the top bar (or the first live one).
   const live = projects.filter((p) => p.status !== "archived");
   const proj = preset.project ?? live.find((p) => p.id === getPrefs().project)?.id ?? live[0]?.id ?? "";

@@ -190,9 +190,9 @@ export function draftFrom(r: RepoV | null, project: Project, dests: SourceInfo[]
         const d0 = n.dest[0] ?? { channel: "slack", target: "" };
         return { event: n.event, integration: d0.integration ?? null, channel: d0.channel, target: d0.target, template: n.template || defaultTemplate(n.event), mode: n.mode };
       })
-    : chat ? [{ event: "onboarding.pr", integration: chat.inst.id, channel: chat.inst.type, target: chat.inst.type === "email" ? "project admins" : `#${project.teams[0] ?? "platform"}-eng`, template: "onboarding" }] : [];
+    : chat ? [{ event: "onboarding.pr", integration: chat.inst.id, channel: chat.inst.type, target: chat.inst.type === "email" ? "project admins" : `#${project.teams[0] ?? project.id}-eng`, template: "onboarding" }] : [];
   return {
-    name: "", source: r?.source ?? "", team: r ? r.team : project.teams[0] ?? "platform", mcp: r ? r.mcp.slice() : project.mcp.slice(0, 2), triggers: r ? !!r.triggers : true, notify,
+    name: "", source: r?.source ?? "", team: r ? r.team ?? "" : project.teams[0] ?? "", mcp: r ? r.mcp.slice() : project.mcp.slice(0, 2), triggers: r ? !!r.triggers : true, notify,
     defaultBranch: c.defaultBranch, branchPrefix: c.branchPrefix, merge: c.merge, tagging: c.tagging, requiredChecks: c.requiredChecks.join(", "), protectedPaths: c.protectedPaths.join("\n"),
   };
 }
@@ -200,7 +200,7 @@ export function draftFrom(r: RepoV | null, project: Project, dests: SourceInfo[]
 export function patchFrom(d: Draft): Record<string, unknown> {
   const events = new Set(NOTIFY_EVENTS.map((e) => e.id));
   return {
-    team: d.team, mcp: d.mcp.slice(), triggers: d.triggers, source: d.source || null,
+    ...(d.team ? { team: d.team } : {}), mcp: d.mcp.slice(), triggers: d.triggers, source: d.source || null,
     notifyOverrides: d.notify.filter((n) => n.target.trim() && n.integration && events.has(n.event)).map((n, i) => ({ id: `RO-${i + 1}`, event: n.event, dest: [{ channel: n.channel, target: n.target.trim(), integration: n.integration }], template: n.template, mode: n.mode || "also" })),
     config: {
       defaultBranch: d.defaultBranch.trim() || "main", branchPrefix: d.branchPrefix.trim() || "gantry/", merge: d.merge, tagging: d.tagging,

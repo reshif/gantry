@@ -33,7 +33,7 @@ export function OnboardDialog({ rows, projects, project, pick, close }: { rows: 
           navigate("onboarding", row.repo.id, target.id);
           return undefined;
         }
-        const r = await connect.run(target.id, row.name, target.teams[0] ?? "platform");
+        const r = await connect.run(target.id, row.name, target.teams[0] ?? null);
         if (!r?.ok) return r?.msg ?? "That did not work.";
         ui.toast("Assessment started", "ok");
         const repo = "repo" in r ? (r as { repo?: { id: string } }).repo : undefined;

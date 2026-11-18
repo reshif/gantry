@@ -192,8 +192,8 @@ export const ops = {
   setAway: (personId: string, away: Obj | null, projectId?: string) => run(["people", "me"], put(api(`people/${enc(personId)}/away`), { away, project: projectId ?? null })),
 
   /* ===== onboarding ===== */
-  connectRepo: (projectId: string, repoName: string, team: string, sourceId?: string) =>
-    run(["repos", "projects"], post(api(`projects/${enc(projectId)}/repos`), { name: repoName, team, source: sourceId ?? null }, create)),
+  connectRepo: (projectId: string, repoName: string, team: string | null, sourceId?: string) =>
+    run(["repos", "projects"], post(api(`projects/${enc(projectId)}/repos`), { name: repoName, team: team || null, source: sourceId ?? null }, create)),
   configureRepo: (repoId: string, patchBody: Obj, v?: Versioned) => run(["repos"], patch(api(`repos/${enc(repoId)}/config`), patchBody, opts(v))),
   rerunAssessment: (repoId: string) => run(["repos"], post(api(`repos/${enc(repoId)}/onboarding/assess`))),
   openOnboardingPR: (repoId: string) => run(["repos"], post(api(`repos/${enc(repoId)}/onboarding/open-pr`))),
