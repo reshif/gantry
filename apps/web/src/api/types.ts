@@ -40,6 +40,14 @@ export interface PublicConfig {
   /** Whether the GitHub sign-in method is enabled in Security settings. */
   githubLogin?: boolean;
   orgName?: string;
+  /** Name of the organisation's identity provider ("Okta"), shown on the sign-in button. Absent: "SSO". */
+  idpName?: string;
+  /** The e-mail domain sign-in is limited to ("acme.dev"). Absent: the sign-in page says nothing about a domain. */
+  allowedDomain?: string;
+  /** True when admins must use a second factor. Absent: the sign-in page says nothing about MFA. */
+  mfaRequiredForAdmins?: boolean;
+  /** True when the server can send a one-time sign-in link by e-mail. Absent: the e-mail field stays off. */
+  emailLinkLogin?: boolean;
 }
 
 /**
