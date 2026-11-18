@@ -54,6 +54,15 @@ describe("palette work orders", () => {
   });
 });
 
+describe("palette reach and toggle", () => {
+  it("asks for every work order, not the first fifty", async () => {
+    const calls = mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: [] }) });
+    mount(<PaletteDialog projectId="payments" onClose={() => undefined} />);
+    await screen.findByRole("combobox", { name: "Search commands" });
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/v1/projects/payments/work-orders")?.query.get("limit")).toBe("500"));
+  });
+});
+
 describe("user menu", () => {
   it("offers Switch persona (demo) with the prototype's four people when the stack runs demo accounts", async () => {
     const list = [["p-asha", "Asha Raman", "asha", "factory admin"], ["p-meera", "Meera Iyer", "meera", "line lead"], ["p-tomas", "Tomás Ferreira", "tomas", "engineer"], ["p-sam", "Sam Whitfield", "sam", "auditor"]].map(([id, name, e, role]) => ({ id, name, email: `${e}@acme.dev`, role, note: "" }));

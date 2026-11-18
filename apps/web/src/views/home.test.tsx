@@ -181,6 +181,8 @@ describe("Home: Control Room", () => {
     setup(ASHA, adminHome({}, { attention: [], setup: undefined, waiting: { approvals: [gate], conversations: [] } }), { extra: { "GET /api/v1/work-orders/WO-9": () => ({ body: { id: "WO-9", project: "payments", version: 1, allowed: { approve: { gate: "G2", instance: "WO-9:G2:1", allowed: true, reason: "", needs: "" } } } }), "GET /api/v1/work-orders/WO-9/gates/G2/approvers": () => ({ body: { label: "Spec", rule: { text: "One approver.", conditions: [] }, progress: { have: 0, need: 1, approvals: [], unmet: [] }, satisfiable: true, warning: "", eligible: [], overrides: [], viewerCanOverride: false, can: { editRule: false, editWhy: "", grantRole: false, grantWhy: "" } } }) } });
     mount();
     expect(await screen.findByText(/Plant overview for .*\. Agents propose, people approve\./)).toBeTruthy();
+    // the copy follows the switcher pill ("All projects")
+    expect(screen.getByText(/Plant overview for all projects\./)).toBeTruthy();
     expect(await screen.findByText("G2 Spec approved for WO-9")).toBeTruthy();
     expect(document.querySelector("#hm-projects #hm-new-project")).toBeNull();
     expect(screen.getByText("WO-9 · Add limits · waiting 1h ago")).toBeTruthy();

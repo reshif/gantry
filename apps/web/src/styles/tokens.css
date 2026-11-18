@@ -96,8 +96,8 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #09090b;
-    --surface: #111113;
+    --bg: #0a0d11;
+    --surface: #11161c;
     --panel: #18181b;
     --sunk: #0c0c0e;
     --ink: #fafafa;
@@ -130,8 +130,8 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #09090b;
-  --surface: #111113;
+  --bg: #0a0d11;
+  --surface: #11161c;
   --panel: #18181b;
   --sunk: #0c0c0e;
   --ink: #fafafa;

@@ -67,7 +67,7 @@ export function Sheet({ wo, cat, project, page }: { wo: TWo; cat: Catalog; proje
       <DataTable id="trv-stamps" caption={`Station stamps of ${wo.id}`} columns={cols} rows={rows} rowKey={(r) => r.key} />
       {page ? null : (
         <div className="row" style={{ marginTop: 16 }}>
-          <Btn label="Print" kind="primary" icon="page" id="trv-print" onClick={() => window.print()} />
+          <Btn label="Print" kind="primary" icon="dl" id="trv-print" onClick={() => window.print()} />
           <span className="muted small"><Icon name="page" /> The printable record that follows the work order down the line.</span>
         </div>
       )}

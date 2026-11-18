@@ -69,7 +69,7 @@ export default function HomeView() {
   const scopeId = pickProject(me, prefs.project);
   const scoped = projects.filter((p) => p.id === scopeId);
   const inView = scoped.length ? scoped : projects;
-  const scopeName = scoped[0]?.name ?? "all projects";
+  const scopeName = prefs.scopeAll ? "all projects" : (scoped[0]?.name ?? "all projects"); // the copy follows the switcher pill; the data scope is unchanged
   const nameOf = (id: string | null | undefined) => actors(id).name.replace(" (agent)", "");
   const hr = new Date().getHours();
   const greet = hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";

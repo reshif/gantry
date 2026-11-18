@@ -88,6 +88,7 @@ export function Shell({ me }: { me: Me }) {
   }, [def, denied, scoped, project, notFound]);
 
   const openPalette = useCallback(() => {
+    if (document.getElementById("palette-list")) return; // toggle-guarded: Ctrl+K while the palette is open does not stack a second one
     ui.open((close) => <PaletteDialog projectId={projectId} onClose={close} />);
   }, [ui, projectId]);
 

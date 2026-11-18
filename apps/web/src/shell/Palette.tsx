@@ -36,7 +36,7 @@ export function usePaletteItems(projectId: string | null): Item[] {
   const prefs = usePrefs();
   const ctx = useRouteCtx();
   const notif = useNotifications();
-  const wos = useWorkOrders(projectId, { limit: 50 }).data;
+  const wos = useWorkOrders(projectId, { limit: 500 }).data;
   const canAgents = canSeeRoute("agents", me, ctx);
   const agents = useAgents().data;
   const people = usePeople().data;

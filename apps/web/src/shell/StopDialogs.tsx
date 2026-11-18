@@ -95,6 +95,7 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
   const mode = "hold" as const; // the prototype offers no cancel mode: in-flight work is held in place and resumes on restore
   const [confirm, setConfirm] = useState(typeof saved?.confirm === "string" ? saved.confirm : "");
   const [err, setErr] = useState("");
+  const [fe, setFe] = useState<{ reason?: string; confirm?: string }>({});
   const [step, setStep] = useState<CommandRefusal | null>(null);
   useEffect(() => registerStepUpDraft(() => ({ kind: "kill", scope, id, values: { reason, mode, confirm } })), [scope, id, reason, mode, confirm]);
   const close = () => {
@@ -110,12 +111,16 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
   const impact = imp.data;
   const submit = async () => {
     if (busy) return;
-    if (reason.trim().length < 10) {
-      setErr("Give a reason of at least 10 characters.");
-      return;
-    }
-    if (confirm !== CONFIRM_WORD) {
-      setErr("Type STOP in capitals.");
+    // the prototype's checks: every invalid field is named at once and focus goes to the first
+    const bad: { reason?: string; confirm?: string } = {};
+    if (!reason.trim()) bad.reason = "Reason is required.";
+    else if (reason.trim().length < 10) bad.reason = "Reason needs at least 10 characters.";
+    if (!confirm) bad.confirm = "Type STOP to confirm is required.";
+    else if (confirm !== CONFIRM_WORD) bad.confirm = "Type STOP in capitals.";
+    setFe(bad);
+    if (bad.reason || bad.confirm) {
+      setErr("");
+      setTimeout(() => document.getElementById(bad.reason ? "kill-reason" : "kill-confirm")?.focus(), 0);
       return;
     }
     setBusy(true);
@@ -147,10 +152,10 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
               will pause at their current station. Nothing is deleted.
             </div>
           </div>
-          <Field label="Reason" required hint="Recorded in the audit ledger." htmlFor="kill-reason">
+          <Field label="Reason" required error={fe.reason} hint="Recorded in the audit ledger." htmlFor="kill-reason">
             <textarea id="kill-reason" className="input" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
-          <Field label="Type STOP to confirm" required htmlFor="kill-confirm">
+          <Field label="Type STOP to confirm" required error={fe.confirm} htmlFor="kill-confirm">
             <input id="kill-confirm" className="input mono" autoComplete="off" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
           </Field>
           {step ? <StepUpNotice result={step} what="a kill" draft={{ kind: "kill", scope, id, values: { reason, mode, confirm } }} /> : null}

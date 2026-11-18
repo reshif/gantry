@@ -27,7 +27,7 @@ export default function TravelerPage() {
       acts={
         <>
           <Btn label="Back to record" id="trv-back" onClick={() => navigate("record", d.wo!.id, d.wo!.project)} />
-          <Btn label="Print" kind="primary" icon="page" id="trv-print" onClick={() => window.print()} />
+          <Btn label="Print" kind="primary" icon="dl" id="trv-print" onClick={() => window.print()} />
         </>
       }
     >

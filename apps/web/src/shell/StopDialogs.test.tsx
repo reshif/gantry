@@ -40,8 +40,14 @@ describe("Kill dialog", () => {
     expect(calls.find((c) => c.path === "/api/v1/stops/impact")?.query.get("scope")).toBe("project");
     // nothing is sent until reason and phrase are right
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
-    expect(await screen.findByText(/reason of at least 10/)).toBeTruthy();
+    expect(await screen.findByText("Reason is required.")).toBeTruthy();
+    expect(await screen.findByText("Type STOP to confirm is required.")).toBeTruthy();
+    await waitFor(() => expect(document.activeElement?.id).toBe("kill-reason"));
+    fireEvent.change(document.getElementById("kill-reason") as HTMLElement, { target: { value: "short" } });
+    fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
+    expect(await screen.findByText("Reason needs at least 10 characters.")).toBeTruthy();
     fireEvent.change(document.getElementById("kill-reason") as HTMLElement, { target: { value: "Runaway agent spend" } });
+    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "stop" } });
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
     expect(await screen.findByText("Type STOP in capitals.")).toBeTruthy();
     expect(posts(calls, "/api/v1/stops")).toHaveLength(0);
