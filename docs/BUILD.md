@@ -107,6 +107,7 @@ It opens a transaction, runs `can()` (a denial is audited in its own transaction
 | `github_app.pem`, `github_app.json` | github |
 | `minio_root_password` | minio, api, worker, edge |
 | `keycloak_admin_password`, `oidc_client_secret` | keycloak; api |
+| `bootstrap_admin_password` | api (written by the owner, never generated; the first Factory Admin's initial password, with `GANTRY_BOOTSTRAP_ADMIN_USERNAME`) |
 
 ## Ports and hostnames (compose service names)
 

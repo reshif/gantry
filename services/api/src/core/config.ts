@@ -18,7 +18,10 @@ export interface Config {
   demoAccounts: boolean;
   /** Development only (GANTRY_DEV_ADMIN_MFA_OPTIONAL): lets a Factory Admin work without a second sign-in factor. Always false off localhost. */
   adminMfaOptional: boolean;
+  /** Deprecated alternative (GANTRY_BOOTSTRAP_ADMIN_EMAIL): the first verified sign-in with this email becomes Factory Admin while there is none. */
   bootstrapAdminEmail: string | null;
+  /** GANTRY_BOOTSTRAP_ADMIN_USERNAME: the first Factory Admin is an identity-provider user with this username, created with the initial password in the `bootstrap_admin_password` secret (core/auth/bootstrap-admin.ts). */
+  bootstrapAdminUsername?: string | null;
   /**
    * Which peers may set X-Forwarded-For (Fastify trustProxy). Default: loopback and private networks only (the ingress on the
    * compose network), so a client reaching the API directly from a public address can't spoof the address that the IP
@@ -69,6 +72,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     demoAccounts: demoAccountsAllowed(env.GANTRY_DEV_SEED === "true", publicUrl),
     adminMfaOptional: adminMfaOptionalAllowed(env.GANTRY_DEV_ADMIN_MFA_OPTIONAL === "true", publicUrl),
     bootstrapAdminEmail: env.GANTRY_BOOTSTRAP_ADMIN_EMAIL ? env.GANTRY_BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase() : null,
+    bootstrapAdminUsername: env.GANTRY_BOOTSTRAP_ADMIN_USERNAME?.trim() ? env.GANTRY_BOOTSTRAP_ADMIN_USERNAME.trim().toLowerCase() : null,
     trustProxy: trustProxyFrom(env.GANTRY_TRUST_PROXY),
     auditAnchorFile: env.GANTRY_AUDIT_ANCHOR_FILE || null,
     host: env.HOST || "0.0.0.0",

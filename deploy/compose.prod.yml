@@ -10,7 +10,7 @@
 #   - daily backups with a weekly restore drill always run (gantry-backup)
 #   - every container has memory and process limits
 #
-# Required: GANTRY_HOSTNAME, GANTRY_TLS, GANTRY_SMTP_HOST, GANTRY_SMTP_FROM_ADDRESS, GANTRY_BOOTSTRAP_ADMIN_EMAIL.
+# Required: GANTRY_HOSTNAME, GANTRY_TLS, GANTRY_SMTP_HOST, GANTRY_SMTP_FROM_ADDRESS. For the first install also GANTRY_BOOTSTRAP_ADMIN_USERNAME.
 # Release images: GANTRY_IMAGE_PREFIX=ghcr.io/<owner>/ and GANTRY_VERSION=<x.y.z> (signed; verify with deploy/verify-images.sh).
 
 x-limits: &limits
@@ -51,7 +51,10 @@ services:
     environment:
       GANTRY_DEV_ADMIN_MFA_OPTIONAL: "false"
       GANTRY_DEV_SEED: "false"
-      GANTRY_BOOTSTRAP_ADMIN_EMAIL: ${GANTRY_BOOTSTRAP_ADMIN_EMAIL:?set GANTRY_BOOTSTRAP_ADMIN_EMAIL to the email of the first Factory Admin}
+      # First install: set the username (and write deploy/secrets/bootstrap_admin_password). Once a Factory Admin exists, both are ignored.
+      GANTRY_BOOTSTRAP_ADMIN_USERNAME: ${GANTRY_BOOTSTRAP_ADMIN_USERNAME:-}
+      # Deprecated alternative to the username.
+      GANTRY_BOOTSTRAP_ADMIN_EMAIL: ${GANTRY_BOOTSTRAP_ADMIN_EMAIL:-}
       SMTP_HOST: ${GANTRY_SMTP_HOST:?set GANTRY_SMTP_HOST to your mail relay}
       SMTP_PORT: ${GANTRY_SMTP_PORT:-587}
 

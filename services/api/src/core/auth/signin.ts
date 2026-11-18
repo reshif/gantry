@@ -6,6 +6,7 @@ import type { IdClaims } from "../oidc.js";
 import { readSecurity } from "../read/index.js";
 import { emailDomainAllowed, ipAllowed } from "../security.js";
 import { hasSecondFactor } from "../oidc.js";
+import { BOOTSTRAP_EMAIL_DOMAIN } from "./bootstrap-admin.js";
 import { holdsFactoryAdmin, MFA_REQUIRED_MSG } from "./mfa.js";
 import { createSession, refreshAuthTime } from "./sessions.js";
 
@@ -48,7 +49,13 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
   return withTx(g.pool, async (tx) => {
     const orgId = g.orgId;
     const sec = (await readSecurity(tx, orgId)).value;
-    const email = claims.email;
+    // The bootstrap admin (GANTRY_BOOTSTRAP_ADMIN_USERNAME) is the identity-provider user Gantry itself created: matched by the provider's
+    // subject recorded at creation, never by a name or an address. It has no email at the provider, so it gets a placeholder that no mailbox can use.
+    const bootSub = g.config.bootstrapAdminUsername
+      ? (((await tx.query(`select settings->'bootstrapAdmin' as b from orgs where id = $1`, [orgId])).rows[0]?.b ?? null) as { username?: string; sub?: string } | null)
+      : null;
+    const bootUser = !!bootSub?.sub && bootSub.username === g.config.bootstrapAdminUsername && bootSub.sub === claims.sub && claims.preferredUsername?.toLowerCase() === bootSub.username;
+    const email = claims.email ?? (bootUser ? `${bootSub!.username}@${BOOTSTRAP_EMAIL_DOMAIN}` : undefined);
     let person: { id: string; status: string; idp_subject: string | null; email: string } | null = null;
 
     const record = async (outcome: "ok" | "denied", reason: string | null, personId: string | null, sessionId: string | null, type = "auth.signin", extra: Record<string, unknown> = {}): Promise<void> => {
@@ -65,7 +72,9 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
 
     if (!email) return deny("no_email", null);
     // Only a provider-verified address links or provisions a person: an IdP that omits email_verified must not claim an invitee by address.
-    if (claims.emailVerified !== true) return deny("email_unverified", null);
+    if (claims.emailVerified !== true && !bootUser) return deny("email_unverified", null);
+    // The placeholder domain is reserved for the bootstrap admin; no one else may sign in claiming an address there.
+    if (!bootUser && email.endsWith(`@${BOOTSTRAP_EMAIL_DOMAIN}`)) return deny("domain_not_allowed", null);
     if (!emailDomainAllowed(email, sec.domains)) return deny("domain_not_allowed", null);
 
     const find = async (sql: string, p: unknown[]) => (await tx.query(sql, p)).rows[0] as typeof person | undefined;
@@ -77,7 +86,7 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
     }
     let inviteId: string | null = null;
     if (!person) {
-      const byEmail = (await find(`select ${cols} from people where org_id = $1 and lower(email) = $2`, [orgId, email])) ?? null;
+      const byEmail = bootUser ? null : (await find(`select ${cols} from people where org_id = $1 and lower(email) = $2`, [orgId, email])) ?? null;
       // A person nobody has linked yet (no provider subject) is never claimed by address alone: the address does not prove the caller
       // is that person (an account at the provider could hold it). An invitee needs the invite's single-use token; anyone else
       // unlinked (accepted without signing in, seeded, imported) is linked only by an identity the provider asserts by Gantry id.
@@ -100,7 +109,7 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
     // Includes the person the bootstrap rule below is about to make Factory Admin. A step-up keeps the factor the session already has.
     const secondFactor = hasSecondFactor(claims, g.config.oidc.mfaAcrValues);
     if (!g.config.adminMfaOptional && !secondFactor && !(person && (person.status === "deactivated" || person.status === "suspended"))) {
-      const bootstrap = !!g.config.bootstrapAdminEmail && email === g.config.bootstrapAdminEmail.toLowerCase() && claims.emailVerified === true;
+      const bootstrap = bootUser || (!!g.config.bootstrapAdminEmail && email === g.config.bootstrapAdminEmail.toLowerCase() && claims.emailVerified === true);
       const admin = person ? await holdsFactoryAdmin(tx, orgId, person.id) : false;
       const willBootstrap = !admin && bootstrap && !(await tx.query(`select 1 from role_assignments where org_id = $1 and role_id = 'factory_admin' and scope_type = 'factory' and revoked_at is null limit 1`, [orgId])).rowCount;
       if (admin || willBootstrap) return deny("mfa_required", person?.id ?? null);
@@ -121,12 +130,13 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
 
     // Bootstrap Factory Admin: the configured email, signing in to an org that has no Factory Admin yet.
     // Only a provider-verified address counts: an IdP that omits email_verified must not hand out the factory.
-    if (g.config.bootstrapAdminEmail && email === g.config.bootstrapAdminEmail.toLowerCase() && claims.emailVerified === true) {
+    // Or, preferred, the username bootstrap above (bootUser); the email rule is deprecated but still honoured.
+    if (bootUser || (g.config.bootstrapAdminEmail && email === g.config.bootstrapAdminEmail.toLowerCase() && claims.emailVerified === true)) {
       const has = await tx.query(`select 1 from role_assignments where org_id = $1 and role_id = 'factory_admin' and scope_type = 'factory' and revoked_at is null limit 1`, [orgId]);
       if (!has.rowCount) {
         await tx.query(`insert into role_assignments (org_id, id, person_id, role_id, scope_type, granted_by) values ($1,$2,$3,'factory_admin','factory','system')`, [orgId, `ra-boot-${person.id}`, person.id]);
         await appendEvent(tx, {
-          orgId, type: "people.role_granted", category: "access", actor: "system", channel: "system", subject: { type: "person", id: person.id }, after: { role: "factory_admin", scope: "factory", reason: "bootstrap admin" }, sourceIp: r.ip || null, requestId: r.requestId,
+          orgId, type: "people.role_granted", category: "access", actor: "system", channel: "system", subject: { type: "person", id: person.id }, after: { role: "factory_admin", scope: "factory", reason: bootUser ? "bootstrap admin (username)" : "bootstrap admin" }, sourceIp: r.ip || null, requestId: r.requestId,
         });
       }
     }
