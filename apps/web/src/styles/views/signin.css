@@ -9,6 +9,3 @@
 .demo-acc:hover { border-color: var(--accent); }
 .demo-main { display: grid; min-width: 0; flex: 1; }
 .demo-main .muted { overflow-wrap: anywhere; }
-
-/* Read-only viewer banner (prototype: accent-soft strip under the top bar). */
-.banner-readonly { background: var(--accent-soft); color: var(--ink); border-color: var(--accent); font-weight: 500; }

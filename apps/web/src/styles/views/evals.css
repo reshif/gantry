@@ -81,10 +81,8 @@
 
 .ev-factory { display: grid; gap: var(--s4); }
 .ev-two { align-items: start; }
-.ev-two.two-col { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 
 @media (max-width: 1200px) {
-  .ev-two.two-col { grid-template-columns: minmax(0, 1fr); }
   .ev-suites { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 900px) {
@@ -118,7 +116,7 @@
 
 /* Factory-wide tab in the prototype's stack: wide extras scroll inside their panel instead of widening the page. */
 .ev-factory, .ev-suites-stack { min-width: 0; }
-.ev-factory > .panel, .ev-factory .cols > .panel, .ev-factory .two-col > .panel { min-width: 0; }
+.ev-factory > .panel, .ev-factory .cols > .panel { min-width: 0; }
 .ev-factory .panel-body { overflow-x: auto; }
 .ev-factory .barlist-l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ev-more { margin: 8px 0 0; }
