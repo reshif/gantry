@@ -48,7 +48,7 @@ describe("Onboarding fidelity round 2", () => {
     expect(await screen.findByText("That repo does not exist.")).toBeTruthy();
   });
 
-  it("each gap has Mark fixed (it re-checks the repo) and no extra fix line; the conversation is bubbles without a Send button or Next line", async () => {
+  it("each gap has Mark fixed (it re-checks the repo) and no extra fix line; the conversation has a pinned composer and no Next line", async () => {
     const calls = api([ASSESSED], { "POST /api/v1/repos/mobile-app/onboarding/assess": () => ({ body: { ok: true, msg: "Assessing." } }) });
     window.location.hash = "#/p/storefront/onboarding/mobile-app";
     mount(<OnboardingView />);
@@ -56,7 +56,7 @@ describe("Onboarding fidelity round 2", () => {
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/onboarding/assess"))).toBe(true));
     expect(document.getElementById("osx-fixed-f2")).toBeNull(); // a finding that is met has none
     expect(document.body.textContent).not.toMatch(/Add a workflow/);
-    expect(document.getElementById("osx-send")).toBeNull();
+    expect(document.getElementById("osx-send")).toBeTruthy(); // the composer is always pinned under the thread
     expect(document.getElementById("osx-next")).toBeNull();
     expect(screen.getByText("I read it.")).toBeTruthy();
   });

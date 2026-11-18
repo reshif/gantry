@@ -81,7 +81,7 @@ export default function OnboardingView() {
                   { key: "s", label: "Stage", sort: (r) => r.stage, render: (r) => <div className="row" style={{ gap: 2 }} role="img" aria-label={`Stage ${PSTAGES[r.stage]}`}>{PSTAGES.map((s, i) => <span key={s} title={s} style={{ width: 18, height: 8, background: i <= r.stage ? "var(--accent)" : "var(--sunk)", border: "1px solid var(--line2)" }} />)}</div> },
                   { key: "sn", label: "Status", render: (r) => { const stop = r.repo ? stoppedLabel(r.repo) : null; return stop ? <Chip text={stop} cls={stop === "Failed" ? "bad" : "warn"} /> : <Chip text={PSTAGES[r.stage]} cls={r.stage === 4 ? "ok" : r.stage ? "info" : "plain"} />; } },
                   { key: "f", label: "Gaps", align: "end", render: (r) => (r.gaps == null ? "—" : String(r.gaps)) },
-                  { key: "a", label: "", align: "end", render: (r) => (r.stage ? <ActBtn small id={`onb-open-${r.id}`} label="Open" onClick={() => navigate("onboarding", r.repo?.id ?? r.id)} /> : <Btn small kind="primary" id={`onb-start-${r.id}`} label="Start" guard={connect} onClick={() => onboard(r)} />) },
+                  { key: "a", label: "", align: "end", render: (r) => (r.stage ? <div className="row" style={{ gap: 6, justifyContent: "flex-end" }}><ActBtn small id={`onb-chat-${r.id}`} label="Conversation" icon="chat" onClick={() => { window.location.hash = `${hashFor("onboarding", r.repo?.id ?? r.id, project.id)}?focus=chat`; }} /><ActBtn small id={`onb-open-${r.id}`} label="Open" onClick={() => navigate("onboarding", r.repo?.id ?? r.id)} /></div> : <Btn small kind="primary" id={`onb-start-${r.id}`} label="Start" guard={connect} onClick={() => onboard(r)} />) },
                 ]}
               />
             </Panel>
