@@ -14,8 +14,8 @@ import { readCatalog } from "../../core/read/index.js";
 import { DEFAULT_SAMPLE_RATE, lvlCode, lvlNum, MAX_GRANTABLE, PROPOSAL_CAP, PROPOSAL_DAY, REPROPOSE_MS, levelsAboveL1, readCriteria } from "./config.js";
 import { cellRows, ceilingRows, loadInsight, toCeiling, type CellRow } from "./store.js";
 
-/** Gates a person always decides, whatever a cell has earned: the brief, the merge itself (first version), and release confirmation (needs L4, which nobody can be granted). */
-export const NEVER_AUTOMATIC_GATES: ReadonlySet<string> = new Set(["G0G1", "G5", "G6"]);
+/** Gates a person always decides, whatever a cell has earned: the brief, plan and security (G3+G3s), the merge itself (first version), and release confirmation (needs L4, which nobody can be granted). */
+export const NEVER_AUTOMATIC_GATES: ReadonlySet<string> = new Set(["G0G1", "G3G3s", "G5", "G6"]);
 /** Where a work order's text came from, when it was written outside the organisation (spec 13.3 "never automatic"). */
 const EXTERNAL_SOURCES: ReadonlySet<string> = new Set(["issue", "comment", "ci", "public", "api", "email", "webhook", "trigger"]);
 

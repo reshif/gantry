@@ -104,6 +104,7 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   } else if (d.allowed && d.override) stopKind = d.overrideKind ?? stopKind;
   if (stopKind && !reason5) throw refuse("denied", `${covering ? covering.reason : "A stop is in force"} As Factory Admin you can approve anyway. Give a reason of at least 5 characters; it is recorded in the audit.`, { needs: "override_reason", rule: { kind: "stop", id: "STOP-" + (covering?.scope ?? "project").toUpperCase(), name: "Stop state" } });
   if (!d.allowed) throw refuse("denied", d.reason, { rule: d.rule, ...(d.needs ? { needs: d.needs } : {}) });
+  if (gateId === "G5") await requireMergeablePr(fx, w);
   await insertVote(fx, w, inst.id, by, "approve", "", via ?? actor.channel);
   const after = await flowFor(fx, w);
   const project = after.st.projects.find((p) => p.id === w.project)!;
@@ -139,10 +140,11 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   }
   if (!passes) {
     const unmet = prog.unmet.length ? `; still needs: ${prog.unmet.map((c) => c.text).join("; ")}` : prog.onlyRequester ? "; the requester cannot be the only approver" : "";
-    note(w, fx, by, `${g.label} approval ${prog.have} of ${need}.`);
-    ev(fx, w, "gate.vote", { gate: gateId, by, text: `${prog.have} of ${need}`, instance: inst.id }, { category: "approvals" });
+    const excl = prog.authorExcluded ? " (the author's vote does not count)" : "";
+    note(w, fx, by, `${g.label} approval ${prog.have} of ${need}${excl}.`);
+    ev(fx, w, "gate.vote", { gate: gateId, by, text: `${prog.have} of ${need}${excl}`, instance: inst.id }, { category: "approvals" });
     await saveWo(fx.tx, fx.orgId, w);
-    return done(fx, `${g.label} approval recorded (${prog.have} of ${need}${unmet}).`, w.project, { passed: false, have: prog.have, need, instance: inst.id, version: w.version });
+    return done(fx, `${g.label} approval recorded (${prog.have} of ${need}${excl}${unmet}).`, w.project, { passed: false, have: prog.have, need, authorExcluded: prog.authorExcluded, instance: inst.id, version: w.version });
   }
   await recordDecision(fx, w, inst, gateId, "approved", voter, { approvals: prog.have, override: override || !!stopKind, ...(override || stopKind ? { reason: (overrideReason ?? reason5).trim() } : {}) });
   await closeInstance(fx, inst.id, "decision");
@@ -192,6 +194,24 @@ export async function passBriefIfGateOff(fx: Fx, w: Wo): Promise<boolean> {
   await confirmBrief(fx, w, "system", `Brief complete. The brief gate (G0+G1) is switched off by an administrator override, so no person confirms it.`);
   await advance(fx, w, "system");
   return true;
+}
+
+/**
+ * G5 approves a pull request to merge. A class that changes code (its route has the Build station) on a repository with a GitHub identity needs an open pull
+ * request (or one already merged) when the gate is approved; otherwise the approval would send the work order on to Close without merging anything, which a person
+ * reading "approved" would take for a merge. The reason names the way forward. Classes whose route never builds (and repositories with no GitHub identity,
+ * which cannot hold a pull request) are not asked for one.
+ */
+async function requireMergeablePr(fx: Fx, w: Wo): Promise<void> {
+  const project = await pinned(fx, w);
+  if (!route(fx.catalog, project, w.cls).includes("build") || !w.repo) return;
+  const gh = (await fx.tx.query<{ full: string | null }>(`select github_full_name as full from repos where org_id = $1 and id = $2`, [fx.orgId, w.repo])).rows[0];
+  if (!gh?.full) return;
+  const prs = (await fx.tx.query<{ state: string }>(`select state from pull_requests where org_id = $1 and wo_id = $2`, [fx.orgId, w.id])).rows;
+  if (prs.some((p) => p.state === "open" || p.state === "merged")) return;
+  throw refuse("conflict", prs.length
+    ? `There is no open pull request to merge: ${prs.length === 1 ? "the pull request was" : "the pull requests were"} closed without merging. Send ${w.id} back to Build so the agent opens a new one, or reopen it on GitHub first.`
+    : `There is no open pull request to merge: Build never opened one. Send ${w.id} back to Build so the agent opens one.`, { needs: "open pull request" });
 }
 
 /** G0+G1 passed: the brief becomes version N, the conversation closes and the route starts. `autoText` is the conversation line when no person confirmed it. */

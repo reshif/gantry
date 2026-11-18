@@ -1,4 +1,4 @@
-import { parseJob, recordMerged, recordNewHead } from "@gantry/api/core";
+import { parkMergeBlocked, parseJob, recordMerged, recordNewHead } from "@gantry/api/core";
 import { withTx, type Job } from "@gantry/db";
 import { raiseAlert, recordEvent } from "../alerts.js";
 import { PermanentError, TransientError } from "../errors.js";
@@ -19,6 +19,18 @@ export async function mergeRequest(job: Job, ctx: HandlerCtx): Promise<unknown> 
   const { woId, prNumber, headSha } = p.value;
   const org = job.orgId;
 
+  /** The head moved after the approval: that approval no longer names what would merge. The merge is closed and G5 reopens on the new head for a person to approve afresh. */
+  const reopen = async (newHead: string): Promise<unknown> => {
+    await withTx(deps.pool, (tx) => recordNewHead(tx, org, woId, newHead));
+    return { skipped: "head moved", headSha: newHead };
+  };
+
+  /** A merge that cannot happen is never left waiting as "merging": the order goes to Needs a person with the reason (Retry merge asks again for the approved head). */
+  const park = async (reason: string): Promise<unknown> => {
+    const r = await withTx(deps.pool, (tx) => parkMergeBlocked(tx, org, woId, { prNumber, reason }));
+    return { parked: r.parked, reason };
+  };
+
   const wo = (await deps.pool.query<{ project_id: string; repo_id: string | null; parent_id: string | null; data: { merging?: { prNumber?: number } } }>(
     `select project_id, repo_id, parent_id, data from work_orders where org_id = $1 and id = $2`, [org, woId],
   )).rows[0];
@@ -27,8 +39,12 @@ export async function mergeRequest(job: Job, ctx: HandlerCtx): Promise<unknown> 
   if (stops.length) return { skipped: `${stops[0]!.mode} at ${stops[0]!.scopeType} scope` };
   if (wo.data.merging?.prNumber !== prNumber) return { skipped: "no merge is waiting for that pull request" };
   const pr = (await deps.pool.query<{ head_sha: string | null; state: string }>(`select head_sha, state from pull_requests where org_id = $1 and wo_id = $2 and number = $3`, [org, woId, prNumber])).rows[0];
+  if (pr?.state === "closed") return park(`Pull request #${prNumber} was closed without merging.`);
   if (!pr || pr.state !== "open") return { skipped: "the pull request is not open" };
-  if (pr.head_sha !== headSha) return { skipped: "the head moved after approval; the gate reopens on the new head" };
+  if (pr.head_sha !== headSha) {
+    if (pr.head_sha) return reopen(pr.head_sha);
+    return { skipped: "the head is not known" };
+  }
   const repo = await loadRepo(deps.pool, org, wo.repo_id);
   if (!repo?.full) throw new PermanentError("The work order's repository has no GitHub identity.", "no_repo");
 
@@ -48,15 +64,11 @@ export async function mergeRequest(job: Job, ctx: HandlerCtx): Promise<unknown> 
     });
     return { merged: true, mergeSha };
   };
-  const reopen = async (newHead: string): Promise<unknown> => {
-    await withTx(deps.pool, (tx) => recordNewHead(tx, org, woId, newHead));
-    return { skipped: "head moved", headSha: newHead };
-  };
 
   // F4: look at GitHub before acting.
   const state = await deps.broker.pullState(repo.full, prNumber);
   if (state.pullRequest.state === "merged") return finish(state.pullRequest.mergeCommitSha ?? null);
-  if (state.pullRequest.state === "closed") return { skipped: "the pull request was closed without merging" };
+  if (state.pullRequest.state === "closed") return park(`Pull request #${prNumber} was closed without merging.`);
   if (state.pullRequest.headSha && state.pullRequest.headSha !== headSha) return reopen(state.pullRequest.headSha);
 
   const res = await deps.broker.merge({ woId, repo: repo.full, number: prNumber, headSha, method: repo.mergeStrategy });
@@ -65,13 +77,15 @@ export async function mergeRequest(job: Job, ctx: HandlerCtx): Promise<unknown> 
     throw new TransientError(`GitHub did not merge #${prNumber}.`, "not_merged");
   }
   if (res.code === "head_moved") return res.headSha ? reopen(res.headSha) : { skipped: "head moved" };
-  if (res.code === "not_open" || res.code === "fenced") return { skipped: res.code };
+  if (res.code === "fenced") return { skipped: res.code };
+  if (res.code === "not_open") return park(`Pull request #${prNumber} is no longer open.`);
   // Branch rules or checks not satisfied yet: retry with backoff; when the queue gives up, a person is told.
   if (ctx.last) {
     await withTx(deps.pool, (tx) => raiseAlert(tx, {
       orgId: org, type: "github.merge.blocked", category: "integrations", subject: { type: "wo", id: woId }, woId, projectId: wo.project_id,
       after: { repo: repo.full, number: prNumber, headSha, reason: res.msg }, key: `${key}:blocked`,
     }));
+    await park(`GitHub still refuses the merge of #${prNumber} after the last retry: ${res.msg}`);
     return { blocked: res.msg };
   }
   throw new TransientError(res.msg, res.code);

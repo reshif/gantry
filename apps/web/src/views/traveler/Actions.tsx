@@ -130,8 +130,8 @@ export function useActionSpecs(wo: TWo, page = false): ActionSpec[] | null {
   }
   void approveGate;
   // A station that failed repeatedly is parked in the Needs a person bay: retrying it is what that person is there for.
-  if (wo.state === "failed" || wo.state === "blocked" || (wo.bay === "person" && wo.bayCause === "failed"))
-    out.push({ key: "retry", label: `Retry ${stName(cat, stationId)}`, kind: "primary", icon: "refresh", id: "trv-retry", guard: stop ? no(stopWhy) : dec(wo, "sendback"), group: "main", onClick: () => void ops.retry(wo.id, undefined, ifm).then((r) => res(r)) });
+  if (wo.state === "failed" || wo.state === "blocked" || (wo.bay === "person" && (wo.bayCause === "failed" || wo.bayCause === "merge")))
+    out.push({ key: "retry", label: wo.bayCause === "merge" ? "Retry merge" : `Retry ${stName(cat, stationId)}`, kind: "primary", icon: "refresh", id: "trv-retry", guard: stop ? no(stopWhy) : dec(wo, "sendback"), group: "main", onClick: () => void ops.retry(wo.id, undefined, ifm).then((r) => res(r)) });
   if (wo.bay) {
     let dU: TDecision = stop ? no(stopWhy) : dec(wo, "park");
     if (dU.allowed && wo.bay === "sechold" && !approveGate.allowed) dU = no(`Security hold can only be released by someone who may approve gates in this project.`);

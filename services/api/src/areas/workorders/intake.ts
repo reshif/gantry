@@ -242,6 +242,10 @@ export async function declineInner(fx: Fx, actor: Actor, w: Wo, reason: string, 
   note(w, fx, by, `Declined: ${reason.trim()}`);
   ev(fx, w, "wo.decline", { text: reason.trim(), station: sid, ...(o.fromGate ? { instance: o.fromGate.id } : {}) });
   await saveWo(fx.tx, fx.orgId, w);
+  if (w.parentId) {
+    const { completeParentIfDone } = await import("./engine.js");
+    await completeParentIfDone(fx, w.parentId, by);
+  }
   await dispatchQueued(fx, w.project);
   return done(fx, `${w.id} moved to Declined.`, w.project, { version: w.version });
 }

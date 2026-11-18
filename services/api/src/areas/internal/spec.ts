@@ -8,7 +8,7 @@ import { commentsHandoff } from "../workorders/doccollab.js";
 import { planOf, researchHosts, sourcesHandoff } from "../workorders/research.js";
 import { swarmOf } from "../workorders/swarm.js";
 import { readSecurity } from "../../core/read/index.js";
-import type { RunCtx } from "./context.js";
+import { loadRunCtx, type RunCtx } from "./context.js";
 import { scopeVerdict, type ScopeRow } from "../mcp/scope.js";
 import { assemble, composedParts, composeLayers, loadAgentVersion, resolveSkills, type InstructionPin, type Layer, type SkillOut } from "../agents/compose.js";
 import { buildManifest, type PromptManifest } from "../agents/manifest.js";
@@ -285,4 +285,18 @@ async function handoff(db: Queryable, c: RunCtx): Promise<unknown> {
     ...(sc ? { scout: { id: sc.id, question: sc.question, focus: sc.focus, note: `You are scout ${sc.id}. Answer only this question, write your findings to research/scout-${sc.id.toLowerCase()}.md with write_document, cite web sources, and end. You cannot send scouts or propose a plan.` } } : {}),
     ...(scouts ? { scouts } : {}),
   };
+}
+
+/**
+ * Dispatch has seeded the workspace and recorded the repository context on the run: the prompt the run will be given is now fully known, so its manifest and hash
+ * are recorded on the run from the same composition the run spec serves (repository context and handoff included). `dispatchPromptHash` is what dispatch pinned;
+ * the spec endpoint compares against it, so "drift" means something changed after dispatch, not that dispatch could not see the repository files yet.
+ */
+export async function recordDispatchPrompt(db: Queryable, orgId: string, runId: string): Promise<{ hash: string } | null> {
+  const c = await loadRunCtx(db, orgId, runId);
+  if (!c) return null;
+  const spec = await composeRunSpec(db, c, "http://edge.invalid");
+  if ("error" in spec) return null;
+  await db.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [orgId, runId, JSON.stringify({ promptManifest: spec.promptManifest, promptHash: spec.promptManifest.hash, dispatchPromptHash: spec.promptManifest.hash })]);
+  return { hash: spec.promptManifest.hash };
 }
