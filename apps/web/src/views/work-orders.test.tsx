@@ -161,6 +161,32 @@ describe("Work orders table", () => {
   });
 });
 
+describe("Work orders empty tab and More panel", () => {
+  it("an empty Killed tab says no killed work orders, not that filters match nothing", async () => {
+    mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page([], null, 0) }) });
+    mount(<WorkOrdersView />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Killed/ }));
+    expect(await screen.findByText("No killed work orders.")).toBeTruthy();
+    expect(screen.queryByText("Nothing matches these filters")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+  });
+
+  it("More labels the columns group and explains Save view", async () => {
+    mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page([], null, 0) }) });
+    mount(<WorkOrdersView />);
+    fireEvent.click(await screen.findByRole("button", { name: "More" }));
+    expect(await screen.findByText("Columns shown")).toBeTruthy();
+    expect(screen.getByText(/Save view keeps the tab, filters, sort and columns/)).toBeTruthy();
+  });
+
+  it("needs text is not clamped or bold in the stylesheet", async () => {
+    const css = (await import("node:fs")).readFileSync("src/styles/views/workorders.css", "utf8");
+    expect(css).not.toMatch(/wo-needs[^}]*line-clamp/);
+    expect(css).not.toMatch(/wo-need-t \{ font-weight: 600/);
+    expect(css).not.toMatch(/overflow-wrap: anywhere/);
+  });
+});
+
 describe("New work order", () => {
   const submitOk = (_c: Call) => ({ body: { ok: true, msg: "WO-3000 submitted.", id: "WO-3000", wo: "WO-3000", classification: wo?.cls } });
   const traveler = () => ({ body: { ...wo, id: "WO-3000", title: "Fix refund crash", clsConfidence: 0.91, clsRationale: "The request describes broken behaviour.", clsSuggested: "bug", cls: "bug", requestedCls: null, conv: { questions: [1, 2, 3], misses: [], messages: [], raised: [], done: false }, version: 1 } });
@@ -193,6 +219,14 @@ describe("New work order", () => {
     expect(screen.getByText("Proposed route")).toBeTruthy();
     expect(document.querySelector(".int-route")).toBeTruthy();
     expect(screen.getByText(/91%/)).toBeTruthy();
+  });
+
+  it("typing 6+ characters never crashes when /me lists projects without a flow, and the preview shows without opening anything", async () => {
+    const { flow: _flow, ...summary } = PAYMENTS as unknown as Record<string, unknown>;
+    await open({}, { me: { projects: [summary] } });
+    fireEvent.change(screen.getByLabelText(/What should change/), { target: { value: "Please ask @ about the refund crash" } });
+    expect(await screen.findByText("Classifier preview:")).toBeTruthy();
+    expect(screen.getByText(/Leave it as is and the Intake agent classifies/)).toBeTruthy();
   });
 
   it("has the prototype's fields: Title, What should change and why, Project, Class (Feature), Priority (P2), and no Source", async () => {

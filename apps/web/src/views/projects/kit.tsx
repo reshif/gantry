@@ -49,8 +49,8 @@ export function useCatalog(): Catalog | null {
   return q.data ?? null;
 }
 
-export const classOf = (cat: Catalog, p: Project, id: string): WorkClass =>
-  p.flow.classes.find((c) => c.id === id) ?? cat.classes.find((c) => c.id === id) ?? ({ id, name: id, skips: [], priority: "P2", slaH: 72, est: "M" } as WorkClass);
+export const classOf = (cat: Catalog, p: Project | null, id: string): WorkClass =>
+  p?.flow?.classes?.find((c) => c.id === id) ?? cat.classes.find((c) => c.id === id) ?? ({ id, name: id, skips: [], priority: "P2", slaH: 72, est: "M" } as WorkClass);
 export const stationName = (cat: Catalog, id: string): string => cat.stations.find((s) => s.id === id)?.name ?? id;
 export const gateLabel = (cat: Catalog, id: string): string => cat.gates.find((g) => g.id === id)?.label ?? id;
 export const roleName = (cat: Catalog, id: string): string => cat.roles.find((r) => r.id === id)?.name ?? id;
