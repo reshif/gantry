@@ -12,23 +12,29 @@ import { Btn, Chip, Empty, Panel } from "../../ui/primitives";
 import { DataTable, type Col } from "../../ui/SortTable";
 import { fmtDate } from "./time";
 
-const KIND: Record<string, string> = { repo_context: "Repo context", layer: "Agent layer", skill: "Skill", station_tools: "Station tools", result_instruction: "Result instruction", result_schema: "Result schema", system: "System", tools: "Tools" };
+const KIND: Record<string, string> = { repo_context: "Repo context (AGENTS.md)", layer: "Agent layer", skill: "Skill", station_tools: "Station tools", result_instruction: "Result instruction", result_schema: "Result schema", system: "System", tools: "Tools" };
 
 function TraceBody({ call }: { call: PromptCall }) {
   const q = usePromptTrace(call.trace);
   return (
     <Async query={q} what="the prompt record" id="pt-trace" rows={4}>
       {(t) => {
-        const parts = t.manifest?.parts ?? [];
+        const m = t.manifest?.parts?.length ? t.manifest : (t.runPrompt?.manifest ?? t.manifest);
+        const parts = m?.parts ?? [];
+        const pin = t.runPrompt?.instructionPin;
+        const skills = parts.filter((p) => p.kind === "skill");
         return (
           <div className="stack" id="pt-manifest">
             <dl className="kv">
               <dt>Model</dt><dd className="mono">{t.model ?? call.model}</dd>
               <dt>Tokens</dt><dd>{`${fmt.k(call.inputTokens)} in · ${fmt.k(call.outputTokens)} out`}</dd>
               <dt>Cost</dt><dd>{fmt.money(call.costMicros / 1e6)}</dd>
-              <dt>Manifest</dt><dd className="mono small">{t.manifest?.hash ?? call.promptHash ?? "none recorded"}</dd>
+              <dt>Manifest</dt><dd className="mono small">{m?.hash ?? call.promptHash ?? "none recorded"}</dd>
+              {pin ? <><dt>Agent version</dt><dd>{`${pin.agent} v${pin.version}`}</dd></> : null}
+              {m?.handoff ? <><dt>Handoff</dt><dd>{`${fmt.k(m.handoff.bytes)} bytes`}</dd></> : null}
               <dt>Trace</dt><dd className="mono small">{call.trace}</dd>
             </dl>
+            {parts.length ? <p className="small muted" id="pt-summary">{`${parts.length} parts: ${parts.some((p) => p.kind === "layer") ? "agent layer, " : ""}${parts.some((p) => p.kind === "repo_context") ? "repository context (AGENTS.md), " : ""}${skills.length} skill${skills.length === 1 ? "" : "s"}${parts.some((p) => p.kind === "station_tools") ? ", station tools" : ""}.`}</p> : null}
             {parts.length ? (
               <ol className="list" id="pt-parts" aria-label="What the model was given">
                 {parts.map((p, i) => (

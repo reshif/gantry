@@ -80,6 +80,16 @@ export const useRecordMarkdown = (id: string | null | undefined) =>
   useQuery({ queryKey: qk.recordMd(id ?? ""), queryFn: () => getText(api(`work-orders/${encodeURIComponent(id ?? "")}/record.md`)), enabled: !!id });
 export const useChanges = (id: string | null | undefined) =>
   useQuery({ queryKey: qk.changes(id ?? ""), queryFn: () => get<unknown>(api(`work-orders/${encodeURIComponent(id ?? "")}/changes`)), enabled: !!id });
+/* ---------- the diff of a work order (GET .../diff: one entry per file across its commits, with the stored patch text as hunks) ---------- */
+
+export interface DiffLine { kind: "add" | "del" | "ctx"; old: number | null; new: number | null; text: string; noNewline?: true }
+export interface DiffHunk { oldStart: number; oldLines: number; newStart: number; newLines: number; header: string; lines: DiffLine[] }
+export interface DiffCommit { commit: string | null; patch: string; plus: number; minus: number; status: string; hunks: DiffHunk[] }
+export interface DiffFile { path: string; status: "added" | "modified" | "deleted" | "renamed"; oldPath: string | null; binary: boolean; plus: number; minus: number; approximate: boolean; commits: DiffCommit[] }
+export interface WoDiff { truncated: boolean; redactions: number; missingPatches: string[]; files: DiffFile[] }
+export const useWoDiff = (id: string | null | undefined) =>
+  useQuery({ queryKey: qk.woDiff(id ?? ""), queryFn: () => get<WoDiff>(api(`work-orders/${encodeURIComponent(id ?? "")}/diff`)), enabled: !!id });
+
 /** Download URL of the record bundle with hashes (GET .../record/export). */
 export const recordExportUrl = (id: string) => api(`work-orders/${encodeURIComponent(id)}/record/export`);
 
@@ -114,7 +124,7 @@ export interface PromptCall {
 }
 export interface PromptPart { kind: string; name: string; source?: string; version: number | null; sha256: string; bytes: number }
 export interface PromptManifestRead { hash?: string; kind?: string; parts?: PromptPart[]; handoff?: { bytes: number; sha256: string }; conversation?: { messages: number; bytes: number }; compact?: boolean }
-export interface PromptTrace { v?: number; kind?: string; model?: string; vendor?: string; status?: number; manifest?: PromptManifestRead | null; request?: unknown; response?: unknown }
+export interface PromptTrace { v?: number; kind?: string; model?: string; vendor?: string; status?: number; manifest?: PromptManifestRead | null; request?: unknown; response?: unknown; /** A station run: the run's own record of what the agent was given, and the agent version it was pinned to. */ runPrompt?: { promptHash?: string | null; manifest?: PromptManifestRead | null; instructionPin?: { agent: string; version: number } | null } | null }
 /** The recorded model calls of one work order (newest first, at most 200). */
 export const usePromptCalls = (woId: string | null | undefined) =>
   useQuery({ queryKey: qk.promptCalls(woId ?? ""), queryFn: async () => (await get<{ calls?: PromptCall[] }>(api("prompt-calls"), { wo: woId ?? "" })).calls ?? [], enabled: !!woId });

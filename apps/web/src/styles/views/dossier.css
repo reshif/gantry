@@ -150,3 +150,17 @@
 @media (pointer: coarse) {
   .dz-head .dz-actions .btn { min-height: 0; }
 }
+
+/* Changes page: the agent's actual diff (GET .../diff), one block per file, hunks with line numbers, per-commit sections when a file was touched more than once. */
+.dfv{font:12.5px/1.5 var(--mono);background:var(--sunk);border-top:1px solid var(--line);overflow:auto}
+.dfv-note{padding:8px 12px;font:13px/1.45 var(--font);border-bottom:1px solid var(--line)}
+.dfv-sec{border-bottom:1px solid var(--line)}
+.dfv-sec>h4{margin:0;padding:6px 12px;font:600 12px var(--font);background:var(--surface2);border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.dfv-hunk{min-width:max-content}
+.dfv-head{padding:2px 12px;color:var(--muted);background:var(--accent-soft)}
+.dfv-row{display:grid;grid-template-columns:44px 44px 1fr;white-space:pre-wrap;overflow-wrap:anywhere}
+.dfv-row .n{text-align:right;padding:0 8px;color:var(--muted);user-select:none;border-right:1px solid var(--line)}
+.dfv-row .t{padding:0 8px}
+.dfv-row.add .t{background:var(--ok-bg);color:var(--ok)}
+.dfv-row.del .t{background:var(--bad-bg);color:var(--bad)}
+.chg-file{display:flex;gap:8px;align-items:center}

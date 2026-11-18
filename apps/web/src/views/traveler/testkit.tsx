@@ -51,6 +51,7 @@ export function readsFor(w: WorkOrder, t: TWo = travelerOf(w), r: RecordData = r
     [`GET /api/v1/work-orders/${w.id}`]: () => ({ body: t }),
     [`GET /api/v1/work-orders/${w.id}/record`]: () => ({ body: r }),
     [`GET /api/v1/work-orders/${w.id}/changes`]: () => ({ body: { pullRequests: [], commits: [], files: [], patches: [] } }),
+    [`GET /api/v1/work-orders/${w.id}/diff`]: () => ({ body: { truncated: false, redactions: 0, missingPatches: [], files: [] } }),
     "GET /api/v1/audit": () => ({ body: { items: [], next: null } }),
   };
 }
