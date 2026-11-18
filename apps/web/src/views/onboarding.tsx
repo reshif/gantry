@@ -8,7 +8,7 @@ import { useUI } from "../ui/overlay-context";
 import { setProject } from "../lib/prefs";
 import { usePrefs } from "../lib/prefs";
 import { ProtoList } from "./projects/protolist";
-import { useTab } from "./projects/proto";
+import { ActBtn, useTab } from "./projects/proto";
 import { GuidelinesPanel } from "./onboarding/Guidelines";
 import { OnboardDialog } from "./onboarding/OnboardDialog";
 import { RepoDrawer } from "./onboarding/Drawer";
@@ -60,7 +60,7 @@ export default function OnboardingView() {
     <div className="view onb-view">
       <ViewHead
         kicker={project.key} title="Onboarding" sub="Bring a repository onto the line: assess it, fix the gaps by pull request, then go live."
-        actions={<Btn kind="primary" icon="plus" id="onb-connect" label="Onboard a repo" guard={connect} onClick={() => onboard()} />}
+        actions={<ActBtn kind="primary" icon="plus" id="onb-connect" label="Onboard a repo" guard={connect} onClick={() => onboard()} />}
       />
       <StatRow>
         <Stat label="Waiting" value={qState(reposQ, () => String(waiting))} sub="not started" />
@@ -68,7 +68,7 @@ export default function OnboardingView() {
         <Stat label="Ready" value={allRepos.every((q) => q.isSuccess) ? String(ready) : "…"} tone="done" sub="repos live" />
         <Stat label="Guidelines" value={gl ? String(gl.items.length) : "…"} sub={gl ? `v${gl.version}` : ""} />
       </StatRow>
-      <Tabs idPrefix="onb-tab" items={[{ id: "pipeline", label: "Pipeline", count: rows.filter((r) => r.stage > 0).length }, { id: "guidelines", label: "Guidelines", count: gl?.items.length ?? null }]} active={tab} onChange={setTab} />
+      <Tabs revealActive idPrefix="onb-tab" items={[{ id: "pipeline", label: "Pipeline", count: rows.filter((r) => r.stage > 0).length }, { id: "guidelines", label: "Guidelines", count: gl?.items.length ?? null }]} active={tab} onChange={setTab} />
       {tab === "pipeline" ? (
         <Async query={reposQ} what="repos" id="onb-repos" isEmpty={() => false}>
           {() => (
@@ -81,7 +81,7 @@ export default function OnboardingView() {
                   { key: "s", label: "Stage", sort: (r) => r.stage, render: (r) => <div className="row" style={{ gap: 2 }} role="img" aria-label={`Stage ${PSTAGES[r.stage]}`}>{PSTAGES.map((s, i) => <span key={s} title={s} style={{ width: 18, height: 8, background: i <= r.stage ? "var(--accent)" : "var(--sunk)", border: "1px solid var(--line2)" }} />)}</div> },
                   { key: "sn", label: "Status", render: (r) => { const stop = r.repo ? stoppedLabel(r.repo) : null; return stop ? <Chip text={stop} cls={stop === "Failed" ? "bad" : "warn"} /> : <Chip text={PSTAGES[r.stage]} cls={r.stage === 4 ? "ok" : r.stage ? "info" : "plain"} />; } },
                   { key: "f", label: "Gaps", align: "end", render: (r) => (r.gaps == null ? "—" : String(r.gaps)) },
-                  { key: "a", label: "", align: "end", render: (r) => (r.stage ? <Btn small id={`onb-open-${r.id}`} label="Open" onClick={() => navigate("onboarding", r.repo?.id ?? r.id)} /> : <Btn small kind="primary" id={`onb-start-${r.id}`} label="Start" guard={connect} onClick={() => onboard(r)} />) },
+                  { key: "a", label: "", align: "end", render: (r) => (r.stage ? <ActBtn small id={`onb-open-${r.id}`} label="Open" onClick={() => navigate("onboarding", r.repo?.id ?? r.id)} /> : <Btn small kind="primary" id={`onb-start-${r.id}`} label="Start" guard={connect} onClick={() => onboard(r)} />) },
                 ]}
               />
             </Panel>

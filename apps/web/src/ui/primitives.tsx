@@ -204,9 +204,18 @@ export interface TabItem {
   count?: number | string | null;
 }
 
-export function Tabs({ items, active, onChange, idPrefix = "tab" }: { items: TabItem[]; active: string; onChange: (id: string) => void; idPrefix?: string }) {
+export function Tabs({ items, active, onChange, idPrefix = "tab", revealActive }: { items: TabItem[]; active: string; onChange: (id: string) => void; idPrefix?: string; /** scroll the active tab to the middle of a strip that overflows (the Blueprint does, so a deep link at phone width opens on its tab) */ revealActive?: boolean }) {
   const bar = useRef<HTMLDivElement>(null);
   const [more, setMore] = useState("");
+  useEffect(() => {
+    if (!revealActive) return;
+    const t = setTimeout(() => {
+      const el = bar.current;
+      const on = el?.querySelector<HTMLElement>(".tab.is-active");
+      if (el && on && el.scrollWidth > el.clientWidth) el.scrollTo({ left: on.offsetLeft - (el.clientWidth - on.offsetWidth) / 2 });
+    }, 30);
+    return () => clearTimeout(t);
+  }, [active, revealActive]);
   useEffect(() => {
     const el = bar.current;
     if (!el) return;

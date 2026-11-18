@@ -1,6 +1,7 @@
 /** Small Blueprint building blocks shared by Onboarding and Project config: key/value list, switch row, URL-held tab. */
 import { Children, Fragment, type ReactNode } from "react";
-import { Toggle, type Decision } from "../../ui/primitives";
+import { Btn, Toggle, type BtnProps, type Decision } from "../../ui/primitives";
+import { useUI } from "../../ui/overlay-context";
 import { useQueryParam } from "./urlState";
 
 /** Prototype `kv`: a definition list of label / value rows. */
@@ -32,3 +33,19 @@ export function useTab(ids: string[], def: string): [string, (id: string) => voi
 }
 
 export const countChildren = (c: ReactNode): number => Children.toArray(c).filter(Boolean).length;
+
+/** The Blueprint's lock text: a control the role may not use stays visible, carries this as its title and answers a click with a red toast. */
+export const LOCK = "Your role is read-only for this action.";
+
+/** A button that is locked for a read-only role the way the prototype's `btn(act)` is: title, aria-disabled, red toast on click (the tooltip keeps the server's reason). */
+export function ActBtn({ guard, onClickCapture, ...rest }: BtnProps) {
+  const ui = useUI();
+  const locked = !!guard && !guard.allowed;
+  return (
+    <Btn
+      {...rest}
+      guard={guard}
+      {...(locked ? { title: LOCK, onClickCapture: () => ui.toast(LOCK, "error") } : { onClickCapture })}
+    />
+  );
+}

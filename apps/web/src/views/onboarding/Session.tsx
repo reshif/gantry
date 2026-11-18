@@ -9,7 +9,7 @@ import { useCan } from "../../api/can";
 import { commands } from "../../api/commands";
 import { useProjects, useRepos } from "../../api/queries";
 import { hashFor, navigate } from "../../lib/router";
-import { Kv } from "../projects/proto";
+import { ActBtn, Kv } from "../projects/proto";
 import { useTab } from "../projects/proto";
 import { Avatar, Btn, Chip, Empty, Panel, Tabs, ViewHead, Who } from "../../ui/primitives";
 import { Async } from "../../ui/async";
@@ -133,7 +133,7 @@ function NotStarted({ projectId, projectName, name, lang }: { projectId: string;
     <div className="osx" id="osx">
       <ViewHead crumbs={[{ label: "Onboarding", href: hashFor("onboarding", null, projectId) }, { label: name }]} title={name} sub="Onboarding session" />
       {STEPS(0)}
-      <Tabs idPrefix="osx-tab" items={[{ id: "findings", label: "Findings", count: 0 }, { id: "pr", label: "Pull request" }, { id: "settings", label: "Settings" }]} active={tab} onChange={setTab} />
+      <Tabs revealActive idPrefix="osx-tab" items={[{ id: "findings", label: "Findings" }, { id: "pr", label: "Pull request" }, { id: "settings", label: "Settings" }]} active={tab} onChange={setTab} />
       <div className="stack">
         {tab === "findings" ? (
           <>
@@ -245,7 +245,7 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
     <div className="osx" id="osx">
       <ViewHead crumbs={[{ label: "Onboarding", href: hashFor("onboarding", null, projectId) }, { label: r.name }]} title={r.name} sub="Onboarding session" />
       {STEPS(st)}
-      <Tabs idPrefix="osx-tab" items={tabs} active={tab} onChange={setTab} />
+      <Tabs revealActive idPrefix="osx-tab" items={tabs} active={tab} onChange={setTab} />
       <div className="stack">
         {tab === "findings" ? (
           <>
@@ -256,7 +256,7 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
                     <li key={f.id}>
                       <Chip text={f.ok ? "met" : "gap"} cls={f.ok ? "ok" : f.required !== false ? "bad" : "warn"} />
                       <div className="grow">{f.check}<div className="small muted">{f.required !== false ? "Required" : "Advisory"}</div></div>
-                      {!f.ok && st < 3 ? <Btn small id={`osx-fixed-${f.id}`} label="Mark fixed" guard={manage} disabledReason={manage.allowed ? busyNote : null} onClick={() => void recheck()} /> : null}
+                      {!f.ok && st < 3 ? <ActBtn small id={`osx-fixed-${f.id}`} label="Mark fixed" guard={manage} disabledReason={manage.allowed ? busyNote : null} onClick={() => void recheck()} /> : null}
                     </li>
                   ))}
                 </ul>
@@ -316,19 +316,19 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
                   ["Files", <div key="f" className="pre">{o.pr.files.map((f) => f.path).join("\n")}</div>],
                 ]} />
                 {s.prNeedsUpdate ? <p className="small muted">A later assessment found this pull request out of date. Approve the update in the conversation.</p> : null}
-                {st === 2 ? <Btn id="osx-checks" label="Mark checks passing" guard={manage} onClick={() => void checks()} /> : null}
-                {o.pr.state !== "merged" && st >= 3 ? <Btn kind="primary" id="osx-merge" label="Merge and go live" guard={merge} disabledReason={mergeReason} onClick={() => void mergeAsk()} /> : null}
+                {st === 2 ? <ActBtn id="osx-checks" label="Mark checks passing" guard={manage} onClick={() => void checks()} /> : null}
+                {o.pr.state !== "merged" && st >= 3 ? <ActBtn kind="primary" id="osx-merge" label="Merge and go live" guard={merge} disabledReason={mergeReason} onClick={() => void mergeAsk()} /> : null}
               </div>
             ) : (
               <Empty title="No pull request yet" text="Open one and the agent writes AGENTS.md, CODEOWNERS and the factory config." action={<>
-                <Btn kind="primary" id="osx-openpr" label="Open pull request" guard={manage} disabledReason={manage.allowed ? busyNote : null} onClick={() => { if (requiredGap) { ui.toast("Fix the required gaps first, or open the PR so the agent can fix them.", "error"); return; } void openPr(); }} />
-                <Btn id="osx-openanyway" label="Open anyway" guard={manage} disabledReason={manage.allowed ? busyNote : null} onClick={() => void openPr()} />
+                <ActBtn kind="primary" id="osx-openpr" label="Open pull request" guard={manage} disabledReason={manage.allowed ? busyNote : null} onClick={() => { if (requiredGap) { ui.toast("Fix the required gaps first, or open the PR so the agent can fix them.", "error"); return; } void openPr(); }} />
+                <ActBtn id="osx-openanyway" label="Open anyway" guard={manage} disabledReason={manage.allowed ? busyNote : null} onClick={() => void openPr()} />
               </>} />
             )}
           </Panel>
         ) : (
-          <Panel title="Settings" tools={<Btn small kind="ghost" id="osx-details" label="Details and settings" onClick={details} />}>
-            <Kv rows={[["Repository", r.name], ["Language", r.lang], ["Project", projectName], ["Default branch", r.config.defaultBranch]]} />
+          <Panel title="Settings">
+            <Kv rows={[["Repository", <a key="d" className="pri" id="osx-details" href={hashFor("onboarding", r.id, projectId)} onClick={(e) => { e.preventDefault(); details(); }}>{r.name}</a>], ["Language", r.lang], ["Project", projectName], ["Default branch", r.config.defaultBranch]]} />
           </Panel>
         )}
       </div>

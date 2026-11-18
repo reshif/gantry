@@ -14,4 +14,5 @@ export const commands = {
   setProject: ops.setProject,
   setGateMode: ops.setGateMode,
   kill: ops.kill,
+  haltProject: ops.haltProject,
 };

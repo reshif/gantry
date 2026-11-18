@@ -11,14 +11,14 @@ import { useCan } from "../../api/can";
 import { useMcpServers, useMe, useRepos, useTemplates } from "../../api/queries";
 import { hashFor } from "../../lib/router";
 import { makeStopActions } from "../../shell/stopActions";
-import { Btn, Chip, Empty, Field, Input, LockNote, Meter, Panel, Select, Toggle } from "../../ui/primitives";
+import { Chip, Empty, Field, Input, LockNote, Meter, Panel, Select, Toggle } from "../../ui/primitives";
 import { isStepUp } from "../../ui/stepup";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
 import { Async } from "../../ui/async";
 import { FormDialog } from "../projects/formdialog";
 import { NumInput, roleName, useRes, useTeams } from "../projects/kit";
-import { Kv, ToggleRow } from "../projects/proto";
+import { ActBtn, Kv, LOCK, ToggleRow } from "../projects/proto";
 import { ProtoList } from "../projects/protolist";
 import { nextVersion } from "../govern/data";
 import type { PcProps } from "./ctx";
@@ -65,7 +65,7 @@ export function OverviewProto({ p, people }: PcProps) {
               </Field>
               <Field label="Description"><Input id="pcf-desc" value={desc} disabled={!cfg.allowed} onChange={(e) => setDesc(e.target.value)} /></Field>
               <Field label="Owner"><Select id="pcf-owner" disabled={!cfg.allowed} value={owner} onChange={setOwner} options={owners.map((x) => ({ value: x.id, label: x.name }))} /></Field>
-              <div><Btn kind="primary" type="submit" id="pcf-ov-save" label="Save" guard={d.allowed ? cfg : d} /></div>
+              <div><ActBtn kind="primary" type="submit" id="pcf-ov-save" label="Save" guard={d.allowed ? cfg : d} /></div>
             </div>
           </form>
         </Panel>
@@ -110,10 +110,10 @@ export function FlowProto({ p, cat }: PcProps) {
                 <div key={st.id} className="row" style={rowStyle}>
                   <span className="mono small" style={{ width: 34, color: "var(--accent)" }}>{st.no}</span>
                   <span>{st.name}</span>
-                  <span className="row small" style={{ flexWrap: "nowrap" }}>WIP <span style={{ width: 64, display: "inline-block" }}><NumInput id={`pcf-wip-${st.id}`} value={cfg.wip} min={1} max={30} locked={false} label={`${st.name} WIP limit`} onCommit={async (v) => (d.allowed ? res(await ops.setProject(p.id, `flow.stations.${st.id}.wip`, v, { ifMatch: p.version }), `${st.name} WIP ${v}`) : refuse(d.reason))} /></span></span>
+                  <span className="row small" style={{ flexWrap: "nowrap" }}>WIP <span style={{ width: 64, display: "inline-block" }}><NumInput id={`pcf-wip-${st.id}`} value={cfg.wip} min={1} max={20} limit={30} minMsg="WIP limit must be at least 1" locked={false} label={`${st.name} WIP limit`} onCommit={async (v) => (d.allowed ? res(await ops.setProject(p.id, `flow.stations.${st.id}.wip`, v, { ifMatch: p.version }), `${st.name} WIP ${v}`) : refuse(LOCK))} /></span></span>
                   <Toggle id={`pcf-st-${st.id}`} checked={st.id === "intake" ? true : cfg.enabled} decision={null} label={`${st.name} enabled`}
                     onChange={async (v) => {
-                      if (!d.allowed) return refuse(d.reason);
+                      if (!d.allowed) return refuse(LOCK);
                       if (st.id === "intake") return refuse("Intake is always on: every work order starts there.");
                       res(await ops.setProject(p.id, `flow.stations.${st.id}.enabled`, v, { ifMatch: p.version }), `${st.name}${v ? " on" : " off"}`);
                     }} />
@@ -135,14 +135,14 @@ export function FlowProto({ p, cat }: PcProps) {
                   <span>{g.name}</span>
                   <Select id={`pcf-gmode-${g.id}`} aria-label={`${g.name} mode`} style={{ width: 110 }} options={KINDS} value={mode}
                     onChange={async (v) => {
-                      if (!d.allowed) return refuse(d.reason);
+                      if (!d.allowed) return refuse(LOCK);
                       const why = gateModeLock(g, v as GateKind, p);
                       if (why) return refuse(why);
                       res(await ops.setGateMode(p.id, g.id, v, { ifMatch: p.version }), `${g.label} → ${v}`);
                     }} />
                   <Toggle id={`pcf-gate-${g.id}`} checked={on} decision={null} label={`${g.name} enabled`}
                     onChange={async (v) => {
-                      if (!d.allowed) return refuse(d.reason);
+                      if (!d.allowed) return refuse(LOCK);
                       if (lock.locked) return refuse(lock.reason);
                       if (!v && g.id !== "G1f") {
                         const ok = await ui.confirm({ title: `Turn off ${g.name}?`, kicker: `Flow · ${p.name}`, ok: "Turn off", body: `${g.name} (${g.label}) is skipped for new work orders. Work orders already in flight keep the flow they started with. This needs a recent sign-in and is audited.` });
@@ -195,7 +195,7 @@ export function ApproversProto({ p, cat }: PcProps) {
             { key: "n", label: "Needed", align: "end", render: (x) => String(x.required) },
             { key: "s", label: "Separation", render: (x) => (x.sod ? <Chip text="SoD" cls="ok" /> : "—") },
             { key: "e", label: "Escalate", align: "end", render: (x) => (x.escalateH ? `${x.escalateH} h` : "—") },
-            { key: "a", label: "", align: "end", render: (x) => <Btn small id={`pcf-ap-edit-${x.g}`} label="Edit" guard={d} onClick={() => edit(x)} /> },
+            { key: "a", label: "", align: "end", render: (x) => <ActBtn small id={`pcf-ap-edit-${x.g}`} label="Edit" guard={d} onClick={() => edit(x)} /> },
           ]}
         />
       </Panel>
@@ -263,7 +263,7 @@ export function BudgetProto({ p }: PcProps) {
               <LockNote decision={d} what="Budget" />
               <Field label={<>Monthly budget ($) <span className="muted">(required)</span></>} error={errs.monthly}><Input id="pcf-bud-monthly" type="number" min={100} value={monthly} disabled={!d.allowed} onChange={(e) => setMonthly(e.target.value)} /></Field>
               <Field label={<>Alert at (% used) <span className="muted">(required)</span></>} error={errs.alert}><Input id="pcf-bud-alert" type="number" min={10} value={alert} disabled={!d.allowed} onChange={(e) => setAlert(e.target.value)} /></Field>
-              <div><Btn kind="primary" type="submit" id="pcf-bud-save" label="Save budget" guard={d} /></div>
+              <div><ActBtn kind="primary" type="submit" id="pcf-bud-save" label="Save budget" guard={d} /></div>
             </div>
           </form>
         </Panel>
@@ -300,17 +300,21 @@ export function LineProto({ p }: PcProps) {
   const kd = useCan("kill.project", { project: p.id });
   const rd = useCan("restore.project", { project: p.id });
   const stop = me ? makeStopActions(ui, me) : null;
-  // the prototype's dialog: type the project key. The server also wants a reason for the audit trail, so that is the one added field.
+  // the prototype's dialog: type the project key only. The server wants a reason for the audit trail, so it is written for the person.
+  // the prototype toggles the halt at once with a toast; the audit reason is written for the person
+  const halt = async () => {
+    const r = await ops.haltProject(p.id, `Halted from Project config (${p.name}).`);
+    ui.toast(r.ok ? `${p.name} halted` : r.msg, r.ok ? "warn" : "error");
+  };
   const kill = () => ui.open((close) => (
     <FormDialog
       title={`Kill ${p.name}`} submit="Kill project" danger close={close} intro="All running work stops now."
-      values={{ c: "", reason: "" }}
+      values={{ c: "" }}
       fields={[
         { k: "c", label: `Type the project key (${p.key})`, req: true, validate: (v) => (v !== p.key ? `Type ${p.key} exactly.` : "") },
-        { k: "reason", label: "Reason", req: true, minLen: 5, hint: "Posted to the notification routes and the audit log." },
       ]}
-      onSubmit={async (v) => {
-        const r = await ops.kill("project", p.id, { reason: String(v.reason).trim(), mode: "hold", confirmText: p.name });
+      onSubmit={async () => {
+        const r = await ops.kill("project", p.id, { reason: `Killed from Project config; ${p.key} typed to confirm.`, mode: "hold", confirmText: p.name });
         if (!r.ok) {
           if (isStepUp(r)) { close(); stop?.kill("project", p.id); return undefined; } // the shell's kill dialog carries the sign-in re-check
           return r.msg;
@@ -325,8 +329,8 @@ export function LineProto({ p }: PcProps) {
       <div className="stack">
         <p>Halting lets running agents finish their current step. A kill stops them now.</p>
         <div className="row">
-          {p.halted ? <Btn icon="pause" id="pcf-resume" label="Resume project" guard={hd} onClick={() => void stop?.resume(p.id)} /> : <Btn icon="pause" id="pcf-halt" label="Halt project" guard={hd} onClick={() => stop?.halt(p.id)} />}
-          {p.killed ? <Btn kind="primary" icon="power" id="pcf-restore" label="Restore project" guard={rd} onClick={() => stop?.restore("project", p.id)} /> : <Btn kind="danger" icon="stop" id="pcf-kill" label="Kill project" guard={kd} onClick={kill} />}
+          {p.halted ? <ActBtn icon="pause" id="pcf-resume" label="Resume project" guard={hd} onClick={() => void stop?.resume(p.id)} /> : <ActBtn icon="pause" id="pcf-halt" label="Halt project" guard={hd} onClick={() => void halt()} />}
+          {p.killed ? <ActBtn kind="primary" icon="power" id="pcf-restore" label="Restore project" guard={rd} onClick={() => stop?.restore("project", p.id)} /> : <ActBtn kind="danger" icon="stop" id="pcf-kill" label="Kill project" guard={kd} onClick={kill} />}
         </div>
       </div>
     </Panel>

@@ -200,6 +200,24 @@ describe("Projects: portfolio", () => {
     await waitFor(() => expect(btn.getAttribute("aria-disabled")).toBe("true"));
     expect(btn.getAttribute("data-reason")).toMatch(/Needs Project Admin. No role holds project.create/);
   });
+
+  it("a locked New project carries the Blueprint's title and answers a click with the read-only toast", async () => {
+    setup({}, ["project.create"]);
+    mount(<ProjectsView />);
+    const btn = await byId("prj-new");
+    await waitFor(() => expect(btn.getAttribute("aria-disabled")).toBe("true"));
+    expect(btn.getAttribute("title")).toBe("Your role is read-only for this action.");
+    fireEvent.click(btn);
+    expect(await screen.findByText("Your role is read-only for this action.", { selector: ".toast, .toast *, [role=status] *, [role=status]" })).toBeTruthy();
+  });
+
+  it("the table's Status filter offers All, active, paused, archived (the Blueprint's)", async () => {
+    window.history.replaceState(null, "", "/?view=table");
+    setup();
+    mount(<ProjectsView />);
+    await byId("prj-table");
+    expect(Array.from((document.getElementById("prj-table-f-status") as HTMLSelectElement).options).map((o) => o.text)).toEqual(["All", "active", "paused", "archived"]);
+  });
 });
 
 describe("Projects: templates and wizard", () => {
@@ -594,7 +612,7 @@ describe("Project config", () => {
     expect(document.body.textContent).not.toMatch(/acme\/moving/);
   });
 
-  it("Line control is one Halt and stop panel; Kill asks for the project key (and a reason for the audit trail), not the shell's kill dialog", async () => {
+  it("Line control is one Halt and stop panel; Kill asks only for the project key, not the shell's kill dialog", async () => {
     const calls = withPayments({ "POST /api/v1/stops/project/payments/kill": () => ok(), "POST /api/v1/stops": () => ok() });
     tab("danger");
     mount(<ProjectConfigView />);
@@ -603,10 +621,42 @@ describe("Project config", () => {
     fireEvent.click(document.getElementById("pcf-kill")!);
     expect(await screen.findByText("Type the project key (PAY)")).toBeTruthy();
     fireEvent.change(document.getElementById("fd-c")!, { target: { value: "WRONG" } });
-    fireEvent.change(document.getElementById("fd-reason")!, { target: { value: "Runaway agent" } });
+    expect(document.getElementById("fd-reason")).toBeNull(); // the prototype asks only for the key
     fireEvent.click(within(document.querySelector(".dlg") as HTMLElement).getByRole("button", { name: "Kill project" }));
     expect(await screen.findByText("Type PAY exactly.")).toBeTruthy();
     expect(calls.some((c) => c.method === "POST" && /kill|stops/.test(c.path))).toBe(false);
+  });
+
+  it("the pages that are not tabs stay reachable from the More menu in the header", async () => {
+    withPayments();
+    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-pages"));
+    const labels = Array.from(document.querySelectorAll("[role=menuitem]")).map((x) => x.textContent);
+    expect(labels).toEqual(expect.arrayContaining(["Members and roles", "Work classes", "Notification routes", "History", "Full rule editor", "Spend breakdown", "Archive project"]));
+    fireEvent.click(screen.getByText("Members and roles"));
+    expect(window.location.search).toBe("?tab=members");
+  });
+
+  it("Halt project halts at once with the Blueprint's toast; WIP below 1 says so; locked Kill shows the title", async () => {
+    const calls = withPayments({ "POST /api/v1/stops": () => ok() });
+    tab("danger");
+    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-halt"));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/stops")?.body).toMatchObject({ scope: "project", id: "payments", mode: "halt" }));
+    expect(document.querySelector(".dlg")).toBeNull();
+    expect(await screen.findByText("Payments Platform halted")).toBeTruthy();
+  });
+
+  it("read-only: Kill project, Halt project and the approver Edit carry the lock title and toast on click", async () => {
+    withPayments({}, ["kill.project", "halt.project", "project.config", "flow.edit"]);
+    tab("danger");
+    mount(<ProjectConfigView />);
+    const kill = await byId("pcf-kill");
+    await waitFor(() => expect(kill.getAttribute("aria-disabled")).toBe("true"));
+    expect(kill.getAttribute("title")).toBe("Your role is read-only for this action.");
+    expect(document.getElementById("pcf-halt")!.getAttribute("title")).toBe("Your role is read-only for this action.");
+    fireEvent.click(kill);
+    expect(await screen.findByText("Your role is read-only for this action.", { selector: "[role=status] *, [role=status], .toast, .toast *" })).toBeTruthy();
   });
 
   it("Flow lists the Compliance sign-off gate (off) when the project's flow carries it", async () => {

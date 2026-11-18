@@ -52,12 +52,11 @@ export function ProjectGrid({ projects }: { projects: PView[] }) {
 export function ProjectTable({ projects }: { projects: PView[] }) {
   const actor = useActors();
   const who = (id: string) => actor(id).name.replace(" (agent)", "");
-  const statuses = Array.from(new Set(projects.map((p) => p.status)));
   return (
     <Panel flush>
       <ProtoList<PView>
         id="prj-table" noun="project" rows={projects} rowKey={(p) => p.id} text={(p) => p.name + p.key + (p.desc ?? "")}
-        filters={[{ k: "status", label: "Status", opts: statuses }]}
+        filters={[{ k: "status", label: "Status", opts: ["active", "paused", "archived"], fn: (p, v) => (v === "paused" ? !!(p.halted || p.killed) : p.status === v) }]}
         cols={[
           { key: "n", label: "Project", sort: (p) => p.name, render: (p) => <div><a className="pri" href={configHref(p)} onClick={() => setProject(p.id)}>{p.name}</a><span className="sub">{`${p.key} · ${p.desc ?? ""}`}</span></div> },
           { key: "o", label: "Owner", sort: (p) => who(p.owner), render: (p) => who(p.owner) },

@@ -12,6 +12,7 @@ import { ProjectGrid, ProjectTable } from "./projects/gallery";
 import { NewProjectDialog } from "./projects/newproject";
 import { TemplatesTab } from "./projects/templates";
 import { NewProjectWizard } from "./projects/wizard";
+import { ActBtn } from "./projects/proto";
 import { useQueryParam } from "./projects/urlState";
 import type { PView } from "./projects/kit";
 
@@ -44,7 +45,7 @@ export default function ProjectsView() {
         kicker="ALL LINES" title="Projects" sub="Each project is its own production line with its own flow, gates and budget."
         actions={<>
           <Segmented pressed name="prj-view" label="View" items={[{ id: "cards", label: "Cards" }, { id: "table", label: "Table" }]} value={view === "table" ? "table" : view === "cards" ? "cards" : ""} onChange={(id) => setView(id === "cards" ? null : id)} />
-          <Btn kind="primary" icon="plus" id="prj-new" guard={create} label="New project" onClick={openNew} />
+          <ActBtn kind="primary" icon="plus" id="prj-new" guard={create} label="New project" onClick={openNew} />
         </>}
       />
       <StatRow id="prj-stats">

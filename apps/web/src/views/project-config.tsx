@@ -9,6 +9,7 @@ import { pickProject } from "../lib/routes";
 import { updatePrefs, usePrefs } from "../lib/prefs";
 import { Btn, Empty, Panel, Select, Tabs, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
+import { useUI } from "../ui/overlay-context";
 import { useCatalog, type PView } from "./projects/kit";
 import { useQueryParam } from "./projects/urlState";
 import { SECONDARY, TABS, type CfgState } from "./project-config/ctx";
@@ -30,6 +31,7 @@ const fresh = (): CfgState => ({ tab: linked()?.tab ?? "overview", gate: linked(
 
 export default function ProjectConfigView() {
   const me = useMe();
+  const ui = useUI();
   const prefs = usePrefs();
   const projectsQ = useProjects();
   const projects = (projectsQ.data ?? []) as PView[];
@@ -70,9 +72,9 @@ export default function ProjectConfigView() {
     <div className="view pcf">
       <ViewHead
         kicker={p.key} title="Project config" sub={`${p.name} · ${p.key}`}
-        actions={<Select id="pcf-project" style={{ width: 200 }} aria-label="Project" value={p.id} options={projects.map((x) => ({ value: x.id, label: x.name }))} onChange={(v) => { updatePrefs({ project: v }); setTabQ(null); navigate("project-config"); }} />}
+        actions={<><Btn kind="ghost" icon="down" id="pcf-pages" label="More" aria={`More pages for ${p.name}`} onClick={(e) => { ui.menu(e.currentTarget, "More pages", SECONDARY.map(([id, label]) => ({ label, onClick: () => set({ tab: id }) }))); }} /><Select id="pcf-project" style={{ width: 200 }} aria-label="Project" value={p.id} options={projects.map((x) => ({ value: x.id, label: x.name }))} onChange={(v) => { updatePrefs({ project: v }); setTabQ(null); navigate("project-config"); }} /></>}
       />
-      <Tabs idPrefix="pcf-tab" items={TABS.map((t) => ({ id: t[0], label: t[1], count: t[0] === "mcp" ? p.mcp.length : null }))} active={active} onChange={(id) => set({ tab: id })} />
+      <Tabs revealActive idPrefix="pcf-tab" items={TABS.map((t) => ({ id: t[0], label: t[1], count: t[0] === "mcp" ? p.mcp.length : null }))} active={active} onChange={(id) => set({ tab: id })} />
       <div className="pcf-body" id="pcf-tab-panel" role="tabpanel" aria-labelledby={`pcf-tab-${active}`}>
         {sec ? <div className="row" style={{ marginBottom: 12 }}><Btn small kind="ghost" icon="back" id="pcf-back" label={TABS.find((t) => t[0] === sec[2])?.[1] ?? "Overview"} onClick={() => set({ tab: sec[2] })} /><strong>{sec[1]}</strong></div> : null}
         {body}
