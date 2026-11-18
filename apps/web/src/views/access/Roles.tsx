@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Action, Matrix, Person, Role } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
-import { Btn, Chip, Field, LockNote, Segmented, Select, type Decision } from "../../ui/primitives";
+import { Chip, Field, LockNote, Segmented, Select, type Decision } from "../../ui/primitives";
 import { DataTable } from "../../ui/DataTable";
 import { useUI } from "../../ui/overlay-context";
 import { ifMatchOf, lockd, useOutcome } from "../govern/data";
@@ -46,7 +46,7 @@ export function RoleForm({ existing, perm, roles, matrix, actions, registerSubmi
 }
 
 export function RolesList({ roles, matrix, actions, people, onRights, onEdit, onRemove }: {
-  roles: Role[]; matrix: Matrix; actions: Action[]; people: Person[]; onRights: (id: string) => void; onEdit: (r: Role) => void; onRemove: (r: Role) => void;
+  roles: Role[]; matrix: Matrix; actions: Action[]; people: Person[]; onRights: (id: string) => void; onEdit: (r: Role | null) => void; onRemove: (r: Role) => void;
 }) {
   const perm = useCan("role.edit") as Decision;
   const ui = useUI();
@@ -60,14 +60,14 @@ export function RolesList({ roles, matrix, actions, people, onRights, onEdit, on
       rowKey={(r) => r.id}
       columns={[
         { key: "name", label: "Role", render: (r) => (
-          <span className="row" style={{ flexWrap: "nowrap", justifyContent: "space-between" }}>
-            <b>{r.name}</b>
-            <Btn icon="dots" aria={`Manage ${r.name}`} small kind="ghost" cls="icon" id={`acc-role-menu-${r.id}`} onClick={(e) => ui.menu(e.currentTarget, r.name, [
-              { label: "Show rights in the matrix", icon: "list", onClick: () => onRights(r.id) },
-              { label: "Edit role", icon: "tag", guard: !perm.allowed ? perm : !r.custom ? lockd(`${r.name} is built in. Edit its rights in the matrix.`) : null, onClick: () => onEdit(r) },
-              { label: "Remove role", icon: "x", kind: "danger", guard: !perm.allowed ? perm : !r.custom ? lockd(`${r.name} is built in and cannot be removed.`) : null, onClick: () => onRemove(r) },
-            ])} />
-          </span>
+          // Static in the prototype: no visible control. Role administration stays on the cell's context menu (right click).
+          <b onContextMenu={(e) => { e.preventDefault(); ui.menu(e.currentTarget, r.name, [
+            { label: "Show rights in the matrix", icon: "list", onClick: () => onRights(r.id) },
+            { label: "Edit role", icon: "tag", guard: !perm.allowed ? perm : !r.custom ? lockd(`${r.name} is built in. Edit its rights in the matrix.`) : null, onClick: () => onEdit(r) },
+            { label: "Remove role", icon: "x", kind: "danger", guard: !perm.allowed ? perm : !r.custom ? lockd(`${r.name} is built in and cannot be removed.`) : null, onClick: () => onRemove(r) },
+            { sep: true },
+            { label: "Add role", icon: "plus", guard: perm, onClick: () => onEdit(null) },
+          ]); }}>{r.name}</b>
         ) },
         { key: "level", label: "Level", render: (r) => <Chip text={r.level} cls="plain" /> },
         { key: "members", label: "Members", align: "end", render: (r) => holdersOf(r.id) },

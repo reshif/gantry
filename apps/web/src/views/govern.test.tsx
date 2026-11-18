@@ -139,7 +139,9 @@ describe("People", () => {
     const card = await byId("ppl-team-platform");
     expect(card.textContent).toContain("2 members \u00b7 1 project");
     expect(card.textContent).not.toContain("Delete");
-    fireEvent.click(within(card).getByRole("button", { name: "Manage Platform" }));
+    // static card face (prototype): no control on it; the menu is the context menu
+    expect(within(card).queryByRole("button")).toBeNull();
+    fireEvent.contextMenu(card);
     expect(await screen.findByText("Edit team")).toBeTruthy();
   });
 
@@ -152,8 +154,14 @@ describe("People", () => {
     mount(<PersonView />);
     fireEvent.click(await screen.findByRole("button", { name: /Grant role/ }));
     fireEvent.change(await screen.findByLabelText("Role"), { target: { value: "project_admin" } });
+    // Scope lists Whole factory first (prototype); a project role needs a project
+    expect(Array.from((document.getElementById("ppl-grant-scope") as HTMLSelectElement).options).map((o) => o.textContent)[0]).toBe("Whole factory");
+    fireEvent.click(await byId("ppl-grant-submit"));
+    expect(await screen.findByText(/applies to one project/)).toBeTruthy();
+    fireEvent.change(document.getElementById("ppl-grant-scope") as HTMLSelectElement, { target: { value: "payments" } });
     fireEvent.click(await byId("ppl-grant-submit"));
     await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.path.endsWith("/roles/project_admin"))).toBe(true));
+    expect(screen.queryByText("Save")).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Remove role" }));
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path.endsWith("/roles/engineer"))).toBe(true));
   });
@@ -181,12 +189,12 @@ describe("People", () => {
     fireEvent.click(await screen.findByText("Invite person"));
     fireEvent.change(await screen.findByLabelText(/Full name/), { target: { value: "Nina Park" } });
     fireEvent.change(screen.getByLabelText(/Work email/), { target: { value: "n@acme.dev" } });
-    expect(screen.queryByLabelText("Reason for the factory role")).toBeNull();
+    expect(screen.queryByLabelText("Reason")).toBeNull();
     fireEvent.change(document.getElementById("ppl-inv-role") as HTMLSelectElement, { target: { value: "factory_admin" } });
     fireEvent.click(screen.getByText("Send invite"));
     expect(await screen.findByText(/at least 10 characters/)).toBeTruthy();
     expect(calls.some((c) => c.path === "/api/v1/invites")).toBe(false);
-    fireEvent.change(screen.getByLabelText("Reason for the factory role"), { target: { value: "Quarterly audit support" } });
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Quarterly audit support" } });
     fireEvent.click(screen.getByText("Send invite"));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/invites")).toBe(true));
     expect(calls.find((x) => x.path === "/api/v1/invites")!.body).toMatchObject({ roles: [{ role: "factory_admin", scope: "factory" }], reason: "Quarterly audit support" });
@@ -292,8 +300,13 @@ describe("Access", () => {
     expect(within(row).getByRole("button", { name: "Remove freeze" })).toBeTruthy();
     fireEvent.click(await byId("acc-add-freeze"));
     expect((await screen.findByText("New change freeze")).textContent).toBe("New change freeze");
-    expect(screen.getByLabelText("From")).toBeTruthy();
-    expect(screen.getByLabelText("To")).toBeTruthy();
+    // the prototype's dialog: Name, From, To (defaults 20 Dec to 3 Jan), no repo picker, no intro
+    expect(screen.getByLabelText(/^From/)).toBeTruthy();
+    expect(screen.getByLabelText(/^To/)).toBeTruthy();
+    expect(screen.queryByLabelText(/Repos/)).toBeNull();
+    expect((screen.getByLabelText(/^From/) as HTMLInputElement).value).toMatch(/-12-20$/);
+    expect((screen.getByLabelText(/^To/) as HTMLInputElement).value).toMatch(/-01-03$/);
+    // the row reads "13 Nov 2026 \u2192 17 Nov 2026" style dates
   });
 
   it("renders policies, and the engine-owned ones cannot be edited", async () => {
@@ -302,7 +315,9 @@ describe("Access", () => {
     fireEvent.click(await byId("acc-tab-policies"));
     expect(await screen.findByText("Release window")).toBeTruthy();
     expect(screen.getByText("Freeze rule")).toBeTruthy();
-    fireEvent.click(await byId("acc-pol-menu-POL-110"));
+    expect(document.getElementById("acc-pol-menu-POL-110")).toBeNull(); // static rows: no menu button
+    expect(document.getElementById("acc-add-policy")).toBeNull();
+    fireEvent.contextMenu((await byId("acc-pol-POL-110")).querySelector("b")!);
     const edit110 = (await screen.findByText("Edit policy")).closest("button, [role=menuitem]")!;
     expect(edit110.getAttribute("aria-disabled")).toBe("true");
     expect(edit110.getAttribute("data-reason") ?? edit110.textContent).toContain("Freeze rules come from the freeze list");
@@ -331,6 +346,8 @@ describe("Access", () => {
     const c = calls.find((x) => x.method === "PUT")!;
     expect(c.body).toEqual({ on: true });
     expect(c.headers["if-match"]).toBe("4");
+    // the Factory Admin column is a locked, disabled box (prototype)
+    expect((screen.getByLabelText("Factory Admin can Release") as HTMLInputElement).disabled).toBe(true);
     // rights a role must keep so nobody is locked out stay locked in the UI
     expect(screen.getByLabelText("Factory Admin can Edit policy").getAttribute("aria-disabled")).toBe("true");
   });
@@ -347,7 +364,8 @@ describe("Access", () => {
     const calls = setup({ "POST /api/v1/policies": () => ({ body: { ok: true, msg: "POL-111 added.", id: "POL-111", version: 1 } }) });
     mount(<AccessView />);
     fireEvent.click(await byId("acc-tab-policies"));
-    fireEvent.click(await byId("acc-add-policy"));
+    fireEvent.contextMenu((await byId("acc-pol-POL-101")).querySelector("b")!);
+    fireEvent.click(await screen.findByText("Add policy"));
     fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Weekend hotfix" } });
     expect(document.querySelector(".acc-preview")?.textContent).toContain("may release");
     fireEvent.click(await byId("acc-pd-save"));
@@ -378,7 +396,8 @@ describe("Access", () => {
     setup({}, ["policy.edit", "role.edit"]);
     mount(<AccessView />);
     fireEvent.click(await byId("acc-tab-policies"));
-    const add = await byId("acc-add-policy");
+    fireEvent.contextMenu((await byId("acc-pol-POL-101")).querySelector("b")!);
+    const add = (await screen.findByText("Add policy")).closest("button, [role=menuitem]")!;
     await waitFor(() => expect(add.getAttribute("aria-disabled")).toBe("true"));
     expect((await byId("acc-pol-on-POL-101")).getAttribute("aria-disabled")).toBe("true");
     expect(screen.getAllByText(/Read-only for you/).length).toBeGreaterThan(0);

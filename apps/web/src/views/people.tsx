@@ -99,11 +99,9 @@ function TeamGrid({ people, teams, projects, repos, roles, perm, invite, teamDlg
           { label: "Delete team", icon: "x", kind: "danger", guard: projs.length || owns.length ? { allowed: false, reason: `${t.name} owns ${plural(projs.length, "project")} and ${plural(owns.length, "repo")}. Move them to another team first.` } : perm, onClick: () => void teamDlg.remove(t, members.length) },
         ]);
         return (
-          <div className="card" key={t.id} id={`ppl-team-${t.id}`}>
-            <div className="row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
-              <h3>{t.name}</h3>
-              <Btn icon="dots" aria={`Manage ${t.name}`} small kind="ghost" cls="icon" id={`ppl-team-menu-${t.id}`} onClick={(e) => menu(e.currentTarget)} />
-            </div>
+          // The card face is static (prototype): no control, no click action. Team administration stays reachable from the card's context menu (right click).
+          <div className="card" key={t.id} id={`ppl-team-${t.id}`} onContextMenu={(e) => { e.preventDefault(); menu(e.currentTarget); }}>
+            <h3>{t.name}</h3>
             <div className="small muted">{t.desc}</div>
             <div className="row">
               {members.slice(0, 6).map((p) => <Avatar key={p.id} id={p.id} />)}
@@ -146,6 +144,7 @@ function PeopleTable({ people, teams, roles }: { people: Person[]; teams: Team[]
       </FilterBar>
       <DataTable<Person>
         id="ppl-table"
+        blueprintSort
         caption="People"
         rows={vis}
         rowKey={(p) => p.id}

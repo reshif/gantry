@@ -2,6 +2,7 @@ import { useState } from "react";
 import { DAYS, type Action, type Person, type Policy, type Project, type Role } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
+import { useAccessMatrix } from "../../api/queries";
 import { Btn, Chip, Field, FilterBar, LockNote, SearchBox, Segmented, Toggle, type Decision } from "../../ui/primitives";
 import { DataTable } from "../../ui/DataTable";
 import { CountClear, setQS, useQS } from "../govern/kit";
@@ -155,11 +156,13 @@ export function usePolicyDialog(args: { perm: Decision; roles: Role[]; actions: 
   };
 }
 
-export function PolicyTable({ policies, people, onEdit, onSimulate }: { policies: Policy[]; people: Person[]; onEdit: (p: Policy) => void; onSimulate: (p: Policy, who: Person | undefined) => void }) {
+export function PolicyTable({ policies, people, onEdit, onSimulate }: { policies: Policy[]; people: Person[]; onEdit: (p: Policy | null) => void; onSimulate: (p: Policy, who: Person | undefined) => void }) {
   const outcome = useOutcome();
   const perm = useCan("policy.edit");
   const ui = useUI();
   const wording = usePolicyWording();
+  const roleList = useAccessMatrix().data?.roles ?? [];
+  const roleName = (id: string) => roleList.find((x) => x.id === id)?.name ?? id;
   const [q, setQ] = useQS("acc.pq");
   const s = q.trim().toLowerCase();
   const list = [...policies].sort((a, b) => (a.id < b.id ? -1 : 1)).filter((p) => !s || p.name.toLowerCase().includes(s));
@@ -182,13 +185,15 @@ export function PolicyTable({ policies, people, onEdit, onSimulate }: { policies
             const who = people.find((x) => x.status === "active" && x.roles.some((g) => p.roles.includes(g.role) && (g.scope === "factory" || g.scope === proj || !p.where.projects?.length)));
             const custom = (p as Policy & { custom?: boolean }).custom;
             return (
-              <div className="row" style={{ flexWrap: "nowrap", justifyContent: "space-between" }}>
-                <div><b>{p.name}</b><span className="sub">{`${p.effect} ${p.actions.join(", ")} for ${p.roles.length ? wording.roles(p) : "everyone"}`}</span></div>
-                <Btn icon="dots" aria={`Manage ${p.name}`} small kind="ghost" cls="icon" id={`acc-pol-menu-${p.id}`} onClick={(e) => ui.menu(e.currentTarget, p.name, [
-                  { label: "Edit policy", icon: "page", guard: !perm.allowed ? perm : SPECIAL[p.id] ? lockd(SPECIAL[p.id]!) : null, onClick: () => onEdit(p) },
-                  { label: "Simulate", icon: "play", onClick: () => onSimulate(p, who) },
-                  ...(custom ? [{ label: "Delete policy", icon: "x", kind: "danger", guard: perm, onClick: () => void ouDelete(p) }] : []),
-                ])} />
+              // Static in the prototype: no visible control. Policy administration stays on the cell's context menu (right click).
+              <div onContextMenu={(e) => { e.preventDefault(); ui.menu(e.currentTarget, p.name, [
+                { label: "Edit policy", icon: "page", guard: !perm.allowed ? perm : SPECIAL[p.id] ? lockd(SPECIAL[p.id]!) : null, onClick: () => onEdit(p) },
+                { label: "Simulate", icon: "play", onClick: () => onSimulate(p, who) },
+                ...(custom ? [{ label: "Delete policy", icon: "x", kind: "danger", guard: perm, onClick: () => void ouDelete(p) }] : []),
+                { sep: true },
+                { label: "Add policy", icon: "plus", guard: perm, onClick: () => onEdit(null) },
+              ]); }}>
+                <b>{p.name}</b><span className="sub">{`${p.effect} ${p.actions.join(", ")} for ${p.roles.length ? p.roles.map(roleName).join(", ") : "everyone"}`}</span>
               </div>
             );
           } },

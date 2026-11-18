@@ -26,11 +26,11 @@ function TeamForm({ perm, team, close, registerSubmit }: { perm: Decision; team:
   return (
     <div className="form-grid">
       <LockNote decision={perm} what="Teams" />
-      <Field label="Team name" htmlFor="ppl-team-name" hint={team ? `Id ${team.id} stays the same.` : "The id is made from the name and cannot change later."}>
-        <input id="ppl-team-name" className="input" autoComplete="off" placeholder="Payments" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
+      <Field label="Team name (required)" htmlFor="ppl-team-name">
+        <input id="ppl-team-name" className="input" autoComplete="off" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
       <Field label="Description" htmlFor="ppl-team-desc">
-        <input id="ppl-team-desc" className="input" autoComplete="off" placeholder="What this team owns" maxLength={300} value={desc} onChange={(e) => setDesc(e.target.value)} />
+        <input id="ppl-team-desc" className="input" autoComplete="off" maxLength={300} value={desc} onChange={(e) => setDesc(e.target.value)} />
       </Field>
       <div className="form-err" role="alert">{err}</div>
     </div>
@@ -43,10 +43,9 @@ export function useTeamDialogs(perm: Decision) {
   const edit = (team: Team | null = null) => {
     let submit: () => void = () => undefined;
     ui.dialog({
-      title: team ? `Edit ${team.name}` : "New team", kicker: "People & teams",
-      sub: "Teams group people and own projects and repos. Membership is set on each person.",
+      title: team ? `Edit ${team.name}` : "New team",
       body: (close) => <TeamForm perm={perm} team={team} close={close} registerSubmit={(fn) => (submit = fn)} />,
-      actions: [{ label: "Cancel" }, { label: team ? "Save team" : "Create team", kind: "primary", icon: team ? "check" : "plus", submit: true, id: "ppl-team-submit", guard: perm, onClick: () => submit() }],
+      actions: [{ label: "Cancel" }, { label: "Save", kind: "primary", submit: true, id: "ppl-team-submit", guard: perm, onClick: () => submit() }],
     });
   };
   const remove = async (team: Team, members: number) => {

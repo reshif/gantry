@@ -38,7 +38,7 @@
 
 /* person page */
 .person-back { align-self: flex-start; }
-.person-stack { display: grid; gap: var(--s4); min-width: 0; }
+.person-stack { min-width: 0; }
 .person-top { display: flex; gap: 16px; align-items: flex-start; padding: 16px; flex-wrap: wrap; }
 .ppl-who { min-width: 0; flex: 1 1 260px; display: grid; gap: 2px; }
 .ppl-who .ad-meta { overflow-wrap: anywhere; color: var(--muted); font-size: var(--t-md); }
@@ -135,3 +135,8 @@
 @media (max-width: 560px) { .acct-kv > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 .person-stack .caps-grid { grid-template-columns: repeat(auto-fill, minmax(min(210px, 100%), 1fr)); }
 .person-stack .caps li > span { min-width: 0; overflow-wrap: anywhere; }
+
+/* Blueprint filter bars: the sheet's fields sit on one baseline (a Field's form margin does not apply inside the bar). */
+.view-people .fbar .field, .view-workload .fbar .field, .view-access .fbar .field { margin-bottom: 0; }
+/* A bar with only a search box: the count sits to its right (a zero filter count makes the grid track list invalid). */
+.view-people .fbar:has(> .q + .tail), .view-workload .fbar:has(> .q + .tail), .view-access .fbar:has(> .q + .tail) { grid-template-columns: minmax(0, 1fr) auto; }

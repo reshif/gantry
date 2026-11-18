@@ -9,6 +9,8 @@ import { ScrollCue, setQS, useQS } from "../govern/kit";
 
 /** Rights that stay on so nobody is locked out (spec 14.4). The server refuses the same edits. */
 const LOCKED_ON = new Set(["factory_admin:policy.edit", "factory_admin:people.manage", "factory_admin:security.manage", "factory_admin:audit.view", "factory_admin:restore.factory", "auditor:audit.view", ...CONSOLE_RIGHTS.map((c) => `factory_admin:${c}`)]);
+/** Roles that always hold every right (spec 14.4): their column is shown checked and locked. */
+const ALWAYS_FULL = new Set(["factory_admin"]);
 const STICKY = { position: "sticky", left: 0, background: "var(--surface)" } as const;
 
 export function MatrixTable({ matrix, version, roles, actions, newRole }: { matrix: Matrix; version: number | undefined; roles: Role[]; actions: Action[]; newRole: string | null }) {
@@ -22,7 +24,7 @@ export function MatrixTable({ matrix, version, roles, actions, newRole }: { matr
   return (
     <div>
       <FilterBar label="Filter actions" count={plural(actions.length, "action")}>
-        <SearchBox id="acc-mx-q" value={q} onChange={(v) => setQS({ "acc.q": v })} placeholder="e.g. approve" label="Search actions" />
+        <SearchBox id="acc-mx-q" caption="Search actions" value={q} onChange={(v) => setQS({ "acc.q": v })} placeholder="e.g. approve" label="Search actions" />
         <Field label="Group" htmlFor="acc-mx-grp"><Select id="acc-mx-grp" value={group} onChange={(v) => setQS({ "acc.group": v })} options={[{ value: "", label: "All groups" }, ...groups]} /></Field>
       </FilterBar>
       {rows.length ? (
@@ -32,9 +34,9 @@ export function MatrixTable({ matrix, version, roles, actions, newRole }: { matr
               <tr>
                 <th scope="col" style={{ ...STICKY, zIndex: 3 }}>Action</th>
                 {roles.map((r) => (
-                  <th key={r.id} scope="col" id={`acc-mx-col-${r.id}`} className={newRole === r.id ? "is-new" : undefined} style={{ textAlign: "center", minWidth: 104 }} title={r.id === "factory_admin" ? "Factory admin always has full access (locked)" : r.name}>
+                  <th key={r.id} scope="col" id={`acc-mx-col-${r.id}`} className={newRole === r.id ? "is-new" : undefined} style={{ textAlign: "center", minWidth: 104 }} title={ALWAYS_FULL.has(r.id) ? "Factory admin always has full access (locked)" : r.name}>
                     {r.name}
-                    {r.id === "factory_admin" ? <span className="sub">locked</span> : null}
+                    {ALWAYS_FULL.has(r.id) ? <span className="sub">locked</span> : null}
                   </th>
                 ))}
               </tr>
@@ -49,7 +51,7 @@ export function MatrixTable({ matrix, version, roles, actions, newRole }: { matr
                     const d: Decision | null = !perm.allowed ? perm : factoryOnly ? lockd(`${ro.name} is a project-level role: '${a.name.toLowerCase()}' is a factory-wide right, held by factory-level roles only.`) : LOCKED_ON.has(`${ro.id}:${a.id}`) ? lockd(`${ro.name} always keeps '${a.name.toLowerCase()}' so nobody is locked out.`) : null;
                     return (
                       <td key={ro.id} style={{ textAlign: "center" }}>
-                        <Toggle variant="check" id={`acc-mx-${ro.id}-${a.id.replace(".", "_")}`} checked={on} decision={d} label={`${ro.name} can ${a.name}`} onChange={async (v) => void outcome(await ops.setMatrix(ro.id, a.id, v, version !== undefined ? { ifMatch: version } : undefined), `${ro.name}: ${a.name} ${v ? "granted" : "revoked"}`)} />
+                        <Toggle variant="check" disabled={ALWAYS_FULL.has(ro.id)} id={`acc-mx-${ro.id}-${a.id.replace(".", "_")}`} checked={on} decision={d} label={`${ro.name} can ${a.name}`} onChange={async (v) => void outcome(await ops.setMatrix(ro.id, a.id, v, version !== undefined ? { ifMatch: version } : undefined), `${ro.name}: ${a.name} ${v ? "granted" : "revoked"}`)} />
                       </td>
                     );
                   })}

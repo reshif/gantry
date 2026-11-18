@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Project, Role, Team } from "@gantry/domain";
 import { ops } from "../../api/ops";
+import { getPrefs } from "../../lib/prefs";
 import { useUI } from "../../ui/overlay-context";
 import { Field, LockNote, Select, type Decision } from "../../ui/primitives";
 
@@ -22,7 +23,9 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
   const [title, setTitle] = useState("");
   const [role, setRole] = useState(roles.find((r) => r.id === "engineer")?.id ?? roles[0]?.id ?? "");
   const [team, setTeam] = useState(preset.team ?? teams[0]?.id ?? "");
-  const [proj, setProj] = useState(preset.project ?? projects.find((p) => p.status !== "archived")?.id ?? "");
+  // The prototype asks only for a role and a team. A project role needs a project: the one open in the top bar (or the first live one).
+  const live = projects.filter((p) => p.status !== "archived");
+  const proj = preset.project ?? live.find((p) => p.id === getPrefs().project)?.id ?? live[0]?.id ?? "";
   const [reason, setReason] = useState("");
   const [err, setErr] = useState("");
   const isFactory = roles.find((r) => r.id === role)?.level === "factory";
@@ -53,28 +56,23 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
   return (
     <div className="form-grid">
       <LockNote decision={perm} what="Inviting people" />
-      <Field label="Full name" htmlFor="ppl-inv-name" required>
-        <input id="ppl-inv-name" className="input" autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
+      <Field label="Full name (required)" htmlFor="ppl-inv-name">
+        <input id="ppl-inv-name" className="input" aria-required="true" autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
-      <Field label="Work email" htmlFor="ppl-inv-email" required hint={domains.length ? `Must use an allowed domain: ${domains.join(", ")}` : undefined}>
-        <input id="ppl-inv-email" className="input" type="email" autoComplete="off" placeholder={`name@${domains[0] ?? "acme.dev"}`} value={email} onChange={(e) => setEmail(e.target.value)} />
+      <Field label="Work email (required)" htmlFor="ppl-inv-email">
+        <input id="ppl-inv-email" className="input" type="email" aria-required="true" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} />
       </Field>
       <Field label="Title" htmlFor="ppl-inv-title">
         <input id="ppl-inv-title" className="input" autoComplete="off" value={title} onChange={(e) => setTitle(e.target.value)} />
       </Field>
       <Field label="Role" htmlFor="ppl-inv-role">
-        <Select id="ppl-inv-role" value={role} onChange={setRole} options={roles.map((r) => ({ value: r.id, label: r.name + (r.custom ? " (custom)" : "") }))} />
+        <Select id="ppl-inv-role" value={role} onChange={setRole} options={roles.map((r) => ({ value: r.id, label: r.name }))} />
       </Field>
       <Field label="Team" htmlFor="ppl-inv-team">
         <Select id="ppl-inv-team" value={team} onChange={setTeam} options={teams.map((t) => ({ value: t.id, label: t.name }))} />
       </Field>
-      {role && !isFactory ? (
-        <Field label="Project" htmlFor="ppl-inv-proj" hint="A project role applies in one project.">
-          <Select id="ppl-inv-proj" value={proj} onChange={setProj} options={projects.filter((p) => p.status !== "archived").map((p) => ({ value: p.id, label: p.name }))} />
-        </Field>
-      ) : null}
       {isFactory ? (
-        <Field label="Reason for the factory role" htmlFor="ppl-inv-reason" hint="Recorded in the audit trail. Factory roles need a fresh sign-in.">
+        <Field label="Reason" htmlFor="ppl-inv-reason">
           <input id="ppl-inv-reason" className="input" autoComplete="off" placeholder="Why this person needs it" value={reason} onChange={(e) => setReason(e.target.value)} />
         </Field>
       ) : null}
@@ -88,8 +86,7 @@ export function useInviteDialog(args: { perm: Decision; teams: Team[]; projects:
   return (preset: { team?: string; project?: string } = {}) => {
     let submit: () => void = () => undefined;
     ui.dialog({
-      title: "Invite a person", kicker: "People", wide: true,
-      sub: "They get an email with a sign-in link. Until they accept, the policy engine grants them nothing.",
+      title: "Invite a person",
       body: (close) => <InviteForm {...args} preset={preset} close={close} registerSubmit={(fn) => (submit = fn)} />,
       actions: [{ label: "Cancel" }, { label: "Send invite", kind: "primary", submit: true, id: "ppl-inv-submit", guard: args.perm, onClick: () => submit() }],
     });

@@ -122,7 +122,13 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     expect(document.body.textContent).toContain("Oldest wait3 h");
     // approvers are the people whose role the matrix lets approve gates (Priya, Meera hold the factory role here)
     expect(document.getElementById("wl-stats")?.textContent).toContain("Approvers3");
-    expect(Array.from(t.querySelectorAll("thead th")).map((h) => h.textContent?.replace(/[\u2191\u2193]/g, ""))).toEqual(["Person", "Can approve", "Open requests", "At a gate", "Actions logged", "On call"]);
+    expect(Array.from(t.querySelectorAll("thead th")).map((h) => h.textContent?.replace(/\s*[\u2191\u2193\u2195\u25b2\u25bc]/g, ""))).toEqual(["Person", "Can approve", "Open requests", "At a gate", "Actions logged", "On call"]);
+    // prototype sort hints: a dim hint on sortable headers, a filled triangle on the active one (Open requests, newest first), no 24 h / 7 d switch, no Sort by select
+    expect(t.querySelector("thead th")?.textContent).toContain("\u2195");
+    expect(t.querySelector("thead th .th-arrow.sorthint")).toBeTruthy();
+    expect(Array.from(t.querySelectorAll("thead th")).map((h) => h.textContent).join("|")).toContain("Open requests \u25bc");
+    expect(document.getElementById("wl-days-1")).toBeNull();
+    expect(document.querySelector(".dtable-sortsel")).toBeNull();
     // no old controls: project select, tabs, bus-factor callout
     expect(document.getElementById("wl-project")).toBeNull();
     expect(document.getElementById("wl-tab-teams")).toBeNull();
@@ -137,7 +143,7 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     expect(screen.getByText("1\u20133 of 3")).toBeTruthy();
   });
 
-  it("links a person to their page, filters by approver in the address bar, and fetches the window the control picks", async () => {
+  it("links a person to their page, filters by approver in the address bar, and keeps a readable sort key", async () => {
     const calls = setup();
     mount();
     await byId("wl-people");
@@ -152,9 +158,9 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     expect(await screen.findByText("Nothing matches these filters")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(window.location.search).not.toContain("wl.approver");
-    fireEvent.click(document.getElementById("wl-days-1")!);
-    await waitFor(() => expect(reads(calls).some((c) => c.query.get("days") === "1")).toBe(true));
-    expect(window.location.search).toContain("wl.days=1");
+    // sorting keeps a readable key in the address bar
+    fireEvent.click(document.getElementById("wl-people-sort-person")!);
+    expect(window.location.search).toContain("wl.sort=person");
   });
 
   it("lists suggestions with the top five, and a link to show them all", async () => {

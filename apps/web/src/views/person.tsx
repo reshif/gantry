@@ -2,8 +2,7 @@
  * A person (prototype "people/<id>"): KPI row, §1 Roles (flush rows, remove, Grant role), §2 Details, §3 the open work orders they
  * requested. Team editing sits on the Teams row, the invite acceptance on the Invite row, and the history below the sheet.
  */
-import { useState } from "react";
-import { WO_STATES, fmt, type Person, type Project, type Role } from "@gantry/domain";
+import { WO_STATES, type Person, type Project, type Role } from "@gantry/domain";
 import { ops } from "../api/ops";
 import { useAccessMatrix, useMe, usePeople, useProjects, useWorkOrdersAcross } from "../api/queries";
 import { useCan } from "../api/can";
@@ -11,8 +10,7 @@ import { hashFor, useHash } from "../lib/router";
 import { Btn, Empty, LockNote, Panel, Stat, StatRow, Toggle, ViewHead, type Decision } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
-import { useActors } from "../ui/actors";
-import { lockd, useOutcome, useTeams } from "./govern/data";
+import { fmtDay, ifMatchOf, lockd, useOutcome, useTeams } from "./govern/data";
 import { HistoryList } from "./people/History";
 import { useOffboard } from "./people/Offboard";
 import { useGrantRole } from "./people/GrantRole";
@@ -32,14 +30,13 @@ export default function PersonView() {
   const people = peopleQ.data ?? [];
   const p = people.find((x) => x.id === loc.param);
   const roleName = (id: string) => roles.find((r) => r.id === id)?.name ?? id;
-  const crumbs = [{ label: "People & teams", href: "#people" }, { label: p?.name ?? "Person" }];
   // Default deny: the directory is itself a right. The server refuses the reads too; this shows why instead of an empty screen.
-  if (!view.allowed) return <div className="view view-person"><ViewHead title="Person" crumbs={crumbs} /><Empty id="people-no-access" icon="lock" title="No access to this sheet" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></div>;
+  if (!view.allowed) return <div className="view view-person"><ViewHead title="Person" /><Empty id="people-no-access" icon="lock" title="No access to this sheet" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></div>;
   if (!p) {
     return (
       <div className="view view-person">
-        <ViewHead title="Person" crumbs={crumbs} />
-        <Async query={peopleQ} what="people" id="person">{() => <Empty id="person-missing" icon="user" title="Nothing to show" text="That person does not exist." action={<a className="btn" id="person-back" href="#people">Back to people</a>} />}</Async>
+        <ViewHead title="Person" />
+        <Panel><Async query={peopleQ} what="people" id="person">{() => <Empty id="person-missing" icon="user" title="Nothing to show" text="That person does not exist." action={<a className="btn" id="person-back" href={hashFor("work-orders")}>Work orders</a>} />}</Async></Panel>
       </div>
     );
   }
@@ -48,35 +45,6 @@ export default function PersonView() {
     <div className="view view-person">
       <LockNote decision={perm} what="Roles, teams and access" />
       <MemberDetail key={p.id} p={p} teams={teamsQ.data ?? []} projects={projects} roles={roles} perm={perm} admins={admins} viewerId={me.person.id} roleName={roleName} />
-    </div>
-  );
-}
-
-function TeamsForm({ p, teams, perm, onSave }: { p: Person; teams: Array<{ id: string; name: string }>; perm: Decision; onSave: (fn: () => Promise<boolean>) => void }) {
-  const [picked, setPicked] = useState<string[]>(p.teams ?? []);
-  const [err, setErr] = useState("");
-  const outcome = useOutcome();
-  onSave(async () => {
-    if (!picked.length) {
-      setErr("Keep at least one team.");
-      return false;
-    }
-    const r = outcome(await ops.setTeams(p.id, picked));
-    if (!r.ok) setErr(r.msg);
-    return r.ok;
-  });
-  return (
-    <div className="form-grid">
-      <LockNote decision={perm} what="Team membership" />
-      <div className="check-grid">
-        {teams.map((t) => (
-          <label key={t.id} className="check" htmlFor={`ppl-tm-${t.id}`}>
-            <input type="checkbox" id={`ppl-tm-${t.id}`} value={t.id} checked={picked.includes(t.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, t.id] : picked.filter((x) => x !== t.id))} />
-            {t.name}
-          </label>
-        ))}
-      </div>
-      <div className="form-err" role="alert">{err}</div>
     </div>
   );
 }
@@ -112,7 +80,6 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
 }) {
   const ui = useUI();
   const outcome = useOutcome();
-  const actors = useActors();
   const away = p.away && p.away.to > Date.now() ? p.away : null;
   const frRole = p.roles.find((g) => g.scope === "factory" && !g.via)?.role ?? "";
   const teamName = (id: string) => teams.find((t) => t.id === id)?.name ?? id;
@@ -139,15 +106,6 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
       },
     });
 
-  const openTeams = () => {
-    let save: () => Promise<boolean> = async () => false;
-    ui.dialog({
-      title: `Teams for ${p.name}`, kicker: "People", sub: "Teams group people and own repos. Permissions come from roles, not teams.",
-      body: <TeamsForm p={p} teams={teams} perm={perm} onSave={(fn) => (save = fn)} />,
-      actions: [{ label: "Cancel" }, { label: "Save teams", kind: "primary", submit: true, id: "ppl-tm-save", guard: perm, onClick: (close) => void save().then((ok) => ok && close()) }],
-    });
-  };
-
   const offboard = useOffboard({ perm, projects, roleName });
   const off = p.status === "deactivated";
   let offGuard: Decision = perm;
@@ -158,12 +116,25 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   const wos = useWorkOrdersAcross(visible.map((x) => x.id));
   const held = wos.items.filter((w) => w.requestedBy === p.id && w.state !== "done" && w.state !== "killed");
   const teamNames = (p.teams ?? []).map(teamName).join(", ") || "\u2014";
-  const oncallLock = lockd("On-call is set per project, in Project config. There is no per-person switch yet.");
+  // On-call is kept per project (a project's admins choose; Factory Admins always count). The person switch edits the lists of the
+  // projects this person is a member of (on) or sits on (off); the server applies its own rules to each list.
+  const setOncall = async (on: boolean) => {
+    const memberOf = new Set(p.roles.filter((g) => g.scope !== "factory").map((g) => g.scope));
+    const targets = projects.filter((x) => (on ? memberOf.has(x.id) && !x.oncall?.includes(p.id) : !!x.oncall?.includes(p.id)));
+    if (!targets.length) return void ui.toast(on ? "No project to add them to: they hold no project role. Factory Admins always count as on call. Set it per project in Project config." : "Not on call for any project.", "warn");
+    let okAll = true;
+    for (const x of targets) {
+      const list = on ? [...(x.oncall ?? []), p.id] : (x.oncall ?? []).filter((id) => id !== p.id);
+      const r = await ops.setProjectOncall(x.id, list, ifMatchOf(x));
+      if (!r.ok) { okAll = false; ui.toast(r.msg, "error"); break; }
+    }
+    if (okAll) ui.toast(on ? "Added to on-call" : "Removed from on-call", "ok");
+  };
 
   return (
     <div className="person-stack" aria-label={p.name}>
       <ViewHead
-        crumbs={[{ label: "People & teams", href: "#people" }, { label: p.name }]}
+        crumbs={[{ label: "People & teams", href: hashFor("people") }, { label: p.name }]}
         title={p.name}
         sub={<>{`${p.title || "No title yet"} \u00b7 `}<span className="mono">{p.email}</span></>}
         actions={off
@@ -191,10 +162,10 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
         </Panel>
         <Panel title="Details">
           <dl className="kv">
-            <dt>Teams</dt><dd>{teamNames} <Btn label="Edit teams" small kind="ghost" id="ppl-teams" guard={perm} onClick={openTeams} /></dd>
+            <dt>Teams</dt><dd>{teamNames}</dd>
             <dt>GitHub</dt><dd>{p.github || "Not linked"}</dd>
-            <dt>Away</dt><dd>{away ? `Until ${fmt.istDate(away.to)}, delegate ${actors(away.delegate).name}` : "Available"}</dd>
-            <dt>On call</dt><dd><div className="row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}><span>On call rotation</span><Toggle id="ppl-oncall" checked={!!p.oncall} decision={oncallLock} label="On call rotation" /></div></dd>
+            <dt>Away</dt><dd>{away ? `Until ${fmtDay(away.to)}` : "Available"}</dd>
+            <dt>On call</dt><dd><div className="row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}><span>On call rotation</span><Toggle id="ppl-oncall" checked={!!p.oncall} decision={perm} label="On call rotation" onChange={(v) => void setOncall(v)} /></div></dd>
             {p.status === "invited" ? <><dt>Invite</dt><dd>Pending <Btn label="Mark invite accepted" small kind="ghost" id="ppl-accept" guard={perm} onClick={async () => void outcome(await ops.acceptInvite(p.id))} /></dd></> : null}
           </dl>
         </Panel>

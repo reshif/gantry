@@ -9,7 +9,7 @@ import { useAccessMatrix, useFreezes, useMe, usePeople, usePolicies, useProjects
 import { Btn, Empty, LockNote, Panel, Stat, StatRow, Tabs, ViewHead, type Decision } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
 import { useAllRepos } from "./govern/data";
-import { setQS, useQS } from "./govern/kit";
+import { Pager, setQS, useQS } from "./govern/kit";
 import { FreezeList, useFreezeDialog } from "./access/Freezes";
 import { MatrixTable } from "./access/Matrix";
 import { PolicyTable, usePolicyDialog } from "./access/Policies";
@@ -47,8 +47,7 @@ export default function AccessView() {
   const [newRole, setNewRole] = useState<string | null>(null);
 
   const openPolicy = usePolicyDialog({ perm, roles, actions, projects, policies, matrix });
-  const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? id;
-  const openFreeze = useFreezeDialog(perm, repos, projectName);
+  const openFreeze = useFreezeDialog(perm);
   const { openRole, removeRole } = useRoleDialogs({
     perm: rperm, roles, matrix, actions, people,
     onCreated: (id) => {
@@ -88,14 +87,14 @@ export default function AccessView() {
       <div className="acc-body" id="acc-tab-panel" role="tabpanel">
         <Async query={(tab === "freezes" ? freezesQ : tab === "policies" ? policiesQ : mQ) as UseQueryResult<unknown>} what={tab === "freezes" ? "freezes" : tab === "policies" ? "policies" : "the access matrix"} id="acc">{() => (
           tab === "check" ? <Simulator people={people} projects={projects} repos={repos} actions={actions} defaults={simDefaults()} />
-          : tab === "matrix" ? <Panel title="What each role may do" flush cls="acc-rules"><MatrixTable matrix={matrix} version={m?.version} roles={roles} actions={actions} newRole={newRole} /></Panel>
-          : tab === "roles" ? <Panel title="Roles" flush cls="acc-rules" tools={<Btn label="Add role" small kind="primary" icon="plus" id="acc-add-role" guard={rperm} onClick={() => openRole(null)} />}><RolesList roles={roles} matrix={matrix} actions={actions} people={people} onRights={showRights} onEdit={openRole} onRemove={removeRole} /></Panel>
+          : tab === "matrix" ? <Panel title="What each role may do" flush><MatrixTable matrix={matrix} version={m?.version} roles={roles} actions={actions} newRole={newRole} /></Panel>
+          : tab === "roles" ? <Panel title="Roles" flush><><RolesList roles={roles} matrix={matrix} actions={actions} people={people} onRights={showRights} onEdit={openRole} onRemove={removeRole} /><Pager id="acc-roles-pager" page={0} total={roles.length} onPage={() => undefined} /></></Panel>
           : tab === "freezes" ? <Panel title="Change freezes" flush tools={<Btn label="New freeze" small kind="primary" icon="plus" id="acc-add-freeze" guard={perm} onClick={openFreeze} />}><FreezeList freezes={freezes} repos={repos} /></Panel>
           : (
-            <Panel title="Conditional policies" flush tools={<Btn label="Add policy" small kind="primary" icon="plus" id="acc-add-policy" guard={perm} onClick={() => openPolicy(null)} />}>
+            <Panel title="Conditional policies" flush>
               <PolicyTable
                 policies={policies} people={people} onEdit={openPolicy}
-                onSimulate={(p, who) => setQS({ "acc.tab": "check", "acc.person": who?.id ?? me.person.id, "acc.action": p.actions[0] ?? "", "acc.project": p.where.projects?.[0] ?? projects[0]?.id ?? "" })}
+                onSimulate={(p, who) => setQS({ "acc.tab": "check", "acc.when": "1", "acc.person": who?.id ?? me.person.id, "acc.action": p.actions[0] ?? "", "acc.project": p.where.projects?.[0] ?? projects[0]?.id ?? "" })}
               />
             </Panel>
           )

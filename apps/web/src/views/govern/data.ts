@@ -81,3 +81,6 @@ export const nextVersion = (result: unknown, current: number): number => {
   return typeof v === "number" ? v : current + 1;
 };
 export const lockd = (reason: string, needs = "") => ({ allowed: false, reason, needs });
+
+/** Prototype fmtDay: "13 Nov 2026" (UTC). */
+export const fmtDay = (t: number | null | undefined): string => (t ? new Date(t).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "\u2014");

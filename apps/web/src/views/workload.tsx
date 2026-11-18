@@ -10,7 +10,7 @@ import { useCan } from "../api/can";
 import { useAccessMatrix, useMe, usePeople, useProjects, useWorkload, useWorkOrdersAcross } from "../api/queries";
 import type { Workload, WorkloadSuggestion } from "../api/types";
 import type { Person } from "@gantry/domain";
-import { Avatar, Btn, Chip, Field, FilterBar, Meter, Panel, Segmented, SearchBox, Select, Stat, StatRow, ViewHead } from "../ui/primitives";
+import { Avatar, Btn, Chip, Field, FilterBar, Meter, Panel, SearchBox, Select, Stat, StatRow, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { BarList } from "../ui/charts";
 import { DataTable } from "../ui/DataTable";
@@ -49,8 +49,7 @@ export default function WorkloadView() {
   const ui = useUI();
   const me = useMe();
   const [allSugg, setAllSugg] = useState(false);
-  const [days, setDays] = useQS("wl.days", "7");
-  const q = useWorkload("all", Number(days) || 7);
+  const q = useWorkload("all", 7);
   const projects = useProjects();
   const peopleQ = usePeople();
   const matrix = useAccessMatrix().data;
@@ -105,8 +104,7 @@ export default function WorkloadView() {
         <Panel title="Queue by gate"><BarList label="Approvals waiting by gate" items={gateItems} labelWidth={150} valueAtEnd /></Panel>
         <Panel title="Work by station"><BarList label="Open work by station" items={stationItems} labelWidth={110} valueAtEnd /></Panel>
       </div>
-      <div style={{ height: 16 }} />
-      <PeoplePanel rows={rows} days={days} setDays={setDays} failed={wos.failed} />
+      <PeoplePanel rows={rows} failed={wos.failed} />
       {sugg.length ? (
         <Panel title="Suggestions" cls="wl-sugg" tools={sugg.length > 5 ? <Btn label={allSugg ? "Show top 5" : `Show all ${sugg.length}`} small id="wl-sugg-all" onClick={() => setAllSugg(!allSugg)} /> : undefined}>
           <ol className="wl-sugg-list">{sugg.slice(0, allSugg ? sugg.length : 5).map((s) => <SuggestionItem key={s.key} s={s} m={m} openDelegate={openDelegate} />)}</ol>
@@ -116,15 +114,15 @@ export default function WorkloadView() {
   );
 }
 
-function PeoplePanel({ rows, days, setDays, failed }: { rows: PRow[]; days: string; setDays: (v: string) => void; failed: boolean }) {
+function PeoplePanel({ rows, failed }: { rows: PRow[]; failed: boolean }) {
   const [qv, ] = useQS("wl.q");
   const [appr] = useQS("wl.approver");
   const [sortV] = useQS("wl.sort");
   const [pageV] = useQS("wl.page", "0");
   const s = qv.trim().toLowerCase();
   const filtered = rows.filter((r) => (!s || r.p.name.toLowerCase().includes(s)) && (!appr || (appr === "yes") === r.approver));
-  const sort = parseSort(sortV, { key: "mine", dir: -1 });
-  const val = (r: PRow): number | string => (sort.key === "n" ? r.p.name : sort.key === "a" ? Number(r.approver) : sort.key === "w" ? r.waiting : sort.key === "ac" ? r.acts : r.mine);
+  const sort = parseSort(sortV, { key: "requests", dir: -1 });
+  const val = (r: PRow): number | string => (sort.key === "person" ? r.p.name : sort.key === "approve" ? Number(r.approver) : sort.key === "gate" ? r.waiting : sort.key === "actions" ? r.acts : r.mine);
   const sorted = [...filtered].sort((a, b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * sort.dir);
   const pages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const page = Math.min(Math.max(0, Number(pageV) || 0), pages - 1);
@@ -132,13 +130,14 @@ function PeoplePanel({ rows, days, setDays, failed }: { rows: PRow[]; days: stri
   const on = !!(qv || appr);
   const clear = () => setQS({ "wl.q": "", "wl.approver": "", "wl.page": "" });
   return (
-    <Panel title="People" flush id="wl-people-panel" tools={<Segmented name="wl-days" label="Window for actions logged" value={days} onChange={setDays} items={[{ id: "1", label: "24 hours" }, { id: "7", label: "7 days" }]} />}>
+    <Panel title="People" flush id="wl-people-panel">
       <FilterBar label="Filter people" count={<CountClear n={filtered.length} of={rows.length} noun="person" active={on} onClear={clear} />}>
         <SearchBox id="wl-q" value={qv} onChange={(v) => setQS({ "wl.q": v, "wl.page": "" })} placeholder={"Search\u2026"} label="Search person" />
         <Field label="Approver" htmlFor="wl-f-approver"><Select id="wl-f-approver" value={appr} onChange={(v) => setQS({ "wl.approver": v, "wl.page": "" })} options={[{ value: "", label: "All" }, { value: "yes", label: "Approvers" }, { value: "no", label: "Others" }]} /></Field>
       </FilterBar>
       <DataTable<PRow>
         id="wl-people"
+        blueprintSort
         caption="Workload per person"
         rows={vis}
         rowKey={(r) => r.p.id}
@@ -150,12 +149,12 @@ function PeoplePanel({ rows, days, setDays, failed }: { rows: PRow[]; days: stri
           ? { title: "Nothing matches these filters", text: "Loosen the search or clear the filters.", action: <Btn label="Clear filters" id="wl-clear" onClick={clear} /> }
           : { title: "Nothing here yet", text: "Items will appear here when they exist." }}
         columns={[
-          { key: "n", label: "Person", sort: (r) => r.p.name, render: (r) => <div className="row" style={{ flexWrap: "nowrap" }}><Avatar id={r.p.id} /><a className="pri" href={hashFor("person", r.p.id)} onClick={(e) => { e.preventDefault(); navigate("person", r.p.id); }}>{r.p.name}</a></div> },
-          { key: "a", label: "Can approve", sort: (r) => Number(r.approver), render: (r) => <Chip text={r.approver ? "yes" : "no"} cls={r.approver ? "ok" : "plain"} /> },
-          { key: "mine", label: "Open requests", align: "end", sort: (r) => r.mine, render: (r) => <span className="num">{failed ? "n/a" : r.mine}</span> },
-          { key: "w", label: "At a gate", align: "end", sort: (r) => r.waiting, render: (r) => <span className="num">{failed ? "n/a" : r.waiting}</span> },
-          { key: "ac", label: "Actions logged", align: "end", sort: (r) => r.acts, render: (r) => <div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}><div style={{ width: 80 }}><Meter value={Math.min(25, r.acts)} max={25} label="Actions logged" /></div><span className="num">{r.acts}</span></div> },
-          { key: "o", label: "On call", render: (r) => (r.oncall ? <Chip text="on call" cls="info" /> : "\u2014") },
+          { key: "person", label: "Person", sort: (r) => r.p.name, render: (r) => <div className="row" style={{ flexWrap: "nowrap" }}><Avatar id={r.p.id} /><a className="pri" href={hashFor("person", r.p.id)} onClick={(e) => { e.preventDefault(); navigate("person", r.p.id); }}>{r.p.name}</a></div> },
+          { key: "approve", label: "Can approve", sort: (r) => Number(r.approver), render: (r) => <Chip text={r.approver ? "yes" : "no"} cls={r.approver ? "ok" : "plain"} /> },
+          { key: "requests", label: "Open requests", align: "end", sort: (r) => r.mine, render: (r) => <span className="num">{failed ? "n/a" : r.mine || null}</span> },
+          { key: "gate", label: "At a gate", align: "end", sort: (r) => r.waiting, render: (r) => <span className="num">{failed ? "n/a" : r.waiting || null}</span> },
+          { key: "actions", label: "Actions logged", align: "end", sort: (r) => r.acts, render: (r) => <div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}><div style={{ width: 80 }}><Meter value={Math.min(25, r.acts)} max={25} plain label="Actions logged" /></div><span className="num">{r.acts}</span></div> },
+          { key: "oncall", label: "On call", render: (r) => (r.oncall ? <Chip text="on call" cls="info" /> : "\u2014") },
         ]}
       />
       <Pager id="wl-pager" page={page} total={sorted.length} onPage={(n) => setQS({ "wl.page": n ? String(n) : "" })} />

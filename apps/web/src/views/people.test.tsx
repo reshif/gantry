@@ -69,10 +69,10 @@ function mount(personId?: string) {
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider>{personId ? <PersonView /> : <PeopleView />}</OverlayProvider></QueryClientProvider>);
 }
-/** Team administration sits behind each team card's menu: open the Teams tab, the card's menu, then the team's roles. */
+/** The card face is static (prototype); team administration is on the card's context menu: open the Teams tab, right-click the card, then the team's roles. */
 const openTeamRoles = async (team: string) => {
   fireEvent.click(await byId("ppl-tab-teams"));
-  fireEvent.click(await byId(`ppl-team-menu-${team}`));
+  fireEvent.contextMenu(await byId(`ppl-team-${team}`));
   fireEvent.click(await screen.findByText("Roles of the team"));
 };
 const writes = (calls: Call[]) => calls.filter((c) => c.method !== "GET" && c.path !== "/api/v1/can");
@@ -192,10 +192,14 @@ describe("People & teams: deactivate", () => {
     setup(base());
     mount("p-tomas");
     const dlg = await open();
-    await waitFor(() => expect(dlg.textContent).toContain("CI bot"));
-    expect(dlg.textContent).toContain("Engineer · Payments Platform");
-    expect(dlg.textContent).toContain("Revoked. Anything using it stops.");
-    await waitFor(() => expect(document.getElementById("ppl-off-work")?.textContent).toContain("WO-9"));
+    // the prototype's one-sentence intro with the open work, then the Reason field; what it ends is one quiet line
+    await waitFor(() => expect(document.getElementById("ppl-off-intro")?.textContent).toContain("They currently hold 1 open work order (WO-9); those stay on the line and are reassigned to their team lead."));
+    expect(dlg.textContent).toContain("Tomás Ferreira will be signed out everywhere.");
+    expect(document.getElementById("ppl-off-reason")).toBeTruthy();
+    await waitFor(() => expect(document.getElementById("ppl-off-holds")?.textContent).toContain("1 API key"));
+    expect(document.getElementById("ppl-off-holds")?.textContent).toContain("1 session");
+    expect(dlg.textContent).toContain("Keep their 1 API key working");
+    expect(Array.from(document.querySelectorAll(".dlg-actions button, .modal button, [role=dialog] button")).map((b) => b.textContent)).toEqual(expect.arrayContaining(["Cancel", "Deactivate"]));
   });
 
   it("needs a reason of 10 characters and sends nothing until then", async () => {
@@ -242,7 +246,7 @@ describe("People & teams: deactivate", () => {
     setup({ ...base(), "POST /api/v1/people/p-tomas/deactivate": () => ({ body: { ok: true, msg: "Deactivated.", openWork: [] } }) });
     mount("p-tomas");
     await open();
-    await waitFor(() => expect(document.getElementById("ppl-off-work")?.textContent).toContain("WO-9"));
+    await waitFor(() => expect(document.getElementById("ppl-off-intro")?.textContent).toContain("WO-9"));
     typeReason("Left the company on Friday");
     fireEvent.click(await byId("ppl-off-submit"));
     const done = await byId("ppl-off-done");
@@ -270,7 +274,7 @@ describe("People & teams: deactivate", () => {
     setup({ ...base(), "GET /api/v1/api-keys": () => ({ status: 403, body: { ok: false, msg: "No." } }) });
     mount("p-tomas");
     const dlg = await open();
-    await waitFor(() => expect(dlg.textContent).toContain("your access does not cover this list"));
+    await waitFor(() => expect(dlg.textContent).toContain("Some lists could not be read"));
   });
 
   it("Reactivate sends a reason and If-Match", async () => {
@@ -326,5 +330,32 @@ describe("People & teams: one page per person", () => {
     const e = await byId("person-missing");
     expect(e.textContent).toContain("Nothing to show");
     expect(e.textContent).toContain("That person does not exist.");
+    // the prototype's generic 404: a Work orders button, no breadcrumb row
+    const back = document.getElementById("person-back") as HTMLAnchorElement;
+    expect(back.textContent).toBe("Work orders");
+    expect(back.getAttribute("href")).toMatch(/work-orders/);
+    expect(document.querySelector(".crumbs, nav[aria-label=Breadcrumb]")).toBeNull();
+  });
+
+  it("team cards are static: no menu button on the face, administration on the right-click menu", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("ppl-tab-teams"));
+    const card = await byId("ppl-team-payments");
+    expect(card.querySelector("button")).toBeNull();
+    expect(document.getElementById("ppl-team-menu-payments")).toBeNull();
+    fireEvent.contextMenu(card);
+    expect(await screen.findByText("Roles of the team")).toBeTruthy();
+  });
+
+  it("the person's Details row has no Edit teams link and the On call switch is live", async () => {
+    const calls = setup({ "PUT /api/v1/projects/payments/oncall": () => ({ body: { ok: true, msg: "Saved.", oncall: ["p-tomas"], version: 3 } }) });
+    mount("p-tomas");
+    const sw = (await screen.findByRole("switch", { name: "On call rotation" })) as HTMLInputElement;
+    expect(document.getElementById("ppl-teams")).toBeNull();
+    expect(sw.getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(sw);
+    await waitFor(() => expect(writes(calls).some((c) => c.method === "PUT" && c.path.endsWith("/projects/payments/oncall"))).toBe(true));
+    expect(writes(calls).find((c) => c.path.endsWith("/projects/payments/oncall"))?.body).toEqual({ people: ["p-tomas"] });
   });
 });

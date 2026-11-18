@@ -84,6 +84,8 @@ export function Simulator({ people, projects, repos, actions, defaults }: { peop
   const [person, setPerson] = useQS("acc.person", defaults.person);
   const [action, setAction] = useQS("acc.action", defaults.action);
   const [project, setProject] = useQS("acc.project", defaults.project);
+  // The prototype asks three things. The repo and the moment are for a deep link from a policy ("Simulate"): shown only when it set them.
+  const [advanced] = useQS("acc.when", "");
   const [extra, setExtra] = useState({ repo: "", date: defaults.date, time: defaults.time });
   const [r, setR] = useState<Evaluated | null>(null);
   const sim: Sim = { person, action, project, ...extra };
@@ -109,15 +111,16 @@ export function Simulator({ people, projects, repos, actions, defaults }: { peop
           <Field label="Action" htmlFor="acc-sim-action"><Select id="acc-sim-action" value={action} onChange={setAction} options={actions.map((a) => ({ value: a.id, label: a.name }))} /></Field>
           <Field label="Project" htmlFor="acc-sim-project"><Select id="acc-sim-project" value={project} onChange={(v) => { setProject(v); setExtra({ ...extra, repo: "" }); }} disabled={!scoped} title={scoped ? undefined : "Factory actions apply everywhere"} options={projects.map((p) => ({ value: p.id, label: p.name }))} /></Field>
         </div>
-        <details className="acc-adv" style={{ margin: "8px 0" }}>
-          <summary>Repo, date and time</summary>
+        {advanced ? (
+          <div className="acc-adv" style={{ margin: "8px 0" }}>
           <div className="cols w3">
             <Field label="Repo" htmlFor="acc-sim-repo"><Select id="acc-sim-repo" value={extra.repo} onChange={(v) => setExtra({ ...extra, repo: v })} disabled={!scoped} options={[{ value: "", label: "Any repo" }, ...repos.filter((x) => x.project === project).map((x) => ({ value: x.id, label: x.name }))]} /></Field>
             <Field label="Date (IST)" htmlFor="acc-sim-date"><input id="acc-sim-date" className="input mono" type="date" value={extra.date} onChange={(e) => setExtra({ ...extra, date: e.target.value })} /></Field>
             <Field label="Time (IST)" htmlFor="acc-sim-time"><input id="acc-sim-time" className="input mono" type="time" value={extra.time} onChange={(e) => setExtra({ ...extra, time: e.target.value })} /></Field>
           </div>
           <Btn label="Use now" small id="acc-sim-now" onClick={() => setExtra({ ...extra, ...nowIst() })} />
-        </details>
+          </div>
+        ) : null}
         <Btn label="Check" kind="primary" type="submit" id="acc-sim-run" />
       </form>
       <div style={{ marginTop: 12 }} aria-live="polite">

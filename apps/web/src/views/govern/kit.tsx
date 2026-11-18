@@ -88,26 +88,31 @@ export function ScrollCue({ children, maxHeight, label }: { children: ReactNode;
   const [more, setMore] = useState(false);
   const [left, setLeft] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // The scrolling element is the Table primitive's own `.table-scroll` wrapper when the children are a Table, else our own region.
+  const target = (): HTMLElement | null => ref.current?.querySelector<HTMLElement>(".table-scroll") ?? ref.current;
   const measure = useCallback(() => {
-    const el = ref.current;
+    const el = ref.current?.querySelector<HTMLElement>(".table-scroll") ?? ref.current;
     if (!el) return;
     setLeft(el.scrollLeft > 4);
     setMore(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
   }, []);
   useLayoutEffect(() => {
+    const el = target();
+    if (!el) return undefined;
+    if (maxHeight) { el.style.maxHeight = `${maxHeight}px`; el.style.overflow = "auto"; }
     measure();
-    const el = ref.current;
-    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    el.addEventListener("scroll", measure);
+    if (typeof ResizeObserver === "undefined") return () => el.removeEventListener("scroll", measure);
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
-  }, [measure]);
+    return () => { ro.disconnect(); el.removeEventListener("scroll", measure); };
+  }, [measure, maxHeight]);
   return (
     <div className={`scrollwrap${left ? " ml" : ""}${more ? " mr" : ""}`}>
       <div className="sf l" aria-hidden="true" />
       <div className="sf r" aria-hidden="true" />
       <div className="sh" aria-hidden="true">scroll {"→"}</div>
-      <div ref={ref} className="tw" tabIndex={0} role="region" aria-label={label} onScroll={measure} style={maxHeight ? { maxHeight, overflow: "auto" } : undefined}>{children}</div>
+      <div ref={ref} className="tw" tabIndex={0} role="region" aria-label={label} onScroll={measure}>{children}</div>
     </div>
   );
 }
