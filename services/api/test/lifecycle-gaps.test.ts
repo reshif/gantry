@@ -195,4 +195,31 @@ d("lifecycle gaps", () => {
     await w.tx((tx) => reconcileStop(tx, stop));
     expect((await w.get(id)).state).toBe("running");
   });
+
+  /** The dispatch jobs for an attempt that can still run (queued or being worked on). */
+  const dispatchable = async (attemptId: string) => w.q(`select id, status from jobs where kind = 'attempt.dispatch' and payload->>'attemptId' = $1 and status in ('queued','running')`, [attemptId]);
+
+  it("gap 5: a send-back (or retry) made during a halt is dispatched after resume (the halt means nothing new starts, not that a person's decision is lost)", async () => {
+    const id = await w.atStation("research", "Sent back while halted");
+    const { reconcileStop } = await import("../src/areas/stops/enforce.js");
+    const h = await w.call("p-meera", "POST", "/api/v1/stops", { scope: "project", id: "payments", mode: "halt", reason: "Andon: check the agents" });
+    expect(h.status, JSON.stringify(h.body)).toBe(200);
+    const stop = String(h.body.stop);
+    expect((await w.tx((tx) => reconcileStop(tx, stop))).action).toBe("enforced");
+    expect(await w.liveAttempt(id)).toBeUndefined();
+    // A person sends the station back (a redo) while halted: the decision is recorded and a queued attempt exists.
+    const sb = await w.call("p-meera", "POST", `/api/v1/work-orders/${id}/send-back`, { toStation: "research", note: "Cover the refund edge cases again." });
+    expect(sb.status, JSON.stringify(sb.body)).toBe(200);
+    const queued = (await w.liveAttempt(id))!;
+    expect(queued).toMatchObject({ station: "research", state: "queued" });
+    // The worker's dispatch job runs now and skips: a stop covers the order. That job is spent.
+    await t.db.admin.query(`update jobs set status = 'done', result = '{"skipped":"halt at project scope"}'::jsonb where kind = 'attempt.dispatch' and payload->>'attemptId' = $1`, [queued.id]);
+    expect(await dispatchable(queued.id)).toEqual([]);
+    // Resume: nothing new may have started during the halt, and now the queued attempt must start.
+    expect((await w.call("p-meera", "DELETE", `/api/v1/stops/${encodeURIComponent("project:payments")}`)).status).toBe(200);
+    expect((await w.tx((tx) => reconcileStop(tx, stop))).action).toBe("resumed");
+    const live = (await w.liveAttempt(id))!;
+    expect(live.state).toBe("queued");
+    expect((await dispatchable(live.id)).length, "the queued attempt has no dispatch job after resume").toBe(1);
+  });
 });

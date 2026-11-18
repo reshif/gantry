@@ -180,8 +180,14 @@ async function resume(fx: Fx, w: Wo, sid: string, catalog: Catalog, afterKill: b
   }
   // An attempt older than the stop is superseded by it (F3) even when the stop was lifted before it was enforced: it does not count as live,
   // and the fresh attempt started below replaces it.
-  const live = (await fx.tx.query(`select 1 from attempts where org_id = $1 and wo_id = $2 and state in ('queued','running') and fencing > $3`, [fx.orgId, w.id, s.fencing])).rowCount;
-  if (live) return;
+  const live = (await fx.tx.query<{ id: string; station: string; state: string; fencing: string }>(`select id, station, state, fencing::text from attempts where org_id = $1 and wo_id = $2 and state in ('queued','running') and fencing > $3`, [fx.orgId, w.id, s.fencing])).rows;
+  // A person's send-back or retry during a halt queued an attempt whose dispatch job ran while the halt covered it and skipped. A halt means nothing new starts
+  // while it lasts, not that the decision is lost: the queued attempt is dispatched now (a running one has its run already).
+  for (const a of live.filter((x) => x.state === "queued")) {
+    fx.jobs.push(job("attempt.dispatch", { woId: w.id, station: a.station, attemptId: a.id, fencing: Number(a.fencing) }, { dedupeKey: `attempt:${a.id}:resume:${s.fencing}` }));
+    fx.changes.add("floor");
+  }
+  if (live.length) return;
   const g = gateAfter(catalog, sid);
   const reopen = (w.data.stopClosedGates as string[] | undefined) ?? [];
   delete w.data.stopClosedGates;
