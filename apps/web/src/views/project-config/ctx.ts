@@ -23,7 +23,7 @@ export interface PcProps {
 }
 
 export const TABS: Array<[string, string]> = [
-  ["overview", "Overview"], ["members", "Members & roles"], ["flow", "Flow"], ["classes", "Work classes"], ["approvers", "Approvers"],
+  ["overview", "General"], ["flow", "Stations and gates"], ["classes", "Classes"], ["approvers", "Approvers"], ["members", "Members"], ["freezes", "Freezes"],
   ["notifications", "Notifications"], ["mcp", "MCP"], ["budget", "Budget"], ["history", "History"], ["danger", "Danger zone"],
 ];
 

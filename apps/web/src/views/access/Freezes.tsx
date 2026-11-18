@@ -86,3 +86,10 @@ export function FreezeList({ freezes, repos, hlFreeze }: { freezes: Freeze[]; re
     </ul>
   );
 }
+
+/** The prototype's "Lift" button on a project's freeze row: ends an active freeze or cancels a scheduled one. */
+export function LiftFreeze({ f }: { f: Freeze }) {
+  const outcome = useOutcome();
+  const perm = useCan("policy.edit");
+  return <Btn label="Lift" small kind="ghost danger" id={`pcf-fz-end-${f.id}`} guard={perm} onClick={async () => void outcome(await ops.endFreeze(f.id, ifMatchOf(f)))} />;
+}

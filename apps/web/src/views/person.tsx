@@ -4,11 +4,12 @@
  */
 import { qk } from "../api/keys";
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { fmt, type Person, type Project, type Role } from "@gantry/domain";
+import { useQueries, useQuery } from "@tanstack/react-query";
+import { fmt, type Person, type Project, type Role, type WorkOrder } from "@gantry/domain";
+import type { Page } from "../api/types";
 import { api, get } from "../api/client";
 import { ops } from "../api/ops";
-import { useAccessMatrix, useMe, usePeople, useProjects } from "../api/queries";
+import { useAccessMatrix, useApiKeys, useMe, usePeople, useProjects, useSessions } from "../api/queries";
 import { useCan } from "../api/can";
 import { navigate, useHash } from "../lib/router";
 import { ExplainDenial } from "./console/ExplainDenial";
@@ -19,7 +20,7 @@ import { useUI } from "../ui/overlay-context";
 import { useActors } from "../ui/actors";
 import { lockd, useOutcome, useTeams } from "./govern/data";
 import { HistoryList } from "./people/History";
-import { useOffboard } from "./people/Offboard";
+import { previewWork, useOffboard } from "./people/Offboard";
 import type { EffectivePermissions } from "./people/types";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
@@ -51,7 +52,6 @@ export default function PersonView() {
   const admins = people.filter((x) => x.status === "active" && x.roles.some((g) => g.role === "factory_admin"));
   return (
     <div className="view view-person">
-      {back}
       <LockNote decision={perm} what="Roles, teams and access" />
       <MemberDetail key={p.id} p={p} teams={teamsQ.data ?? []} projects={projects} roles={roles} perm={perm} admins={admins} viewerId={me.person.id} roleName={roleName} />
     </div>
@@ -98,6 +98,22 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   const [cell, setCell] = useState<{ action: string; project: string } | null>(null);
   const eff = useQuery({ queryKey: qk.effectivePermissions(p.id), queryFn: () => get<EffectivePermissions>(api(`people/${encodeURIComponent(p.id)}/effective-permissions`)) });
   const away = p.away && p.away.to > Date.now() ? p.away : null;
+  const keysQ = useApiKeys();
+  const sessQ = useSessions({ all: true });
+  const keyCount = (keysQ.data ?? []).filter((k) => k.by === p.id && !k.revoked && !k.expired).length;
+  const lastSeen = (sessQ.data ?? []).filter((x) => x.person === p.id).reduce((m, x) => Math.max(m, x.lastSeen), 0) || null;
+  const lists = useQueries({
+    queries: projects.map((pr) => ({
+      queryKey: qk.workOrders(pr.id, { offboard: p.id }),
+      queryFn: async () => {
+        const r = await get<WorkOrder[] | Page<WorkOrder>>(api(`projects/${encodeURIComponent(pr.id)}/work-orders`), {});
+        return Array.isArray(r) ? r : r.items;
+      },
+    })),
+  });
+  const holdsLoading = lists.some((l) => l.isLoading);
+  const holdsOpen = previewWork(p, projects, lists.map((l) => l.data)).length;
+  const ownedNames = projects.filter((pr) => p.roles.some((g) => g.role === "project_admin" && g.scope === pr.id)).map((pr) => pr.name).join(", ");
   const visible = projects.filter((x) => x.status !== "archived");
   const frRole = p.roles.find((g) => g.scope === "factory" && !g.via)?.role ?? "";
   const teamName = (id: string) => teams.find((t) => t.id === id)?.name ?? id;
@@ -173,11 +189,10 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
         actions={(
           <>
             {p.status === "invited" ? <Btn label="Mark invite accepted" icon="check" id="ppl-accept" guard={perm} onClick={async () => void outcome(await ops.acceptInvite(p.id))} /> : null}
-            <Btn label="Edit teams" icon="teams" id="ppl-teams" guard={perm} onClick={openTeams} />
-            <Btn label="History" icon="ledger" id="ppl-history-jump" onClick={() => setTab("activity")} />
+            <a className="btn" id="person-back" href="#people">All people</a>
             {off
               ? <Btn label="Reactivate" icon="check" id="ppl-reactivate" guard={perm} onClick={() => offboard.reactivate(p)} />
-              : <Btn label="Deactivate" kind="danger" icon="lock" id="ppl-deactivate" guard={offGuard} onClick={() => offboard.deactivate(p, offGuard)} />}
+              : <Btn label="Deactivate\u2026" kind="danger" id="ppl-deactivate" guard={offGuard} onClick={() => offboard.deactivate(p, offGuard)} />}
           </>
         )}
       />
@@ -196,11 +211,24 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
           <dl className="kv" id="ppl-profile">
             <dt>Email</dt><dd className="mono">{p.email}</dd>
             <dt>Title</dt><dd>{p.title || "No title yet"}</dd>
-            <dt>Team</dt><dd>{teamNames}</dd>
+            <dt>Team</dt><dd>{teamNames} <Btn label="Edit teams" small kind="ghost" id="ppl-teams" guard={perm} onClick={openTeams} /></dd>
             <dt>MFA</dt><dd>{p.mfa ? "On" : "Off"}</dd>
             <dt>GitHub</dt><dd className="mono">{p.github || "not linked"}</dd>
+            <dt>Last seen</dt><dd>{lastSeen ? `${fmt.ago(lastSeen, Date.now())} ago` : "n/a"}</dd>
           </dl>
         </Panel>
+        <Panel title="Holds right now">
+          <dl className="kv" id="ppl-holds">
+            <dt>Open work orders</dt><dd>{holdsLoading ? "…" : holdsOpen}</dd>
+            <dt>Eligible to approve</dt><dd title="The server does not report pending approvals per person.">n/a</dd>
+            <dt>API keys</dt><dd>{keysQ.data ? keyCount : "…"}</dd>
+            <dt>Projects owned</dt><dd>{ownedNames || "none"}</dd>
+          </dl>
+        </Panel>
+      </div>
+      ) : null}
+      {tab === "access" ? (<>
+      <div className="gv-two gv-top">
         <Panel title="Roles held">
           <div className="ppl-held" id="ppl-held">
             <div>
@@ -230,8 +258,6 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
           </div>
         </Panel>
       </div>
-      ) : null}
-      {tab === "access" ? (<>
       <Panel title="Roles per project" flush>
         <p className="muted small ppl-hint ppl-hint-pad">One person can hold different roles in each project. A role granted by a team shows as "via team" and is changed on the team. A switch is locked where you cannot manage that project's members.</p>
         <div className="table-scroll" data-keep-scroll="ppl-proles">

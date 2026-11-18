@@ -159,7 +159,7 @@ export function CreateAgent({ agents, projects, policies, perm, close }: { agent
     void ops.createAgent({ name: d.name.trim(), station: d.station, model: d.model, fallbacks: d.fallbacks, autonomy: d.autonomy, tools: d.tools, stations, projects: d.projects, budget: d.budget, instructions: d.instructions, skills: d.skills }).then((r) => {
       if (!r.ok) { setErr(r.msg); return; }
       const created = (r as unknown as { agent?: AgentRow }).agent;
-      if (created) { ui.sel = created.id; ui.tab = "config"; rerender(); }
+      if (created) { ui.sel = created.id; ui.tab = "overview"; rerender(); }
       ui_.toast(r.msg, "ok");
       done();
     });

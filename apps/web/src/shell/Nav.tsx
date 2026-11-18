@@ -64,7 +64,7 @@ export function Nav({ me, current, project, onNavigate }: { me: Me; current: str
     try { ref.current?.querySelector("[aria-current=page]")?.scrollIntoView({ block: "nearest" }); } catch { /* not supported */ }
   }, [current]);
   return (
-    <nav className={`rail${more ? " more" : ""}`} id="nav" aria-label="Main" ref={ref}>
+    <nav className={`rail${more ? " rail-more" : ""}`} id="nav" aria-label="Main" ref={ref}>
       {NAV_LAYOUT.map((g) => {
         const items = g.ids.map((id) => ROUTES.find((r) => r.id === id)).filter((r): r is (typeof ROUTES)[number] => !!r && r.nav !== false && ((!!r.project && !shown) || access.visible(r.id)));
         if (!items.length) return null;

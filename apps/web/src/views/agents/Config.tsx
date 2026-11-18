@@ -25,7 +25,12 @@ const Sec = ({ title, children, hint, cls }: { title: string; children: ReactNod
   </section>
 );
 
-export function ConfigTab({ a, d, ro, perm, projects, policies, edit }: TabProps) {
+export type CfgSection = "identity" | "model" | "autonomy" | "tools" | "staffing" | "budget" | "guardrails" | "gate";
+const ALL: CfgSection[] = ["identity", "model", "autonomy", "tools", "staffing", "budget", "guardrails", "gate"];
+
+/** The configuration form, one or more sections of it: the prototype spreads these over its Tools, Model and budget and Guardrails tabs. */
+export function ConfigTab({ a, d, ro, perm, projects, policies, edit, show = ALL }: TabProps & { show?: CfgSection[] }) {
+  const on = (k: CfgSection) => show.includes(k);
   const m = useModels();
   const st = useStations();
   const suites = useAgentSuites().data ?? [];
@@ -40,7 +45,7 @@ export function ConfigTab({ a, d, ro, perm, projects, policies, edit }: TabProps
   const allProj = d.projects === "all";
   return (
     <div className="cfg">
-      <Sec title="Identity">
+      {on("identity") ? <Sec title="Identity">
         <div className="form-grid">
           <Field label="Name" htmlFor="ag-name"><input id="ag-name" className="input" value={d.name} disabled={ro} onChange={(e) => edit(() => { d.name = e.target.value; })} /></Field>
           <dl className="kv-row ag-ident">
@@ -49,8 +54,8 @@ export function ConfigTab({ a, d, ro, perm, projects, policies, edit }: TabProps
             <div className="kv"><dt className="kv-k">Live version</dt><dd className="kv-v mono">{a.version}</dd></div>
           </dl>
         </div>
-      </Sec>
-      <Sec title="Model chain">
+      </Sec> : null}
+      {on("model") ? <Sec title="Model chain">
         <div className="form-grid">
           <Field label="Primary model" htmlFor="ag-model" hint="Only enabled models on connected vendors are listed.">
             <Select id="ag-model" options={primaryOpts} value={d.model} disabled={ro} onChange={(v) => edit(() => { d.model = v; d.fallbacks = d.fallbacks.filter((x) => x !== v); })} />
@@ -76,8 +81,8 @@ export function ConfigTab({ a, d, ro, perm, projects, policies, edit }: TabProps
             <Select id="ag-fb-add" aria-label="Add fallback model" disabled={ro || !addable.length} value="" options={[{ value: "", label: "Add fallback model…" }, ...addable.map((x) => ({ value: x.id, label: `${x.name} · ${x.vendor}` }))]} onChange={(v) => { if (v) edit(() => { d.fallbacks.push(v); }); }} />
           </div>
         </div>
-      </Sec>
-      <Sec title="Autonomy" hint="POL-112 limits agents from Plan onward on regulated projects to act with gate.">
+      </Sec> : null}
+      {on("autonomy") ? <Sec title="Autonomy" hint="POL-112 limits agents from Plan onward on regulated projects to act with gate.">
         <div className="radio-cards" role="radiogroup" aria-label="Autonomy level">
           {AUTONOMY.map((o) => {
             const chk = check(o[0]);
@@ -92,8 +97,8 @@ export function ConfigTab({ a, d, ro, perm, projects, policies, edit }: TabProps
             );
           })}
         </div>
-      </Sec>
-      <Sec title="Tool permissions">
+      </Sec> : null}
+      {on("tools") ? <Sec title="Tool permissions">
         <div className="toggle-grid">
           {TOOLS.map((t) => (
             <div key={t[0]} className="toggle-row">
@@ -102,8 +107,8 @@ export function ConfigTab({ a, d, ro, perm, projects, policies, edit }: TabProps
             </div>
           ))}
         </div>
-      </Sec>
-      <Sec title="Staffing">
+      </Sec> : null}
+      {on("staffing") ? <Sec title="Staffing">
         <div className="form-grid">
           <div className="field">
             <div className="field-label">Stations it may staff</div>
@@ -136,24 +141,26 @@ export function ConfigTab({ a, d, ro, perm, projects, policies, edit }: TabProps
             </div>
           </div>
         </div>
-      </Sec>
-      <Sec title="Budget and guardrails">
+      </Sec> : null}
+      {on("budget") ? <Sec title="Budget">
         <div className="form-grid">
-          <div className="form-row">
-            <Field label="Budget per work order (USD)" htmlFor="ag-budget"><input id="ag-budget" className="input mono" type="number" min="0" step="0.1" value={String(d.budget)} disabled={ro} onChange={(e) => edit(() => { d.budget = +e.target.value || 0; })} /></Field>
-            <Field label="Max diff size (lines)" htmlFor="ag-maxdiff" hint="0 means no limit."><input id="ag-maxdiff" className="input mono" type="number" min="0" step="50" value={String(d.guardrails.maxDiff)} disabled={ro} onChange={(e) => edit(() => { d.guardrails.maxDiff = +e.target.value || 0; })} /></Field>
-          </div>
+          <Field label="Budget per work order (USD)" htmlFor="ag-budget"><input id="ag-budget" className="input mono" type="number" min="0" step="0.1" value={String(d.budget)} disabled={ro} onChange={(e) => edit(() => { d.budget = +e.target.value || 0; })} /></Field>
+        </div>
+      </Sec> : null}
+      {on("guardrails") ? <Sec title="Guardrails">
+        <div className="form-grid">
+          <Field label="Max diff size (lines)" htmlFor="ag-maxdiff" hint="0 means no limit."><input id="ag-maxdiff" className="input mono" type="number" min="0" step="50" value={String(d.guardrails.maxDiff)} disabled={ro} onChange={(e) => edit(() => { d.guardrails.maxDiff = +e.target.value || 0; })} /></Field>
           <Field label="Paths it must not touch" htmlFor="ag-paths" hint="One glob per line.">
             <textarea id="ag-paths" className="input mono" rows={3} disabled={ro} placeholder="infra/prod/**" value={d.guardrails.paths.join("\n")} onChange={(e) => edit(() => { d.guardrails.paths = e.target.value.split("\n").map((x) => x.trim()).filter(Boolean); })} />
           </Field>
         </div>
-      </Sec>
-      <Sec title="Promotion gate" cls="ag-wide">
+      </Sec> : null}
+      {on("gate") ? <Sec title="Promotion gate" cls="ag-wide">
         <Field label="Required eval suite" htmlFor="ag-suite" hint="A version reaches the floor only when its latest run of this suite meets the threshold.">
           <Select id="ag-suite" disabled={ro} value={d.suite} onChange={(v) => edit(() => { d.suite = v; })}
             options={(suites.some((x) => x.id === d.suite) || !d.suite ? suites : [...suites, { id: d.suite, name: "not found", station: null, agent: null, threshold: 0 }]).map((x) => ({ value: x.id, label: `${x.id} · ${x.name} (≥ ${fmt.pct(x.threshold)})` }))} />
         </Field>
-      </Sec>
+      </Sec> : null}
     </div>
   );
 }

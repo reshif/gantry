@@ -147,6 +147,9 @@ describe("People & teams: a member's roles and where permissions come from", () 
   it("separates direct roles from roles inherited via a team", async () => {
     setup();
     mount("p-tomas");
+    // roles held sit on the Access tab; the Profile tab is the prototype's Profile and Holds right now
+    expect(await byId("ppl-holds")).toBeTruthy();
+    fireEvent.click(await waitFor(() => { const t = document.getElementById("person-tab-access"); if (!t) throw new Error("no tab"); return t; }));
     const held = await byId("ppl-held");
     await waitFor(() => expect(document.getElementById("ppl-held")?.textContent).toContain("Reviewer · Payments Platform · via Payments"));
     const [direct, inherited] = Array.from(held.querySelectorAll(":scope > div"));

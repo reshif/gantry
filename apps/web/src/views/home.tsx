@@ -8,7 +8,7 @@ import { fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useActivity, useHome, useMe, useProjects } from "../api/queries";
 import { hasCommand, runCommand } from "../lib/commands";
-import { eventRows, eventText, eventTone } from "../lib/eventText";
+import { eventRows, eventText, hourly, eventTone } from "../lib/eventText";
 import { hashFor, navigate } from "../lib/router";
 import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
 import { useOpenTraveler } from "../shell/useTraveler";
@@ -22,7 +22,6 @@ import { metricsOf, useCatalog, type PView } from "./projects/kit";
 
 export { openNewProject };
 
-const HOUR_MS = 3_600_000;
 
 export default function HomeView() {
   const me = useMe();
@@ -213,14 +212,3 @@ export default function HomeView() {
   );
 }
 
-/** Station entries per hour over the last 24 hours (oldest first), from the activity feed. */
-function hourly(events: Array<{ at: number; type: string }>): number[] {
-  const now = Date.now();
-  const out = Array.from({ length: 24 }, () => 0);
-  for (const e of events) {
-    if (e.type !== "wo.enter") continue;
-    const age = Math.floor((now - e.at) / HOUR_MS);
-    if (age >= 0 && age < 24) out[23 - age] = (out[23 - age] ?? 0) + 1;
-  }
-  return out;
-}

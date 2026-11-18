@@ -164,9 +164,13 @@ describe("Agents screen", () => {
     setup();
     mountAgent();
     await byId("agent-detail");
-    expect(document.querySelector(".ad-meta")!.textContent).toBe("2.6.1 · claude-opus-5-5 · 2 work orders now · SUITE-BUILD 80% · next after this station: Verify");
-    expect(document.querySelector(".ad-meta")!.textContent).not.toMatch(/ · $/);
-    expect(document.getElementById("ag-back-link")).toBeTruthy();
+    // the prototype header: kicker, name, "<station> station · <model>", All agents and Talk
+    await waitFor(() => expect(document.querySelector(".ph .sub, .view-head .sub")!.textContent).toBe("Build station · claude-opus-5-5"));
+    expect(document.getElementById("ag-back-link")!.getAttribute("href")).toBe("#agents");
+    expect(document.getElementById("ag-talk")!.getAttribute("href")).toMatch(/conversations$/);
+    // the prototype's tabs, in its order, then the tabs the product keeps
+    expect([...document.querySelectorAll("#agent-detail [role=tab]")].map((t) => t.textContent!.replace(/\d+$/, "").trim())).toEqual(["Overview", "Instructions", "Tools", "Model and budget", "Skills", "Guardrails", "Evals", "Per-project", "Versions", "Trust", "History"]);
+    expect(document.getElementById("ag-overview")).toBeTruthy();
     expect(document.getElementById("ag-row-ag-build")).toBeNull();
     cleanup();
     mountAgent("ag-nope");
@@ -184,11 +188,14 @@ describe("Agents screen", () => {
   it("edits the configuration in a draft and saves one audited PATCH with the agent's version and only the changed keys", async () => {
     const calls = setup({ "PATCH /api/v1/agents/ag-build": () => ok() });
     mountAgent();
+    await tab("model");
     const budget = (await byId("ag-budget")) as HTMLInputElement;
     expect(document.getElementById("ag-savebar")!.className).not.toContain("is-dirty");
     expect(document.getElementById("ag-save")!.getAttribute("data-reason")).toBe("No changes to save.");
     fireEvent.change(budget, { target: { value: "15" } });
+    await tab("guardrails");
     fireEvent.change(await byId("ag-maxdiff"), { target: { value: "600" } });
+    await tab("tools");
     fireEvent.click(await byId("ag-tool-merge"));
     await waitFor(() => expect(document.getElementById("ag-savebar")!.className).toContain("is-dirty"));
     fireEvent.click(document.getElementById("ag-save")!);
@@ -206,9 +213,11 @@ describe("Agents screen", () => {
     let live = { ...BUILD };
     const calls = setup({ "GET /api/v1/agents": () => ({ body: [live, REVIEW] }), "PATCH /api/v1/agents/ag-build": () => ok() });
     mountAgent();
+    await tab("guardrails");
     fireEvent.change(await byId("ag-maxdiff"), { target: { value: "600" } });
     live = { ...BUILD, rev: 8, budget: 20 };
     invalidateSlices(["agents"]);
+    await tab("model");
     await waitFor(() => expect(((document.getElementById("ag-budget")) as HTMLInputElement).value).toBe("20"));
     expect(document.getElementById("ag-conflict")).toBeNull();
     fireEvent.click(await byId("ag-save"));
@@ -222,6 +231,7 @@ describe("Agents screen", () => {
     let live = { ...BUILD };
     const calls = setup({ "GET /api/v1/agents": () => ({ body: [live, REVIEW] }), "PATCH /api/v1/agents/ag-build": () => ok() });
     mountAgent();
+    await tab("model");
     fireEvent.change(await byId("ag-budget"), { target: { value: "15" } });
     live = { ...BUILD, rev: 8, budget: 20 };
     invalidateSlices(["agents"]);
@@ -240,9 +250,10 @@ describe("Agents screen", () => {
   it("keeps the draft across tabs and discards it on request", async () => {
     setup();
     mountAgent();
+    await tab("model");
     fireEvent.change(await byId("ag-budget"), { target: { value: "33" } });
     await tab("overrides");
-    await tab("config");
+    await tab("model");
     expect(((await byId("ag-budget")) as HTMLInputElement).value).toBe("33");
     fireEvent.click(await byId("ag-discard"));
     await waitFor(() => expect(((document.getElementById("ag-budget")) as HTMLInputElement).value).toBe("12"));
@@ -251,6 +262,7 @@ describe("Agents screen", () => {
   it("blocks autonomy on a regulated project with POL-112, naming the project", async () => {
     setup();
     mountAgent();
+    await tab("guardrails");
     const auto = (await byId("ag-aut-auto")) as HTMLInputElement;
     expect(auto.disabled).toBe(true);
     expect(auto.closest("label")!.getAttribute("data-reason")).toMatch(/POL-112: no autonomous agents from Plan onward on regulated projects \(Risk and Compliance\)/);
@@ -267,8 +279,9 @@ describe("Agents screen", () => {
     mountAgent();
     await waitFor(() => expect(document.querySelector(".lock-note")).not.toBeNull());
     expect(document.querySelector(".lock-note")!.textContent).toContain("Read-only for you: agent configuration");
+    expect((await byId("ag-pause")).getAttribute("aria-disabled")).toBe("true");
+    await tab("model");
     expect(((await byId("ag-name")) as HTMLInputElement).disabled).toBe(true);
-    expect(document.getElementById("ag-pause")!.getAttribute("aria-disabled")).toBe("true");
     cleanup();
     window.location.hash = "#agents";
     mount(<AgentsView />);
@@ -389,7 +402,7 @@ describe("Agents screen", () => {
     await waitFor(() => expect(writes(calls, "POST")).toHaveLength(1));
     expect(writes(calls, "POST")[0]).toMatchObject({ path: "/api/v1/agents/ag-build/versions", body: { label: "2.7.0-rc2", note: "Sonnet trial" }, headers: { "if-match": "7" } });
     // with unsaved edits the button says why it is locked
-    await tab("config");
+    await tab("model");
     fireEvent.change(await byId("ag-budget"), { target: { value: "40" } });
     await tab("versions");
     expect((await byId("ag-newver-go")).getAttribute("data-reason")).toMatch(/Save or discard your changes first/);
@@ -401,7 +414,7 @@ describe("Agents screen", () => {
     await tab("versions");
     const blocked = await byId("ag-promote-270rc1");
     expect(blocked.getAttribute("aria-disabled")).toBe("true");
-    expect(blocked.getAttribute("data-reason")).toBe("Needs a passing run of SUITE-BUILD. No run of SUITE-BUILD yet.");
+    await waitFor(() => expect(blocked.getAttribute("data-reason")).toBe("Needs a passing run of SUITE-BUILD. No run of SUITE-BUILD yet."));
     fireEvent.click(blocked);
     expect(writes(calls, "POST")).toHaveLength(0);
     const eligible = await byId("ag-promote-280rc1");

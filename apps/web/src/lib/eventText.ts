@@ -36,3 +36,15 @@ export function eventTone(e: EventEntry): EventTone {
 export function eventRows(d: EventEntry[] | { items: EventEntry[] } | undefined): EventEntry[] {
   return Array.isArray(d) ? d : (d?.items ?? []);
 }
+
+/** Station entries per hour over the last 24 hours (oldest first), from the activity feed. */
+export function hourly(events: Array<{ at: number; type: string }>): number[] {
+  const now = Date.now();
+  const out = Array.from({ length: 24 }, () => 0);
+  for (const e of events) {
+    if (e.type !== "wo.enter") continue;
+    const age = Math.floor((now - e.at) / 3_600_000);
+    if (age >= 0 && age < 24) out[23 - age] = (out[23 - age] ?? 0) + 1;
+  }
+  return out;
+}

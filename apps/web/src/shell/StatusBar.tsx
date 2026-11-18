@@ -3,12 +3,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useActivity, useHome, useProjects } from "../api/queries";
 import { metricsOf, type PView } from "../views/projects/kit";
 import type { HomeFull } from "../views/home/data";
-import { eventRows } from "../lib/eventText";
+import { eventRows, hourly } from "../lib/eventText";
 import { useConnection } from "../lib/connection/store";
 
 const LIVE = { live: "LIVE", reconnecting: "RECONNECTING", offline: "OFFLINE" } as const;
 const TONE = { live: "ok pulse", reconnecting: "warn", offline: "bad" } as const;
-const HOUR = 3_600_000;
 
 /** HH:MM:SS UTC, ticking each second. */
 export function UtcClock() {
@@ -20,14 +19,12 @@ export function UtcClock() {
   return <span style={{ marginLeft: "auto" }} id="clock">{`${new Date(now).toISOString().slice(11, 19)} UTC`}</span>;
 }
 
-/** Station entries per hour, the mean of the last six hours (the Home throughput chart's buckets). null until the feed has loaded. */
+/** Station entries per hour: the mean of the last six of the Home throughput chart's hourly buckets (the same data). null until the feed has loaded. */
 export function useThroughput(): number | null {
   const activity = useActivity();
   const events = useMemo(() => eventRows(activity.data), [activity.data]);
   if (!activity.data) return null;
-  const now = Date.now();
-  const n = events.filter((e) => e.type === "wo.enter" && now - e.at >= 0 && now - e.at < 6 * HOUR).length;
-  return n / 6;
+  return hourly(events).slice(-6).reduce((a, b) => a + b, 0) / 6;
 }
 
 export function StatusBar() {

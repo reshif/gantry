@@ -42,9 +42,10 @@ const flow = () => ({
 /* [id, title, class, priority, station, kind] kind: run | queue | gate | block | fail | person */
 type Spec = [number, string, string, string, string, "run" | "queue" | "gate" | "block" | "fail" | "person"];
 const PAY: Spec[] = [
+  [1001, "Add idempotency keys to refund endpoint", "feature", "P2", "build", "run"],
   [1002, "Rate limit the payout API per merchant", "hotfix", "P1", "spec", "run"],
   [1003, "Retry failed ledger postings with backoff", "security", "P1", "intake", "queue"],
-  [1004, "Add idempotency keys to refund endpoint", "feature", "P1", "review", "gate"],
+  [1004, "Rate limit the payout API per merchant", "feature", "P1", "review", "gate"],
   [1005, "Expose payout status webhook", "bug", "P2", "design", "block"],
   [1006, "Migrate payouts to batch settlement", "bug", "P1", "close", "block"],
   [1007, "Remove deprecated v1 charge route", "epic", "P3", "research", "run"],
@@ -179,7 +180,11 @@ function reposFor(project: string) {
 export function richOverrides(): Record<string, Handler> {
   const ov: Record<string, Handler> = {};
   const me = { ...PERSONAS.admin.me, projects: PROJECTS.map((p, i) => ({ id: p.id, name: p.name, key: p.key, status: "active", halted: "halted" in p && p.halted ? { by: "p-admin", at: NOW - 3 * HOUR, reason: "x" } : null, killed: null, order: i })) };
-  ov["me"] = (r) => fulfillJson(r, me);
+  // the prototype's user menu always offers "Switch persona (demo)"; the real menu shows it when the stack runs demo accounts
+  const demoAccountList = [["p-asha", "Asha Raman", "asha", "factory admin"], ["p-meera", "Meera Iyer", "meera", "line lead"], ["p-tomas", "Tomás Ferreira", "tomas", "engineer"], ["p-sam", "Sam Whitfield", "sam", "auditor"]].map(([id, name, e, role]) => ({ id, name, email: `${e}@acme.dev`, role, note: "" }));
+  ov["me"] = (r) => fulfillJson(r, { ...me, config: { demoAccounts: true, demoAccountList } });
+  // eval runs per station suite: a few runs so an agent page has a trend and recent runs
+  for (const st of ["intake", "research", "spec", "design", "plan", "build", "test", "verify", "review", "close"]) ov[`suites/su-${st}/runs`] = (r) => fulfillJson(r, [0.86, 0.9, 0.88, 0.93, 0.91].map((score, i) => ({ id: `run-${st}-${i + 1}`, suite: `su-${st}`, agent: `ag-${st}`, version: "1.4.0", model: "claude-sonnet", at: NOW - (5 - i) * DAY, score, results: [], by: "p-admin", cost: 0.4 + i * 0.3, status: "completed", count: 20 })));
   ov["projects"] = (r) => fulfillJson(r, PROJECTS.map((p, i) => ({ ...project(p, i), metrics: metrics(i, p.id) })));
   for (const p of PROJECTS) {
     ov[`projects/${p.id}/floor`] = (r) => fulfillJson(r, floorFor(p.id));
@@ -200,12 +205,12 @@ export function richOverrides(): Record<string, Handler> {
     ov[`projects/${p.id}/repos`] = (r) => fulfillJson(r, p.id === "payments" ? reposFor(p.id) : []);
   }
   ov["activity"] = (r) => fulfillJson(r, events());
-  ov["stops/impact"] = (r) => fulfillJson(r, { projects: PROJECTS.length, workOrders: 12, running: 5, slots: 4, prs: 3 });
+  ov["stops/impact"] = (r) => fulfillJson(r, { projects: PROJECTS.length, workOrders: 52, running: 31, slots: 4, prs: 3 });
   ov["agents"] = (r) => fulfillJson(r, agents());
   ov["home"] = (r) =>
     fulfillJson(r, {
       approvals: [
-        { wo: "WO-1004", title: "Add idempotency keys to refund endpoint", gate: "G5", gateLabel: "G5", gateName: "Review and merge", project: "payments", projectName: "Payments Platform", have: 1, need: 2, waitMs: 5 * HOUR },
+        { wo: "WO-1004", title: "Rate limit the payout API per merchant", gate: "G5", gateLabel: "G5", gateName: "Review and merge", project: "payments", projectName: "Payments Platform", have: 1, need: 2, waitMs: 5 * HOUR },
         { wo: "WO-1013", title: "Add order tracking page", gate: "G6", gateLabel: "G6", gateName: "Release confirmed", project: "storefront", projectName: "Storefront", have: 0, need: 1, waitMs: 6 * HOUR },
         { wo: "WO-1021", title: "Add WebAuthn backup codes", gate: "G4", gateLabel: "G4", gateName: "Checks green", project: "identity", projectName: "Identity", have: 0, need: 1, waitMs: 2 * HOUR },
       ],
@@ -219,7 +224,7 @@ export function richOverrides(): Record<string, Handler> {
         ],
         waiting: {
           approvals: [
-            { wo: "WO-1004", title: "Add idempotency keys to refund endpoint", gate: "G5", gateLabel: "G5", gateName: "Review and merge", project: "payments", projectName: "Payments Platform", have: 1, need: 2, waitMs: 5 * HOUR },
+            { wo: "WO-1004", title: "Rate limit the payout API per merchant", gate: "G5", gateLabel: "G5", gateName: "Review and merge", project: "payments", projectName: "Payments Platform", have: 1, need: 2, waitMs: 5 * HOUR },
             { wo: "WO-1013", title: "Add order tracking page", gate: "G6", gateLabel: "G6", gateName: "Release confirmed", project: "storefront", projectName: "Storefront", have: 0, need: 1, waitMs: 6 * HOUR },
             { wo: "WO-1021", title: "Add WebAuthn backup codes", gate: "G4", gateLabel: "G4", gateName: "Checks green", project: "identity", projectName: "Identity", have: 0, need: 1, waitMs: 2 * HOUR },
           ],

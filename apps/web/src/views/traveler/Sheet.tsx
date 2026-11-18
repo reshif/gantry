@@ -9,7 +9,7 @@ import { stName, type TWo } from "./model";
 
 type Row = { key: string; station: string; agent: string; at: number | null; dur: number; state: "passed" | "now" | "skipped"; gate: string | null };
 
-export function Sheet({ wo, cat, project }: { wo: TWo; cat: Catalog; project: Project }) {
+export function Sheet({ wo, cat, project, bare }: { wo: TWo; cat: Catalog; project: Project; bare?: boolean }) {
   const actor = useActors();
   const h = [...wo.id].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7);
   const bars = Array.from({ length: 46 }, (_, i) => ({ x: i * 5, w: 1 + ((h >> (i % 20)) & 3) }));
@@ -49,10 +49,12 @@ export function Sheet({ wo, cat, project }: { wo: TWo; cat: Catalog; project: Pr
       <hr />
       <div className="label" style={{ marginBottom: 8 }}>Station stamps</div>
       <DataTable id="trv-stamps" caption={`Station stamps of ${wo.id}`} columns={cols} rows={rows} rowKey={(r) => r.key} />
-      <div className="row" style={{ marginTop: 16 }}>
-        <Btn label="Print" kind="primary" icon="dl" id="trv-print" onClick={() => window.print()} />
-        <span className="muted small"><Icon name="page" /> The printable record that follows the work order down the line.</span>
-      </div>
+      {bare ? null : (
+        <div className="row" style={{ marginTop: 16 }}>
+          <Btn label="Print" kind="primary" icon="dl" id="trv-print" onClick={() => window.print()} />
+          <span className="muted small"><Icon name="page" /> The printable record that follows the work order down the line.</span>
+        </div>
+      )}
     </div>
   );
 }

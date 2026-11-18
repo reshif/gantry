@@ -32,7 +32,7 @@ const NOW = Date.parse("2026-01-15T10:00:00Z");
 const P = "/#/p/payments";
 export const ROUTE_MAP = {
   home: "/#home", inbox: "/#inbox", workspace: "/#workspace", console: "/#workspace", conversations: `${P}/conversations`, projects: "/#projects",
-  floor: `${P}/floor`, "work-orders": `${P}/work-orders`, record: `${P}/record/WO-1004`, traveler: `${P}/record/WO-1004?traveler=WO-1004`, dossier: `${P}/record/WO-1004`, changes: `${P}/changes/WO-1004`,
+  floor: `${P}/floor`, "work-orders": `${P}/work-orders`, record: `${P}/record/WO-1004`, traveler: `${P}/traveler/WO-1004`, dossier: `${P}/dossier/WO-1004`, changes: `${P}/changes/WO-1004`,
   onboarding: `${P}/onboarding`, "project-config": `${P}/project-config`,
   agents: "/#agents", skills: "/#skills", models: "/#models", evals: "/#evals", trust: "/#trust", learning: "/#learning",
   integrations: "/#integrations", mcp: "/#mcp", api: "/#api", notifications: "/#notifications",
@@ -45,6 +45,8 @@ const realHash = (route) => {
   const base = ROUTE_MAP[name];
   if (base === undefined) throw new Error(`no mapping for route "${name}" (see ROUTE_MAP)`);
   if (base === null) return null;
+  // the fixtures name the signed-in admin p-admin where the prototype says p-asha; people have one real route id, "person"
+  if (name === "people" && param) return `/#person/${{ "p-asha": "p-admin", "p-meera": "p-lead" }[param] ?? param}`;
   return param && !base.includes("WO-") ? `${base}/${param}` : base;
 };
 

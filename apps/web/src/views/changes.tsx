@@ -3,8 +3,8 @@
  * plan, commits and the Builder's guardrail kept in the full Changes section below it.
  */
 import { useMemo } from "react";
-import { navigate, useHash } from "../lib/router";
-import { Btn } from "../ui/primitives";
+import { hashFor, navigate, useHash } from "../lib/router";
+import { ReviewBtn } from "./dossier/Head";
 import { Page, Card } from "../ui/cr";
 import { Loading } from "../ui/async";
 import { Picker } from "./record/Picker";
@@ -41,7 +41,17 @@ export default function ChangesView() {
   const { wo, rec, project, cat } = d;
   const pr = rec.code.pullRequests[0];
   const cur = files[Number(rawFile)] ?? files[0];
-  const ap = wo.allowed.approve;
+  const summary = (
+        <Card title="Review summary">
+          <p>{rec.summary.written?.text ?? (rec.code.tests.passed + rec.code.tests.failed ? `${rec.code.tests.passed} tests passed, ${rec.code.tests.failed} failed, ${rec.code.tests.added} added. ${files.length} files changed.` : "No review summary has been written yet.")}</p>
+          <details className="chg-all" open={!files.length} style={{ marginTop: 12 }}>
+            <summary className="linkbtn">Plan, commits and guardrail</summary>
+            <div style={{ marginTop: 12 }}>
+              <Changes c={{ wo, rec, project, cat, pre: "chg-", compact: false, page: true }} />
+            </div>
+          </details>
+        </Card>
+  );
   return (
     <Page
       eyebrow={`Work order \u00b7 ${wo.id}`}
@@ -49,8 +59,8 @@ export default function ChangesView() {
       sub={`${pr ? `PR #${pr.number} on ` : ""}${wo.repo}: ${files.length} files, +${sum(files, "plus")} \u2212${sum(files, "minus")}`}
       acts={
         <>
-          <Btn label="Back to record" id="chg-back" onClick={() => navigate("record", wo.id, wo.project)} />
-          {ap ? <Btn label={`Review ${ap.gate}`} kind="ok" id="chg-review" onClick={() => navigate("record", wo.id, wo.project)} /> : null}
+          <a className="btn" id="chg-back" href={hashFor("record", wo.id, wo.project)}>Back to record</a>
+          <ReviewBtn wo={wo} id="chg-review" />
         </>
       }
     >
@@ -81,21 +91,17 @@ export default function ChangesView() {
                     <div key={i} className={`ln ${l.t === "+" ? "add" : l.t === "-" ? "del" : l.s.startsWith("@@") ? "hh" : ""}`}>
                       <span>{l.s.startsWith("@@") ? "" : i}</span>
                       <span />
-                      <span>{l.s.startsWith("@@") ? l.s : `${l.t} ${l.s}`}</span>
+                      <span>{l.s.startsWith("@@") ? l.s : l.t === " " ? ` ${l.s}` : `${l.t} ${l.s}`}</span>
                     </div>
                   ))}
                 </div>
               ) : <Empty icon="page" title="No diff preview" text="The patch is stored by content hash; open the full review below." />}
             </Card>
+            {summary}
           </div>
         </div>
       ) : null}
-      <details className="chg-all" open={!files.length} style={{ marginTop: 16 }}>
-        <summary className="btn sm">Plan, commits and guardrail</summary>
-        <div style={{ marginTop: 12 }}>
-          <Changes c={{ wo, rec, project, cat, pre: "chg-", compact: false, page: true }} />
-        </div>
-      </details>
+      {files.length ? null : summary}
     </Page>
   );
 }
