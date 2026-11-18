@@ -1,3 +1,4 @@
+import { updatePrefs } from "../lib/prefs";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RecordView from "./record";
@@ -91,9 +92,10 @@ describe("Work order record", () => {
     expect(await screen.findByText(new RegExp(`pinned to flow v3, rule v2, policy v5`))).toBeTruthy();
   });
 
-  it("shows the picker when no record is selected and a notice when the record is not visible", async () => {
+  it("shows the picker when no record is selected and the not-found state when the record is not visible", async () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: { items: WOS.slice(0, 2), next: null, total: 2 } }) });
     window.location.hash = "#record";
+    updatePrefs({ record: null });
     mount(<RecordView />);
     expect(await screen.findByText("Work order records", {}, { timeout: 4000 })).toBeTruthy();
     expect(await screen.findByText(WOS[0]!.id)).toBeTruthy();
@@ -101,6 +103,7 @@ describe("Work order record", () => {
     mockApi({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }), [`GET /api/v1/work-orders/${W.id}/record`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }), "GET /api/v1/projects/payments/work-orders": () => ({ body: { items: [], next: null, total: 0 } }) });
     window.location.hash = `#record/${W.id}`;
     mount(<RecordView />);
-    expect(await screen.findByText(/was not found, or it belongs to a project outside your access/, {}, { timeout: 4000 })).toBeTruthy();
+    expect(await screen.findByText(`${W.id} does not exist`, {}, { timeout: 4000 })).toBeTruthy();
   });
+
 });

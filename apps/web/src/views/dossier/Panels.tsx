@@ -4,6 +4,7 @@ import { Chip, Empty, Panel } from "../../ui/primitives";
 import { DataTable, type Col } from "../../ui/SortTable";
 import { useActors } from "../../ui/actors";
 import type { TWo } from "../traveler/model";
+import { ago, minutes, plainName } from "./time";
 
 const label = (k: string): string => k.replace(/([A-Z])/g, " $1");
 
@@ -75,14 +76,14 @@ export function GatesPanel({ wo, cat }: { wo: TWo; cat: Catalog }) {
   const def = (k: string) => cat.gates.find((x) => x.id === k);
   const cols: Col<(typeof rows)[number]>[] = [
     { key: "k", label: "Gate", render: (g) => <span className="pri-cell"><b className="mono">{g.k}</b><span className="sub">{def(g.k)?.name}</span></span> },
-    { key: "kind", label: "Kind", render: (g) => def(g.k)?.kind ?? "" },
+    { key: "kind", label: "Kind", render: (g) => { const k = def(g.k)?.kind; return k === "auto" ? "Automatic" : k ? k[0]!.toUpperCase() + k.slice(1) : ""; } },
     { key: "s", label: "Status", render: (g) => <Chip text={g.status} cls={g.status === "passed" ? "ok" : g.status === "waiting" ? "warn" : g.status === "failed" ? "bad" : "plain"} /> },
     { key: "by", label: "Decided by", render: (g) => { const d = g.approvals[0] ?? g.rejections[0]; return d ? actor(d.by).name : g.decision?.mode === "trust" ? "Under trust" : "—"; } },
-    { key: "at", label: "When", render: (g) => { const d = g.approvals[0] ?? g.rejections[0]; return d ? `${fmt.dur(Date.now() - d.at)} ago` : "—"; } },
+    { key: "at", label: "When", render: (g) => { const d = g.approvals[0] ?? g.rejections[0]; return d ? ago(d.at) : "—"; } },
   ];
   return (
     <Panel title="Gate decisions" flush>
-      <DataTable id="dz-gates" caption={`Gate decisions for ${wo.id}`} columns={cols} rows={rows} rowKey={(g) => g.k} />
+      <DataTable id="dz-gates" caption={`Gate decisions for ${wo.id}`} columns={cols} rows={rows} rowKey={(g) => g.k} pageSize={20} />
     </Panel>
   );
 }
@@ -91,16 +92,16 @@ export function RunsPanel({ wo, cat }: { wo: TWo; cat: Catalog }) {
   const actor = useActors();
   const cols: Col<TWo["history"][number]>[] = [
     { key: "station", label: "Station", render: (x) => cat.stations.find((s) => s.id === x.station)?.name ?? x.station },
-    { key: "agent", label: "Agent", render: (x) => actor(x.agent).name + (x.agentVersion ? ` v${x.agentVersion}` : "") },
+    { key: "agent", label: "Agent", render: (x) => plainName(actor(x.agent).name) + (x.agentVersion ? ` v${x.agentVersion}` : "") },
     { key: "model", label: "Model", render: (x) => <span className="mono small">{x.model}</span> },
-    { key: "dur", label: "Duration", align: "end", render: (x) => (x.endedAt ? `${Math.round((x.endedAt - x.startedAt) / 60000)} min` : "running") },
+    { key: "dur", label: "Duration", align: "end", render: (x) => (x.endedAt ? minutes(x.endedAt - x.startedAt) : "running") },
     { key: "tok", label: "Tokens", align: "end", render: (x) => <span className="num">{fmt.k(x.tokens)}</span> },
     { key: "cost", label: "Cost", align: "end", render: (x) => <span className="num">{fmt.money(x.cost)}</span> },
     { key: "o", label: "Outcome", render: (x) => (x.outcome ? <Chip text={x.outcome} cls={x.outcome === "passed" ? "ok" : "bad"} /> : <Chip text="active" cls="info" />) },
   ];
   return (
     <Panel title="Station runs" flush>
-      <DataTable id="dz-runs" caption={`Station runs for ${wo.id}`} columns={cols} rows={wo.history} rowKey={(x) => `${x.station}-${x.startedAt}`} />
+      <DataTable id="dz-runs" caption={`Station runs for ${wo.id}`} columns={cols} rows={wo.history} rowKey={(x) => `${x.station}-${x.startedAt}`} pageSize={20} />
     </Panel>
   );
 }

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RecordView from "./record";
 import ChangesView from "./changes";
 import { mockApi, mount, resetApp } from "./floor/testkit";
-import { deny, readsFor, recordOf, travelerOf, waitingWo } from "./traveler/testkit";
+import { readsFor, waitingWo } from "./traveler/testkit";
 
 beforeEach(() => resetApp());
 afterEach(() => {
@@ -30,73 +30,120 @@ describe("Work order page", () => {
     // Traveler and Changes sit beside the decision; everything else is in one Actions menu
     expect(document.getElementById("rec-traveler")).toBeTruthy();
     expect(document.getElementById("rec-changes")).toBeTruthy();
-    fireEvent.click(document.getElementById("dz-actions") as HTMLElement);
-    expect(await screen.findByRole("menuitem", { name: /Open conversation/ })).toBeTruthy();
   });
 
-  it("opens the Activity tab from the address and from the Open conversation button", async () => {
-    await show({}, `#record/${W.id}/activity`);
+  it("has the prototype crumb: no drawing number, no All records link", async () => {
+    await show();
+    const crumb = document.querySelector(".kicker")?.textContent ?? "";
+    expect(crumb).toMatch(/Work orders\s*\/\s*WO-/);
+    expect(crumb).not.toMatch(/REC-11|All records/i);
+    expect(document.getElementById("rec-all")).toBeNull();
+  });
+
+  it("lists the prototype's Actions menu: Edit title, Change priority, Send back, Park, then a divider and Kill", async () => {
+    await show();
+    fireEvent.click(document.getElementById("dz-actions") as HTMLElement);
+    const items = (await screen.findAllByRole("menuitem")).map((i) => i.textContent ?? "");
+    expect(items[0]).toMatch(/Edit title/);
+    expect(items[1]).toMatch(/Change priority/);
+    expect(items[2]).toMatch(/Send back/);
+    expect(items[3]).toMatch(/Park in a bay|Resume/);
+    expect(items[items.length - 1]).toMatch(/Kill work order/);
+    expect(items.some((t) => /Open conversation|Copy link|Halt repo/.test(t))).toBe(false);
+  });
+
+  it("opens the Traveler page, not the drawer", async () => {
+    await show();
+    fireEvent.click(document.getElementById("rec-traveler") as HTMLElement);
+    await waitFor(() => expect(window.location.hash).toContain(`traveler/${W.id}`));
+    expect(window.location.search).not.toContain("traveler=");
+  });
+
+  it("labels the decision Approve and Reject, and Approve asks first with the gate's purpose", async () => {
+    await show();
+    const approve = document.getElementById("trv-approve") as HTMLElement;
+    expect(approve.textContent).toBe("Approve");
+    expect(document.getElementById("trv-reject")?.textContent).toBe("Reject");
+    fireEvent.click(approve);
+    expect(await screen.findByText(new RegExp(`^Approve .+ for ${W.id}$`))).toBeTruthy();
+  });
+
+  it("keeps the tab in the address (?tab=) and opens it from there", async () => {
+    await show({}, `#record/${W.id}?tab=activity`);
     expect(screen.getByRole("tab", { name: /^Activity/ }).getAttribute("aria-selected")).toBe("true");
-    cleanup();
-    resetApp();
-    await show();
-    fireEvent.click(document.getElementById("dz-actions") as HTMLElement);
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Open conversation/ }));
-    await waitFor(() => expect(window.location.hash).toContain("%2Factivity"));
+    expect(await screen.findByText("Timeline")).toBeTruthy();
+    expect(screen.getByText("Conversation")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: /^Gates/ }));
+    await waitFor(() => expect(window.location.hash).toContain("tab=gates"));
   });
 
-  it("says why an action is locked, once per reason, beside the buttons", async () => {
-    const t = travelerOf(W, {}, { can: { classify: deny("Class can only change at Intake.", "Project Admin"), reassign: deny("Class can only change at Intake.", "Project Admin") } });
-    await show(readsFor(W, t, recordOf(W)));
-    const lines = document.querySelectorAll(".dz-lockline");
-    expect(lines.length).toBeGreaterThan(0);
-    expect(document.querySelector(".dz-lockline")?.textContent).toMatch(/locked\./);
+  it("shows the ten Properties rows and nothing else", async () => {
+    await show();
+    const keys = [...document.querySelectorAll("#dz-side dt")].map((d) => d.textContent);
+    expect(keys).toEqual(["Station", "Class", "Priority", "Repo", "SLA due", "Cost", "Tokens", "PR", "Diff", "Tests"]);
+    expect(screen.queryByText("Waiting on you")).toBeNull();
+    expect(screen.queryByText(/An agent is working/)).toBeNull();
   });
 
-  it("lists what waits on the viewer in the side column", async () => {
+  it("links the repo to its dossier", async () => {
     await show();
-    expect(screen.getByText("Waiting on you")).toBeTruthy();
-    expect(screen.getByText("Outline")).toBeTruthy();
-    expect(document.getElementById("rec-copy")).toBeTruthy();
+    const link = document.querySelector("#dz-side dd a") as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toContain("/dossier/");
+  });
+
+  it("shows the prototype's empty state for a work order that does not exist", async () => {
+    mockApi({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }), [`GET /api/v1/work-orders/${W.id}/record`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }) });
+    window.location.hash = `#record/${W.id}`;
+    mount(<RecordView />);
+    expect(await screen.findByText(`${W.id} does not exist`, {}, { timeout: 4000 })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Work orders" })).toBeTruthy();
+    expect(screen.queryByText("Work order records")).toBeNull();
   });
 });
 
 describe("Work order page: links, viewers and kills", () => {
-  it("scrolls to a section when the viewer is on the Activity tab, and stops retrying", async () => {
-    const scrolled = vi.fn();
-    Element.prototype.scrollIntoView = scrolled;
-    await show({}, `#record/${W.id}/activity`);
-    fireEvent.click(screen.getByRole("button", { name: "Read the brief" }));
-    await waitFor(() => expect(screen.getByRole("tab", { name: "Document" }).getAttribute("aria-selected")).toBe("true"));
-    await waitFor(() => expect(document.getElementById("rec-sec-agreement")).toBeTruthy());
-    await waitFor(() => expect(scrolled).toHaveBeenCalled());
-    const n = scrolled.mock.calls.length;
-    await new Promise((r) => setTimeout(r, 500));
-    expect(scrolled.mock.calls.length).toBe(n);
-  });
-
   it("degrades cleanly for a viewer without access to the conversation", async () => {
     await show({ [`GET /api/v1/work-orders/${W.id}/session`]: () => ({ status: 403, body: { ok: false, msg: "No access." } }) });
     expect(screen.getByRole("heading", { level: 1, name: W.title })).toBeTruthy();
-    expect(screen.getByText("Outline")).toBeTruthy();
+    expect(document.getElementById("dz-docs")).toBeTruthy();
     expect(document.getElementById("dz-head")?.textContent).not.toMatch(/is next/);
   });
 
-  it("keeps the traveler and the record picker reachable from the page", async () => {
+  it("keeps the station documents and the export reachable behind one secondary section", async () => {
     await show();
-    expect(document.getElementById("rec-traveler")).toBeTruthy();
-    fireEvent.click(document.getElementById("rec-all") as HTMLElement);
-    await waitFor(() => expect(window.location.hash).not.toContain(W.id));
+    expect(document.getElementById("dz-docs")?.querySelector("summary")?.textContent).toMatch(/Station documents/);
+    expect(document.getElementById("rec-copy")).toBeTruthy();
   });
 });
 
 describe("Changes page", () => {
-  it("shows counts, the plan and a way back to the work order", async () => {
+  it("shows counts and the plan, with the crumb as the way back (no Back button, no drawing number)", async () => {
     mockApi({ ...readsFor(W) });
     window.location.hash = `#changes/${W.id}`;
     mount(<ChangesView />);
     expect(await screen.findByRole("heading", { name: `Changes · ${W.id}` }, { timeout: 4000 })).toBeTruthy();
-    fireEvent.click(document.getElementById("chg-back") as HTMLElement);
-    await waitFor(() => expect(window.location.hash).toContain(`record/${W.id}`));
+    expect(document.getElementById("chg-back")).toBeNull();
+    expect(document.querySelector(".kicker")?.textContent).not.toMatch(/CHG-14/);
+    expect(document.querySelector(".kicker a[href*='record']")).toBeTruthy();
+  });
+
+  it("shows the prototype's empty state for a work order that does not exist", async () => {
+    mockApi({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }), [`GET /api/v1/work-orders/${W.id}/record`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }) });
+    window.location.hash = `#changes/${W.id}`;
+    mount(<ChangesView />);
+    expect(await screen.findByText("That work order does not exist.", {}, { timeout: 4000 })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Work orders" })).toBeTruthy();
+  });
+
+  it("without an id shows the Changes index with search, a Checks filter and a count", async () => {
+    mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: { items: [{ ...W, diff: { plus: 3, minus: 1, files: 2 } }], next: null, total: 1 } }) });
+    window.location.hash = "#/p/payments/changes";
+    mount(<ChangesView />);
+    expect(await screen.findByRole("heading", { name: "Changes" }, { timeout: 4000 })).toBeTruthy();
+    expect(await screen.findByText("1 change", {}, { timeout: 4000 })).toBeTruthy();
+    expect(document.getElementById("chg-q")).toBeTruthy();
+    expect(document.getElementById("chg-f-checks")).toBeTruthy();
+    expect(await screen.findByText(W.id)).toBeTruthy();
+    for (const c of ["Work order", "Repo", "PR", "Checks", "Diff", "Files"]) expect(screen.getAllByText(c).length).toBeGreaterThan(0);
   });
 });

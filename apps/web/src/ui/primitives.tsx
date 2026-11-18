@@ -324,15 +324,15 @@ export function Empty({ title, text, action, id, icon, tone }: { title: ReactNod
 }
 
 /** Page header (prototype .ph): eyebrow with the sheet's drawing number, one h1, a quiet subtitle, the action cluster. */
-export function ViewHead({ kicker, title, status, sub, meta, actions, sheet }: { sheet?: string; kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
+export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, plain }: { sheet?: string; /** Crumb headers (prototype): no drawing number before the crumb. */ plain?: boolean; kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
   const hashId = useHash().id || "home";
   const route = sheet ?? hashId;
   return (
     <header className="ph vhead">
       <div className="title vhead-main">
         <div className="eyebrow kicker">
-          <span title="Drawing number">{drawingNo(route)}</span>
-          {kicker ? <><span aria-hidden="true">·</span><span>{kicker}</span></> : null}
+          {plain ? null : <span title="Drawing number">{drawingNo(route)}</span>}
+          {kicker ? <>{plain ? null : <span aria-hidden="true">·</span>}<span>{kicker}</span></> : null}
         </div>
         {status ? <div className="row vtitle-row"><h1 className="vtitle">{title}</h1>{status}</div> : <h1 className="vtitle">{title}</h1>}
         {sub ? <p className="sub vsub">{sub}</p> : null}
@@ -350,8 +350,8 @@ export function ViewHead({ kicker, title, status, sub, meta, actions, sheet }: {
 }
 
 /** One stat tile: a quiet label, a big value, an optional note. Put them in <StatRow>. `value` may be the result of qState(). */
-export function Stat({ label, value, sub, tone, icon, id, action }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: "wait" | "block" | "done"; icon?: string; id?: string; action?: ReactNode }) {
-  const t = tone === "wait" ? "warn" : tone === "block" ? "bad" : tone === "done" ? "ok" : "";
+export function Stat({ label, value, sub, tone, icon, id, action }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: "wait" | "block" | "done" | "info"; icon?: string; id?: string; action?: ReactNode }) {
+  const t = tone === "wait" ? "warn" : tone === "block" ? "bad" : tone === "done" ? "ok" : tone === "info" ? "info" : "";
   return (
     <div className={`stat${t ? ` ${t}` : ""} stat-tile${tone ? ` stat-${tone}` : ""}`} id={id}>
       <div className="micro stat-lbl">

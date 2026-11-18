@@ -1,16 +1,13 @@
-/** The side column of a work order page: its properties, what waits on the viewer, the brief as it stands, the outline of the document and the export. */
+/** The Properties panel of a work order page (prototype: Station, Class, Priority, Repo, SLA due, Cost, Tokens, PR, Diff, Tests) and what waits on the viewer. */
 import type { ReactNode } from "react";
 import { fmt, type Catalog, type Project } from "@gantry/domain";
-import { WoStatus } from "./stateTone";
-import { Btn, Chip, Panel, Who } from "../../ui/primitives";
-import { Icon } from "../../ui/Icon";
-import { ClassChip, classOf } from "../projects/kit";
+import { Chip, Panel } from "../../ui/primitives";
+import { classOf } from "../projects/kit";
 import { useRepoName } from "../traveler/repo";
+import { hashFor, navigate } from "../../lib/router";
 import { bayLabel, stName, stNo, type TWo } from "../traveler/model";
 import type { WoSession } from "../conversations/session-api";
-import { Meter, useCopyMarkdown, useExportRecord } from "../record/Lifecycle";
-import type { RecordData, SectionId } from "../record/data";
-import { srcName } from "../record/data";
+import { fmtDate } from "./time";
 
 const Row = ({ k, children }: { k: string; children: ReactNode }) => (
   <>
@@ -30,72 +27,28 @@ export function waitingOnYou(wo: TWo, cat: Catalog, s: WoSession | undefined): A
   return out;
 }
 
-export function Props({ wo, rec, cat, project, session, onJump, onActivity, onDecide }: { wo: TWo; rec: RecordData; cat: Catalog; project: Project; session: WoSession | undefined; onJump: (s: SectionId) => void; onActivity: (target?: string) => void; onDecide: () => void }) {
-  const copy = useCopyMarkdown();
-  const exportRec = useExportRecord();
+export function Props({ wo, cat, project }: { wo: TWo; cat: Catalog; project: Project }) {
   const repo = useRepoName(wo.project, wo.repo);
   const tot = wo.history.reduce((t, e) => ({ tokens: t.tokens + e.tokens, cost: t.cost + e.cost }), { tokens: 0, cost: 0 });
   const st = cat.stations[wo.state === "done" ? cat.stations.length - 1 : wo.station];
-  const where = wo.state === "done" ? (wo.split ? "Split into children" : `Shipped ${fmt.stamp(wo.doneAt ?? 0)}`) : wo.bay ? bayLabel(cat, wo.bay) : `${stNo(cat, st?.id)} ${stName(cat, st?.id)}`.trim();
-  const open = wo.history[wo.history.length - 1];
-  const wait = waitingOnYou(wo, cat, session);
-  const b = wo.brief;
-  const ruleBased = session?.agent.mode === "rule-based";
+  const where = wo.bay ? bayLabel(cat, wo.bay) : `${stNo(cat, st?.id)} ${stName(cat, st?.id)}`.trim();
+  const dossier = hashFor("dossier", wo.repo, wo.project);
   return (
-    <aside className="dz-side stack" aria-label="Properties" id="dz-side">
+    <div id="dz-side">
       <Panel title="Properties">
         <dl className="kv">
-              <Row k="Status"><WoStatus state={wo.state} /></Row>
-              <Row k="Station or bay">{where}</Row>
-              <Row k="Agent now">{session ? (ruleBased ? "Rule-based (no agent)" : <>{session.agent.name}<span className="muted">{` v${session.agent.mode === "agent" ? session.agent.version : ""} · ${session.agent.mode === "agent" ? session.agent.model : ""}`}</span></>) : open ? <Who id={open.agent} /> : "none"}</Row>
-              <Row k="Class"><span className="dz-cls"><ClassChip cls={classOf(cat, project, wo.cls)} /><span className="muted">{`${Math.round(wo.clsConfidence * 100)}%`}</span>{wo.clsOverridden ? <Chip text="overridden" cls="chip-warn" /> : null}</span></Row>
-              <Row k="Priority">{wo.priority}</Row>
-              <Row k="Repo"><span className="mono">{repo}</span></Row>
-              <Row k="Requested by"><Who id={wo.requestedBy} /><span className="muted">{` via ${srcName(wo.source)}`}</span></Row>
-              <Row k="Created">{fmt.stamp(wo.createdAt)}</Row>
-              <Row k="SLA due">{wo.slaDue ? fmt.stamp(wo.slaDue) : "none"}</Row>
-              <Row k="Cost"><span className="mono">{fmt.money(tot.cost)}</span>{session ? <span className="muted">{` · budget ${fmt.money(session.budget.limitUsd)}`}</span> : null}</Row>
-              <Row k="Tokens"><span className="mono">{fmt.k(tot.tokens)}</span></Row>
-              <Row k="Pull request">{wo.pr ? `#${wo.pr.number} ${wo.pr.state}` : "not yet"}</Row>
-              <Row k="Diff">{wo.diff ? `+${wo.diff.plus} −${wo.diff.minus} · ${wo.diff.files} files` : "—"}</Row>
-              <Row k="Tests">{wo.tests ? `${wo.tests.passed} passed, ${wo.tests.failed} failed, ${wo.tests.added} added` : "—"}</Row>
-              <Row k="Coding slot">{wo.slot ? `${wo.slot} of ${project.flow.slots}` : "none"}</Row>
-              <Row k="Risk">{wo.risk || "normal"}</Row>
+          <Row k="Station"><Chip text={where} cls="plain" /></Row>
+          <Row k="Class">{`${classOf(cat, project, wo.cls).name} (${Math.round(wo.clsConfidence * 100)}%)`}</Row>
+          <Row k="Priority">{wo.priority}</Row>
+          <Row k="Repo">{wo.repo ? <a href={dossier} onClick={(e) => { e.preventDefault(); navigate("dossier", wo.repo, wo.project); }}>{repo}</a> : "—"}</Row>
+          <Row k="SLA due">{fmtDate(wo.slaDue)}</Row>
+          <Row k="Cost">{fmt.money(tot.cost)}</Row>
+          <Row k="Tokens">{fmt.k(tot.tokens)}</Row>
+          <Row k="PR">{wo.pr ? `#${wo.pr.number} · ${wo.pr.state} · checks ${wo.pr.checks}` : "—"}</Row>
+          <Row k="Diff">{wo.diff ? <span className="num">{`+${wo.diff.plus} −${wo.diff.minus} · ${wo.diff.files} files`}</span> : "—"}</Row>
+          <Row k="Tests">{wo.tests ? `${wo.tests.passed} passed, ${wo.tests.failed} failed, ${wo.tests.added} added` : "—"}</Row>
         </dl>
       </Panel>
-      <div className="props">
-          <section>
-            <h3 className="dz-lab">Waiting on you</h3>
-            {wait.length ? (
-              <ul className="dz-wy-list">
-                {wait.map((w) => (
-                  <li key={w.key}><button type="button" className="linkish dz-wy" onClick={() => (w.go === "decide" ? onDecide() : onActivity(w.target))}><Icon name="check" /><span>{w.text}</span></button></li>
-                ))}
-              </ul>
-            ) : <p className="dz-none">Nothing waits on you.</p>}
-          </section>
-          <section>
-            <h3 className="dz-lab">Brief</h3>
-            {b.goal ? (
-              <div className="dz-bb">
-                <b>{b.goal}</b>
-                <span className="muted">{`${b.ac.length} acceptance ${b.ac.length === 1 ? "criterion" : "criteria"} · ${b.open.length} open ${b.open.length === 1 ? "question" : "questions"}`}</span>
-                <button type="button" className="linkish" onClick={() => onJump("agreement")}>Read the brief</button>
-              </div>
-            ) : <p className="dz-none">Not drafted yet.</p>}
-          </section>
-          <section>
-            <h3 className="dz-lab">Outline</h3>
-            <Meter rec={rec} pre="rec-" onJump={onJump} />
-          </section>
-          <section>
-            <h3 className="dz-lab">Export</h3>
-            <div className="dz-exp">
-              <Btn label="Copy as Markdown" small icon="copy" id="rec-copy" onClick={() => void copy(wo.id)} />
-              <Btn label="Export" small icon="ledger" id="rec-export" onClick={() => void exportRec(wo.id)} />
-            </div>
-          </section>
-      </div>
-    </aside>
+    </div>
   );
 }

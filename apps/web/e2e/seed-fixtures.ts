@@ -132,6 +132,9 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     };
   };
   const iso = (t: number | undefined | null) => (t ? new Date(t).toISOString() : null);
+  // --- group wo: the changes read carries the seed's commits (sha, message, author, at) so the Changes page lists them as the prototype does
+  const changesOf = (w: Seed) => ({ pullRequests: [], commits: (w.commits ?? []).map((c: Seed) => ({ sha: c.hash, message: c.message, author: c.agent, at: new Date(c.at).toISOString() })), files: w.files ?? [], patches: [] });
+  // --- end group wo
   const recordOf = (w: Seed) => ({
     id: w.id, version: 7, project: w.project, repo: w.repo, title: w.title, state: w.state,
     request: { text: w.description || w.title, by: w.requestedBy, via: w.source ?? "ui", at: w.createdAt, attachments: [] },
@@ -174,7 +177,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (seg[0] === "work-orders" && seg[1]) {
       const w = byId.get(seg[1]);
       if (!w) return undefined;
-      return seg[2] === "record" ? recordOf(w) : seg[2] === "gates" && seg[4] === "approvers" ? approversOf(w, seg[3]!) : seg[2] === "session" ? sessionOf(w) : seg[2] === "changes" ? { pullRequests: [], commits: [], files: w.files ?? [], patches: [] } : seg[2] ? undefined : travelerOf(w);
+      return seg[2] === "record" ? recordOf(w) : seg[2] === "gates" && seg[4] === "approvers" ? approversOf(w, seg[3]!) : seg[2] === "session" ? sessionOf(w) : seg[2] === "changes" ? changesOf(w) : seg[2] ? undefined : travelerOf(w);
     }
     if (path === "work-order-sessions") {
       const proj = url.searchParams.get("project");

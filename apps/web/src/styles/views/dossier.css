@@ -133,3 +133,13 @@
 .dz-rail-d>summary{cursor:pointer;color:var(--muted);padding:2px 0}
 .dz-rail-d[open]>summary{margin-bottom:8px}
 .dz-rail-d .dz-rail{margin:0}
+
+/* Activity tab (prototype): the conversation as bubbles inside the Conversation panel, person messages to the right */
+.dz-conv .osx.is-bare .osx-grid { gap: 0; }
+.dz-conv .osx.is-bare .osx-main { border: 0; box-shadow: none; background: none; }
+.dz-conv .osx.is-bare .osx-side { border: 0; border-top: 1px solid var(--line); border-radius: 0; box-shadow: none; }
+.dz-conv .osx-thread { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
+.dz-conv .osx-msg { max-width: 92%; border: 1px solid var(--line2); background: var(--surface); padding: 8px 12px; overflow-wrap: anywhere; }
+.dz-conv .osx-msg.is-user { align-self: flex-end; background: var(--accent-soft); border-color: var(--accent); }
+.dz-conv .osx-msg.is-update { border: 0; background: none; padding: 0; max-width: 100%; }
+.dz-conv .osx-who { font: 600 11px var(--mono); color: var(--ink3); margin-bottom: 2px; }
