@@ -57,7 +57,7 @@ export function Shell({ me }: { me: Me }) {
 
   // redirect (replace, no dead back step) to the canonical form of the URL
   useLayoutEffect(() => {
-    if (scoped && !loc.project && project) replaceHash(formatHash(routeId, loc.param, project.id));
+    if (scoped && !loc.project && project) replaceHash(formatHash(routeId, loc.param, project.id) + (loc.query ? `?${loc.query}` : ""));
     else if (loc.id === "" && landing) replaceHash(formatHash(landing.id, null, landing.project));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scoped, loc.project, loc.param, loc.id, project?.id, routeId]);

@@ -1,19 +1,20 @@
 /** Onboarding (#onboarding): repo readiness pipeline for the current project, the repo drawer, the connect-repo wizard, per-repo settings and the Onboarding agent tab with versioned guidelines. Ported from legacy/js/views/onboarding.js. */
 import { useState } from "react";
-import { useCan } from "../api/can";
 import { useMe, useProjects, useRepos } from "../api/queries";
-import { updatePrefs, usePrefs } from "../lib/prefs";
+import { usePrefs } from "../lib/prefs";
 import { navigate, useHash } from "../lib/router";
-import { Btn, Empty, Tabs } from "../ui/primitives";
+import { Empty, Tabs } from "../ui/primitives";
 import { Page } from "../ui/cr";
 import { Async } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
-import { AgentTab } from "./onboarding/Agent";
 import { RepoDrawer, rememberTab } from "./onboarding/Drawer";
+import { useAllRepos } from "./projects/kit";
 import { type RepoV } from "./onboarding/kit";
 import { Pipeline } from "./onboarding/Pipeline";
 import { SessionPage } from "./onboarding/Session";
-import { ConnectWizard } from "./onboarding/Wizard";
+import { OnbWizard, WIZ0, type Wiz } from "./onboarding/OnbWizard";
+import { SessionTab, SettingsTab } from "./onboarding/Tabs";
+import { useParam } from "./projects/url";
 
 export default function OnboardingView() {
   const ui = useUI();
@@ -25,12 +26,16 @@ export default function OnboardingView() {
   const project = projects.find((p) => p.id === prefs.project) ?? null;
   const reposQ = useRepos(project?.id);
   const repos = (reposQ.data ?? []) as RepoV[];
-  const connect = useCan("repo.onboard", { project: project?.id });
-  const [tab, setTab] = useState<"wizard" | "pipeline" | "agent">(() => { const t = new URLSearchParams(window.location.search).get("tab"); return t === "pipeline" || t === "agent" ? t : "wizard"; });
-  const openRepo = (repoId: string, dtab?: string) => {
-    if (!project) return;
+  const [tab, setTab] = useParam("tab", "wizard", ["wizard", "pipeline", "session", "settings"]);
+  const [wiz, setWiz] = useState<Wiz>(WIZ0);
+  // the Pipeline and Session tabs list every project's repos (the prototype's tables), the wizard and settings work on the current project
+  const allQ = useAllRepos(projects.map((p) => p.id));
+  const keyOf = (id: string): string => (projects.find((p) => p.id === id)?.key ?? id).toUpperCase();
+  const openRepo = (repoId: string, dtab?: string, projectId?: string) => {
+    const pid = projectId ?? project?.id;
+    if (!pid) return;
     if (dtab) rememberTab(repoId, dtab);
-    ui.drawer.open(`onb:${repoId}`, (close) => <RepoDrawer repoId={repoId} projectId={project.id} close={close} />);
+    ui.drawer.open(`onb:${repoId}`, (close) => <RepoDrawer repoId={repoId} projectId={pid} close={close} />);
   };
   if (!me) return null;
   if (!project) return <div className="view">{projectsQ.data ? <Empty title="No project" text="You do not have a project to show." /> : <Async query={projectsQ} what="your projects" id="onb-projects">{() => null}</Async>}</div>;
@@ -39,20 +44,15 @@ export default function OnboardingView() {
   return (
     <Page
       cls="onb-view"
-      eyebrow={`Portfolio · ${project.name}`}
+      eyebrow="Portfolio"
       title="Onboarding"
       sub="Bring a repository onto the line: assess, set guidelines, merge the onboarding PR."
-      acts={
-        <>
-          <Btn small kind="ghost" icon="agent" id="onb-agent-profile" label="Onboarding agent profile" onClick={() => { updatePrefs({ agent: "ag-onboard" }); navigate("agents"); }} />
-          <Btn kind="primary" icon="plus" id="onb-connect" label="Connect repo" guard={connect} onClick={() => setTab("wizard")} />
-        </>
-      }
     >
-      <Tabs idPrefix="onb-tab" items={[{ id: "wizard", label: "Wizard" }, { id: "pipeline", label: "Pipeline", count: repos.length }, { id: "agent", label: "Guidelines" }]} active={tab} onChange={(t) => setTab(t as typeof tab)} />
-      {tab === "wizard" ? <ConnectWizard project={project} repos={repos} onCancel={() => setTab("pipeline")} onDone={(id) => { setTab("pipeline"); navigate("onboarding", id); }} /> : null}
-      {tab === "pipeline" ? <Async query={reposQ} what="repos" id="onb-repos">{() => <Pipeline project={project.id} repos={repos} open={(id) => navigate("onboarding", id)} details={openRepo} />}</Async> : null}
-      {tab === "agent" ? <AgentTab project={project} /> : null}
+      <Tabs idPrefix="onb-tab" items={[{ id: "wizard", label: "Wizard" }, { id: "pipeline", label: "Pipeline" }, { id: "session", label: "Session" }, { id: "settings", label: "Settings" }]} active={tab} onChange={setTab} />
+      {tab === "wizard" ? <OnbWizard project={project} repos={repos} w={wiz} set={(p) => setWiz((x) => ({ ...x, ...p }))} onDone={() => setTab("pipeline")} /> : null}
+      {tab === "pipeline" ? <Async query={allQ} what="repos" id="onb-repos">{(all) => <Pipeline keyOf={keyOf} repos={all as RepoV[]} details={(r) => openRepo(r.id, undefined, r.project)} />}</Async> : null}
+      {tab === "session" ? <Async query={allQ} what="repos" id="onb-repos-s">{(all) => <SessionTab repos={all as RepoV[]} />}</Async> : null}
+      {tab === "settings" ? <SettingsTab project={project} /> : null}
     </Page>
   );
 }

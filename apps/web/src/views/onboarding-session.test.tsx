@@ -141,11 +141,12 @@ describe("Onboarding session", () => {
     await waitFor(() => expect(calls.some((c) => c.path.endsWith("/session/messages") && c.body?.kind === "open")).toBe(true));
   });
 
-  it("a pipeline row opens the session", async () => {
+  it("a repo opens its session from the drawer, and from the Session tab", async () => {
     window.location.hash = "#/p/storefront/onboarding";
     api(session());
     mount(<OnboardingView />);
-    fireEvent.click(await byId("onb-row-mobile-app"));
+    fireEvent.click(await byId("onb-detail-mobile-app"));
+    fireEvent.click(await byId("onb-act-session"));
     await waitFor(() => expect(window.location.hash).toMatch(/onboarding\/mobile-app$/));
     expect(await screen.findByText(/Gantry observed two gaps/)).toBeTruthy();
   });

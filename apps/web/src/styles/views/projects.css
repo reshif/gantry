@@ -49,3 +49,10 @@
 .prj-wz .radio-card .rc-t { font-weight: 600; }
 .prj-wz .radio-card .rc-d { color: var(--muted); font-size: var(--t-md); }
 .prj-wz .radio-card .rc-d:last-child { color: var(--faint); font-size: var(--t-sm); }
+
+/* Fidelity (proj): at phone width the search icon sits inside the input and the meta row (count, layout switch) starts at the left like the prototype. */
+#prj-q { display: block; }
+.fb:has(#prj-q) .filterbar-count, .fb:has(#prj-q) .filterbar-end { margin-left: 0; }
+@media (max-width: 1280px) { .fb:has(#prj-q) .meta { justify-content: flex-start; } }
+.searchbox.search:has(#prj-q) { position: relative; }
+.searchbox.search:has(#prj-q) > .ic { top: 50%; transform: translateY(-50%); }

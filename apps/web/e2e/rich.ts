@@ -10,6 +10,7 @@ import { workforceOverrides } from "./rich-workforce";
 import { PERSONAS, fulfillJson, mockApi, type Handler } from "./fixtures";
 import { woReadOverrides, type Ops1Approve } from "./rich-wo";
 import { richGroupE, routesE } from "./rich-e";
+import { PROJ_CLASSES, PROJ_OWNER, PROJ_REGULATED, richGroupProj } from "./rich-proj";
 
 export const NOW = Date.parse("2026-01-15T10:00:00Z");
 const MIN = 60_000;
@@ -34,7 +35,7 @@ const flow = () => ({
   stations: Object.fromEntries(cat.stations.map((s) => [s.id, { enabled: true, wip: s.id === "build" ? 4 : 3 }])),
   gates: Object.fromEntries(cat.gates.map((g) => [g.id, { enabled: true, mode: g.kind }])),
   slots: 4,
-  classes: cat.classes,
+  classes: PROJ_CLASSES.map((c) => ({ ...cat.classes.find((x) => x.id === c.id), ...c })), // group proj: the prototype's seven classes
   order: STATION_IDS,
   bays: ["declined", "hold", "sechold", "person", "queue"],
 });
@@ -92,9 +93,12 @@ function agents() {
   return _agents;
 }
 
+// group proj: approver rules for the payments gates (the Approvers tab), prototype wording
+const PAY_APPROVERS = Object.fromEntries([["G0G1", ["project_admin", "line_lead"]], ["G2", ["project_admin", "line_lead"]], ["G3d", ["approver"]], ["G3G3s", ["approver", "security_reviewer"]], ["G5", ["reviewer", "line_lead"]], ["G6", ["release_manager"]]].map(([g, roles]) => [g, { roles, people: [], required: 2, sod: true, conditions: [], escalateH: 24, fallback: null }]));
+
 function project(p: (typeof PROJECTS)[number], i: number) {
   return {
-    id: p.id, name: p.name, key: p.key, status: "active", teams: ["platform"], owner: "p-admin", template: "standard", regulated: i % 2 === 0, desc: p.desc, flow: flow(), approvers: {}, notifications: routesE, mcp: [],
+    id: p.id, name: p.name, key: p.key, status: "active", teams: ["platform"], owner: PROJ_OWNER[p.id] ?? "p-admin", template: "standard", regulated: PROJ_REGULATED.has(p.id), desc: p.desc, flow: flow(), approvers: p.id === "payments" ? PAY_APPROVERS : {}, notifications: routesE, mcp: [],
     budget: { monthly: 4000, mtd: 1280 + i * 190, alertAt: 0.8 }, created: NOW - 90 * DAY,
     halted: "halted" in p && p.halted ? { by: "p-admin", at: NOW - 3 * HOUR, reason: "Relevance regression under investigation" } : null, killed: null, overlay: "", version: 3,
   };
@@ -314,6 +318,7 @@ export function richOverrides(): Record<string, Handler> {
   ov["people"] = (r) => fulfillJson(r, [person("p-admin", "Asha Raman", "Engineering Director", "factory_admin"), person("p-lead", "Meera Iyer", "Tech Lead", "tech_lead"), person("p-reader", "Rae Reader", "Auditor", "auditor")]);
   Object.assign(ov, workforceOverrides());
   Object.assign(ov, richGroupE());
+  Object.assign(ov, richGroupProj());
   return ov;
 }
 

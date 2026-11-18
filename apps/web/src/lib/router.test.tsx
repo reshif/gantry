@@ -21,6 +21,9 @@ describe("hash parsing", () => {
   it("parses and formats project routes", () => {
     expect(parseHash("#/p/payments/floor")).toEqual({ id: "floor", param: null, project: "payments" });
     expect(parseHash("#/p/pay%20x/record/WO-1")).toEqual({ id: "record", param: "WO-1", project: "pay x" });
+    // a query after the route is kept apart, so `#/project-config/storefront?tab=members` is the route project-config with param storefront
+    expect(parseHash("#/project-config/storefront?tab=members")).toEqual({ id: "project-config", param: "storefront", project: null, query: "tab=members" });
+    expect(parseHash("#/p/payments/onboarding?tab=pipeline")).toEqual({ id: "onboarding", param: null, project: "payments", query: "tab=pipeline" });
     expect(formatHash("record", "WO-1", "payments")).toBe("#/p/payments/record/WO-1");
   });
   it("navigate puts the remembered project into project routes only", () => {

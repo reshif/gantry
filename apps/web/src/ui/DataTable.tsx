@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total, selected, onSelect, page: pageProp, onPage, sortHints, neutralArrow }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total, selected, onSelect, page: pageProp, onPage, sortHints, neutralArrow, sortGlyphs }: {
   /** Show the prototype's dim up/down arrow on sortable headers that are not the active sort. */
   neutralArrow?: boolean;
   /** Additive: show a faint two-way arrow on every sortable column that is not the current sort (Control Room prototype). */
@@ -49,6 +49,8 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   /** Accessible name of the first-cell control when the cell's text is not enough ("Open work order WO-12"). */
   rowLabel?: (r: R) => string;
   sort?: SortState | undefined;
+  /** Additive: show a faint two-way arrow on sortable columns that are not the sort key (the Control Room prototype's header). */
+  sortGlyphs?: boolean;
   onSort?: (s: SortState) => void;
   /** Client paging: show this many, then "Show more". */
   pageSize?: number;
@@ -162,7 +164,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                   <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.width ? { width: c.width } : undefined} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
                       <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
-                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : (neutralArrow || sortHints) ? <span className="th-arrow-idle">↕</span> : ""}</span>
+                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : (neutralArrow || sortHints || sortGlyphs) ? <span className="th-arrow-idle">↕</span> : ""}</span>
                       </button>
                     ) : c.label}
                   </th>

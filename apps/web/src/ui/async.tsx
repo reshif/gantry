@@ -57,7 +57,7 @@ export function LoadFailed({ what, msg, onRetry, id }: { what: string; msg: stri
 }
 
 interface AsyncProps<T> {
-  query: Pick<UseQueryResult<T>, "data" | "error" | "isPending" | "isError" | "refetch">;
+  query: Pick<UseQueryResult<T>, "data" | "error" | "isPending" | "isError"> & { refetch: () => unknown };
   /** What is being loaded, in the words the empty and error states use: "MCP servers". */
   what: string;
   /** True when the data has nothing to show. Defaults to an empty array or an empty `items` page. */

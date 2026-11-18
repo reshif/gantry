@@ -1,5 +1,6 @@
 /** The repo drawer (legacy onboarding.js drawer): status, stepper, callouts, actions and the Findings, Pull request, Timeline, Settings and History tabs. */
 import { useState } from "react";
+import { navigate } from "../../lib/router";
 import { assessorLabel, fmt, type OnboardAssessor } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
@@ -252,6 +253,7 @@ export function RepoDrawer({ repoId, projectId, close }: { repoId: string; proje
   const edit = () => ui.open((done) => <SettingsDialog repo={r} project={project} close={done} />);
 
   const acts = [
+    <Btn key="session" label="Open session" small icon="agent" id="onb-act-session" onClick={() => { close(); navigate("onboarding", r.id); }} />,
     <Btn key="rerun" label="Re-run assessment" icon="refresh" small id="onb-act-rerun" guard={manage} disabledReason={manage.allowed ? busy ?? (o.stage === "ready" ? "Already ready; re-assessing would restart onboarding" : null) : null} onClick={() => void run(() => ops.rerunAssessment(r.id))} />,
     showOpen ? <Btn key="openpr" label="Open onboarding PR" icon="branch" small id="onb-act-openpr" guard={manage} disabledReason={openReason} onClick={() => void run(() => ops.openOnboardingPR(r.id))} /> : null,
     o.pr ? <Btn key="merge" label="Approve and merge" kind="primary" icon="check" small id="onb-act-merge" guard={merge} disabledReason={merge.allowed ? (!prOpen ? "The PR is already merged" : busy ?? (o.pr.checks !== "green" || o.stage !== "pr_checks" ? "Checks are not green yet" : null)) : null} onClick={() => void run(() => ops.mergeOnboardingPR(r.id))} /> : null,

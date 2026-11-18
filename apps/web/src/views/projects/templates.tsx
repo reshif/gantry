@@ -79,7 +79,7 @@ export function tplCustomFromProject(cat: Catalog, p: Project): TplCustom {
   };
 }
 
-export function TemplatesTab({ projects, current, onUse }: { projects: PView[]; current: PView | null; onUse: (tplId: string) => void }) {
+export function TemplatesTab({ projects, current, onUse, onWizard }: { projects: PView[]; current: PView | null; onUse: (tplId: string) => void; onWizard: () => void }) {
   const ui = useUI();
   const res = useRes();
   const cat = useCatalog();
@@ -95,6 +95,7 @@ export function TemplatesTab({ projects, current, onUse }: { projects: PView[]; 
       <LockNote decision={d} what="Templates" />
       <div className="toolbar">
         <p className="muted small">A template sets stations, gates, coding slots, class routes, approver preset and notification preset for new projects. Changing a template does not change projects already created from it.</p>
+        <Btn icon="plus" id="prj-tpl-wizard" guard={create} label="Full setup wizard" onClick={onWizard} />
         {current ? <Btn icon="copy" id="prj-tpl-from-cur" guard={d} label={`Save ${current.name} as template`} onClick={() => saveFrom(current)} /> : null}
       </div>
       <div className="prj-tpl-grid">

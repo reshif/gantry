@@ -68,7 +68,7 @@ function RolePicker({ cat, idp, sel, onChange }: { cat: Catalog; idp: string; se
   );
 }
 
-const KINDS = [{ value: "human", label: "Human: approver rules" }, { value: "mixed", label: "Mixed: checks, then a person" }, { value: "auto", label: "Automatic: checks only" }];
+export const KINDS = [{ value: "human", label: "Human: approver rules" }, { value: "mixed", label: "Mixed: checks, then a person" }, { value: "auto", label: "Automatic: checks only" }];
 
 function StationDialog({ p, cat, close }: { p: PView; cat: Catalog; close: () => void }) {
   const ui = useUI();

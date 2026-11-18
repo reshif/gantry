@@ -18,6 +18,8 @@ export interface RouteLocation {
   project: string | null;
   /** The prototype's `?state=loading|empty|error|forbidden|conflict` preview, written after the route in the hash (`#home?state=empty`); null when absent. */
   state?: string | null;
+  /** A query string after the route (`#/project-config/storefront?tab=members`), without the "?"; absent when there is none. */
+  query?: string;
 }
 
 const dec = (v: string): string => {
@@ -32,10 +34,11 @@ export function parseHash(hash: string): RouteLocation {
   const full = hash.replace(/^#\/?/, "");
   const qi = full.indexOf("?");
   const raw = qi < 0 ? full : full.slice(0, qi);
+  const query = qi < 0 ? "" : full.slice(qi + 1);
   let state: string | null = null;
-  if (qi >= 0) {
+  if (query) {
     try {
-      state = new URLSearchParams(full.slice(qi + 1)).get("state");
+      state = new URLSearchParams(query).get("state");
     } catch {
       state = null;
     }
@@ -47,7 +50,7 @@ export function parseHash(hash: string): RouteLocation {
     [head = "", ...rest] = rest.slice(1);
   }
   const tail = rest.join("/");
-  return { id: head, param: tail ? dec(tail) : null, project, ...(state ? { state } : {}) };
+  return { id: head, param: tail ? dec(tail) : null, project, ...(state ? { state } : {}), ...(query ? { query } : {}) };
 }
 
 export function formatHash(id: string, param?: string | null, project?: string | null): string {

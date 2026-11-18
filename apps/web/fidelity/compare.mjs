@@ -125,6 +125,8 @@ async function main() {
         // the fixtures cannot hold a server-sent-events response open, so a stand-in EventSource reports an open stream (the connection reads LIVE)
         await rc.addInitScript(() => { window.EventSource = class { constructor(u) { this.url = u; this.readyState = 1; this.l = {}; setTimeout(() => { (this.l.open ?? []).forEach((f) => f({ type: "open" })); if (this.onopen) this.onopen({ type: "open" }); }, 50); } addEventListener(t, f) { (this.l[t] ??= []).push(f); } removeEventListener() {} close() { this.readyState = 2; } }; });
         const rp = await rc.newPage();
+        rp.on("pageerror", (e) => console.error("pageerror:", String(e).slice(0, 300)));
+        rp.on("console", (m) => { if (m.type() === "error") console.error("console.error:", m.text().slice(0, 400)); });
         await rp.clock.install({ time: new Date(NOW) });
         if (route === "signin") await rich.installSignedOut(rp); else await rich.installRich(rp);
         if (real === null) {
