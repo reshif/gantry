@@ -192,6 +192,7 @@ describe("People & teams: deactivate", () => {
   const wo = { id: "WO-9", project: "payments", title: "Fix refund", state: "running", requestedBy: "p-tomas", gates: {} };
   const base = (): Record<string, Handler> => ({
     "GET /api/v1/api-keys": keysH,
+    "GET /api/v1/workload": () => ({ body: { rows: [], teams: [], bottlenecks: [], suggestions: [], projects: [], totals: {}, at: 0 } }),
     "GET /api/v1/sessions": () => ({ body: [{ id: "s9", person: "p-tomas", revoked: false, method: "sso", device: "d", ip: "", started: 0, lastSeen: 0 }] }),
     "GET /api/v1/projects/payments/work-orders": () => ({ body: [wo] }),
     "GET /api/v1/projects/storefront/work-orders": () => ({ body: [] }),
