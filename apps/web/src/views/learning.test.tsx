@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -98,6 +98,7 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
+  window.history.replaceState(null, "", "/");
 });
 afterEach(() => {
   cleanup();
@@ -105,31 +106,29 @@ afterEach(() => {
 });
 
 describe("Learning screen (legacy learning.js on the real API)", () => {
+  beforeEach(() => window.history.replaceState(null, "", "/?tab=proposals"));
   it("shows the title block, the status strip and one card per proposal with its change, metric and pipeline", async () => {
     setup();
     mount();
     const card = await byId("ln-prop-LP-1");
     expect(document.body.textContent).toContain("Open findings2");
-    expect(document.body.textContent).toContain("To review2");
-    expect(document.body.textContent).toContain("Applied2");
-    expect(document.body.textContent).toContain("Verified1");
-    expect(document.getElementById("ln-st-open")?.textContent).toBe("Proposed2");
-    expect(document.getElementById("ln-st-accepted")?.textContent).toBe("Accepted and applied2");
-    expect(document.getElementById("ln-st-all")?.textContent).toBe("All6");
-    expect(card.querySelector(".ln-kind")?.textContent).toBe("Skill edit");
-    expect(card.querySelector(".ln-pipe")?.getAttribute("aria-label")).toBe("Status: Proposed");
-    expect(card.querySelector(".ln-diff ins")?.textContent).toContain("Always add a Rollback section.");
-    expect(card.textContent).toContain("Spec writing v1.2.0 → next minor version");
-    expect(card.textContent).toContain("At most 1 gate rejection signal in the 14 days after it is applied");
-    expect(card.textContent).toContain("Omar Haddad");
-    expect(card.querySelectorAll(".ln-chips .entity-chip")).toHaveLength(3);
-    expect(document.getElementById("ln-prop-LP-3")).toBeNull();
-    fireEvent.click(await byId("ln-st-accepted"));
-    const acc = await byId("ln-prop-LP-3");
-    expect(acc.textContent).toContain("before: 4 in 14 days");
-    expect(acc.querySelector(".ln-pipe li.is-on")?.textContent).toContain("Accepted and applied");
-    fireEvent.click(await byId("ln-st-declined"));
-    expect((await byId("ln-prop-LP-6")).textContent).toContain("One incident is not enough.");
+    expect(document.body.textContent).toContain("Proposals waiting2");
+    expect(document.body.textContent).toContain("Accepted, 30d");
+    expect(document.body.textContent).toContain("Avg eval lift");
+    expect(document.body.textContent).not.toContain("To review");
+    expect(document.querySelector("label[for=ln-st-open]")).toBeNull();
+    expect(document.getElementById("ln-off")).toBeNull();
+    expect(Array.from(document.querySelectorAll(".ln-list > div")).map((e) => e.id).slice(0, 2)).toEqual(["ln-prop-LP-1", "ln-prop-LP-2"]);
+    expect(card.textContent).toContain("LP-1");
+    expect(card.textContent).toContain("From finding");
+    expect(card.textContent).toContain("Proposed");
+    expect(card.querySelector(".chip.plain")?.textContent).toBe("eval lift not available");
+    const diff = card.querySelector("pre.code.diff")!;
+    expect(diff.querySelector(".del")?.textContent?.startsWith("- ")).toBe(true);
+    expect(diff.querySelector(".add")?.textContent).toContain("Always add a Rollback section.");
+    expect(card.querySelector(".ln-kv")).toBeNull();
+    expect(document.querySelectorAll("#ln-prop-LP-6").length).toBe(1);
+    expect((await byId("ln-prop-LP-6")).textContent).toContain("Declined");
   });
 
   it("locks Accept for the drafter while a second person exists, and says why", async () => {
@@ -182,7 +181,6 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
   it("verifies only once the declared window has run, and the server's refusal is shown", async () => {
     const calls = setup({ "POST /api/v1/learning/proposals/LP-3/verify": () => ({ status: 409, body: { ok: false, msg: "Not verified: 3 rejection signals in the 14 days after it was applied, against a target of at most 1." } }) });
     mount();
-    fireEvent.click(await byId("ln-st-accepted"));
     const early = await byId("ln-verify-LP-4");
     expect(early.getAttribute("data-reason")).toMatch(/The window runs until/);
     fireEvent.click(await byId("ln-verify-LP-3"));
@@ -195,7 +193,6 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
   it("rolls an applied change back with a reason, and offers it for a verified one too", async () => {
     const calls = setup({ "POST /api/v1/learning/proposals/LP-3/rollback": () => ({ body: { ok: true, msg: "LP-3 rolled back." } }) });
     mount();
-    fireEvent.click(await byId("ln-st-all"));
     expect(await byId("ln-rollback-LP-5")).toBeTruthy();
     expect(document.getElementById("ln-rollback-LP-1")).toBeNull();
     fireEvent.click(await byId("ln-rollback-LP-3"));
@@ -213,7 +210,6 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     const b = await byId("ln-accept-LP-1");
     await waitFor(() => expect(b.getAttribute("data-reason")).toMatch(/Needs Factory Admin. No role holds learning.apply/));
     expect((await byId("ln-decline-LP-1")).getAttribute("aria-disabled")).toBe("true");
-    expect(document.querySelector(".lock-note")?.textContent).toContain("Read-only for you: applying learning proposals");
     expect(document.getElementById("ln-switch")?.getAttribute("aria-disabled")).toBe("true");
   });
 
@@ -224,49 +220,43 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
       "PUT /api/v1/learning/switch": () => { on = true; return { body: { ok: true, msg: "Learning proposals are on." } }; },
     });
     mount();
-    expect((await byId("ln-off")).textContent).toContain("switched off");
+    expect((await byId("ln-switch")).textContent).toContain("Turn on proposals");
     expect((await byId("ln-accept-LP-1")).getAttribute("data-reason")).toMatch(/Learning proposals are switched off/);
     expect((await byId("ln-decline-LP-1")).getAttribute("data-reason")).toMatch(/switched off/);
-    fireEvent.click(await byId("ln-tab-findings"));
-    expect((await byId("ln-draft-F-1")).getAttribute("data-reason")).toMatch(/switched off/);
     fireEvent.click(await byId("ln-switch"));
     const ta = await waitFor(() => { const e = document.querySelector<HTMLTextAreaElement>("#rsn-text"); if (!e) throw new Error("no field"); return e; });
     type(ta, "Trying the loop");
     fireEvent.click(Array.from(document.querySelectorAll<HTMLButtonElement>(".dlg .btn")).find((b) => b.textContent === "Turn on")!);
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]).toMatchObject({ method: "PUT", path: "/api/v1/learning/switch", body: { on: true, reason: "Trying the loop" } });
-    await waitFor(() => expect(document.getElementById("ln-off")).toBeNull());
+    await waitFor(() => expect(document.getElementById("ln-switch")!.textContent).toContain("Turn off proposals"));
   });
 
   it("lists findings with their agent, project, signals and evidence, marks a small sample, and refreshes", async () => {
-    const calls = setup({ "POST /api/v1/learning/findings/refresh": () => ({ body: { ok: true, msg: "Findings refreshed: 1 new, 0 with new evidence." } }) });
+    setup();
     mount();
     fireEvent.click(await byId("ln-tab-findings"));
     const f1 = await byId("ln-f-F-1");
     expect(f1.textContent).toContain("Spec agent");
-    expect(f1.textContent).toContain("Payments Platform");
-    expect(f1.textContent).toContain("3 signals");
-    expect(f1.textContent).not.toContain("small sample");
-    expect((await byId("ln-f-F-2")).textContent).toContain("small sample");
+    expect(f1.textContent).toContain("Open");
     const f3 = await byId("ln-f-F-3");
     expect(f3.textContent).toContain("Addressed");
-    expect(f3.textContent).toContain("All projects");
-    expect(f3.querySelector(".entity-chip.is-plain")?.textContent).toBe("RUN-9");
+    expect(f3.querySelector("a[href*='record']") ?? f3.querySelector(".mono")).not.toBeNull();
     expect(Array.from(document.querySelectorAll("#ln-f-table tbody tr")).map((e) => e.id)).toEqual(["ln-f-F-1", "ln-f-F-2", "ln-f-F-3"]);
-    expect((await byId("ln-f-F-1")).textContent).toContain("LP-1 (proposed)");
-    fireEvent.click(await byId("ln-refresh"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/v1/learning/findings/refresh" });
-    fireEvent.click(await byId("ln-f-p-LP-1"));
-    await byId("ln-prop-LP-1");
-    expect(document.getElementById("ln-prop-LP-1")?.className).toContain("is-hi");
+    fireEvent.change(await byId("ln-search"), { target: { value: "zzz" } });
+    await waitFor(() => expect(window.location.search).toContain("q=zzz"));
+    expect(document.body.textContent).toContain("Nothing matches");
+    fireEvent.click(await byId("ln-clear-empty"));
+    await waitFor(() => expect(window.location.search).not.toContain("q="));
+    expect(document.querySelector("#ln-f-table thead")!.textContent).not.toContain("Draft");
+    expect(f1.querySelector(".chip.plain")!.textContent).toBe("rejection");
   });
 
   it("drafts a proposal: declares the metric and window before anything is applied, and sends the change", async () => {
     const calls = setup({ "POST /api/v1/learning/proposals": () => ({ body: { ok: true, msg: "LP-7 drafted.", proposal: prop({ id: "LP-7", owner: "p-asha" }) } }) });
     mount();
     fireEvent.click(await byId("ln-tab-findings"));
-    fireEvent.click(await byId("ln-draft-F-1"));
+    fireEvent.click(await byId("ln-open-F-1"));
     await byId("ln-draft-form");
     expect((document.getElementById("ln-d-kind") as HTMLSelectElement).value).toBe("skill");
     expect((document.getElementById("ln-d-metric") as HTMLInputElement).value).toBe("1");
@@ -297,7 +287,7 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     const calls = setup({ "POST /api/v1/learning/proposals": () => ({ body: { ok: true, msg: "LP-8 drafted.", proposal: prop({ id: "LP-8" }) } }) });
     mount();
     fireEvent.click(await byId("ln-tab-findings"));
-    fireEvent.click(await byId("ln-draft-F-2"));
+    fireEvent.click(await byId("ln-open-F-2"));
     await byId("ln-draft-form");
     expect((document.getElementById("ln-d-kind") as HTMLSelectElement).value).toBe("guardrail");
     type(document.getElementById("ln-d-title")!, "Builder: no ledger");
@@ -311,7 +301,7 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     setup();
     mount();
     fireEvent.click(await byId("ln-tab-findings"));
-    fireEvent.click(await byId("ln-draft-F-1"));
+    fireEvent.click(await byId("ln-open-F-1"));
     await byId("ln-draft-form");
     type(await byId("ln-d-kind"), "route");
     const skip = await byId("ln-d-skip");
@@ -320,28 +310,42 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     expect(options).toContain("build");
     for (const bad of ["intake", "spec", "design", "plan", "verify", "review", "close"]) expect(options).not.toContain(bad);
   });
+});
 
-  it("shows every signal, filtered by type, with the run of a regression", async () => {
+describe("Learning screen: prototype structure", () => {
+  it("has exactly the Findings and Proposals tabs, with the tab in the URL, and evidence links go to the record route by work order id alone", async () => {
     setup();
+    window.history.replaceState(null, "", "/");
     mount();
-    fireEvent.click(await byId("ln-tab-signals"));
-    const table = await byId("ln-sig-table");
-    expect(table.querySelectorAll("tbody tr")).toHaveLength(4);
-    expect(document.body.textContent).toContain("All 4");
-    expect(document.body.textContent).toContain("Eval regression 1");
-    expect(document.body.textContent).toContain("3 in the last 7 days");
-    const reg = table.querySelector("tr[data-key^='RUN-9']")!;
-    expect(reg.textContent).toContain("Spec suite fell from 90% to 80%");
-    expect(reg.textContent).toContain("All projects");
-    fireEvent.click(document.getElementById("ln-sig-sendback")!);
-    await waitFor(() => expect(document.querySelectorAll("#ln-sig-table tbody tr")).toHaveLength(1));
-    expect(within(document.getElementById("ln-sig-table")!).getByText("Unclear scope")).toBeTruthy();
-    fireEvent.click(document.getElementById("ln-sig-regression")!);
-    await waitFor(() => expect(document.querySelectorAll("#ln-sig-table tbody tr")).toHaveLength(1));
-    // sorting by a column
-    fireEvent.click(document.getElementById("ln-sig-all")!);
-    fireEvent.click(await byId("ln-sig-table-sort-signal"));
-    expect(document.querySelector("#ln-sig-table th[aria-sort]")?.getAttribute("aria-sort")).toBe("ascending");
+    fireEvent.click(await byId("ln-tab-findings"));
+    await byId("ln-f-table");
+    expect([...document.querySelectorAll("[role=tab][id^='ln-tab-']")].map((e) => (e.textContent ?? "").replace(/\d+$/, ""))).toEqual(["Findings", "Proposals"]);
+    const a = document.querySelector("#ln-f-table a.mono") as HTMLAnchorElement;
+    expect(a.getAttribute("href")).toMatch(/record\/WO-[0-9]+$/);
+    fireEvent.click(document.getElementById("ln-tab-proposals")!);
+    await waitFor(() => expect(window.location.search).toContain("tab=proposals"));
+  });
+});
+
+describe("Learning screen: round 3 fidelity", () => {
+  it("has no header action and no nested .view wrapper; the proposals switch lives on the Proposals tab", async () => {
+    setup();
+    window.history.replaceState(null, "", "/");
+    mount();
+    await byId("ln-stats");
+    expect(document.querySelector(".ph .acts")).toBeNull();
+    expect(document.querySelector(".view-learning.view")).toBeNull();
+    expect(document.querySelector(".ph #ln-switch")).toBeNull();
+    fireEvent.click(await byId("ln-tab-proposals"));
+    expect((await byId("ln-switch")).closest("#ln-switch-row")).not.toBeNull();
+    expect(document.getElementById("ln-switch")!.closest(".ph")).toBeNull();
+  });
+  it("draws a skill proposal with no earlier text as one added line, not an empty removed line", async () => {
+    setup({}, { proposals: [prop({ change: { skill: "sk-spec", before: "", after: "Always end a spec with a rollback note." } })] });
+    window.history.replaceState(null, "", "/?tab=proposals");
+    mount();
+    const pre = (await waitFor(() => { const e = document.querySelector("pre.diff"); if (!e) throw new Error("no diff"); return e; }));
+    expect([...pre.children].map((c) => c.textContent)).toEqual(["+ Always end a spec with a rollback note."]);
   });
 });
 
@@ -351,5 +355,18 @@ describe("Learning screen: a read the person may not make", () => {
     mount();
     await waitFor(() => expect(document.getElementById("ln-proposals-hidden")?.textContent).toContain("Not visible to you"));
     expect(document.getElementById("ln-proposals-hidden")?.textContent).toContain("learning.view");
+  });
+});
+
+describe("Learning screen: evidence", () => {
+  it("shows a work order id alone and links the record of that id, even when the evidence is a sentence", async () => {
+    setup({ "GET /api/v1/learning/findings": () => ({ body: [{ ...FINDINGS[0]!, evidence: ["WO-1004 rejected at G2", "WO-1013 rejected at G2"] }] }) });
+    window.history.replaceState(null, "", "/");
+    mount();
+    fireEvent.click(await byId("ln-tab-findings"));
+    await byId("ln-f-table");
+    const links = [...document.querySelectorAll<HTMLAnchorElement>("#ln-f-table a.mono")];
+    expect(links.map((a) => a.textContent)).toEqual(["WO-1004", "WO-1013"]);
+    expect(links[0]!.getAttribute("href")).toMatch(/record\/WO-1004$/);
   });
 });

@@ -1,7 +1,7 @@
 /** Shared pieces of the Learning screen (legacy js/views/learning.js): kinds, signals, statuses, the word diff, what a change does, the status pipeline and evidence chips. */
 import { fmt, type LearningProposal } from "@gantry/domain";
 import { useAgents, useProjects, useSkills, useSuites } from "../../api/queries";
-import { Icon } from "../../ui/Icon";
+import { hashFor } from "../../lib/router";
 import { useOpenRecordRoute } from "../record/nav";
 import { useCatalog } from "../projects/kit";
 
@@ -25,14 +25,14 @@ export function useLn() {
   };
 }
 
-/** Evidence chip for a work order record; other evidence (an eval run) is shown as plain text. */
-export function WoChip({ id, project }: { id: string; project?: string | null }) {
+/** Evidence for a work order record: a mono link to the record route (prototype); other evidence (an eval run) is plain mono text. */
+export function WoChip({ id: raw, project }: { id: string; project?: string | null }) {
   const open = useOpenRecordRoute();
-  if (!/^WO-/.test(id)) return <span className="chip entity-chip is-plain" data-entity={`run:${id}`}><Icon name="eval" /><span className="mono">{id}</span></span>;
+  // evidence can carry a sentence ("WO-1004 rejected at G2"): the link is the work order id alone
+  const id = /^WO-[\w-]+/.exec(raw)?.[0] ?? raw;
+  if (!/^WO-/.test(id)) return <span className="mono" data-entity={`run:${id}`}>{id}</span>;
   return (
-    <a className="chip entity-chip entity-wo" href="#record" data-entity={`wo:${id}`} onClick={(e) => { e.preventDefault(); open(id, project ?? undefined); }}>
-      <Icon name="page" /><span>{id}</span>
-    </a>
+    <a className="mono" href={hashFor("record", id, project ?? null)} data-entity={`wo:${id}`} onClick={(e) => { e.preventDefault(); open(id, project ?? undefined); }}>{id}</a>
   );
 }
 
@@ -40,7 +40,7 @@ export function ChipList({ ids, max = 8, project }: { ids: string[]; max?: numbe
   return (
     <span className="ln-chips">
       {ids.slice(0, max).map((id) => <WoChip key={id} id={id} project={project} />)}
-      {ids.length > max ? <span className="small muted">{`+${ids.length - max} more`}</span> : null}
+      {ids.length > max ? <span className="small muted">{`+${ids.length - max}`}</span> : null}
     </span>
   );
 }
@@ -120,3 +120,19 @@ export function Pipeline({ lp }: { lp: LearningProposal }) {
   );
 }
 
+
+/** What a proposal changes as diff lines for the prototype's code block: a skill edit shows its before and after text, any other kind one added line saying what it does. */
+export function useChangeLines(lp: LearningProposal): string[] {
+  const c = (lp.change ?? {}) as Change;
+  const cat = useCatalog();
+  const { projName, agName } = useLn();
+  if (lp.kind === "skill") return [...(c.before ? [`- ${String(c.before)}`] : []), `+ ${String(c.after ?? "")}`];
+  if (lp.kind === "eval") return [`+ Add case "${c.case?.name || lp.title}" to ${c.suite}`];
+  if (lp.kind === "guideline") return [`+ ${projName(c.project)} onboarding guideline${c.item?.required ? " (required)" : ""}: ${c.item?.text || ""}`];
+  if (lp.kind === "guardrail") return [`+ ${agName(c.agent)} must not touch ${c.path}`];
+  const byKind: Record<string, () => string[]> = { approver: () => { const g = cat?.gates.find((x) => x.id === c.gate); return [`+ ${projName(c.project)} ${g ? g.label : c.gate}: ${c.condition?.text || ""}`]; } };
+  const other = byKind[lp.kind];
+  if (other) return other();
+  if (lp.kind === "route") { const st = cat?.stations.find((x) => x.id === c.addSkip); return [`+ ${cat?.classes.find((k) => k.id === c.cls)?.name ?? c.cls} on ${projName(c.project)} skips ${st ? st.name : c.addSkip}`]; }
+  return [`+ ${lp.title}`];
+}

@@ -6,9 +6,10 @@ import { useSyncExternalStore, type ReactNode } from "react";
 import { TRUST_LEVELS, flowOf, trustAgentFor, trustCellId, type Catalog, type Gate, type Project, type TrustCell, type TrustProposal } from "@gantry/domain";
 import { updatePrefs } from "../../lib/prefs";
 import { navigate } from "../../lib/router";
+import { setUrlParams } from "../urlState";
 
 export const MIN_RUNS = 5;
-export type TrustTab = "matrix" | "ladder" | "proposals" | "demotions" | "policy";
+export type TrustTab = "matrix" | "proposals" | "ceilings" | "criteria" | "ladder" | "demotions";
 export const trustUi = { tab: "matrix" as TrustTab, project: null as string | null, repo: "", sel: null as { agent: string | null; cls: string } | null, propFilter: "pending", demoFilter: "all", hiProposal: null as string | null };
 let tick = 0;
 const listeners = new Set<() => void>();
@@ -44,10 +45,14 @@ export function trustFocus(o: { cell?: string | null; proposal?: string | null; 
     if (o.cls) trustUi.sel = { agent: o.agent || null, cls: o.cls };
   }
   if (prop) {
+    setUrlParams({ tab: "proposals" });
     trustUi.tab = "proposals";
     trustUi.propFilter = prop.status === "pending" ? "pending" : "all";
     trustUi.hiProposal = prop.id;
-  } else trustUi.tab = (o.tab as TrustTab) || "ladder";
+  } else {
+    trustUi.tab = (o.tab as TrustTab) || "ladder";
+    setUrlParams({ tab: trustUi.tab });
+  }
   rerender();
 }
 /** Asks the Trust screen to open at a cell, from another screen. */

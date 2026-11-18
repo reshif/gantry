@@ -4,17 +4,15 @@
  * the task count and a range, head-to-head of two runs task by task, regressions, promotion eligibility, and factory-wide views.
  * Not ported, on purpose: the legacy "Runs are simulated locally" timer and its random pass/fail. A model-graded check is advisory only; deterministic checks decide.
  */
-import { fmt } from "@gantry/domain";
-import { useMemo } from "react";
+import { useEffect } from "react";
 import { usePrefs } from "../lib/prefs";
-import { Empty, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
+import { Btn, Empty, Tabs } from "../ui/primitives";
 import { Async } from "../ui/async";
-import { Icon } from "../ui/Icon";
-import { useProjects } from "../api/queries";
-import { FactoryTab } from "./evals/Factory";
-import { LinkedOutcomes, ScorecardsTab } from "./evals/Scorecards";
-import { SuitesTab } from "./evals/Suites";
-import { agentOf, evalsUi, rerender, suiteOf, useEvalsData, useEvalsUi, type EvalsData, type EvalsTab, type RunRow } from "./evals/kit";
+import { Page, Stats } from "../ui/cr";
+import { setUrlParams, useUrlState } from "./urlState";
+import { SuitesTab, useFinishedRuns, useRunSuites } from "./evals/Suites";
+import { agentOf, evalsUi, suiteOf, useEvalsData, useEvalsUi, type EvalsData, type EvalsTab, type RunRow } from "./evals/kit";
+import { RunsTab } from "./evals/Runs";
 
 const DAY = 86_400_000;
 
@@ -42,51 +40,48 @@ export function regressionsOf(d: EvalsData, now = Date.now()): Regression[] {
   return out;
 }
 
+const TABS: EvalsTab[] = ["suites", "runs"];
+const SUB = "Golden-set suites that decide whether an agent change may go live.";
+
 export default function EvalsView() {
   useEvalsUi();
   const d = useEvalsData();
   usePrefs();
-  const projectsData = useProjects().data;
-  const label = useMemo(() => (c: { agent: string; cls: string; project: string; repo: string | null }): string => {
-    const a = d.agents.find((x) => x.id === c.agent)?.name ?? c.agent;
-    const p = (projectsData ?? []).find((x) => x.id === c.project)?.name ?? c.project;
-    return `${a} · ${c.cls} · ${p}${c.repo ? ` · ${c.repo}` : ""}`;
-  }, [d.agents, projectsData]);
-  if (d.q.data === undefined) return <div className="view view-evals"><ViewHead title="Evals" /><Async query={d.q as never} what="evals" id="evals">{() => null}</Async></div>;
-  if (!d.agents.length) return <div className="view view-evals"><ViewHead title="Evals" /><Empty title="No agents" text="Create an agent to see how it does its job." /></div>;
-  const regs = regressionsOf(d);
-  const tab = evalsUi.tab as EvalsTab;
-  const body = tab === "suites" ? <SuitesTab d={d} /> : tab === "factory" ? <FactoryTab d={d} /> : <ScorecardsTab d={d} label={label} />;
-  const passing = d.suites.filter((su) => { const done = d.runsOf(su.id).filter((r) => r.status === "completed"); const last = done[done.length - 1]; return !!last && last.score >= su.threshold; }).length;
+  const [url, setUrl] = useUrlState({ tab: "suites", q: "", sort: "", dir: "", suite: "", run: "" });
+  const runner = useRunSuites(d);
+  useFinishedRuns(d);
+  // another screen (Agents) asked for a suite: its request becomes URL state once, so a reload keeps it
+  useEffect(() => {
+    if (evalsUi.suite && !url.suite) setUrlParams({ suite: evalsUi.suite, ...(evalsUi.tab !== "suites" ? { tab: evalsUi.tab } : {}) });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const tab = (TABS as string[]).includes(url.tab) ? (url.tab as EvalsTab) : "suites";
+  evalsUi.tab = tab;
+  evalsUi.suite = url.suite || null;
+  evalsUi.run = url.run || null;
+  const head = <Page eyebrow="Workforce" title="Evals" sub={SUB} />;
+  if (d.q.data === undefined) return <div className="view-evals">{head}<Async query={d.q as never} what="evals" id="evals">{() => null}</Async></div>;
+  if (!d.agents.length) return <div className="view-evals">{head}<Empty title="No agents" text="Create an agent to see how it does its job." /></div>;
+  const lastOf = (id: string): RunRow | undefined => { const done = d.runsOf(id).filter((r) => r.status === "completed"); return done[done.length - 1]; };
+  const passing = d.suites.filter((su) => { const last = lastOf(su.id); return !!last && last.score >= su.threshold; }).length;
+  const below = d.suites.filter((su) => { const last = lastOf(su.id); return !!last && last.score < su.threshold; }).length;
+  const setTab = (t: string): void => { evalsUi.run = null; setUrl({ tab: t, q: "", sort: "", dir: "", suite: t === "suites" ? url.suite : "", run: "" }); };
+  const body = tab === "suites" ? <SuitesTab d={d} url={url} setUrl={setUrl} runner={runner} /> : <RunsTab d={d} url={url} setUrl={setUrl} />;
+  const all = d.suites.map((s) => s.id);
   return (
-    <div className="view view-evals">
-      <ViewHead kicker="Workforce" title="Evals" sub="Golden-set suites that decide whether an agent change may go live. Suite runs use the same runtime as work, in sandboxes with no write access to real repositories." />
-      <StatRow id="ev-stats">
-        <Stat label="Suites" value={String(d.suites.length)} />
-        <Stat label="Passing" value={String(passing)} tone="done" />
-        <Stat label="Below threshold" value={String(d.suites.length - passing)} tone={d.suites.length - passing ? "block" : undefined} />
-        <Stat label="Runs, 7 days" value={String(d.runs.filter((r) => r.at > Date.now() - 7 * DAY).length)} />
-      </StatRow>
-      {regs.length ? (
-        <div className="callout callout-fail ev-regs" role="note">
-          <Icon name="st-fail" />
-          <div>
-            <strong>{`${regs.length} regression${regs.length > 1 ? "s" : ""} in the last 14 days. `}</strong>
-            <ul className="plain-list">
-              {regs.map((r, i) => (
-                <li key={`${r.run.id}`}>
-                  <button type="button" className="linkish" id={`ev-reg-${i}`} onClick={() => { evalsUi.tab = "suites"; evalsUi.suite = r.suite.id; evalsUi.run = r.run.id; evalsUi.a = r.run.id; evalsUi.b = r.base.id; rerender(); }}>
-                    {`${r.suite.id}: ${r.agentName} ${r.run.version} on ${r.run.model || "stub"} scored ${fmt.pct(r.run.score)} vs ${fmt.pct(r.base.score)} for the floor version (${r.delta >= 0 ? "+" : ""}${fmt.pct(r.delta)}). Compare`}
-                  </button>
-                  <LinkedOutcomes agentId={r.agentId} idp={`ev-reg-${i}`} />
-                </li>
-              ))}
-            </ul>
-          </div>
+    <div className="view-evals">
+      <Page eyebrow="Workforce" title="Evals" sub={SUB}
+        acts={<Btn label="Run all suites" kind="primary" icon="play" id="ev-run-all" guard={runner.guard.allowed ? null : runner.guard} onClick={() => runner.start(all)} />}>
+        <div id="ev-stats">
+          <Stats items={[
+            { l: "Suites", v: String(d.suites.length), tone: "info" },
+            { l: "Passing", v: String(passing), tone: "ok" },
+            { l: "Below threshold", v: String(below), tone: "bad" },
+            { l: "Runs, 7 days", v: String(d.runs.filter((r) => r.at > Date.now() - 7 * DAY).length), tone: "agent" },
+          ]} />
         </div>
-      ) : null}
-      <Tabs idPrefix="ev-tab" items={[{ id: "suites", label: "Suites and runs", count: d.suites.length }, { id: "agents", label: "Scorecards" }, { id: "factory", label: "Factory-wide" }]} active={tab} onChange={(t) => { evalsUi.tab = t as EvalsTab; rerender(); }} />
-      {body}
+        <Tabs idPrefix="ev-tab" items={[{ id: "suites", label: "Suites" }, { id: "runs", label: "Runs" }]} active={tab} onChange={setTab} />
+        {body}
+      </Page>
     </div>
   );
 }

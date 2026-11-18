@@ -81,7 +81,9 @@ const writes = (calls: Call[]) => calls.filter((c) => c.method !== "GET" && c.pa
 const reasonOf = (e: HTMLElement) => e.getAttribute("data-reason") ?? "";
 const ok = (extra: object = {}) => ({ body: { ok: true, msg: "Done.", ...extra } });
 
+const at = (search: string): void => window.history.replaceState(null, "", `/${search}`);
 beforeEach(() => {
+  at("");
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
@@ -94,16 +96,16 @@ afterEach(() => {
 });
 
 describe("Trust screen: ladder", () => {
+  beforeEach(() => at("?tab=ladder"));
   it("shows the header numbers, including that levels above L1 are off", async () => {
     setup();
     mount();
     await byId("tr-matrix");
     const head = document.getElementById("tr-stats")!.textContent!;
-    expect(head).toContain("Cells at L3+1");
-    expect(head).toContain("Pending proposals1");
+    expect(head).toContain("Agents at L3+");
+    expect(head).toContain("Open proposals1");
     expect(head).toContain("Active ceilings");
     expect(head).toContain("Review sample rate");
-    expect(head).toContain("levels above L1 off");
   });
   it("draws each cell with its level, run count, the level it actually runs at, ceiling and proposal marks, and recent demotion", async () => {
     setup();
@@ -215,15 +217,13 @@ describe("Trust screen: proposals", () => {
     mount();
     await openProps();
     const card = await byId("tr-prop-TP-1");
-    expect(card.textContent).toContain("Pending");
-    expect(card.textContent).toContain("Clean streak20");
-    expect(card.textContent).toContain("2.5 approvals / week");
+    expect(card.textContent).toContain("Designer on Payments Platform: L1 \u2192 L2");
+    expect(card.textContent).toContain("Met the L2 criteria.");
     const ok_ = await byId("tr-prop-ok-TP-1");
     expect(ok_.getAttribute("aria-disabled")).toBe("true");
     expect(reasonOf(ok_)).toContain("Trust levels above L1 are switched off");
-    expect(document.getElementById("tr-prop-TP-0")).toBeNull();
-    fireEvent.click(document.getElementById("tr-propf-all")!);
-    await waitFor(() => expect(document.getElementById("tr-prop-TP-0")!.textContent).toContain("Declined by Asha Raman"));
+    expect(document.getElementById("tr-propf-all")).toBeNull();
+    expect(document.getElementById("tr-prop-TP-0")!.textContent).toContain("Declined");
     expect(document.getElementById("tr-prop-TP-0")!.textContent).toContain("One more month");
   });
   it("approves with a reason when the switch is on, and declines with a reason", async () => {
@@ -233,10 +233,10 @@ describe("Trust screen: proposals", () => {
     fireEvent.click(await byId("tr-prop-ok-TP-1"));
     const ta = await waitFor(() => { const e = document.querySelector("textarea"); if (!e) throw new Error("no dialog"); return e; });
     fireEvent.change(ta, { target: { value: "ab" } });
-    fireEvent.click(Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Approve")!);
+    fireEvent.click(Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Approve" && b.closest(".dlg, [role=dialog]"))!);
     expect(writes(calls)).toHaveLength(0);
     fireEvent.change(ta, { target: { value: "Clean streak reviewed" } });
-    fireEvent.click(Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Approve")!);
+    fireEvent.click(Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Approve" && b.closest(".dlg, [role=dialog]"))!);
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]!.body).toEqual({ accept: true, reason: "Clean streak reviewed" });
     fireEvent.click(await byId("tr-prop-no-TP-1"));
@@ -251,8 +251,8 @@ describe("Trust screen: proposals", () => {
 describe("Trust screen: demotions", () => {
   it("lists demotions with their cause and work order, filters by cause, and has no simulated outcome", async () => {
     setup();
+    at("?tab=demotions");
     mount();
-    fireEvent.click(await byId("tr-tab-demotions"));
     const t = await byId("tr-demo-table");
     expect(t.textContent).toContain("L3 ▼ L1");
     expect(t.textContent).toContain("Incident");
@@ -266,7 +266,8 @@ describe("Trust screen: demotions", () => {
   it("records a real post-release outcome with its attribution on a shipped work order", async () => {
     const calls = setup({ "POST /api/v1/work-orders/WO-6/outcomes": () => ok({ demoted: [] }) });
     mount();
-    fireEvent.click(await byId("tr-tab-demotions"));
+    at("?tab=demotions");
+    mount();
     fireEvent.click(await byId("tr-rec-outcome"));
     fireEvent.change(await byId("tr-out-text"), { target: { value: "Refunds doubled" } });
     expect((await byId("tr-out-impact")).textContent).toContain("Would drop 1 cell for this class to L1 if they are at that agent: ag-design L3");
@@ -280,19 +281,20 @@ describe("Trust screen: demotions", () => {
   it("locks outcome recording when no project allows it", async () => {
     setup({}, ["outcome.record"]);
     mount();
-    fireEvent.click(await byId("tr-tab-demotions"));
+    at("?tab=demotions");
+    mount();
     await waitFor(() => expect(document.getElementById("tr-rec-outcome")!.getAttribute("aria-disabled")).toBe("true"));
   });
 });
 
 describe("Trust screen: ceilings, criteria and the switch", () => {
-  const openPolicy = async () => fireEvent.click(await byId("tr-tab-policy"));
+  const openPolicy = async () => fireEvent.click(await byId("tr-tab-ceilings"));
   it("shows the switch off with what that means, and turns it on with a reason", async () => {
     const calls = setup({ "PUT /api/v1/trust/switch": () => ok() });
     mount();
     await openPolicy();
     expect((await byId("tr-switch") as HTMLInputElement).checked).toBe(false);
-    expect(document.querySelector(".tr-switch")!.textContent).toContain("Off (the default in a new install)");
+    expect(document.querySelector(".tr-switch")!.textContent).toContain("Levels above L1");
     fireEvent.click(document.getElementById("tr-switch")!);
     const ta = await waitFor(() => { const e = document.querySelector("textarea"); if (!e) throw new Error("no dialog"); return e; });
     fireEvent.change(ta, { target: { value: "Enough evidence on payments" } });
@@ -300,67 +302,44 @@ describe("Trust screen: ceilings, criteria and the switch", () => {
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]).toMatchObject({ method: "PUT", path: "/api/v1/trust/switch", body: { on: true, reason: "Enough evidence on payments" } });
   });
-  it("lists ceilings with their reach, toggles one with its version, and removes one with a reason", async () => {
-    const calls = setup({ "POST /api/v1/trust/ceilings": () => ok(), "DELETE /api/v1/trust/ceilings/CEIL-1": () => ok() });
+  it("lists every ceiling as a setrow with a switch, and toggling one sends its version and toasts Enabled or Disabled", async () => {
+    const calls = setup({ "POST /api/v1/trust/ceilings": () => ok() });
     mount();
     await openPolicy();
-    const row = (await byId("tr-ceil-on-CEIL-1")).closest("tr")!;
+    const row = (await byId("tr-ceil-on-CEIL-1")).closest(".setrow")!;
     expect(row.textContent).toContain("Regulated projects are capped at L2");
-    expect(row.textContent).toContain("regulated projects");
-    expect(row.textContent).toContain("0 cells");
+    expect(row.textContent).toContain("Maximum level L2. No proposal can exceed it.");
+    expect(document.getElementById("tr-ceil-add")).toBeNull();
+    expect(document.getElementById("tr-ceil-edit-CEIL-1")).toBeNull();
     fireEvent.click(document.getElementById("tr-ceil-on-CEIL-1")!);
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]!.body).toMatchObject({ id: "CEIL-1", enabled: false, max: 2 });
     expect(writes(calls)[0]!.headers["if-match"]).toBe("2");
-    fireEvent.click(document.getElementById("tr-ceil-rm-CEIL-1")!);
-    const ta = await waitFor(() => { const e = document.querySelector("textarea"); if (!e) throw new Error("no dialog"); return e; });
-    fireEvent.change(ta, { target: { value: "No longer regulated" } });
-    fireEvent.click(Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Remove" && b.closest(".dlg, [role=dialog]"))!);
-    await waitFor(() => expect(writes(calls)).toHaveLength(2));
-    expect(writes(calls)[1]).toMatchObject({ method: "DELETE", path: "/api/v1/trust/ceilings/CEIL-1" });
-    expect(writes(calls)[1]!.headers["if-match"]).toBe("2");
-  });
-  it("adds a ceiling from a dialog and shows a refusal inline", async () => {
-    const calls = setup({ "POST /api/v1/trust/ceilings": () => ({ status: 422, body: { ok: false, msg: "Describe the ceiling." } }) });
-    mount();
-    await openPolicy();
-    fireEvent.click(await byId("tr-ceil-add"));
-    fireEvent.change(await byId("tr-cd-text"), { target: { value: "Docs stay at L1" } });
-    fireEvent.change(document.getElementById("tr-cd-cls")!, { target: { value: "docs" } });
-    fireEvent.change(document.getElementById("tr-cd-max")!, { target: { value: "1" } });
-    fireEvent.click(document.getElementById("tr-cd-ok")!);
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]!.body).toEqual({ text: "Docs stay at L1", when: { cls: "docs" }, max: 1, enabled: true });
-    expect(writes(calls)[0]!.headers["idempotency-key"]).toBeTruthy();
-    await waitFor(() => expect(document.querySelector(".form-err")!.textContent).toBe("Describe the ceiling."));
-  });
-  it("saves a level's criteria as the next version, sending the version it was read at, and the spot-check rate", async () => {
-    const calls = setup({ "PUT /api/v1/trust/criteria": () => ok(), "PUT /api/v1/trust/sample-rate": () => ok() });
-    mount();
-    await openPolicy();
-    expect(document.querySelector(".tr-crit-t")!.closest(".panel")!.textContent).toContain("A change publishes version 5");
-    fireEvent.change(await byId("tr-crit-2-cleanRuns"), { target: { value: "25" } });
-    fireEvent.change(document.getElementById("tr-crit-2-evalMin")!, { target: { value: "90" } });
-    fireEvent.click(document.getElementById("tr-crit-save-2")!);
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]).toMatchObject({ method: "PUT", path: "/api/v1/trust/criteria", body: { level: 2, patch: { cleanRuns: 25, evalMin: 0.9 } } });
-    expect(writes(calls)[0]!.headers["if-match"]).toBe("4");
-    fireEvent.change(document.getElementById("tr-sample")!, { target: { value: "8" } });
-    fireEvent.click(document.getElementById("tr-sample-save")!);
-    await waitFor(() => expect(writes(calls)).toHaveLength(2));
-    expect(writes(calls)[1]).toMatchObject({ path: "/api/v1/trust/sample-rate", body: { n: 8 } });
-    expect(writes(calls)[1]!.headers["if-match"]).toBe("4");
+    await waitFor(() => expect(document.body.textContent).toContain("Disabled Regulated projects are capped at L2"));
   });
   it("locks every policy control for someone without trust.criteria", async () => {
     setup({}, ["trust.criteria"]);
     mount();
     await openPolicy();
-    await waitFor(() => expect(document.getElementById("tr-ceil-add")!.getAttribute("aria-disabled")).toBe("true"));
-    expect(document.querySelector(".tr-policy .lock-note")!.textContent).toContain("trust policy");
-    expect((document.getElementById("tr-crit-2-cleanRuns") as HTMLInputElement).disabled).toBe(true);
-    expect((document.getElementById("tr-sample") as HTMLInputElement).disabled).toBe(true);
-    expect(document.getElementById("tr-crit-save-2")!.getAttribute("aria-disabled")).toBe("true");
-    expect(document.getElementById("tr-switch")!.getAttribute("aria-disabled")).toBe("true");
+    await waitFor(() => expect(document.getElementById("tr-switch")!.getAttribute("aria-disabled")).toBe("true"));
+    expect(document.getElementById("tr-ceil-on-CEIL-1")!.getAttribute("aria-disabled")).toBe("true");
+  });
+});
+
+describe("Trust screen: prototype structure", () => {
+  it("has exactly the four prototype tabs Matrix, Proposals, Ceilings, Criteria and keeps the tab in the URL", async () => {
+    setup();
+    mount();
+    await byId("tr-tab-matrix");
+    expect([...document.querySelectorAll("[role=tab][id^='tr-tab-']")].map((e) => (e.textContent ?? "").replace(/\d+$/, ""))).toEqual(["Matrix", "Proposals", "Ceilings", "Criteria"]);
+    expect(document.body.textContent).toContain("L4 runs unattended, audited");
+    fireEvent.click(document.getElementById("tr-tab-criteria")!);
+    await waitFor(() => expect(window.location.search).toContain("tab=criteria"));
+    expect(document.body.textContent).toContain("To level");
+    expect(document.body.textContent).toContain("Window (days)");
+    expect([...document.querySelectorAll("#tr-criteria tbody tr")].map((r) => r.textContent?.slice(0, 2))).toEqual(["L2", "L3", "L4"]);
+    expect(document.getElementById("tr-crit-edit")).toBeNull();
+    expect(document.getElementById("tr-sample")).toBeNull();
   });
 });
 
@@ -382,7 +361,28 @@ describe("Trust screen: matrix", () => {
     const link = m.querySelector("a.lvl") as HTMLElement;
     expect(link.textContent).toMatch(/^L\d$/);
     fireEvent.click(link);
+    await waitFor(() => expect(document.querySelector("[role=dialog], .dlg")!.textContent).toContain("Propose a change"));
+    expect(document.body.textContent).toContain("New level");
+    expect(document.body.textContent).toContain("Submit proposal");
+    fireEvent.click(await byId("tr-mx-ladder"));
     await byId("tr-matrix");
-    expect(trustUi.tab).toBe("ladder");
+    expect(window.location.search).toContain("tab=ladder");
+  });
+  it("keeps the ladder link out of the propose dialog and the runtime switch out of the ceilings list", async () => {
+    setup();
+    Object.assign(trustUi, { tab: "matrix" });
+    mount();
+    const m = await byId("tr-agent-matrix");
+    fireEvent.click(m.querySelector("a.lvl") as HTMLElement);
+    const dlg = await waitFor(() => { const e = document.querySelector("[role=dialog], .dlg"); if (!e) throw new Error("no dialog"); return e; });
+    expect(dlg.querySelector("#tr-mx-ladder")).toBeNull();
+    expect(document.querySelector(".view-trust.view")).toBeNull();
+    cleanup();
+    setup();
+    mount();
+    fireEvent.click(await byId("tr-tab-ceilings"));
+    await byId("tr-switch");
+    expect(document.querySelectorAll(".tr-ceil .setrow")).toHaveLength(document.querySelectorAll(".tr-ceil [id^='tr-ceil-on-']").length);
+    expect(document.querySelector(".tr-ceil #tr-switch")).toBeNull();
   });
 });

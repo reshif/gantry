@@ -97,10 +97,10 @@ export function ProposalButtons({ prop, cell, p }: { prop: TrustProposal; cell: 
     : prop.to > cell.ceiling.max ? { allowed: false, needs: "", reason: `Capped at ${code(cell.ceiling.max)} by ${cell.ceiling.ids.join(", ")}. Decline it or change the ceiling.` } : null;
   return (
     <>
-      <Btn label={`Approve ${code(prop.to)}`} small kind="primary" icon="check" id={`tr-prop-ok-${prop.id}`} guard={accGuard}
+      <Btn label="Approve" aria={`Approve ${prop.id}, promote to ${code(prop.to)}`} small kind="primary" icon="check" id={`tr-prop-ok-${prop.id}`} guard={accGuard}
         onClick={() => ui_.reasonDialog({ title: `Approve ${prop.id}`, kicker: "Trust · promotion", sub: `${label(cell, p)} moves from ${code(prop.from)} to ${code(prop.to)}. About ${prop.savedPerWeek || 0} approvals a week stop needing a person.`, label: "Reason (required)", placeholder: "e.g. Clean streak reviewed, no open incidents", ok: "Approve", min: 4, guard: accGuard,
-          onOk: async (t) => out(await ops.decideTrustProposal(prop.id, true, t)) }) } />
-      <Btn label="Decline" small icon="x" id={`tr-prop-no-${prop.id}`} guard={perm}
+          onOk: async (t) => { const r = await ops.decideTrustProposal(prop.id, true, t); return out(r, `Promoted ${p.agentName(cell.agent)} to ${code(prop.to)}`); } }) } />
+      <Btn label="Decline" small kind="danger" icon="x" id={`tr-prop-no-${prop.id}`} guard={perm}
         onClick={() => ui_.reasonDialog({ title: `Decline ${prop.id}`, kicker: "Trust · promotion", sub: `${label(cell, p)} stays at ${code(prop.from)}. The system will not propose this cell again for 3 days.`, label: "Reason (required)", ok: "Decline", kind: "danger", min: 4, guard: perm,
           onOk: async (t) => out(await ops.decideTrustProposal(prop.id, false, t)) })} />
     </>
@@ -120,7 +120,7 @@ function LevelDialog({ cell, p, onDone }: { cell: CellOut; p: LadderProps; onDon
       <div className="radio-cards tr-lvl-cards" role="radiogroup" aria-label="Trust level">
         {[0, 1, 2, 3, 4].map((n) => {
           const why = n > 3 ? "L4 (unattended including release) cannot be granted in this version."
-            : n > 1 && !p.switchOn ? "Trust levels above L1 are switched off. Turn them on in Ceilings and criteria."
+            : n > 1 && !p.switchOn ? "Trust levels above L1 are switched off. Turn them on under Ceilings."
             : n > cell.ceiling.max ? `Above the ceiling: ${cell.ceiling.ids.join(", ")}.`
             : null;
           return (
@@ -184,7 +184,7 @@ function Detail({ p, rows }: { p: LadderProps; rows: LadderRow[] }) {
     ["Ceiling", `≤ ${code(cell.ceiling.max)}`, (m.next ?? 0) <= cell.ceiling.max, (m.next ?? 0) <= cell.ceiling.max ? null : `blocked by ${cell.ceiling.ids.join(", ")}`],
   ] : [];
   if (m.next && m.next > 3) lines.push(["Grantable", "L4 is not grantable", false, "unattended release stays with a person in this version"]);
-  if (m.next && m.next > 1 && !p.switchOn) lines.push(["Switch", "levels above L1 are off", false, "turn them on in Ceilings and criteria"]);
+  if (m.next && m.next > 1 && !p.switchOn) lines.push(["Switch", "levels above L1 are off", false, "turn them on under Ceilings"]);
   const metN = lines.filter((l) => l[2]).length;
   const hist = [...(cell.history || [])].reverse();
   const reasonWhy = eff < cell.level ? (!p.switchOn && cell.level > 1 && cell.ceiling.max >= cell.level ? "levels above L1 are switched off" : `capped by ${cell.ceiling.ids.join(", ")}`) : "";
@@ -315,4 +315,9 @@ export function LadderTab({ p }: { p: LadderProps }) {
       <div className="tr-ladder-grid"><Detail p={p} rows={rows} /><Projection p={p} rows={rows} /></div>
     </div>
   );
+}
+
+/** Sets a cell's level (a reduction is a demotion, applied at once; a rise is a grant): the one place the Matrix dialog and the ladder write a level. */
+export function applyTrustLevel(c: CellOut, to: number, why: string, lower: boolean) {
+  return lower ? ops.demoteTrust(c.id, to, why, { ifMatch: c.rev }) : ops.grantTrust(c.id, to, why, { ifMatch: c.rev });
 }

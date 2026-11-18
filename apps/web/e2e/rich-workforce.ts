@@ -4,7 +4,6 @@ import { fulfillJson, type Handler } from "./fixtures";
 const NOW = Date.parse("2026-01-15T10:00:00Z");
 const DAY = 86_400_000;
 const AG = ["ag-intake", "ag-research", "ag-spec", "ag-design", "ag-plan", "ag-build", "ag-test", "ag-review", "ag-close"];
-const AGN: Record<string, string> = { "ag-intake": "Intake Clerk", "ag-research": "Researcher", "ag-spec": "Spec Writer", "ag-design": "Designer", "ag-plan": "Planner", "ag-build": "Builder", "ag-test": "Test Engineer", "ag-review": "Reviewer", "ag-close": "Release Captain" };
 const ST = ["intake", "research", "spec", "design", "plan", "build", "verify", "review", "close"];
 
 const SKILLS: Array<[string, string, string, string, string[]]> = [
@@ -43,8 +42,13 @@ const prices = () => ({ current: 3, versions: [3, 2, 1].map((version) => ({ vers
 const budgets = () => ["payments", "storefront", "identity", "risk", "search"].map((project, i) => ({ project, monthly: 4000, alertAt: 0.8, perWorkOrder: 25, spent: 1280 + i * 190, version: 1 }));
 
 const scorecards = () => Object.fromEntries(AG.map((id, i) => [id, { taskSuccess: 0.89 + (i % 4) * 0.02, firstPass: 0.8 + (i % 5) * 0.03, testPass: 0.93, rework: 0.05 + (i % 3) * 0.02, costPerWO: 0.9 + i * 0.15, minutesPerStation: 8 + i, gateRejections: i % 3, overrideRate: 0.04, trend: { success: [0.86, 0.88, 0.9, 0.89, 0.92, 0.91 + (i % 3) * 0.01], cost: [1.1, 1.0, 1.05, 0.98, 0.95, 0.9], n: [12, 14, 15, 13, 16, 18] }, counts: { attempts: 60 + i * 9, decisions: 20 + i, workOrders: 18 + i, tests: 40 } }]));
-const suites = () => ST.map((s, i) => ({ id: "su-" + s, name: `${AGN[AG[i]!]} golden set`, station: s, threshold: 0.85, agent: AG[i], version: 1, builtin: true, running: null, cases: [1, 2, 3, 4, 5].map((n) => ({ id: `${s}-c${n}`, name: `Case ${n}: ${s} sample`, task: "Handle the sample request.", golden: n < 3, rules: [{ kind: "contains", text: "ok" }], by: "p-lead", added: NOW - 20 * DAY })) }));
-const runs = () => ST.flatMap((s, i) => [0, 1, 2, 3, 4, 5, 6, 7].map((k) => ({ id: `run-${s}-${k}`, suite: "su-" + s, agent: AG[i], version: "1.4.0", model: "claude-sonnet-5-5", at: NOW - (k + 1) * DAY * 3, score: 0.86 + ((i + k) % 5) * 0.02, results: [], by: "p-lead", cost: 1.2, status: "completed", count: 5, passed: 4 + (k % 2), range: [0.6, 0.97], finishedAt: NOW - (k + 1) * DAY * 3 + 60000 })));
+// --- work2 (Evals fidelity): the prototype's nine suites (SUITE-<STATION>, 6 to 10 cases) and 36 runs, newest first, the nine latest scoring as drawn ---
+const SU_NAME: Record<string, string> = { intake: "Intake", research: "Research", spec: "Spec", design: "Design", plan: "Plan", build: "Build", verify: "Verify", review: "Review and merge", close: "Release" };
+const SU_CASES = [9, 10, 9, 9, 6, 10, 9, 8, 8];
+const SU_LAST = [0.88, 0.94, 0.9, 0.84, 0.86, 0.93, 0.83, 1.0, 0.83];
+const suites = () => ST.map((s, i) => ({ id: "SUITE-" + s.toUpperCase(), name: `${SU_NAME[s]} golden set`, station: s, threshold: 0.85, agent: AG[i], version: 1, builtin: true, running: null, cases: Array.from({ length: SU_CASES[i]! }, (_, n) => ({ id: `${s}-c${n + 1}`, name: `Case ${n + 1}: ${s} sample`, task: "Handle the sample request.", golden: n < 3, rules: [{ kind: "contains", text: "ok" }], by: "p-lead", added: NOW - 20 * DAY })) }));
+const runs = () => Array.from({ length: 36 }, (_, k) => { const i = k % 9; const s = ST[i]!; const at = NOW - k * 9 * 3_600_000; const n = SU_CASES[i]!; const score = k < 9 ? SU_LAST[i]! : +(0.8 + ((k * 7) % 20) / 100).toFixed(2); return { id: `RUN-${913 - k}`, suite: "SUITE-" + s.toUpperCase(), agent: AG[i], version: "1.4.0", model: "claude-sonnet", at, score, results: [], by: "p-lead", cost: 1.2, status: "completed", count: n, passed: Math.round(n * score), range: [Math.max(0, score - 0.15), Math.min(1, score + 0.08)], finishedAt: at + 60000 }; });
+// --- end work2 ---
 const evalsFactory = () => ({
   heat: Object.fromEntries(AG.map((a, i) => [a, Object.fromEntries(["feature", "bug", "refactor", "docs"].map((c, j) => [c, 0.7 + ((i + j) % 4) * 0.08]))])),
   confusion: { feature: { feature: 21, bug: 2, refactor: 1 }, bug: { feature: 1, bug: 17, refactor: 0 }, refactor: { feature: 1, bug: 0, refactor: 9 } },
@@ -52,22 +56,39 @@ const evalsFactory = () => ({
   overrideRate: 0.04, onboarding: { attempts: 14, ready: 11, successRate: 0.79, medianDays: 2.1, p90Days: 5, failedReasons: [["No test command", 2], ["Missing CI access", 1]] },
   gateRejections: [["G5", 6], ["G4", 3], ["G2", 2]], humanOverride: { "ag-build": 3, "ag-review": 2 }, onboardingStages: { discovered: 3, assessed: 4, ready: 11 }, counts: { workOrders: 103, classified: 99, decisions: 212, attempts: 540 },
 });
+// --- work2 (Trust fidelity): the prototype's levels per agent (Payments, Storefront, Risk); the bug class sits one level lower; Risk is regulated, capped at L2 by CEIL-1 ---
+const LV = [[2, 3, 1], [2, 3, 1], [2, 3, 1], [1, 2, 0], [2, 3, 1], [1, 2, 0], [3, 4, 2], [2, 3, 1], [1, 2, 0]];
+// --- end work2 ---
 const trust = () => ({
-  sampleRate: 0.2, seededAt: NOW - 60 * DAY, nextProposal: 3, levelsAboveL1: true, minRuns: 5, soakDays: 7, maxGrantable: 3, criteriaVersion: 1,
-  criteria: { "1": { cleanRuns: 5, evalMin: 0.8, reworkMax: 0.2, incidentsMax: 1, windowD: 14 }, "2": { cleanRuns: 15, evalMin: 0.88, reworkMax: 0.12, incidentsMax: 0, windowD: 30 }, "3": { cleanRuns: 40, evalMin: 0.93, reworkMax: 0.06, incidentsMax: 0, windowD: 60 } },
-  ceilings: [{ id: "ce1", text: "Regulated projects are capped at L2", when: { regulated: true }, max: 2, enabled: true, version: 1 }],
-  cells: AG.flatMap((agent, i) => ["payments", "storefront", "risk"].flatMap((project, k) => ["feature", "bug"].map((cls, j) => ({ id: `tc-${agent}-${cls}-${project}`, agent, cls, project, repo: null, level: (i + j + k) % 4, since: NOW - (10 + i) * DAY, cleanRuns: 6 + i * 4 + j * 3, history: [{ at: NOW - (10 + i) * DAY, from: 0, to: 1, by: "p-lead", note: "Initial grant" }], rev: 1, gate: "G5", effective: (i + j + k) % 4, evidence: { runs: 12 + i * 3, cleanRuns: 6 + i * 4, evalScore: 0.9, rework: 0.06, incidents: 0, incidentWos: [] }, meets: { ok: (i + j) % 2 === 0, next: 2, missing: (i + j) % 2 ? ["More clean runs"] : [] }, ceiling: { max: 3, ids: [] }, projection: 2, pending: null })))),
-  proposals: [],
+  sampleRate: 20, seededAt: NOW - 60 * DAY, nextProposal: 3, levelsAboveL1: true, minRuns: 5, soakDays: 7, maxGrantable: 3, criteriaVersion: 1,
+  criteria: { "1": { cleanRuns: 3, evalMin: 0.8, reworkMax: 0.2, incidentsMax: 1, windowD: 7 }, "2": { cleanRuns: 6, evalMin: 0.85, reworkMax: 0.15, incidentsMax: 0, windowD: 14 }, "3": { cleanRuns: 15, evalMin: 0.9, reworkMax: 0.1, incidentsMax: 0, windowD: 30 }, "4": { cleanRuns: 40, evalMin: 0.93, reworkMax: 0.06, incidentsMax: 0, windowD: 60 } },
+  ceilings: [{ id: "CEIL-1", text: "Regulated projects are capped at L2", when: { regulated: true }, max: 2, enabled: true, version: 1 },
+    // --- work2 (Trust fidelity): the prototype's four ceilings ---
+    { id: "CEIL-2", text: "Security fixes never run above L1", when: { cls: "security" }, max: 1, enabled: true, version: 1 },
+    { id: "CEIL-3", text: "Hotfixes are capped at L2", when: { cls: "hotfix" }, max: 2, enabled: true, version: 1 },
+    { id: "CEIL-4", text: "Release confirmation (G6) is capped at L3 on Payments Platform", when: { project: "payments", gate: "G6" }, max: 3, enabled: true, version: 1 },
+    // --- end work2 ---
+  ],
+  cells: AG.flatMap((agent, i) => ["payments", "storefront", "risk"].flatMap((project, k) => ["feature", "bug"].map((cls, j) => ({ id: `tc-${agent}-${cls}-${project}`, agent, cls, project, repo: null, level: LV[i]![k]! - j > 0 ? LV[i]![k]! - j : 0, since: NOW - (10 + i) * DAY, cleanRuns: 6 + i * 4 + j * 3, history: [{ at: NOW - (10 + i) * DAY, from: 0, to: 1, by: "p-lead", note: "Initial grant" }], rev: 1, gate: "G5", effective: LV[i]![k]! - j > 0 ? LV[i]![k]! - j : 0, evidence: { runs: 12 + i * 3, cleanRuns: 6 + i * 4, evalScore: 0.9, rework: 0.06, incidents: 0, incidentWos: [] }, meets: { ok: (i + j) % 2 === 0, next: 2, missing: (i + j) % 2 ? ["More clean runs"] : [] }, ceiling: project === "risk" ? { max: 2, ids: ["CEIL-1"] } : { max: 4, ids: [] }, projection: 2, pending: null })))),
+  proposals: [
+    { id: "TP-4", cell: "tc-ag-spec-feature-payments", from: 2, to: 3, at: NOW - 2 * DAY, status: "pending", by: null, decidedAt: null, reason: "", evidence: { cleanRuns: 18, evalScore: 0.93, note: "18 clean runs, eval 0.93, rework 6%" }, savedPerWeek: 3 },
+    { id: "TP-5", cell: "tc-ag-test-feature-storefront", from: 2, to: 3, at: NOW - 3 * DAY, status: "pending", by: null, decidedAt: null, reason: "", evidence: { cleanRuns: 22, evalScore: 0.95, note: "22 clean runs, eval 0.95, rework 4%" }, savedPerWeek: 4 },
+    { id: "TP-3", cell: "tc-ag-build-feature-risk", from: 1, to: 2, at: NOW - 6 * DAY, status: "declined", by: "p-lead", decidedAt: NOW - 5 * DAY, reason: "", evidence: { cleanRuns: 9, evalScore: 0.88, note: "9 clean runs; capped by CEIL-1" }, savedPerWeek: 1 },
+  ],
 });
+// --- work2 (Learning fidelity): the prototype's four findings and three proposals (F-1..F-4, LP-1..LP-3) ---
 const findings = () => [
-  { id: "lf-1", title: "Reviewers keep asking for rollback notes", signal: "rejection", agent: "ag-spec", project: "payments", evidence: ["WO-1004 rejected at G2", "WO-1013 rejected at G2"], count: 7, firstAt: NOW - 20 * DAY, lastAt: NOW - 1 * DAY, status: "open", rev: 1 },
-  { id: "lf-2", title: "Builder diffs overridden on migration files", signal: "override", agent: "ag-build", project: "payments", evidence: ["WO-1021 override"], count: 4, firstAt: NOW - 15 * DAY, lastAt: NOW - 2 * DAY, status: "open", rev: 1 },
-  { id: "lf-3", title: "Release notes missed a breaking flag", signal: "miss", agent: "ag-close", project: null, evidence: ["WO-1008"], count: 2, firstAt: NOW - 9 * DAY, lastAt: NOW - 3 * DAY, status: "addressed", rev: 1 },
+  { id: "F-1", title: "Specs keep missing a rollback note", signal: "rejection", agent: "ag-spec", project: "payments", evidence: ["WO-1002 rejected at G2", "WO-1007 rejected at G2"], count: 7, firstAt: NOW - 20 * DAY, lastAt: NOW - 1 * DAY, status: "open", rev: 1 },
+  { id: "F-2", title: "Classifier calls regressions features", signal: "override", agent: "ag-intake", project: null, evidence: ["WO-1010 override", "WO-1020 override"], count: 4, firstAt: NOW - 15 * DAY, lastAt: NOW - 2 * DAY, status: "open", rev: 1 },
+  { id: "F-3", title: "Rounding changes get reverted after release", signal: "revert", agent: "ag-build", project: "storefront", evidence: ["WO-1004", "WO-1031", "WO-1040"], count: 3, firstAt: NOW - 12 * DAY, lastAt: NOW - 3 * DAY, status: "open", rev: 1 },
+  { id: "F-4", title: "Intake rarely gets test data up front", signal: "miss", agent: "ag-intake", project: null, evidence: ["WO-1003", "WO-1005", "WO-1008", "WO-1011"], count: 4, firstAt: NOW - 9 * DAY, lastAt: NOW - 3 * DAY, status: "addressed", rev: 1 },
 ];
 const proposals = () => [
-  { id: "lp-1", finding: "lf-1", kind: "guideline", title: "Require a rollback note in every spec", owner: "ag-spec", status: "proposed", at: NOW - 2 * DAY, expected: "Fewer G2 rejections", change: {}, history: [], rev: 1, windowDays: 14, metric: { signal: "rejection", project: "payments", agent: "ag-spec", target: 2 }, baseline: { count: 7, from: NOW - 20 * DAY, to: NOW } },
-  { id: "lp-2", finding: "lf-3", kind: "skill", title: "Add a breaking-change check to Release notes", owner: "ag-close", status: "verified", at: NOW - 8 * DAY, expected: "No missed breaking flags", change: {}, history: [], rev: 2, appliedAt: NOW - 6 * DAY, appliedBy: "p-lead", verification: { measured: 0, target: 1, baseline: 2, at: NOW - DAY, by: "p-lead" } },
+  { id: "LP-1", finding: "F-1", kind: "skill", title: "Add a rollback-note requirement", owner: "ag-spec", status: "proposed", at: NOW - 2 * DAY, expected: "Fewer G2 rejections", change: { skill: "sk-spec", before: "", after: "Always end a spec with a short rollback note." }, history: [], rev: 1, windowDays: 14, metric: { signal: "rejection", project: "payments", agent: "ag-spec", target: 2 }, baseline: { count: 7, from: NOW - 20 * DAY, to: NOW } },
+  { id: "LP-2", finding: "F-2", kind: "skill", title: "Treat \"regression\" as bug unless a new capability is requested", owner: "ag-intake", status: "proposed", at: NOW - 3 * DAY, expected: "Fewer class overrides", change: { skill: "sk-intake", before: "Classify as feature if behaviour changes.", after: "Classify as bug when a regression is reported; feature only for new capability." }, history: [], rev: 1, windowDays: 14, metric: { signal: "override", project: null, agent: "ag-intake", target: 1 }, baseline: { count: 4, from: NOW - 15 * DAY, to: NOW } },
+  { id: "LP-3", finding: "F-4", kind: "skill", title: "Ask for test data in the first question", owner: "ag-intake", status: "accepted", at: NOW - 8 * DAY, expected: "Fewer intake misses", change: { skill: "sk-intake", before: "", after: "Ask for sample inputs or test data in your first question." }, history: [], rev: 2, windowDays: 14, appliedAt: NOW - 6 * DAY, appliedBy: "p-lead", rollback: { summary: "Restore the previous skill version.", available: true } },
 ];
+// --- end work2 ---
 
 /** work1 block: the composed instructions the Instructions tab shows for an agent (layers, sections, hand-off), so the tab renders in the fidelity run. */
 const effective = (agent: string) => {
@@ -87,6 +108,6 @@ export function workforceOverrides(): Record<string, Handler> {
     ...eff,
     skills: j(skills), vendors: j(vendors), routing: j(routing), prices: j(prices), budgets: j(budgets), "routing/versions": j(() => [{ version: 4, publishedAt: new Date(NOW - 5 * DAY).toISOString(), publishedBy: "p-admin", note: "Opus on plan" }]),
     "evals/scorecards": j(scorecards), suites: j(suites), "evals/runs": j(runs), "evals/factory": j(evalsFactory),
-    "trust/cells": j(trust), "learning/findings": j(findings), "learning/proposals": j(proposals), "learning/signals": j(() => []),
+    "trust/cells": j(trust), "learning/findings": j(findings), "learning/proposals": j(proposals), "learning/signals": j(() => []), "learning/settings": j(() => ({ proposalsOn: true, otherDeciders: 1 })),
   };
 }
