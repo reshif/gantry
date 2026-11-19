@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { upstreamFetch, type UpstreamInit } from "./upstream-guard.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { ApiClient, authorizeCall, type Alternate, type Route } from "./api.js";
@@ -94,7 +95,7 @@ export interface Gateway {
 /** The :8443 listener: model gateway (spec 5.3, 10.4) and the runner's control calls (spec 4.2, 4.3). */
 export function buildGateway(deps: GatewayDeps): Gateway {
   const { cfg } = deps;
-  const f = deps.fetchImpl ?? fetch;
+  const f = (deps.fetchImpl ?? upstreamFetch(cfg.blockPrivateAddresses)) as (url: string | URL, init?: UpstreamInit) => Promise<Response>;
   const api = deps.api ?? new ApiClient(cfg);
   const store = deps.store ?? new NoObjectStore();
   const keys = deps.keys ?? new VendorKeys(cfg.vendorKeys, api);
@@ -155,7 +156,7 @@ export function buildGateway(deps: GatewayDeps): Gateway {
     const alternates: Alternate[] = primary.alternates ?? [];
     // A model the vendor knows under another id (the same model on Bedrock, say) is called with that id.
     const bodyFor = (rt: { upstreamModel?: string }): Uint8Array<ArrayBuffer> => (rt.upstreamModel && body.model !== rt.upstreamModel ? new Uint8Array(Buffer.from(JSON.stringify({ ...body, model: rt.upstreamModel }))) : new Uint8Array(raw));
-    const callTo = (rt: Route | Alternate, key: string | null, signal: AbortSignal): { url: string; init: RequestInit } => {
+    const callTo = (rt: Route | Alternate, key: string | null, signal: AbortSignal): { url: string; init: UpstreamInit } => {
       const url = upstreamUrl(rt.baseUrl, countOnly ? "/v1/messages/count_tokens" : "/v1/messages");
       const headers: Record<string, string> = { "content-type": "application/json", "accept-encoding": "identity", "anthropic-version": String(req.headers["anthropic-version"] ?? "2023-06-01") };
       if (key) {
@@ -164,7 +165,7 @@ export function buildGateway(deps: GatewayDeps): Gateway {
       }
       if (typeof req.headers["anthropic-beta"] === "string") headers["anthropic-beta"] = req.headers["anthropic-beta"];
       if (typeof req.headers.accept === "string") headers.accept = req.headers.accept;
-      return { url, init: { method: "POST", headers, body: bodyFor(rt), signal } };
+      return { url, init: { method: "POST", headers, body: bodyFor(rt), signal, lan: primary.lan } };
     };
 
     const key = await keys.get(route.vendor);
@@ -448,7 +449,7 @@ export function buildGateway(deps: GatewayDeps): Gateway {
   const research = registerResearchRoutes(app, { api, store, knownKeys: () => keys.knownKeys(), runAuth, jsonBody, ...(deps.researchFetch ? { fetchImpl: deps.researchFetch } : {}) });
 
   // Model calls for the console and "explain why not" (spec 12.6): the API calls with the edge token, the key stays here.
-  const service = registerServiceRoutes({ app, cfg, api, keys, limiter, fetchImpl: f, track, store, maxTraceBytes: cfg.maxTraceBytes });
+  const service = registerServiceRoutes({ app, cfg, api, keys, limiter, fetchImpl: f as typeof fetch, track, store, maxTraceBytes: cfg.maxTraceBytes });
 
   return { app, metrics, mcp, service, research, keys, limiter, api, store, drain: async () => void (await Promise.allSettled([...pending])) };
 }
