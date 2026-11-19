@@ -64,4 +64,56 @@ d("sandbox teardown order", () => {
     expect(toks.length).toBeGreaterThan(0);
     expect(toks.every((t) => t.revoked === true)).toBe(true);
   });
+
+  it("G-S3: waiting for capacity never fails queued work, however long, and the order says why", async () => {
+    w.launcher.capacity = true;
+    const a = await w.workOrderAt("WO-9310", { station: "research", repo: null });
+    await w.drain(8); // far more waits than the world's deferral budget of 3
+    expect((await w.q(`select state from attempts where id = $1`, [a.attemptId]))[0].state).toBe("queued");
+    const run = (await w.q(`select data from runs where id = $1`, [a.runId]))[0];
+    expect(run.data.dispatchError).toBeUndefined();
+    expect(run.data.dispatchWait.label).toBe("Waiting for a run slot (1 queued)");
+    expect(run.data.dispatchWait.deferrals).toBeGreaterThan(3);
+    // room appears: it starts, and the wait note is gone
+    w.launcher.capacity = false;
+    await w.drain(1);
+    const after = (await w.q(`select data, state from runs where id = $1`, [a.runId]))[0];
+    expect(after.data.dispatch.phase).toBe("started");
+    expect(after.data.dispatchWait).toBeUndefined();
+  });
+
+  it("G-S3: a low host disk reads as 'Waiting: host disk low'", async () => {
+    w.launcher.capacity = "host free disk is 3.0 GB, under the 20.0 GB floor";
+    const a = await w.workOrderAt("WO-9311", { station: "research", repo: null });
+    await w.drain(5);
+    const run = (await w.q(`select data from runs where id = $1`, [a.runId]))[0];
+    expect(run.data.dispatchWait.label).toBe("Waiting: host disk low");
+    expect(run.data.dispatchError).toBeUndefined();
+  });
+
+  it("G-S9: the wall clock starts at the runner start, and a run that never started is not killed by the watchdog", async () => {
+    w.launcher.capacity = true;
+    const a = await w.workOrderAt("WO-9312", { station: "research", repo: null });
+    await w.drain(1);
+    await w.q(`update runs set started_at = now() - interval '2 hours', data = data || '{"wallClockSeconds": 60}'::jsonb where id = $1`, [a.runId]);
+    expect(await w.worker.scheduler.watchdog()).toEqual([]);
+    w.launcher.capacity = false;
+    await w.drain(1);
+    const r = (await w.q(`select now() - started_at < interval '1 minute' as fresh from runs where id = $1`, [a.runId]))[0];
+    expect(r.fresh).toBe(true);
+  });
+
+  it("G-S4: a kill during the second start with the launcher down at that moment is retried, not left for the reaper", async () => {
+    const a = await w.workOrderAt("WO-9313", { station: "research", repo: null, dispatch: false });
+    let fired = false;
+    w.launcher.onStart = async (b) => {
+      if (b.seedComplete === false || fired) return;
+      fired = true;
+      await w.q(`update attempts set state = 'cancelled' where id = $1`, [a.attemptId]);
+      w.launcher.stopFailures = 1; // the launcher fails the first stop
+    };
+    await w.enqueue("attempt.dispatch", { woId: "WO-9313", station: "research", attemptId: a.attemptId, fencing: a.fencing }, { dedupeKey: `attempt:${a.attemptId}` });
+    await w.drain(3);
+    expect(w.launcher.runs.has(a.runId)).toBe(false);
+  });
 });

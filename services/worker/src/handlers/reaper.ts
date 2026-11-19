@@ -74,7 +74,7 @@ export async function reapOrphans(deps: Deps, orgId: string): Promise<string[]> 
 export async function wallClockWatchdog(deps: Deps, orgId: string): Promise<string[]> {
   const { rows } = await deps.pool.query<{ id: string; attempt_id: string; fencing: string; limit_s: string }>(
     `select r.id, r.attempt_id, a.fencing::text as fencing, (r.data->>'wallClockSeconds') as limit_s from runs r join attempts a on a.org_id = r.org_id and a.id = r.attempt_id
-      where r.org_id = $1 and r.state in ('starting','running') and a.state in ('queued','running') and r.data ? 'wallClockSeconds'
+      where r.org_id = $1 and r.state in ('starting','running') and a.state in ('queued','running') and r.data ? 'wallClockSeconds' and r.data->'dispatch'->>'phase' = 'started'
         and r.started_at + ((r.data->>'wallClockSeconds')::int * interval '1 second') < $2 limit 50`,
     [orgId, deps.now()],
   );

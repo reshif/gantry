@@ -101,7 +101,7 @@ export async function guardRun(db: Queryable, c: RunCtx, tok: TokenRow | null, o
   // S-94: past its wall clock a run gets no model calls or egress, whether or not the launcher has managed to stop it yet (the watchdog also revokes the token).
   if (o.mode === "model") {
     const limit = Number(c.runData.wallClockSeconds);
-    if (c.runStartedAt && Number.isFinite(limit) && limit > 0 && Date.now() > c.runStartedAt.getTime() + limit * 1000) {
+    if (c.runStartedAt && (c.runData.dispatch as { phase?: string } | undefined)?.phase === "started" && Number.isFinite(limit) && limit > 0 && Date.now() > c.runStartedAt.getTime() + limit * 1000) {
       return { code: "ended", reason: `The run is past its wall-clock limit of ${limit} seconds.` };
     }
   }
