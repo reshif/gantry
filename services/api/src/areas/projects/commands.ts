@@ -101,7 +101,7 @@ export async function createProject(tx: Tx, a: Actor, body: NewProjectBody): Pro
       [org, `${id}:${r.id || `NR-${i + 1}`}`, id, r.event, json(r.dest), r.template, json(r.cond), json(r.fields), r.enabled],
     );
   }
-  await tx.query(`insert into budgets (org_id, project_id, monthly_limit_micros, monthly_zero_cap, alert_at) values ($1,$2,$3,$4,0.8)`, [org, id, Math.round((body.budget ?? 1000) * 1_000_000), body.budget === 0]);
+  await tx.query(`insert into budgets (org_id, project_id, monthly_limit_micros, monthly_zero_cap, alert_at) values ($1,$2,$3,$4,0.8)`, [org, id, Math.round((body.budget ?? 1000) * 1_000_000), false]);
 
   const events: EventSpec[] = [evt("project.create", id, { type: "project", id }, undefined, { name, key, template: tpl.id, owner: ownerId })];
   const grant = !isFactoryAdminPerson(owner);
@@ -172,6 +172,12 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
       await tx.query(`update projects set config = jsonb_set(config, '{mcp}', $3::jsonb) where org_id = $1 and id = $2`, [org, projectId, json([...new Set(edit.value)])]);
       return done("project.config", before, edit.value, `Saved ${path}.`);
     }
+    case "oncall-page": {
+      // Whether the default page to the people on call goes out for halts, blocked work orders, security holds and escalations. Kill and restore page whatever this says.
+      const before = (row.config as { oncallPage?: boolean }).oncallPage !== false;
+      await tx.query(`update projects set config = jsonb_set(config, '{oncallPage}', $3::jsonb) where org_id = $1 and id = $2`, [org, projectId, json(edit.value)]);
+      return done("project.config", before, edit.value, `On-call page ${edit.value ? "on" : "off"} for halts, blocked work orders, security holds and escalations. Kill and restore always page.`);
+    }
     case "notifications": {
       const old = (await readProject(tx, org, projectId))!.notifications;
       // The kill and restore routes are locked as they are on the single-route path (S-35): none may be dropped, switched off or narrowed by a bulk save.
@@ -197,20 +203,21 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
       return done("notify.edit", old, edit.value, `Saved ${path}.`, "integrations");
     }
     case "budget-monthly": {
-      // What you type is what is enforced (S-43): 0 is a real $0 cap (nothing metered runs), null takes the cap off.
-      const prior = (await tx.query<{ m: string; z: boolean }>(`select monthly_limit_micros::text as m, monthly_zero_cap as z from budgets where org_id = $1 and project_id = $2`, [org, projectId])).rows[0];
-      const beforeCap: number | null = prior ? (Number(prior.m) > 0 ? Number(prior.m) / 1_000_000 : prior.z ? 0 : null) : null;
+      // 0 or null means no cap (owner decision, reversing the S-43 zero cap); monthly_zero_cap is never set and stays false.
+      const prior = (await tx.query<{ m: string }>(`select monthly_limit_micros::text as m from budgets where org_id = $1 and project_id = $2`, [org, projectId])).rows[0];
+      const beforeCap: number | null = prior && Number(prior.m) > 0 ? Number(prior.m) / 1_000_000 : null;
       const before = beforeCap ?? 0;
+      const value: number | null = edit.value !== null && edit.value > 0 ? edit.value : null;
       await tx.query(
         `insert into budgets (org_id, project_id, monthly_limit_micros, monthly_zero_cap) values ($1,$2,$3,$4) on conflict (org_id, project_id) do update set monthly_limit_micros = excluded.monthly_limit_micros, monthly_zero_cap = excluded.monthly_zero_cap, version = budgets.version + 1, updated_at = now()`,
-        [org, projectId, edit.value === null ? 0 : Math.round(edit.value * 1_000_000), edit.value === 0],
+        [org, projectId, value === null ? 0 : Math.round(value * 1_000_000), false],
       );
       // Raising the monthly budget lifts the budget halts it was holding (audited as a resume, naming the cap), unless something else still holds the work order.
       const lifted: string[] = [];
       const kept: string[] = [];
       const events: EventSpec[] = [];
       const jobs: NonNullable<CommandResult["jobs"]> = [];
-      if (edit.value === null || edit.value > before) {
+      if (value === null || value > before) {
         const halts = (await tx.query<{ wo_id: string; reason: string }>(
           `select s.wo_id, s.reason from stops s join work_orders w on w.org_id = s.org_id and w.id = s.wo_id where s.org_id = $1 and w.project_id = $2 and s.scope_type = 'wo' and s.mode = 'halt' and s.cause = 'budget' and s.lifted_at is null order by s.wo_id`, [org, projectId],
         )).rows;
@@ -218,13 +225,13 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
           if (capOfReason(h.reason) !== "project") continue;
           const still = await overBudget(tx, org, h.wo_id);
           if (still.length) { kept.push(`${h.wo_id} (${still.map(overText).join(" and ")})`); continue; }
-          const l = await liftBudgetHalt(tx, a, h.wo_id, edit.value === null ? "Project monthly cap taken off" : `Project monthly budget raised to $${edit.value}`);
+          const l = await liftBudgetHalt(tx, a, h.wo_id, value === null ? "Project monthly cap taken off" : `Project monthly budget raised to $${value}`);
           events.push(...l.events);
           jobs.push(...l.jobs);
           lifted.push(h.wo_id);
         }
       }
-      const r = await done("project.config", beforeCap, edit.value, `${edit.value === null ? "Took the monthly cap off." : edit.value === 0 ? "Set a $0 cap: nothing metered runs in this project until it is raised." : `Saved ${path}.`}${lifted.length ? ` Lifted the budget halt on ${lifted.join(", ")}.` : ""}${kept.length ? ` Still halted: ${kept.join("; ")}.` : ""}`);
+      const r = await done("project.config", beforeCap, value, `${value === null ? "Took the monthly cap off." : `Saved ${path}.`}${lifted.length ? ` Lifted the budget halt on ${lifted.join(", ")}.` : ""}${kept.length ? ` Still halted: ${kept.join("; ")}.` : ""}`);
       return lifted.length ? { ...r, events: [...r.events, ...events], jobs, changes: [...(r.changes ?? []), "workOrders", "stops", "floor", "home"] } : r;
     }
     case "budget-alert": {

@@ -50,8 +50,11 @@ d("round 4: a dead kill notice is tried on another channel (S-37)", () => {
     const mail = w.smtp.mails.find((m) => m.data.includes("asha@acme.dev"));
     expect(mail, "the Factory Admins were emailed the kill").toBeTruthy();
     expect(mail!.data).toMatch(/Kill switch pulled/);
-    const sent = await w.q(`select status, event_type from deliveries where event_id = $1 and channel = 'email'`, [e]);
-    expect(sent).toEqual([{ status: "sent", event_type: "kill" }]);
+    // Two separate emails: the on-call page (sent at the kill) and the S-37 retry of the dead Slack notice to the Factory Admins. Nobody gets both.
+    const sent = await w.q(`select status, event_type, coalesce(request->>'page', 'false') as page from deliveries where event_id = $1 and channel = 'email' order by page`, [e]);
+    expect(sent).toEqual([{ status: "sent", event_type: "kill", page: "false" }, { status: "sent", event_type: "kill", page: "true" }]);
+    const to = w.smtp.mails.map((m) => ((m.data.match(/^To: (.*)$/m) || ["", ""])[1] ?? "").split(/,\s*/)).flat();
+    expect(new Set(to).size, "no address is emailed twice for one kill").toBe(to.length);
     expect(Number((await w.q(`select count(*)::int n from events where type = 'delivery.failed'`))[0].n)).toBe(1);
   });
 });

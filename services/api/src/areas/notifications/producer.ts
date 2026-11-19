@@ -4,12 +4,12 @@
  * with a card template and conditions; repo overrides add or replace destinations; kill and restore ignore switches and conditions; a gate card is updated in
  * place when its gate changes, through the stored message reference. A failure here never undoes the event (the observer runs under a savepoint).
  */
-import { addEventObserver, enqueueOutbox, onObserverError, type AppendedEvent, type EventInput, type Queryable, type Tx } from "@gantry/db";
+import { addEventObserver, appendEvent, enqueueOutbox, onObserverError, type AppendedEvent, type EventInput, type Queryable, type Tx } from "@gantry/db";
 import { obj } from "../../core/read/rows.js";
 import { loadSample, slackBlocks, type CardSample } from "./cards.js";
 import { emitOne, newDeliveryId, recordDelivery } from "./emit.js";
 import { isMandatoryEvent, notifyEventFor, type EventLike } from "./events.js";
-import { condOf, hoursOk, loadInstances, type Dest, type InstInfo } from "./routing.js";
+import { adminsToPage, condOf, factoryAdmins, hoursOk, loadInstances, resolveOnCall, type Dest, type InstInfo } from "./routing.js";
 import { defaultTarget } from "../integrations/connectors.js";
 
 export interface ProducerOptions {
@@ -63,12 +63,15 @@ export async function produceNotifications(tx: Tx, e: EventInput, ap: AppendedEv
   const overrides = repoId ? await repoOverrides(tx, orgId, repoId, m.event) : [];
   // What reached a connection (not a failed row): a kill that reaches nobody falls back to the Factory Admins (S-35).
   let delivered = 0;
+  // Every address any route or fallback of this event reaches, so nobody is paged twice for it (the on-call page skips them).
+  const reached = new Set<string>();
   if (!projects.length) {
     // A factory kill with no kill route in any project: every connection open to the factory gets it, else the Factory Admins.
     const sample = await loadSample(tx, { orgId, publicUrl, event: m.event, projectId: null, woId: e.woId ?? null, source: like, at: ap.recordedAt });
-    const base = { orgId, eventId: ap.id, event: m.event, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo };
+    const base = { orgId, eventId: ap.id, event: m.event, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo, reached };
     delivered += await fallbackMandatory(tx, { ...base, project: null });
     if (!delivered) await fallbackAdmins(tx, { ...base, project: e.projectId ?? null });
+    await pageFactory(tx, e, ap, { orgId, event: m.event, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo, reached });
     return;
   }
   for (const project of projects) {
@@ -99,17 +102,71 @@ export async function produceNotifications(tx: Tx, e: EventInput, ap: AppendedEv
           repo: repoId, wo: e.woId ?? null, sample: { ...sample, template: r.template || sample.template }, insts, woFacts: wo, mentioned: typeof after.person === "string" ? after.person : null,
         });
         produced++;
-        if (em.status === "pending") carried++;
+        if (em.status === "pending") { carried++; for (const x of em.to ?? []) reached.add(x); }
       }
     }
     if (m.event === "mention" && produced === 0) await mentionNotice(tx, e, ap, publicUrl, after);
-    if (m.mandatory && carried === 0) carried += await fallbackMandatory(tx, { orgId, eventId: ap.id, event: m.event, project, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo });
+    if (m.mandatory && carried === 0) carried += await fallbackMandatory(tx, { orgId, eventId: ap.id, event: m.event, project, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo, reached });
     delivered += carried;
-    if (m.mandatory && !delivered && project === projects[projects.length - 1]) await fallbackAdmins(tx, { orgId, eventId: ap.id, event: m.event, project: e.projectId ?? null, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo });
+    if (m.mandatory && !delivered && project === projects[projects.length - 1]) await fallbackAdmins(tx, { orgId, eventId: ap.id, event: m.event, project: e.projectId ?? null, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo, reached });
+    if (e.projectId && pagesOnCall(m.event, e.type)) await pageOnCall(tx, e, ap, { orgId, project, event: m.event, mandatory: m.mandatory, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo, reached });
   }
+  // A factory-wide kill or restore (no project) that routes of some project carried still pages everyone on call, whatever channel carried it.
+  if (!e.projectId && m.mandatory) await pageFactory(tx, e, ap, { orgId, event: m.event, repoId, woId: e.woId ?? null, sample: await loadSample(tx, { orgId, publicUrl, event: m.event, projectId: null, woId: e.woId ?? null, source: like, at: ap.recordedAt }), insts, woFacts: wo, reached });
 }
 
-interface FallbackCtx { orgId: string; eventId: string; event: string; project: string | null; repoId: string | null; woId: string | null; sample: CardSample; insts: InstInfo[]; woFacts: WoFacts | null; exclude?: ReadonlySet<string> }
+interface FactoryPageCtx { orgId: string; event: string; repoId: string | null; woId: string | null; sample: CardSample; insts: InstInfo[]; woFacts: WoFacts | null; reached: ReadonlySet<string> }
+
+/**
+ * The page of a factory-wide kill or restore: the on-call people of EVERY project plus the Factory Admins (present first; all of them when every admin is away),
+ * one email, deduped by address and minus anyone already reached. One `notify.page` audit event. Kill and restore cannot be switched off.
+ */
+async function pageFactory(tx: Tx, e: EventInput, ap: AppendedEvent, c: FactoryPageCtx): Promise<void> {
+  const emails = new Set<string>();
+  const who = new Map<string, string>();
+  const projects = (await tx.query<{ id: string }>(`select id from projects where org_id = $1 order by id`, [c.orgId])).rows;
+  for (const p of projects) {
+    const oc = await resolveOnCall(tx, c.orgId, p.id, ap.recordedAt, false);
+    oc.emails.forEach((x, i) => { emails.add(x); who.set(x, oc.ids[i] ?? x); });
+  }
+  const admins = await adminsToPage(tx, c.orgId, ap.recordedAt);
+  for (const r of await factoryAdmins(tx, c.orgId)) if (admins.ids.includes(r.id)) { emails.add(r.email.toLowerCase()); who.set(r.email.toLowerCase(), r.id); }
+  const to = [...emails].filter((x) => !c.reached.has(x));
+  if (!to.length) return;
+  const em = await emitOne(tx, { orgId: c.orgId, eventId: ap.id, event: c.event, mandatory: true, project: null, route: null, dest: { channel: "email", target: to.join(","), integration: null }, repo: c.repoId, wo: c.woId, sample: c.sample, insts: c.insts, woFacts: c.woFacts, page: true });
+  await appendEvent(tx, {
+    orgId: c.orgId, type: "notify.page", category: "integrations", actor: "system", channel: "system", subject: { type: "factory", id: "factory" }, woId: c.woId, outcome: em.status === "pending" ? "ok" : "failed", causationId: ap.id,
+    after: { event: c.event, source: e.type, scope: "factory", paged: to.map((x) => who.get(x) ?? x), ...(admins.allAway ? { note: "all admins away: paged anyway" } : {}), delivery: em.deliveryId, ...(em.status === "failed" ? { error: em.error } : {}) },
+  });
+}
+
+/** The urgent events that page the people on call by default: kill, restore, an andon halt (not its resume), a blocked work order, a security hold, a gate escalation. */
+const pagesOnCall = (event: string, type: string): boolean => (event === "andon" ? type === "halt" : ["kill", "restore", "blocked", "security.hold", "gate.escalated"].includes(event));
+
+interface PageCtx { orgId: string; project: string; event: string; mandatory: boolean; repoId: string | null; woId: string | null; sample: CardSample; insts: InstInfo[]; woFacts: WoFacts | null; reached: ReadonlySet<string> }
+
+/**
+ * The default on-call page: one email to the project's on-call people (Factory Admins when nobody on the list is active and present) through the project's default email connection,
+ * minus anyone a route or fallback of this event already reached. Kill and restore always page; for the other events a project turns it off with `config.oncallPage = false`.
+ * Each page is a delivery-log row (marked `page`) and one `notify.page` audit event naming who was paged.
+ */
+async function pageOnCall(tx: Tx, e: EventInput, ap: AppendedEvent, c: PageCtx): Promise<void> {
+  if (!c.mandatory) {
+    const off = (await tx.query<{ off: boolean }>(`select (config ->> 'oncallPage') = 'false' as off from projects where org_id = $1 and id = $2`, [c.orgId, c.project])).rows[0]?.off;
+    if (off) return;
+  }
+  const oc = await resolveOnCall(tx, c.orgId, c.project, ap.recordedAt);
+  const emails = oc.emails.filter((x) => !c.reached.has(x));
+  if (!emails.length) return;
+  const em = await emitOne(tx, { orgId: c.orgId, eventId: ap.id, event: c.event, mandatory: c.mandatory, project: c.project, route: null, dest: { channel: "email", target: emails.join(","), integration: null }, repo: c.repoId, wo: c.woId, sample: c.sample, insts: c.insts, woFacts: c.woFacts, page: true });
+  const byEmail = new Map((oc.fallback ? await factoryAdmins(tx, c.orgId) : (await tx.query<{ id: string; email: string }>(`select id, email from people where org_id = $1 and id = any($2)`, [c.orgId, oc.ids])).rows).map((r) => [r.email.toLowerCase(), r.id]));
+  await appendEvent(tx, {
+    orgId: c.orgId, type: "notify.page", category: "integrations", actor: "system", channel: "system", subject: { type: "project", id: c.project }, projectId: c.project, woId: c.woId, outcome: em.status === "pending" ? "ok" : "failed", causationId: ap.id,
+    after: { event: c.event, source: e.type, paged: emails.map((x) => byEmail.get(x) ?? x), ...(oc.fallback ? { fallback: "Factory Admins (nobody on call is active and present)" } : {}), ...(oc.allAway ? { note: "all admins away: paged anyway" } : {}), delivery: em.deliveryId, ...(em.status === "failed" ? { error: em.error } : {}) },
+  });
+}
+
+interface FallbackCtx { orgId: string; eventId: string; event: string; project: string | null; repoId: string | null; woId: string | null; sample: CardSample; insts: InstInfo[]; woFacts: WoFacts | null; exclude?: ReadonlySet<string>; reached?: Set<string> }
 
 /** Kill and restore cannot be switched off: with no route to carry them, every connection open to the project that can notify gets them at its default target. Returns how many were queued. */
 async function fallbackMandatory(tx: Tx, c: FallbackCtx): Promise<number> {
@@ -120,7 +177,7 @@ async function fallbackMandatory(tx: Tx, c: FallbackCtx): Promise<number> {
     const target = defaultTarget(inst.typeId, inst.config) || (inst.typeId === "webhook" ? inst.targetId ?? "" : "");
     if (!target && inst.typeId !== "webhook") continue;
     const r = await emitOne(tx, { orgId: c.orgId, eventId: c.eventId, event: c.event, mandatory: true, project: c.project, route: null, dest: { channel: inst.typeId, target, integration: inst.id }, repo: c.repoId, wo: c.woId, sample: c.sample, insts: c.insts, woFacts: c.woFacts });
-    if (r.status === "pending") n++;
+    if (r.status === "pending") { n++; for (const x of r.to ?? []) c.reached?.add(x); }
   }
   return n;
 }
@@ -143,7 +200,7 @@ async function fallbackAdmins(tx: Tx, c: FallbackCtx): Promise<number> {
     for (const inst of c.insts) {
       if (inst.typeId !== "email" || !inst.destination || !inst.available || c.exclude?.has(inst.id)) continue;
       const r = await emitOne(tx, { orgId: c.orgId, eventId: c.eventId, event: c.event, mandatory: true, project: c.project, route: null, dest: { channel: "email", target: admins.join(","), integration: inst.id }, repo: c.repoId, wo: c.woId, sample: c.sample, insts: c.insts, woFacts: c.woFacts });
-      if (r.status === "pending") n++;
+      if (r.status === "pending") { n++; for (const x of r.to ?? []) c.reached?.add(x); }
     }
   }
   if (!n) {
