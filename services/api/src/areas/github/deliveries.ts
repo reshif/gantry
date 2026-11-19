@@ -50,6 +50,17 @@ export function factsFromWebhook(event: string, payload: Json): { facts: GithubF
       if (!["labeled", "opened"].includes(String(payload.action))) return { ignore: `issues.${String(payload.action)}` };
       return { facts: GithubFacts.parse({ ...base, issues: [{ number: Number(i.number), title: str(i.title) ?? "", labels: labels(i.labels), author: str(obj(i.user).login), url: str(i.html_url) }] }) };
     }
+    case "push": {
+      // A push to the default branch moves the commit new work orders start from (S-140). Any other branch, a deleted ref and a tag are not the base.
+      const branch = str(obj(payload.repository).default_branch);
+      const ref = str(payload.ref);
+      const after = str(payload.after);
+      if (!branch || ref !== `refs/heads/${branch}`) return { ignore: "push is not to the default branch" };
+      if (payload.deleted === true || !after || !/^[0-9a-f]{40}$/.test(after) || /^0+$/.test(after)) return { ignore: "push has no head commit" };
+      const before = str(payload.before);
+      const ts = str(obj(payload.head_commit).timestamp);
+      return { facts: GithubFacts.parse({ ...base, base: { branch, sha: after, ...(before && /^[0-9a-f]{40}$/.test(before) ? { before } : {}), ...(ts && Number.isFinite(Date.parse(ts)) ? { committedAt: new Date(ts).toISOString() } : {}) } }) };
+    }
     default:
       return { ignore: `${event} is not stored` };
   }

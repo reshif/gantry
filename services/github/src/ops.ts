@@ -304,6 +304,16 @@ async function defaultBranchTip(req: ReturnType<typeof rq>, owner: string, name:
   } catch { return null; }
 }
 
+/** The repository's default branch and its head commit now, read through the App (read-only). Refuses when the branch has no commits. */
+export async function readDefaultHead(d: OpDeps, repo: string): Promise<{ branch: string; sha: string }> {
+  const { owner, name } = splitRepo(repo);
+  try {
+    const head = await d.app.withRepo(repo, "read_state", async (c) => defaultBranchTip(rq(c.octokit), owner, name));
+    if (!head) throw new BrokerError(409, "no_default_head", `The default branch head of ${repo} could not be read.`);
+    return head;
+  } catch (e) { throw e instanceof BrokerError ? e : gh(e); }
+}
+
 /**
  * One reconciliation pass for a repository: recently updated pull requests on Gantry's branches with their checks and reviews, and issues carrying the
  * trigger label. The same pass runs when webhooks are available, to catch missed deliveries. The API records any difference as a drift event.

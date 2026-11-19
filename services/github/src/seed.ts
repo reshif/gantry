@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { buildRepoContext, CONVENTION_FILES, type RawConventionFile, type RepoContext } from "@gantry/domain";
+import { buildRepoContext, CONVENTION_FILES, isConventionPath, type RawConventionFile, type RepoContext } from "@gantry/domain";
 import type { GithubConfig } from "./config.js";
 import { BrokerError } from "./errors.js";
 import { git, gitText, GitError } from "./git.js";
@@ -64,11 +64,44 @@ export async function readRepoContext(work: string, commit: string): Promise<Rep
   return buildRepoContext(commit, found, { scan: (path, text) => scanText(path, text, { longLines: true }), sha256: (b) => createHash("sha256").update(b).digest("hex") });
 }
 
+/**
+ * The convention files as they are at a commit in the checkout's object store (`rev`), not in the working tree: the maintainers' version at the target branch head
+ * (S-141). Only regular blobs are read (a symlink or submodule entry is skipped), through the same caps and secret scan as the working tree read.
+ */
+export async function readRepoContextAt(work: string, rev: string, commit: string, gitBin: string): Promise<RepoContext> {
+  const found: RawConventionFile[] = [];
+  for (const f of CONVENTION_FILES) {
+    try {
+      const entry = (await gitText(["ls-tree", "-z", rev, "--", f.path], { gitBin, cwd: work })).split("\0")[0] ?? "";
+      const m = /^(100644|100755) blob ([0-9a-f]{40})\t/.exec(entry);
+      if (!m) continue;
+      const size = Number((await gitText(["cat-file", "-s", m[2]!], { gitBin, cwd: work })).trim());
+      if (!Number.isFinite(size) || size > 4 * 1024 * 1024) continue;
+      found.push({ path: f.path, content: await git(["cat-file", "blob", m[2]!], { gitBin, cwd: work }) });
+    } catch { /* absent at that commit */ }
+  }
+  return buildRepoContext(commit, found, { scan: (path, text) => scanText(path, text, { longLines: true }), sha256: (b) => createHash("sha256").update(b).digest("hex") });
+}
+
+/** The convention files (and anything under .claude/, CODEOWNERS, the pull request template) the work branch changed against the target branch: `git diff --name-status base...head`. */
+export async function conventionChangesBetween(work: string, base: string, head: string, gitBin: string): Promise<Array<{ path: string; status: "added" | "changed" | "removed" }>> {
+  const out = await gitText(["diff", "--name-status", "--no-renames", "-z", `${base}...${head}`], { gitBin, cwd: work });
+  const parts = out.split("\0").filter((x) => x !== "");
+  const res: Array<{ path: string; status: "added" | "changed" | "removed" }> = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const code = parts[i]!;
+    const path = parts[i + 1]!;
+    if (!isConventionPath(path)) continue;
+    res.push({ path, status: code.startsWith("A") ? "added" : code.startsWith("D") ? "removed" : "changed" });
+  }
+  return res.slice(0, 200);
+}
+
 /** How much history a seed with a base carries: a pull request's own commits plus the point it left the target branch. Deepened once when the merge base is further back. */
 const BASE_DEPTH = 100;
 const DEEPEN_BY = 1000;
 
-export async function seedWorkspace(d: SeedDeps, b: SeedBody): Promise<{ ok: true; repo: string; commit: string; volume: string; repoContext: RepoContext; base: string | null; baseBranch: string | null }> {
+export async function seedWorkspace(d: SeedDeps, b: SeedBody): Promise<{ ok: true; repo: string; commit: string; volume: string; repoContext: RepoContext; baseRepoContext: RepoContext | null; conventionChanges: Array<{ path: string; status: "added" | "changed" | "removed" }> | null; base: string | null; baseBranch: string | null }> {
   splitRepo(b.repo);
   const scratch = await mkdtemp(join(d.cfg.scratchDir, "gantry-seed-"));
   const work = join(scratch, "work");
@@ -111,8 +144,15 @@ export async function seedWorkspace(d: SeedDeps, b: SeedBody): Promise<{ ok: tru
     const head = (await gitText(["rev-parse", "HEAD"], { gitBin: d.cfg.gitBin, cwd: work })).trim();
     if (head !== b.commit) throw new BrokerError(502, "fetch_failed", `Fetched ${head}, expected ${b.commit}.`);
     const repoContext = await readRepoContext(work, head);
+    // The maintainers' version of the conventions is the target branch head's, not the work branch's (S-141): read at the base commit, and what the branch changed is listed apart.
+    let baseRepoContext: RepoContext | null = null;
+    let conventionChanges: Array<{ path: string; status: "added" | "changed" | "removed" }> | null = null;
+    if (base) {
+      baseRepoContext = base === head ? repoContext : await readRepoContextAt(work, base, base, d.cfg.gitBin).catch(() => null);
+      conventionChanges = base === head ? [] : await conventionChangesBetween(work, base, head, d.cfg.gitBin).catch(() => null);
+    }
     await d.store.seed(b.volume, work, { uid: RUNNER_UID, gid: RUNNER_UID });
-    return { ok: true, repo: b.repo, commit: head, volume: b.volume, repoContext, base, baseBranch: base ? (b.baseBranch ?? null) : null };
+    return { ok: true, repo: b.repo, commit: head, volume: b.volume, repoContext, baseRepoContext, conventionChanges, base, baseBranch: base ? (b.baseBranch ?? null) : null };
   } finally {
     await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
   }

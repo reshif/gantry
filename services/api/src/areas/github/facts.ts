@@ -91,7 +91,13 @@ export const GithubFacts = z.object({
     commits: z.array(PublishedCommitFact).max(500),
   }).optional(),
   /** The default branch and its tip as the poll saw them. Recorded as the repository's base commit, the commit new workspaces are seeded from (spec 4.3) until a work order has commits of its own. */
-  base: z.object({ branch: z.string().min(1).max(300), sha: z.string().regex(/^[0-9a-f]{40}$/) }).optional(),
+  base: z.object({
+    branch: z.string().min(1).max(300),
+    sha: z.string().regex(/^[0-9a-f]{40}$/),
+    /** From a push: the commit the branch pointed at before it, and when the new head was committed. A late delivery is told apart from a newer one by these. */
+    before: z.string().regex(/^[0-9a-f]{40}$/).optional(),
+    committedAt: z.string().max(40).optional(),
+  }).optional(),
   /** Set when a webhook says a delivery was seen but its detail must come from the next poll. */
   hint: z.string().max(200).optional(),
 });

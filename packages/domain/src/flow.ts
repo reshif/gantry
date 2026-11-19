@@ -400,7 +400,8 @@ export function riskTagsFor(paths: readonly string[]): string[] {
 
 /** Risk tags on a work order: from its changed files (or declared paths) plus a `high` risk level. Any tag forces a human vote. */
 export function riskTagsOf(wo: Pick<WorkOrder, "files" | "paths" | "risk">): string[] {
-  const paths = wo.files && wo.files.length ? wo.files.map((f) => f.path) : wo.paths;
+  // Every file the work order changed, across all Build rounds: `files` is the latest publish only, `paths` accumulates, so a change flagged in round 1 stays flagged in round 2.
+  const paths = [...new Set([...(wo.files ?? []).map((f) => f.path), ...(wo.paths ?? [])])];
   const tags = riskTagsFor(paths);
   if (wo.risk === "high" && !tags.includes("high-risk")) tags.push("high-risk");
   return tags;

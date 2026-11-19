@@ -16,9 +16,11 @@ describe("the run spec's repository context section", () => {
     expect(s).toMatch(/- CONTRIBUTING\.md \(8 bytes, sha256 [0-9a-f]{12}\)\n?/);
     expect(s).not.toContain("Be nice.");
   });
-  it("is empty when the run has no manifest, an unavailable one, or a malformed one", () => {
+  it("is empty when the run has no manifest or a malformed one; an unavailable one says so to the agent (S-145)", () => {
     expect(repoContextSection({ runData: {} })).toBe("");
-    expect(repoContextSection({ runData: { repoContext: { commit: null, files: [], hash: null, unavailable: true } } })).toBe("");
+    const u = repoContextSection({ runData: { repoContext: { commit: null, files: [], hash: null, unavailable: true } } });
+    expect(u).toContain("## Repository context");
+    expect(u).toContain("The repository's convention files could not be read for this run");
     expect(repoContextSection({ runData: { repoContext: { files: "x" } } })).toBe("");
   });
 });

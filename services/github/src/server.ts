@@ -5,7 +5,7 @@ import type { ApiClient } from "./api.js";
 import type { GithubConfig } from "./config.js";
 import { BrokerError } from "./errors.js";
 import type { GithubApp } from "./github.js";
-import { DescribeBody, DraftBody, GateCheckBody, MergeBody, Poller, convertToDraft, describePullRequest, listDeliveries, mergePullRequest, readPrState, readProtections, reconcileDeliveries, reconcileRepo, setGateCheck, type OpDeps } from "./ops.js";
+import { DescribeBody, DraftBody, GateCheckBody, MergeBody, Poller, readDefaultHead, convertToDraft, describePullRequest, listDeliveries, mergePullRequest, readPrState, readProtections, reconcileDeliveries, reconcileRepo, setGateCheck, type OpDeps } from "./ops.js";
 import { CanaryBody, FileBody, InspectBody, OnboardMergeBody, PrBody, inspectRepo, listAvailable, mergeOnboardingPr, openOnboardingPr, readRepoFile, runCanary } from "./onboarding.js";
 import { PublishBody, publishWorkspace } from "./publish.js";
 import { SeedBody, seedWorkspace, type SeedDeps } from "./seed.js";
@@ -63,6 +63,8 @@ export async function buildServer(d: ServerDeps): Promise<{ server: FastifyInsta
 
   server.post("/v1/workspaces/seed", async (req) =>
     seedWorkspace({ cfg: d.cfg, app, store: d.store, apiBase: appCfg.baseUrl, ...(d.cloneUrl ? { cloneUrl: d.cloneUrl } : {}), ...(d.gitConfig ? { gitConfig: d.gitConfig } : {}) }, SeedBody.parse(req.body)));
+  // The default branch and its head as GitHub has them now: dispatch asks this when its recorded base commit is stale (S-140).
+  server.get("/v1/default-head", async (req) => ({ ok: true, ...(await readDefaultHead(ops, z.object({ repo: Repo }).parse(req.query).repo)) }));
   server.post("/v1/publish", async (req) => publishWorkspace({ cfg: d.cfg, app, api: d.api, store: d.store }, PublishBody.parse(req.body)));
   server.post("/v1/checks/gate", async (req) => setGateCheck(ops, GateCheckBody.parse(req.body)));
   server.get("/v1/pull-state", async (req) => {

@@ -19,7 +19,7 @@ import { command, decide, policyState, refuse, type CommandSpec } from "../core/
 import { loadFlow, stateWithPinned } from "../areas/workorders/model.js";
 import { actionForGate, approveGate, parseGateId, rejectGate, requireGatePin } from "../areas/workorders/gates.js";
 import { addFollowup, decline, editBrief, postMessage, reclassify, submitWO } from "../areas/workorders/intake.js";
-import { dryRunMove, moveWO, park, reassign, retry, retryWithLimits, sendBack, setRecordSummary, unpark, wipOverride } from "../areas/workorders/moves.js";
+import { dryRunMove, moveWO, park, reassign, refreshContext, retry, retryWithLimits, sendBack, setRecordSummary, unpark, wipOverride } from "../areas/workorders/moves.js";
 import { setWoCap } from "../areas/workorders/budget.js";
 import { keyCreator } from "../areas/apikeys/store.js";
 import { woVersion, readWoRow } from "../areas/workorders/model.js";
@@ -423,6 +423,13 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/v1/work-orders/:id/retry", async (req) => {
     const { id } = Id.parse(req.params);
     return command(req, spec(id, "wo.sendback", await scopeOf(req, id)), (tx, a) => retry(tx, a, id));
+  });
+
+  /** Refresh instructions: re-pin the work order's context (layers, guidelines, agent and skill versions) to what is published now. Audited as wo.context.repin. */
+  app.post("/api/v1/work-orders/:id/refresh-context", async (req) => {
+    const { id } = Id.parse(req.params);
+    const b = z.looseObject({ reason: z.string().trim().max(300).optional(), via: Via }).parse(req.body ?? {});
+    return command(req, spec(id, "wo.sendback", await scopeOf(req, id)), (tx, a) => refreshContext(tx, a, id, b.reason));
   });
 
   /** Retry with a higher limit: a one-off raise for the next attempt only. Needs the right to change limits (project.config); a Factory Admin's reason (5+ characters) overrides a freeze and is audited. */

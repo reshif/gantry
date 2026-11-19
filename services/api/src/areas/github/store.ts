@@ -52,12 +52,20 @@ export async function applyFacts(tx: Tx, orgId: string, f: GithubFacts, o: { now
   const touched = new Set<string>();
 
   if (f.base) {
-    // Quiet bookkeeping (no event): the worker seeds new workspaces from repo_config.data.baseSha when a work order has no commit of its own.
-    await tx.query(
-      `update repo_config set data = jsonb_set(jsonb_set(data, '{baseSha}', to_jsonb($3::text)), '{baseBranch}', to_jsonb($4::text)), updated_at = now()
-        where org_id = $1 and repo_id = $2 and (data->>'baseSha' is distinct from $3 or data->>'baseBranch' is distinct from $4)`,
-      [orgId, repo.id, f.base.sha, f.base.branch],
-    );
+    // Quiet bookkeeping (no event): the worker seeds new workspaces from repo_config.data.baseSha when a work order has no commit of its own. `baseAt` is when the
+    // commit was last confirmed, so dispatch can tell a recorded commit that is fresh from one that has to be checked against GitHub (S-140).
+    // A push may only move the base FORWARD (G-X2): two real pushes can be delivered out of order, and the older one must not take the base back or mark it fresh.
+    // A poll reads the branch tip as it is, so it is always the truth. A push is a clean step when its `before` is the stored commit, or newer than the stored commit by time.
+    const cur = (await tx.query<{ sha: string | null; at: string | null }>(`select data->>'baseSha' as sha, data->>'baseCommittedAt' as at from repo_config where org_id = $1 and repo_id = $2`, [orgId, repo.id])).rows[0];
+    const b = f.base;
+    const forward = f.source !== "hook" || !cur?.sha || cur.sha === b.sha || b.before === cur.sha || (b.committedAt ? !cur.at || Date.parse(b.committedAt) > Date.parse(cur.at) : !b.before);
+    if (forward) {
+      await tx.query(
+        `update repo_config set data = (data || jsonb_build_object('baseSha', $3::text, 'baseBranch', $4::text, 'baseAt', $5::text)) - 'baseCommittedAt' || case when $6::text is null then '{}'::jsonb else jsonb_build_object('baseCommittedAt', $6::text) end, updated_at = now()
+          where org_id = $1 and repo_id = $2`,
+        [orgId, repo.id, b.sha, b.branch, (o.now ?? new Date()).toISOString(), f.source === "hook" ? (b.committedAt ?? null) : null],
+      );
+    }
   }
 
   if (f.publish) {
