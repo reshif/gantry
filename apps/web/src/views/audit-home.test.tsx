@@ -116,6 +116,8 @@ describe("Audit", () => {
     expect(document.getElementById("aud-verify")!.closest("#aud-verify-row")).toBeTruthy();
     expect(Array.from(document.querySelectorAll("#aud-table th")).map((t) => t.textContent?.replace(/[↑↓↕]/g, ""))).toEqual(["When", "Actor", "Action", "Target", "Category", "Outcome"]);
     expect(document.querySelectorAll("#aud-table tbody tr")).toHaveLength(3);
+    // T-47: a time never wraps onto two lines ("14 Nov / 13:34"): the cell and its column are held to one line by the stylesheet
+    expect(document.querySelector("#aud-table td .aud-when")).toBeTruthy();
     expect(document.querySelector("#aud-table .chip.bad")?.textContent).toBe("denied");
     expect(document.getElementById("aud-count") ?? document.querySelector(".filterbar-count")?.textContent).toBeTruthy();
     expect(document.querySelector(".filterbar-count")?.textContent).toBe("3 entries");
