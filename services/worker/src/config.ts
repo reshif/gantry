@@ -32,6 +32,8 @@ export interface WorkerConfig {
   reconcileEveryMs: number;
   verifyEveryMs: number;
   watchdogEveryMs: number;
+  /** A repository's recorded base commit older than this is checked against GitHub when a work order with no commit of its own is dispatched (S-140). */
+  baseStaleMs: number;
   /** Time a freshly dispatched run has to send its first heartbeat before the attempt is lost (F9). */
   startupLeaseMs: number;
   /** Time the result intake keeps the attempt's lease while it publishes. */
@@ -92,6 +94,7 @@ export async function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): Pr
     reconcileEveryMs: int(env.WORKER_RECONCILE_EVERY_MS, 5 * 60_000),
     verifyEveryMs: int(env.WORKER_VERIFY_EVERY_MS, 24 * 3600_000),
     watchdogEveryMs: int(env.WORKER_WATCHDOG_EVERY_MS, 15_000),
+    baseStaleMs: int(env.WORKER_BASE_STALE_MS, 10 * 60_000),
     startupLeaseMs: int(env.WORKER_STARTUP_LEASE_MS, 180_000),
     publishLeaseMs: int(env.WORKER_PUBLISH_LEASE_MS, 15 * 60_000),
     maxDispatchDeferrals: int(env.WORKER_MAX_DISPATCH_DEFERRALS, 60),

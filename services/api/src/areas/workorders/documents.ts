@@ -101,19 +101,19 @@ export async function readDocument(db: Queryable, orgId: string, woId: string, i
 }
 
 /** The latest version of each document, with its text, for the station handoff. Bodies are capped so a handoff stays a handoff. */
-export async function latestDocuments(db: Queryable, orgId: string, woId: string, o: { exceptAttempt?: string; perDoc?: number; total?: number } = {}): Promise<Array<{ name: string; station: string | null; version: number; markdown: string; truncated: boolean; editedByPerson?: boolean }>> {
-  const { rows } = await db.query<{ doc: string; station: string | null; version: number; body: string | null; author_kind: string; accepted_by: string | null }>(
-    `select distinct on (doc) doc, station, version, body, author_kind from artefacts where org_id = $1 and wo_id = $2 and doc is not null and not (author_kind = 'system' and attempt_id is not null) and ($3::text is null or attempt_id is distinct from $3) order by doc, version desc`,
+export async function latestDocuments(db: Queryable, orgId: string, woId: string, o: { exceptAttempt?: string; perDoc?: number; total?: number } = {}): Promise<Array<{ at?: number; name: string; station: string | null; version: number; markdown: string; truncated: boolean; editedByPerson?: boolean }>> {
+  const { rows } = await db.query<{ doc: string; station: string | null; version: number; body: string | null; author_kind: string; accepted_by: string | null; at: number }>(
+    `select distinct on (doc) doc, station, version, body, author_kind, (extract(epoch from created_at) * 1000)::float8 as at from artefacts where org_id = $1 and wo_id = $2 and doc is not null and not (author_kind = 'system' and attempt_id is not null) and ($3::text is null or attempt_id is distinct from $3) order by doc, version desc`,
     [orgId, woId, o.exceptAttempt ?? null],
   );
   const perDoc = o.perDoc ?? 40_000;
   let left = o.total ?? 160_000;
-  const out: Array<{ name: string; station: string | null; version: number; markdown: string; truncated: boolean; editedByPerson?: boolean }> = [];
+  const out: Array<{ at?: number; name: string; station: string | null; version: number; markdown: string; truncated: boolean; editedByPerson?: boolean }> = [];
   for (const r of rows) {
     const text = r.body ?? "";
     const take = Math.max(0, Math.min(perDoc, left, text.length));
     left -= take;
-    out.push({ name: r.doc, station: r.station, version: r.version, markdown: text.slice(0, take), truncated: take < text.length, ...(r.author_kind === "person" ? { editedByPerson: true } : {}) });
+    out.push({ at: Number(r.at), name: r.doc, station: r.station, version: r.version, markdown: text.slice(0, take), truncated: take < text.length, ...(r.author_kind === "person" ? { editedByPerson: true } : {}) });
   }
   return out;
 }

@@ -7,6 +7,7 @@ import {
 import type { Queryable } from "@gantry/db";
 import { loadFlowState } from "../../core/read/state.js";
 import { ms, obj } from "../../core/read/rows.js";
+import { parsePin } from "../agents/context-pin.js";
 import { projectEvents } from "../audit/read.js";
 import { countWip, coveringStop, type CoveringStop } from "./engine.js";
 import { readProject } from "../projects/store.js";
@@ -207,6 +208,34 @@ export async function readFloor(db: Queryable, orgId: string, projectId: string,
 const sha = (s: string): string => createHash("sha256").update(s).digest("hex");
 const iso = (d: Date | null | undefined): string | null => (d ? new Date(d).toISOString() : null);
 
+interface RunContextRow { seed?: { commit?: string; source?: string; why?: string } | null; unavailable?: boolean | null; unavailableReason?: string | null; commit?: string | null; hash?: string | null; proposed?: Array<{ path: string; status: string }> | null; drift?: boolean | null; pin?: string | null }
+
+/**
+ * What instructions the work order runs on (S-143, S-145): the context pin written at its first dispatch (layer versions, guidelines, agent and skill versions), every
+ * recorded re-pin, and per run which commit the workspace was seeded at and why, whether the repository's convention files could be read, what the branch proposed to
+ * change in them, and whether the prompt moved after dispatch. A run whose conventions were not read, or whose prompt drifted, is a notice for a person.
+ */
+function contextOf(rawPin: unknown, runs: Array<{ id: string; attempt_id: string; ctx: RunContextRow }>, attempts: Array<{ id: string; station: string }>, events: Array<{ seq: string; occurred_at: Date; type: string; actor: string; after: unknown; subject?: unknown }>) {
+  const pin = parsePin(rawPin);
+  const station = (attempt: string): string => attempts.find((a) => a.id === attempt)?.station ?? "";
+  const perRun = runs.map((r) => ({
+    run: r.id, station: station(r.attempt_id), contextPin: r.ctx.pin ?? null,
+    seed: r.ctx.seed ? { commit: r.ctx.seed.commit ?? null, source: r.ctx.seed.source ?? null, why: r.ctx.seed.why ?? null } : null,
+    conventions: r.ctx.unavailable ? { state: "unavailable" as const, reason: r.ctx.unavailableReason ?? null } : r.ctx.commit ? { state: "read" as const, commit: r.ctx.commit, hash: r.ctx.hash ?? null } : { state: "none" as const },
+    proposedChanges: (r.ctx.proposed ?? []).map((f) => ({ path: f.path, status: f.status })),
+    promptDrift: r.ctx.drift === true,
+  }));
+  const notices = perRun.flatMap((r) => [
+    ...(r.conventions.state === "unavailable" ? [{ kind: "conventions_unavailable" as const, run: r.run, station: r.station, text: `The repository's convention files could not be read for the ${r.station} run${r.conventions.reason ? ` (${r.conventions.reason})` : ""}. The agent was told so.` }] : []),
+    ...(r.promptDrift ? [{ kind: "prompt_drift" as const, run: r.run, station: r.station, text: `The prompt of the ${r.station} run changed after it was dispatched: what it ran with is not what was recorded at dispatch.` }] : []),
+  ]);
+  return {
+    pin: pin ? { id: pin.id, pinnedAt: pin.pinnedAt, base: pin.base, project: pin.project, guidelines: pin.guidelines ? { hash: pin.guidelines.hash, commit: pin.guidelines.commit } : null, agents: Object.fromEntries(Object.entries(pin.agents).map(([k, v]) => [k, { version: v.version, skills: v.skills }])) } : null,
+    repins: events.filter((e) => e.type === "wo.context.repin").map((e) => ({ seq: Number(e.seq), at: iso(e.occurred_at), by: e.actor, detail: e.after })),
+    runs: perRun, notices,
+  };
+}
+
 /** The record of a work order (spec 8.4, 13.1): request verbatim, classification, brief versions, journey, every gate instance with votes and the decision with its pinned versions, send-backs, bay stays, attempts and results, code and outcomes. */
 export async function readRecord(db: Queryable, orgId: string, woId: string) {
   const row = await readWoRow(db, orgId, woId);
@@ -225,7 +254,8 @@ export async function readRecord(db: Queryable, orgId: string, woId: string) {
       `select id, station, visit, fencing::text, state, outcome, started_at, ended_at, tuple_id, data from attempts where org_id = $1 and wo_id = $2 order by created_at, id`),
     q<{ id: string; attempt_id: string; station: string; outcome: string; summary: string; created_at: Date; body: Data }>(`select id, attempt_id, station, outcome, summary, created_at, body from station_results where org_id = $1 and wo_id = $2 order by created_at, id`),
     q<{ bay: string; reason: string; entered_by: string | null; entered_at: Date; left_at: Date | null }>(`select bay, reason, entered_by, entered_at, left_at from bay_stays where org_id = $1 and wo_id = $2 order by entered_at`),
-    q<{ id: string; attempt_id: string; state: string; model_id: string | null; created_at: Date }>(`select id, attempt_id, state, model_id, created_at from runs where org_id = $1 and wo_id = $2 order by created_at`),
+    q<{ id: string; attempt_id: string; state: string; model_id: string | null; created_at: Date; ctx: RunContextRow }>(
+      `select id, attempt_id, state, model_id, created_at, jsonb_build_object('seed', data->'seed', 'unavailable', data->'repoContext'->'unavailable', 'unavailableReason', data->'repoContext'->'unavailableReason', 'commit', data->'repoContext'->'commit', 'hash', data->'repoContext'->'hash', 'proposed', data->'repoContextProposed'->'files', 'drift', data->'promptDrift', 'pin', data->'contextPin'->'id') as ctx from runs where org_id = $1 and wo_id = $2 order by created_at`),
     q<{ seq: string; occurred_at: Date; type: string; actor: string; outcome: string; after: unknown; subject: unknown; project_id: string | null; wo_id: string | null }>(
       `select seq::text, occurred_at, type, actor, outcome, after, subject, project_id, wo_id from events where org_id = $1 and wo_id = $2 and outcome <> 'denied' order by occurred_at, seq limit 2000`),
     q<{ original_text: string; submitted_by: string | null; via: string; created_at: Date }>(`select original_text, submitted_by, via, created_at from requests where org_id = $1 and wo_id = $2`),
@@ -255,6 +285,7 @@ export async function readRecord(db: Queryable, orgId: string, woId: string) {
     attempts: attempts.map((a) => ({ id: a.id, station: a.station, visit: a.visit, fencing: Number(a.fencing), state: a.state, outcome: a.outcome, startedAt: iso(a.started_at), endedAt: iso(a.ended_at), tuple: a.tuple_id, agent: a.data.agent ?? null })),
     results: results.map((r) => ({ id: r.id, attempt: r.attempt_id, station: r.station, outcome: r.outcome, summary: r.summary, at: iso(r.created_at), output: obj(r.body).output ?? null })),
     runs: runs.map((r) => ({ id: r.id, attempt: r.attempt_id, state: r.state, model: r.model_id, at: iso(r.created_at) })),
+    context: contextOf(row.data.contextPin, runs, attempts, events),
     wait: await readRunWait(db, orgId, woId),
     code: { pullRequests: prs.map((p) => ({ number: p.number, state: p.state, draft: p.draft, headSha: p.head_sha, title: p.title, url: p.url, mergedAt: iso(p.merged_at) })), commits: commits.map((c) => ({ sha: c.sha, message: c.message, author: c.author, at: iso(c.committed_at) })), files: wo.files ?? [], diff: wo.diff, tests: wo.tests },
     outcomes: wo.outcomes ?? [], totals, completeness: completeness(full), summary,

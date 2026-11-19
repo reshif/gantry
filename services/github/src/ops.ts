@@ -293,15 +293,28 @@ export async function reconcileDeliveries(d: OpDeps, limit = 50): Promise<{ chec
 // ---------------------------------------------------------------- polling (spec 11.6)
 
 /** The default branch and its tip commit, or null when it cannot be read (the poll is still useful without it). */
-async function defaultBranchTip(req: ReturnType<typeof rq>, owner: string, name: string): Promise<{ branch: string; sha: string } | null> {
+async function defaultBranchTip(req: ReturnType<typeof rq>, owner: string, name: string): Promise<{ branch: string; sha: string; committedAt?: string } | null> {
   try {
     const repo = (await req("GET /repos/{owner}/{repo}", { owner, repo: name })).data as { default_branch?: unknown };
     const branch = typeof repo.default_branch === "string" && repo.default_branch ? repo.default_branch : null;
     if (!branch) return null;
     const ref = (await req("GET /repos/{owner}/{repo}/git/ref/{ref}", { owner, repo: name, ref: `heads/${branch}` })).data as { object?: { sha?: unknown } };
     const sha = ref.object?.sha;
-    return typeof sha === "string" && /^[0-9a-f]{40}$/.test(sha) ? { branch, sha } : null;
+    if (typeof sha !== "string" || !/^[0-9a-f]{40}$/.test(sha)) return null;
+    // The tip's commit time lets a late push hook be told apart from a newer one (G-X6). Best effort: without it the API clears the stored time and accepts only a clean step.
+    const at = await req("GET /repos/{owner}/{repo}/commits/{ref}", { owner, repo: name, ref: sha }).then((r) => (r.data as { commit?: { committer?: { date?: unknown } } }).commit?.committer?.date).catch(() => undefined);
+    return typeof at === "string" && Number.isFinite(Date.parse(at)) ? { branch, sha, committedAt: new Date(at).toISOString() } : { branch, sha };
   } catch { return null; }
+}
+
+/** The repository's default branch and its head commit now, read through the App (read-only). Refuses when the branch has no commits. */
+export async function readDefaultHead(d: OpDeps, repo: string): Promise<{ branch: string; sha: string; committedAt?: string }> {
+  const { owner, name } = splitRepo(repo);
+  try {
+    const head = await d.app.withRepo(repo, "read_state", async (c) => defaultBranchTip(rq(c.octokit), owner, name));
+    if (!head) throw new BrokerError(409, "no_default_head", `The default branch head of ${repo} could not be read.`);
+    return head;
+  } catch (e) { throw e instanceof BrokerError ? e : gh(e); }
 }
 
 /**

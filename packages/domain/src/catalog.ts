@@ -1595,6 +1595,7 @@ export const RISK_TAG_RULES: readonly RiskTagRule[] = [
   { tag: "ci", label: "CI and workflow files", test: /(^|\/)(\.github\/workflows\/|\.gitlab-ci\.ya?ml$|Jenkinsfile$|\.circleci\/|azure-pipelines\.ya?ml$)/i },
   { tag: "dependencies", label: "Dependency manifests and lockfiles", test: /(^|\/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|go\.(mod|sum)|Cargo\.(toml|lock)|requirements[^/]*\.txt|poetry\.lock|Pipfile(\.lock)?|pom\.xml|build\.gradle(\.kts)?|Gemfile(\.lock)?|composer\.(json|lock))$/i },
   { tag: "codeowners", label: "Code-owner files", test: /(^|\/)CODEOWNERS$/ },
+  { tag: "repo-conventions", label: "Repository conventions (AGENTS.md, CLAUDE.md, CONTRIBUTING.md, .claude, PR template)", test: /(^|\/)((AGENTS|CLAUDE)\.md$|\.claude\/|pull_request_template(\.md$|\/)|CONTRIBUTING(\.md)?$)/i },
   { tag: "auth-crypto", label: "Auth and crypto paths", test: /(^|\/)(auth|authn|authz|crypto|security|secrets?|tls|keys?)(\/|[._-])|\.pem$|\.key$/i },
   { tag: "gantry-config", label: "Gantry config", test: /(^|\/)(\.gantry\/|factory\.ya?ml$)/ },
   { tag: "migration", label: "Migrations", test: /(^|\/)(migrations?|db\/migrate)\/|\.sql$/i },

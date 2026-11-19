@@ -1,6 +1,6 @@
 import type { Queryable } from "@gantry/db";
-import { REPO_CONTEXT_LAYER_NAME, RepoContext, checkMatches, renderRepoContext } from "@gantry/domain";
-import { compactPrevious, type StationResultRow } from "./previous.js";
+import { PROPOSED_CONVENTIONS_TITLE, REPO_CONTEXT_LAYER_NAME, ProposedConventions, RepoContext, checkMatches, renderProposedConventions, renderRepoContext, renderRepoContextUnavailable } from "@gantry/domain";
+import { compactPrevious, discardedStations, type StationResultRow } from "./previous.js";
 import { agentConfig } from "./metering.js";
 import { runLimitsOf } from "../agents/run-limits.js";
 import { testCommandRules } from "../onboarding/testcmd.js";
@@ -76,7 +76,8 @@ export async function composeInstructions(db: Queryable, c: RunCtx): Promise<Com
   const agent = await agentConfig(db, c);
   const av = c.agentId ? await loadAgentVersion(db, c.orgId, c.agentId, c.agentVersion) : null;
   const pin = c.runData.instructionPin && typeof c.runData.instructionPin === "object" ? (c.runData.instructionPin as InstructionPin) : null;
-  const { layers } = await composeLayers(db, { orgId: c.orgId, agentId: c.agentId, projectId: c.projectId, repoId: c.repoId, pin, fallbackAgentText: agent.instructions, fallbackOverlay: c.overlay }, av);
+  // A run dispatched with a pin is composed from that snapshot alone: a repository chosen after dispatch brings in no guidelines the run was not given with its conventions.
+  const { layers } = await composeLayers(db, { orgId: c.orgId, agentId: c.agentId, projectId: c.projectId, repoId: c.repoId, pin, frozen: pin !== null, fallbackAgentText: agent.instructions, fallbackOverlay: c.overlay }, av);
   const out = assemble(layers);
   return { text: out.text, hash: out.hash, layers: out.layers.map((l) => ({ name: l.name, hash: l.hash, version: l.version })), used: out.layers };
 }
@@ -87,9 +88,22 @@ export async function composeInstructions(db: Queryable, c: RunCtx): Promise<Com
  * The harness's own CLAUDE.md loader stays disabled, so this is the only way repository conventions reach the model.
  */
 export function repoContextSection(c: Pick<RunCtx, "runData">): string {
+  const raw = c.runData.repoContext as { unavailable?: unknown; unavailableReason?: unknown } | undefined;
+  // S-145: a repository context that could not be read is said plainly to the agent, never dropped silently.
+  if (raw && raw.unavailable === true) return `## ${REPO_CONTEXT_LAYER_NAME}\n\n${renderRepoContextUnavailable(typeof raw.unavailableReason === "string" ? raw.unavailableReason : null)}`;
   const parsed = RepoContext.safeParse(c.runData.repoContext);
   const body = parsed.success ? renderRepoContext(parsed.data) : "";
   return body ? `## ${REPO_CONTEXT_LAYER_NAME}\n\n${body}` : "";
+}
+
+/**
+ * What the work order's branch changed in the repository's convention files (S-141), as its own section after the maintainers' context and clearly not theirs.
+ * The repository context above is read at the target branch head; this is the only place the branch's own version of those files reaches an agent.
+ */
+export function proposedConventionsSection(c: Pick<RunCtx, "runData">): string {
+  const parsed = ProposedConventions.safeParse(c.runData.repoContextProposed);
+  const body = parsed.success ? renderProposedConventions(parsed.data) : "";
+  return body ? `## ${PROPOSED_CONVENTIONS_TITLE}\n\n${body}` : "";
 }
 
 async function skillsFor(db: Queryable, c: RunCtx): Promise<SkillOut[]> {
@@ -140,7 +154,10 @@ export interface RunSpecOut {
 }
 
 /** What the runner wrapper's `RunSpec` expects (runner/wrapper/src/spec.ts). Returns null when a claude run has no model. */
-export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string): Promise<RunSpecOut | { error: string }> {
+export async function composeRunSpec(db: Queryable, c0: RunCtx, edgeUrl: string): Promise<RunSpecOut | { error: string }> {
+  // The repository the run was dispatched with decides its repo-scoped inputs (MCP scope, confirmed test commands, guidelines): a repository chosen later does not join a run midway.
+  const snap = c0.runData.dispatchSnapshot as { repoId?: string | null } | undefined;
+  const c: RunCtx = snap && "repoId" in snap && (snap.repoId ?? null) !== c0.repoId ? { ...c0, repoId: snap.repoId ?? null } : c0;
   const agent = await agentConfig(db, c);
   const model = c.runModel ?? c.tupleModel ?? undefined;
   // No model is never a silent stub: the stub adapter runs only when the run was explicitly marked as one (tests and local development).
@@ -162,8 +179,9 @@ export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string):
   const confirmedTests = carrier || !c.repoId ? null : (await db.query<{ t: unknown }>(`select data->'testCommands' as t from repo_config where org_id = $1 and repo_id = $2`, [c.orgId, c.repoId])).rows[0]?.t;
   // The repository's own convention files follow the layers; they are a manifest part of their own, so the hash covers them.
   const repoSection = repoContextSection(c);
-  const instructionsText = [inst.text, repoSection].filter((x) => x !== "").join("\n\n");
-  const promptManifest = buildManifest("run", composedParts(inst.used, skills, repoSection), { handoff: input ?? "" });
+  const proposedSection = proposedConventionsSection(c);
+  const instructionsText = [inst.text, repoSection, proposedSection].filter((x) => x !== "").join("\n\n");
+  const promptManifest = buildManifest("run", composedParts(inst.used, skills, repoSection, proposedSection), { handoff: input ?? "" });
   return {
     runId: c.runId,
     adapter,
@@ -251,12 +269,19 @@ function returnedFact(c: RunCtx): Record<string, unknown> | null {
   return { times: sb.length, latest: { from: last.from ?? null, by: last.by ?? null, note: String(last.note ?? "").slice(0, 8000) }, note: "This station was run again: the latest note says what the person or the reviewer wants different. Address it point by point." };
 }
 
+/** The latest send-back that returned this station, when there is one: results older than it are from the round being redone (S-146). */
+function redoOf(c: RunCtx): { station: string; since: number } | undefined {
+  const sb = (Array.isArray(c.woData?.sendbacks) ? (c.woData.sendbacks as Array<{ to?: string; at?: number }>) : []).filter((x) => x && x.to === c.station && typeof x.at === "number");
+  const last = sb[sb.length - 1];
+  return last ? { station: c.station, since: last.at as number } : undefined;
+}
+
 /** Station handoff (spec 10.2): the latest confirmed brief and the previous stations' structured results, not a transcript. */
 async function handoff(db: Queryable, c: RunCtx): Promise<unknown> {
   const brief = (await db.query(`select body from brief_versions where org_id = $1 and wo_id = $2 order by version desc limit 1`, [c.orgId, c.woId])).rows[0]?.body;
   const prior = (
     await db.query(
-      `select station, outcome, summary, body from station_results where org_id = $1 and wo_id = $2 and attempt_id <> $3 order by created_at`,
+      `select station, outcome, summary, body, (extract(epoch from created_at) * 1000)::float8 as at from station_results where org_id = $1 and wo_id = $2 and attempt_id <> $3 order by created_at, id`,
       [c.orgId, c.woId, c.attemptId],
     )
   ).rows;
@@ -276,12 +301,21 @@ async function handoff(db: Queryable, c: RunCtx): Promise<unknown> {
   const sc = c.attemptData.scout as { id: string; question: string; focus: string } | undefined;
   const sw = swarmOf(c.woData);
   const scouts = !sc && sw?.endedAt && sw.station === c.station ? sw.scouts.map((x) => ({ id: x.id, question: x.question, focus: x.focus, state: x.state, summary: x.summary ?? "" })) : undefined;
-  const change = await changeFact(db, c, prior as StationResultRow[]);
-  const ci = c.station === "build" ? null : await ciFact(db, c);
+  const redo = redoOf(c);
+  const old = discardedStations(prior as StationResultRow[], redo);
+  const DISCARDED = "This was written before the send-back that returned this station: it belongs to a discarded round and shows what the work looked like then, not now.";
+  // A document, the change fact and the CI fact from before the send-back are kept and marked, never presented as the current state of the work (G-X3).
+  const documentsMarked = documents.map(({ at, ...d }) => (redo && d.station && old.has(d.station) && typeof at === "number" && at < redo.since ? { ...d, fromDiscardedRound: true as const, discardedRoundNote: DISCARDED } : d));
+  const changeRaw = await changeFact(db, c, prior as StationResultRow[]);
+  const ciRaw = c.station === "build" ? null : await ciFact(db, c);
+  const pubAt = redo ? Number((await db.query<{ t: number | null }>(`select (extract(epoch from max(occurred_at)) * 1000)::float8 as t from events where org_id = $1 and wo_id = $2 and type = 'run.published'`, [c.orgId, c.woId])).rows[0]?.t ?? 0) : 0;
+  const stale = !!redo && old.has("build") && pubAt > 0 && pubAt < redo.since;
+  const change = changeRaw && stale ? { ...changeRaw, fromDiscardedRound: true, discardedRoundNote: DISCARDED } : changeRaw;
+  const ci = ciRaw && stale ? { ...ciRaw, fromDiscardedRound: true, discardedRoundNote: DISCARDED } : ciRaw;
   const review = await reviewFact(db, c, brief);
   const returned = returnedFact(c);
   return {
-    workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, ...(change ? { change } : {}), ...(ci ? { ci } : {}), ...(review ? { review } : {}), ...(returned ? { returned } : {}), previous: compactPrevious(prior as StationResultRow[], c.woId), documents, dialogue, sources, research,
+    workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, ...(change ? { change } : {}), ...(ci ? { ci } : {}), ...(review ? { review } : {}), ...(returned ? { returned } : {}), previous: compactPrevious(prior as StationResultRow[], c.woId, undefined, redo), documents: documentsMarked, dialogue, sources, research,
     ...(sc ? { scout: { id: sc.id, question: sc.question, focus: sc.focus, note: `You are scout ${sc.id}. Answer only this question, write your findings to research/scout-${sc.id.toLowerCase()}.md with write_document, cite web sources, and end. You cannot send scouts or propose a plan.` } } : {}),
     ...(scouts ? { scouts } : {}),
   };

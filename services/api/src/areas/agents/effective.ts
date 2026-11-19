@@ -6,25 +6,32 @@
 import type { Queryable } from "@gantry/db";
 import { RepoContext, repoContextRecord } from "@gantry/domain";
 import { notFound, invalid } from "../../core/errors.js";
-import { assemble, composeLayers, loadAgentVersion, pinSkills, projectInfo, resolveSkills, type AgentBody, type Layer } from "./compose.js";
+import { assemble, composedParts, composeLayers, loadAgentVersion, pinSkills, projectInfo, resolveSkills, tupleInstructionHash, type AgentBody, type Layer } from "./compose.js";
+import { buildManifest } from "./manifest.js";
 import { HANDOFF_SHAPE, RESULT_TEXT, STATION_TOOLS_TEXT, systemPrompt } from "./runner-sections.js";
 import { cfgOf, sha256, snapshotOf } from "./config.js";
 import { attachedSkills, labelOf, versionRows } from "./store.js";
 
-/** What the repository's own convention files looked like the last time a run was seeded from it (the manifest on that run), without the file text. */
-export type RepoContextSummary = (Omit<ReturnType<typeof repoContextRecord>, "hash"> & { runId: string; offeredAt: string | null }) | null;
+/**
+ * What the repository's own convention files looked like the last time a run was seeded from it (the manifest on that run), without the file text. The latest run
+ * counts even when its context could not be read (`unavailable`): the page must not show an older run's files as "last offered" (S-145).
+ */
+export type RepoContextSummary = (Omit<ReturnType<typeof repoContextRecord>, "commit"> & { commit: string | null; unavailable?: true; unavailableReason?: string; runId: string; offeredAt: string | null }) | null;
 
 async function latestRepoContext(db: Queryable, orgId: string, repoId: string): Promise<RepoContextSummary> {
   const row = (await db.query<{ id: string; rc: unknown }>(
     `select r.id, r.data->'repoContext' as rc from runs r join work_orders w on w.org_id = r.org_id and w.id = r.wo_id
-      where r.org_id = $1 and w.repo_id = $2 and r.data->'repoContext'->>'commit' is not null
-      order by r.started_at desc limit 1`,
+      where r.org_id = $1 and w.repo_id = $2 and (r.data->'repoContext'->>'commit' is not null or r.data->'repoContext'->>'unavailable' = 'true')
+      order by coalesce(r.started_at, r.created_at) desc, r.created_at desc limit 1`,
     [orgId, repoId],
   )).rows[0];
-  const p = row ? RepoContext.safeParse(row.rc) : null;
-  if (!row || !p?.success) return null;
-  const { hash: _hash, ...rest } = repoContextRecord(p.data);
-  return { ...rest, runId: row.id, offeredAt: typeof (row.rc as { offeredAt?: unknown }).offeredAt === "string" ? (row.rc as { offeredAt: string }).offeredAt : null };
+  if (!row) return null;
+  const raw = row.rc as { offeredAt?: unknown; unavailable?: unknown; unavailableReason?: unknown };
+  const offeredAt = typeof raw.offeredAt === "string" ? raw.offeredAt : null;
+  if (raw.unavailable === true) return { commit: null, files: [], hash: "unavailable", unavailable: true, ...(typeof raw.unavailableReason === "string" ? { unavailableReason: raw.unavailableReason } : {}), runId: row.id, offeredAt };
+  const p = RepoContext.safeParse(row.rc);
+  if (!p.success) return null;
+  return { ...repoContextRecord(p.data), runId: row.id, offeredAt };
 }
 
 export interface Effective {
@@ -40,6 +47,10 @@ export interface Effective {
   hash: string;
   /** Hash of the whole system prompt above. */
   promptHash: string;
+  /** The hash of the repository's convention files the last run was given ("unavailable" when it could not read them, null with no repository or no run yet): part of the instruction hash. */
+  repoContextHash: string | null;
+  /** What a version tuple stores for a run given these layers, skills and convention files (S-144): runs given different AGENTS.md files have different values. */
+  instructionHash: string;
   /** The parts of `text` in order; `source` says who adds each: the layers and skills are configuration, "runner" parts are added by the runner. */
   sections: Array<{ key: string; title: string; source: "layer" | "skill" | "runner"; text: string; words: number }>;
   handoff: { first: string; json: string[] };
@@ -81,6 +92,7 @@ export async function effectiveFor(db: Queryable, orgId: string, agentId: string
     label = av?.label ?? "";
   }
   const { layers } = await composeLayers(db, { orgId, agentId, projectId: project?.id ?? null, repoId: repo?.id ?? null }, av);
+  const repoContext = repo ? await latestRepoContext(db, orgId, repo.id) : null;
   const composed = assemble(layers);
   const skills = av ? await resolveSkills(db, { orgId, agentId, body: av.body, projectId: project?.id ?? null, }) : [];
   const full = systemPrompt(composed.text, skills);
@@ -93,9 +105,10 @@ export async function effectiveFor(db: Queryable, orgId: string, agentId: string
   ];
   return {
     agent: agentId, version: label, live: av !== null && av.version === a.live_version, draft: q.version === "draft", project: project ? { id: project.id, name: project.name } : null, repo: repo ? { id: repo.id, name: repo.name } : null,
-    text: full, hash: composed.hash, promptHash: sha256(full), sections, handoff: HANDOFF_SHAPE, words: wc(full), tokens: Math.round(full.length / 4),
+    text: full, hash: composed.hash, promptHash: sha256(full), repoContextHash: repoContext ? repoContext.hash : null,
+    instructionHash: tupleInstructionHash(buildManifest("run", composedParts(composed.layers, skills)).hash, repoContext ? repoContext.hash : null), sections, handoff: HANDOFF_SHAPE, words: wc(full), tokens: Math.round(full.length / 4),
     layers: composed.layers.map((l) => ({ key: l.key, name: l.name, version: l.version, hash: l.hash, text: l.text, ...(l.commit !== undefined ? { commit: l.commit } : {}) })),
     skills: skills.map((s) => ({ id: s.id, name: s.name, version: s.version, label: s.label, when: s.when, resources: s.resources, content: s.content })),
-    repoContext: repo ? await latestRepoContext(db, orgId, repo.id) : null,
+    repoContext,
   };
 }

@@ -94,22 +94,62 @@ export async function resolveSeedBase(db: Queryable, orgId: string, woId: string
   return c ? defaultBranch : null;
 }
 
-/**
- * The commit a workspace is seeded at (spec 4.3 step 2): the head of the work order's pull request, else its latest published commit,
- * else the commit recorded for the repository (repo_config.data.baseSha / repos.data.baseSha, written by onboarding and reconciliation).
- */
-export async function resolveSeedCommit(db: Queryable, orgId: string, woId: string, repoId: string): Promise<string> {
+export type SeedSource = "eval_pin" | "pr_head" | "wo_commit" | "default_head" | "base_sha";
+
+export interface SeedChoice {
+  commit: string;
+  source: SeedSource;
+  /** Why this commit, in a sentence: recorded on the run and shown with it. */
+  why: string;
+}
+
+/** The commit a workspace is seeded at, decided from what is stored (no network): the head of the work order's pull request, its latest published commit, else the recorded base commit. */
+export async function storedSeedChoice(db: Queryable, orgId: string, woId: string, repoId: string): Promise<SeedChoice> {
   // An eval case is pinned to the snapshot it was written against (spec 13.2), not to whatever the repository's head is now.
   const pinned = (await db.query<{ c: string | null }>(`select coalesce(data->'eval'->>'commit', data->'onboarding'->>'commit') as c from work_orders where org_id = $1 and id = $2 and source in ('eval','onboarding')`, [orgId, woId])).rows[0]?.c;
-  if (pinned && SHA.test(pinned)) return pinned;
+  if (pinned && SHA.test(pinned)) return { commit: pinned, source: "eval_pin", why: "The snapshot this eval case or onboarding step was written against." };
   const pr = (await db.query<{ head_sha: string | null }>(`select head_sha from pull_requests where org_id = $1 and wo_id = $2 and state = 'open' and head_sha is not null order by number desc limit 1`, [orgId, woId])).rows[0];
-  if (pr?.head_sha && SHA.test(pr.head_sha)) return pr.head_sha;
+  if (pr?.head_sha && SHA.test(pr.head_sha)) return { commit: pr.head_sha, source: "pr_head", why: "The head of this work order's open pull request." };
   const c = (await db.query<{ sha: string }>(`select sha from commits where org_id = $1 and wo_id = $2 order by committed_at desc nulls last, created_at desc limit 1`, [orgId, woId])).rows[0];
-  if (c && SHA.test(c.sha)) return c.sha;
+  if (c && SHA.test(c.sha)) return { commit: c.sha, source: "wo_commit", why: "The latest commit published for this work order." };
   const r = (await db.query<{ cfg: string | null; repo: string | null }>(
     `select (select data->>'baseSha' from repo_config where org_id = $1 and repo_id = $2) as cfg, (select data->>'baseSha' from repos where org_id = $1 and id = $2) as repo`,
     [orgId, repoId],
   )).rows[0];
-  for (const v of [r?.cfg, r?.repo]) if (v && SHA.test(v)) return v;
+  for (const v of [r?.cfg, r?.repo]) if (v && SHA.test(v)) return { commit: v, source: "base_sha", why: "The commit recorded for the repository." };
   throw new PermanentError("No commit is recorded for this repository, so the workspace cannot be seeded. Run onboarding or a reconcile first.", "no_commit");
+}
+
+/**
+ * The commit a workspace is seeded at (spec 4.3 step 2): the head of the work order's pull request, else its latest published commit, else the commit recorded for the
+ * repository (repo_config.data.baseSha / repos.data.baseSha, kept current by the push webhook, the poll and dispatch).
+ */
+export async function resolveSeedCommit(db: Queryable, orgId: string, woId: string, repoId: string): Promise<string> {
+  return (await storedSeedChoice(db, orgId, woId, repoId)).commit;
+}
+
+export interface FreshenDeps {
+  broker: { defaultHead(repo: string): Promise<{ ok: true; branch: string; sha: string; committedAt?: string } | { ok: false; code: string; msg: string }> };
+  now: () => Date;
+  staleMs: number;
+}
+
+/**
+ * Like `storedSeedChoice`, but a work order that has no commit of its own starts from the repository's default branch as it is now (S-140): when the recorded base
+ * commit is older than `staleMs` (or has no recorded time, as onboarding writes it), the default branch head is asked of GitHub through the broker and recorded on the
+ * repository, so the first stations see merged work and the current AGENTS.md. A broker that cannot answer leaves the recorded commit in use, and the reason is said.
+ */
+export async function chooseSeedCommit(db: Queryable, orgId: string, woId: string, repo: { id: string; full: string | null }, d: FreshenDeps): Promise<SeedChoice> {
+  const stored = await storedSeedChoice(db, orgId, woId, repo.id);
+  if (stored.source !== "base_sha" || !repo.full) return stored;
+  const at = (await db.query<{ at: string | null }>(`select data->>'baseAt' as at from repo_config where org_id = $1 and repo_id = $2`, [orgId, repo.id])).rows[0]?.at;
+  const age = at ? d.now().getTime() - Date.parse(at) : Number.POSITIVE_INFINITY;
+  if (age <= d.staleMs) return { ...stored, why: `The repository's default branch head, recorded ${Math.max(0, Math.round(age / 60_000))} min ago (within ${Math.round(d.staleMs / 60_000)} min).` };
+  const head = await d.broker.defaultHead(repo.full).catch((e: unknown) => ({ ok: false as const, code: "unreachable", msg: e instanceof Error ? e.message : String(e) }));
+  if (!head.ok) return { ...stored, why: `The recorded base commit${at ? ` (from ${at})` : " (no time recorded)"}; asking GitHub for the default branch head failed (${head.code}: ${head.msg.slice(0, 160)}).` };
+  await db.query(
+    `update repo_config set data = (data || jsonb_build_object('baseSha', $3::text, 'baseBranch', $4::text, 'baseAt', $5::text)) - 'baseCommittedAt' || case when $6::text is null then '{}'::jsonb else jsonb_build_object('baseCommittedAt', $6::text) end, updated_at = now() where org_id = $1 and repo_id = $2`,
+    [orgId, repo.id, head.sha, head.branch, d.now().toISOString(), head.committedAt ?? null],
+  );
+  return { commit: head.sha, source: "default_head", why: `The default branch ${head.branch} head, read from GitHub at dispatch because the recorded base commit was ${at ? `${Math.round(age / 60_000)} min old` : "of unknown age"}${head.sha === stored.commit ? " (unchanged)" : ` (it was ${stored.commit.slice(0, 12)})`}.` };
 }

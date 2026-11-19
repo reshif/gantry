@@ -49,4 +49,19 @@ d("guardrails enforced from observed files", () => {
     await w.tx(async (tx) => openGate(await w.fxIn(tx), await lockWo(tx, t.orgId, "WO-9302"), "G4", { checks: [{ name: "Required checks", ok: true }] }));
     expect(await w.q(`select 1 from gate_decisions where wo_id = 'WO-9302' and decision = 'auto_passed'`)).toHaveLength(1);
   });
+
+  it("G-X1: a convention file written in Build round 1 keeps the repo-conventions tag after a round 2 that does not touch it, and the automatic gate waits for a person", async () => {
+    // round 1 published AGENTS.md and src/a.ts; round 2 published only src/a.ts: `files` is the latest publish, `paths` is everything the work order changed
+    await w.insertWo("WO-9303", { position: "build", state: "running", data: { files: [{ path: "src/a.ts" }], paths: ["AGENTS.md", "src/a.ts"] } });
+    await w.tx(async (tx) => openGate(await w.fxIn(tx), await lockWo(tx, t.orgId, "WO-9303"), "G4", { checks: [{ name: "Required checks", ok: true }] }));
+    expect(await w.q(`select 1 from gate_decisions where wo_id = 'WO-9303'`)).toHaveLength(0);
+    const basis = (await w.q<{ basis: { riskTags: string[]; forcedHuman: boolean } }>(`select basis from gate_instances where wo_id = 'WO-9303' order by opened_at desc limit 1`))[0]!.basis;
+    expect(basis.riskTags).toContain("repo-conventions");
+    expect(basis.forcedHuman).toBe(true);
+    // the same gap closed for the other path tags: a migration or workflow written in round 1
+    await w.insertWo("WO-9304", { position: "build", state: "running", data: { files: [{ path: "src/a.ts" }], paths: ["db/migrations/001.sql", ".github/workflows/ci.yml", "src/a.ts"] } });
+    await w.tx(async (tx) => openGate(await w.fxIn(tx), await lockWo(tx, t.orgId, "WO-9304"), "G4", { checks: [{ name: "Required checks", ok: true }] }));
+    const b2 = (await w.q<{ basis: { riskTags: string[] } }>(`select basis from gate_instances where wo_id = 'WO-9304' order by opened_at desc limit 1`))[0]!.basis;
+    expect(b2.riskTags).toEqual(expect.arrayContaining(["migration", "ci"]));
+  });
 });
