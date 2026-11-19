@@ -1,4 +1,4 @@
-# Gantry factory configuration for this repository.
-# No MCP servers are declared: none were found to be needed for development.
-version: 1
+# Gantry factory declaration for this repository.
+# No MCP tool servers are declared: agents here use the repository's own commands (npm ci, npm run lint, npm test).
+# Add servers under `mcp:` only when a work order needs one, and have a maintainer review the change (.gantry/ is covered by CODEOWNERS).
 mcp: []
