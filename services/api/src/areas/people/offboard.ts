@@ -122,9 +122,21 @@ export async function deactivatePerson(tx: Tx, a: Actor, id: string, body: z.inf
     events.push({ type: "project.oncall", category: "access", subject: { type: "project", id: pr.id }, projectId: pr.id, before: pr.list, after: next });
   }
 
+  // Projects this person owned or administered, and whether any other active Project Admin is left (S-47). Allowed for a Factory Admin with a reason; it is named, not blocked.
+  const led = (await tx.query<{ id: string; name: string; owner_id: string | null; was_admin: boolean; others: number }>(
+    `select p.id, p.name, p.owner_id,
+            exists (select 1 from role_assignments r where r.org_id = p.org_id and r.project_id = p.id and r.person_id = $2 and r.role_id = 'project_admin' and r.revoked_at is null) as was_admin,
+            (select count(*)::int from role_assignments r join people q on q.org_id = r.org_id and q.id = r.person_id where r.org_id = p.org_id and r.project_id = p.id and r.role_id = 'project_admin' and r.revoked_at is null and q.status = 'active' and q.id <> $2) as others
+       from projects p where p.org_id = $1 and p.status <> 'archived' and (p.owner_id = $2 or exists (select 1 from role_assignments r where r.org_id = p.org_id and r.project_id = p.id and r.person_id = $2 and r.role_id = 'project_admin' and r.revoked_at is null))
+      order by p.id`,
+    [a.orgId, id],
+  )).rows;
+  const projects = led.map((r) => ({ id: r.id, name: r.name, owner: r.owner_id, soleAdmin: r.others === 0 }));
+  const noAdmin = projects.filter((x) => x.soleAdmin);
+
   events.unshift({
     type: "people.deactivate", category: "access", subject, projectId: null, before: p.status,
-    after: { status: "deactivated", reason, keepKeys: !!body.keepKeys, ...(body.keepKeys && keys.length ? { keysLeftLive: keys.map((k) => k.id) } : {}), openWork: openWork.length },
+    after: { status: "deactivated", reason, keepKeys: !!body.keepKeys, ...(body.keepKeys && keys.length ? { keysLeftLive: keys.map((k) => k.id) } : {}), openWork: openWork.length, ...(projects.length ? { projects } : {}), ...(noAdmin.length ? { leftWithoutAdmin: noAdmin.map((x) => x.id) } : {}) },
   });
   events.push({ type: "people.sessions.revoke", category: "access", subject, projectId: null, before: { live: sessions.length }, after: { revoked: sessions.length, reason } });
   if (!body.keepKeys) {
@@ -136,7 +148,7 @@ export async function deactivatePerson(tx: Tx, a: Actor, id: string, body: z.inf
   if (p.oncall) events.push({ type: "people.oncall", category: "access", subject, projectId: null, before: true, after: false });
 
   return {
-    msg: `${p.name} is deactivated. ${openWork.length ? `${openWork.length} open work ${openWork.length === 1 ? "order needs" : "orders need"} a new owner.` : "They have no open work."}`,
+    msg: `${p.name} is deactivated. ${openWork.length ? `${openWork.length} open work ${openWork.length === 1 ? "order needs" : "orders need"} a new owner.` : "They have no open work."}${noAdmin.length ? ` ${noAdmin.map((x) => x.name).join(", ")} ${noAdmin.length === 1 ? "has" : "have"} no active Project Admin left: only a Factory Admin can administer ${noAdmin.length === 1 ? "it" : "them"} until someone is named.` : ""}`,
     events,
     extra: {
       version,
@@ -146,6 +158,8 @@ export async function deactivatePerson(tx: Tx, a: Actor, id: string, body: z.inf
       delegationsRevoked: delegations.map((d) => d.id),
       oncallRemoved: oncall.map((o) => o.id),
       openWork,
+      projects,
+      projectsWithoutAdmin: noAdmin.map((x) => x.id),
     },
     changes: ["people", "projects", "apiKeys", "matrix"],
     project: null,

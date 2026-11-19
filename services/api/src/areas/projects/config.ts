@@ -15,7 +15,7 @@ export type ConfigEdit =
   | { kind: "classes"; value: WorkClass[] }
   | { kind: "notifications"; value: z.infer<typeof RouteSchema>[] }
   | { kind: "mcp"; value: string[] }
-  | { kind: "budget-monthly"; value: number }
+  | { kind: "budget-monthly"; value: number | null }
   | { kind: "budget-alert"; value: number };
 
 const parse = <T extends z.ZodType>(s: T, v: unknown, what: string): z.infer<T> => {
@@ -41,7 +41,7 @@ export function parseConfigEdit(path: string, value: unknown): ConfigEdit {
     if (d === "wip") return { kind: "station-wip", id: c, value: parse(z.number().int().min(1).max(30), value, "WIP limit") };
   }
   if (a === "flow" && b === "gates" && c && p.length === 4 && d === "enabled") return { kind: "gate-enabled", id: c, value: parse(z.boolean(), value, "On or off") };
-  if (a === "budget" && p.length === 2 && b === "monthly") return { kind: "budget-monthly", value: parse(z.number().min(0).max(10_000_000), value, "Monthly budget") };
+  if (a === "budget" && p.length === 2 && b === "monthly") return { kind: "budget-monthly", value: parse(z.number().min(0).max(10_000_000).nullable(), value, "Monthly budget") };
   if (a === "budget" && p.length === 2 && b === "alertAt") return { kind: "budget-alert", value: parse(z.number().min(0.05).max(1), value, "Alert line") };
   if (a === "approvers") throw invalid("Approver rules are saved with PUT /projects/{id}/approvers/{gate}.");
   throw invalid(`${path} is not an editable project setting.`);

@@ -13,7 +13,9 @@
 import { z } from "zod";
 import { visibleProjects } from "@gantry/domain";
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
+import { withTx } from "@gantry/db";
 import { command, decide, policyState, refuse } from "../core/index.js";
+import { publishChange } from "../core/changes.js";
 import { THREAD_RETENTION_DAYS } from "../areas/console/config.js";
 import { allowedTools, consoleRights, missingRightText, type ConsoleRights } from "../areas/console/rights.js";
 import { composeSessionContext, consoleAgent, recordedTurn } from "../areas/session/context.js";
@@ -179,41 +181,52 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
     const who = requirePerson(req);
     const { id, pid } = ProposalParams.parse(req.params);
     const edits = ProposalConfirmBody.parse(req.body ?? {});
-    const card = await readProposal(g.pool, g.orgId, who.id, id, pid);
-    if (!card) throw refuse("not_found", "No such proposal.");
-    if (card.status !== "pending") throw refuse("conflict", `This card is already ${String(card.status)}.`);
-    const call = card.call as { method: "POST" | "DELETE"; path: string; body: Record<string, unknown>; idempotent: boolean };
-    if (typeof call?.path !== "string" || !call.path.startsWith("/api/v1/")) throw refuse("invalid", "This card carries no action to run.");
-    const body: Record<string, unknown> = { ...call.body };
-    if (card.needsReason !== null && card.needsReason !== undefined) body.reason = (edits.reason ?? "").trim();
-    if (card.phrase) body.confirmText = edits.confirmText ?? "";
-    if (card.kind === "kill" && call.body.inFlight !== undefined) body.inFlight = edits.inFlight ?? "hold";
-    const h = req.headers;
-    const headers: Record<string, string> = { "content-type": "application/json", "x-gantry-console": "card" };
-    for (const k of ["cookie", "x-csrf-token", "authorization", "user-agent", "origin"] as const) if (typeof h[k] === "string") headers[k] = h[k] as string;
-    if (call.idempotent) headers["idempotency-key"] = `console-card-${id}-${pid}`;
-    const res = await app.inject({ method: call.method, url: call.path, headers, payload: JSON.stringify(body), remoteAddress: req.ip });
-    let out: Record<string, unknown> = {};
-    try {
-      out = res.json() as Record<string, unknown>;
-    } catch {
-      /* a body that is not JSON carries no message */
-    }
-    const msg = typeof out.msg === "string" ? out.msg : res.statusCode < 300 ? "Done." : `The action was refused (${res.statusCode}).`;
-    const needs = typeof out.needs === "string" ? out.needs : "";
-    const ok = res.statusCode >= 200 && res.statusCode < 300;
-    const asksMore = res.statusCode === 422 && (/reason|confirm/i.test(msg) || /reason|confirm/i.test(needs));
-    const transient = res.statusCode === 429 || res.statusCode >= 500;
-    if (!ok && (asksMore || transient)) {
-      req.gx.reply.code(res.statusCode);
-      return { ok: false, recorded: false, status: "pending", httpStatus: res.statusCode, msg, ...(needs ? { needs } : {}), retry: true };
-    }
-    const refusal = ok ? undefined : { code: res.statusCode, ...(out.rule ? { rule: out.rule } : {}), ...(typeof out.overrideKind === "string" ? { overrideKind: out.overrideKind } : {}) };
-    await command(req, { action: null }, async (tx, a) => {
-      if (!(await recordProposalOutcome(tx, a.orgId, who.id, id, pid, { status: ok ? "done" : "failed", result: msg, ...(needs ? { needs } : {}), ...(refusal ? { refusal } : {}) }))) throw refuse("not_found", "No such proposal.");
-      return { msg: "Saved.", events: [], changes: ["console"], project: null, audience: [who.id] };
-    }).catch(() => undefined);
-    return { ok, recorded: true, status: ok ? "done" : "failed", httpStatus: res.statusCode, msg, ...(needs ? { needs } : {}), ...(refusal ? { refusal } : {}), result: out };
+    // The card row is locked for the check and the write (S-50): a second confirm waits here, then sees the card already done and is told so, instead of running the action again
+    // and overwriting done with its own refusal. The action itself runs on its own connection, so the lock does not touch it.
+    return withTx(g.pool, async (tx) => {
+      const locked = (await tx.query<{ data: { proposals?: Array<Record<string, unknown>> } }>(
+        `select m.data from console_messages m join console_threads t on t.org_id = m.org_id and t.id = m.thread_id where m.org_id = $1 and m.id = $2 and m.role = 'assistant'
+            and (t.person_id = $3 or exists (select 1 from thread_members tm where tm.org_id = t.org_id and tm.thread_id = t.id and tm.person_id = $3)) for update of m`,
+        [g.orgId, id, who.id],
+      )).rows[0];
+      const card = (locked?.data.proposals ?? []).find((x) => x.id === pid);
+      if (!card) throw refuse("not_found", "No such proposal.");
+      if (card.status !== "pending") throw refuse("conflict", `This card is already ${String(card.status)}.`);
+      const call = card.call as { method: "POST" | "DELETE"; path: string; body: Record<string, unknown>; idempotent: boolean };
+      if (typeof call?.path !== "string" || !call.path.startsWith("/api/v1/")) throw refuse("invalid", "This card carries no action to run.");
+      const body: Record<string, unknown> = { ...call.body };
+      if (card.needsReason !== null && card.needsReason !== undefined) body.reason = (edits.reason ?? "").trim();
+      if (card.phrase) body.confirmText = edits.confirmText ?? "";
+      if (card.kind === "kill" && call.body.inFlight !== undefined) body.inFlight = edits.inFlight ?? "hold";
+      const h = req.headers;
+      const headers: Record<string, string> = { "content-type": "application/json", "x-gantry-console": "card" };
+      for (const k of ["cookie", "x-csrf-token", "authorization", "user-agent", "origin"] as const) if (typeof h[k] === "string") headers[k] = h[k] as string;
+      if (call.idempotent) headers["idempotency-key"] = `console-card-${id}-${pid}`;
+      const res = await app.inject({ method: call.method, url: call.path, headers, payload: JSON.stringify(body), remoteAddress: req.ip });
+      let out: Record<string, unknown> = {};
+      try {
+        out = res.json() as Record<string, unknown>;
+      } catch {
+        /* a body that is not JSON carries no message */
+      }
+      const msg = typeof out.msg === "string" ? out.msg : res.statusCode < 300 ? "Done." : `The action was refused (${res.statusCode}).`;
+      const needs = typeof out.needs === "string" ? out.needs : "";
+      const ok = res.statusCode >= 200 && res.statusCode < 300;
+      const asksMore = res.statusCode === 422 && (/reason|confirm/i.test(msg) || /reason|confirm/i.test(needs));
+      const transient = res.statusCode === 429 || res.statusCode >= 500;
+      // A refusal that signing in again fixes does not end the card (S-49): it stays pending and records nothing, the web asks for the sign-in and repeats the same confirm.
+      const stepUp = res.statusCode === 403 && needs === "step_up";
+      if (!ok && (asksMore || transient || stepUp)) {
+        req.gx.reply.code(res.statusCode);
+        return { ok: false, recorded: false, status: "pending", httpStatus: res.statusCode, msg, ...(needs ? { needs } : {}), ...(out.rule ? { rule: out.rule } : {}), retry: true };
+      }
+      const refusal = ok ? undefined : { code: res.statusCode, ...(out.rule ? { rule: out.rule } : {}), ...(typeof out.overrideKind === "string" ? { overrideKind: out.overrideKind } : {}) };
+      const rec = await recordProposalOutcome(tx, g.orgId, who.id, id, pid, { status: ok ? "done" : "failed", result: msg, ...(needs ? { needs } : {}), ...(refusal ? { refusal } : {}) });
+      if (rec === "already_done") throw refuse("conflict", "This card is already done.");
+      if (!rec) throw refuse("not_found", "No such proposal.");
+      await publishChange(tx, { org: g.orgId, keys: ["console"], audience: [who.id] });
+      return { ok, recorded: true, status: ok ? "done" : "failed", httpStatus: res.statusCode, msg, ...(needs ? { needs } : {}), ...(refusal ? { refusal } : {}), result: out };
+    });
   });
 
   /* ------------------------------------------------------------------ tools, directly */

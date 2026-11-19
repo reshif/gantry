@@ -417,6 +417,17 @@ function satisfies(person: Person, project: Project, needs: ApproverNeeds): bool
   return ok && (!needs.oncall || isOnCall({ projects: [project] }, person, project.id));
 }
 
+/** Can this voter still approve under the rule? Active, and a Factory Admin, a role or name the rule lists, a condition they meet, the escalation fallback, or a delegate for someone. */
+function stillMayVote(person: Person, people: Person[], project: Project, rule: ApproverRule, conds: ApproverCondition[], escalated: boolean): boolean {
+  if (person.status !== "active") return false;
+  const roles = rolesIn(person, project.id);
+  if (roles.includes("factory_admin")) return true;
+  if (rule.roles.some((r) => roles.includes(r)) || rule.people.includes(person.id)) return true;
+  if (conds.some((cd) => satisfies(person, project, cd.needs))) return true;
+  if (escalated && (rule.fallback ?? project.owner) === person.id) return true;
+  return people.some((x) => x.away && x.away.delegate === person.id);
+}
+
 export interface GateProgress {
   have: number;
   need: number;
@@ -427,6 +438,8 @@ export interface GateProgress {
   passes: boolean;
   /** Separation of duties is on and the author had voted: that vote is on record but does not count ("1 of 2 (the author's vote does not count)"). */
   authorExcluded: boolean;
+  /** A vote on record came from someone who is deactivated or no longer holds a role the rule accepts: it does not count ("1 of 2 (a vote by someone who has left does not count)"). */
+  leaverExcluded: boolean;
 }
 
 /** N of M: approvals so far against the rule, unmet conditions, and I4. G0+G1 is the submitter's own confirmation, so I4 does not apply to it. */
@@ -436,8 +449,15 @@ export function gateProgress(project: Project, wo: Pick<WorkOrder, "cls" | "risk
   const conds = conditionsFor(project, wo, gateId);
   // Separation of duties is judged when votes are counted, not only when one is cast: a vote the author made while it was off stays on record and stops counting once it is on.
   const sodNow = gateId !== "G0G1" && !!rule.sod;
-  const counted = sodNow ? st.approvals.filter((a) => a.by !== wo.requestedBy) : st.approvals;
-  const authorExcluded = counted.length !== st.approvals.length;
+  const bySod = sodNow ? st.approvals.filter((a) => a.by !== wo.requestedBy) : st.approvals;
+  const authorExcluded = bySod.length !== st.approvals.length;
+  // The same holds for who voted: a vote counts while its voter can still approve (S-46). A person who has left (deactivated), or whose role no longer reaches the rule, drops out;
+  // the vote stays on record. Factory Admin stays a normal approver; a voter this list does not know (an agent id, a partial list) is left alone.
+  const counted = gateId === "G0G1" ? bySod : bySod.filter((a) => {
+    const pp = people.find((x) => x.id === a.by);
+    return !pp || stillMayVote(pp, people, project, rule, conds, !!(st as { escalated?: boolean }).escalated);
+  });
+  const leaverExcluded = counted.length !== bySod.length;
   const unmet = conds.filter((cd) => !counted.some((a) => {
     const pp = people.find((x) => x.id === a.by);
     return !!pp && satisfies(pp, project, cd.needs);
@@ -447,7 +467,7 @@ export function gateProgress(project: Project, wo: Pick<WorkOrder, "cls" | "risk
   const classSet = !!rule.classRequired && Object.prototype.hasOwnProperty.call(rule.classRequired, wo.cls);
   const need = classSet ? requiredFor(rule, wo.cls) : Math.max(requiredFor(rule, wo.cls), Number((st as { openedRequired?: number }).openedRequired) || 0);
   const onlyRequester = gateId !== "G0G1" && counted.length > 0 && counted.every((a) => a.by === wo.requestedBy);
-  return { have: counted.length, need, unmet, conds, onlyRequester, passes: counted.length >= need && !unmet.length && !onlyRequester, authorExcluded };
+  return { have: counted.length, need, unmet, conds, onlyRequester, passes: counted.length >= need && !unmet.length && !onlyRequester, authorExcluded, leaverExcluded };
 }
 
 function deny(reason: string, needs?: string, rule?: string): Decision {

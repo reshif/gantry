@@ -122,7 +122,7 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   // Bypassing separation of duties is always an override, even when the count would be met with the author's vote.
   const sodBypass = isAdmin && gateId !== "G0G1" && !!project.approvers[gateId]?.sod && wo.requestedBy === by;
   // N of M that cannot be reached (fewer eligible people than the gate needs) is a break-glass case too: the admin passes it with a reason.
-  const eligible = new Set(after.wo.gates[gateId]?.approvals.map((a) => a.by) ?? []);
+  const eligible = new Set((after.wo.gates[gateId]?.approvals ?? []).filter((a) => after.st.people.find((pp) => pp.id === a.by)?.status !== "deactivated").map((a) => a.by));
   if (isAdmin && !ruled && gateId !== "G0G1") for (const pp of after.st.people) if (pp.status === "active" && !eligible.has(pp.id) && gateDecision(after.st, pp.id, after.wo, gateId, fx.now.getTime()).allowed) eligible.add(pp.id);
   const unreachable = isAdmin && !ruled && gateId !== "G0G1" && eligible.size < need;
   const override = isAdmin && ((!ruled && (prog.onlyRequester || prog.unmet.length > 0 || unreachable)) || sodBypass);
@@ -142,11 +142,11 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   }
   if (!passes) {
     const unmet = prog.unmet.length ? `; still needs: ${prog.unmet.map((c) => c.text).join("; ")}` : prog.onlyRequester ? "; the requester cannot be the only approver" : "";
-    const excl = prog.authorExcluded ? " (the author's vote does not count)" : "";
+    const excl = `${prog.authorExcluded ? " (the author's vote does not count)" : ""}${prog.leaverExcluded ? " (a vote by someone who has left does not count)" : ""}`;
     note(w, fx, by, `${g.label} approval ${prog.have} of ${need}${excl}.`);
     ev(fx, w, "gate.vote", { gate: gateId, by, text: `${prog.have} of ${need}${excl}`, instance: inst.id }, { category: "approvals" });
     await saveWo(fx.tx, fx.orgId, w);
-    return done(fx, `${g.label} approval recorded (${prog.have} of ${need}${excl}${unmet}).`, w.project, { passed: false, have: prog.have, need, authorExcluded: prog.authorExcluded, instance: inst.id, version: w.version });
+    return done(fx, `${g.label} approval recorded (${prog.have} of ${need}${excl}${unmet}).`, w.project, { passed: false, have: prog.have, need, authorExcluded: prog.authorExcluded, leaverExcluded: prog.leaverExcluded, instance: inst.id, version: w.version });
   }
   await recordDecision(fx, w, inst, gateId, "approved", voter, { approvals: prog.have, override: override || !!stopKind, ...(override || stopKind ? { reason: (overrideReason ?? reason5).trim() } : {}) });
   await closeInstance(fx, inst.id, "decision");

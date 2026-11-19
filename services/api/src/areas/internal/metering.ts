@@ -29,8 +29,9 @@ const toMicros = (usd: unknown): number | null => {
 
 /** Spec 10.4 Budget: project monthly budget, work-order cap (the work order's own data.budgetUsd, else the project's budgets.wo_limit_micros, else config extra.woBudgetUsd), per-run cap (agent budget). */
 export async function loadLimits(db: Queryable, c: RunCtx): Promise<Limits> {
-  const b = await db.query<{ m: string; w: string }>(`select monthly_limit_micros::text as m, wo_limit_micros::text as w from budgets where org_id = $1 and project_id = $2`, [c.orgId, c.projectId]);
-  const projectMicros = b.rows[0] && Number(b.rows[0].m) > 0 ? Number(b.rows[0].m) : null;
+  const b = await db.query<{ m: string; w: string; z: boolean }>(`select monthly_limit_micros::text as m, wo_limit_micros::text as w, monthly_zero_cap as z from budgets where org_id = $1 and project_id = $2`, [c.orgId, c.projectId]);
+  // A monthly amount of 0 is a real $0 cap only when a person set it (monthly_zero_cap); an older row holding 0 still means no cap (S-43).
+  const projectMicros = b.rows[0] ? (Number(b.rows[0].m) > 0 ? Number(b.rows[0].m) : b.rows[0].z ? 0 : null) : null;
   const projectWoMicros = b.rows[0] && Number(b.rows[0].w) > 0 ? Number(b.rows[0].w) : null;
   const extra = (c.projectConfig.extra ?? {}) as Record<string, unknown>;
   const woMicros = toMicros(c.woData.budgetUsd) ?? projectWoMicros ?? toMicros(extra.woBudgetUsd);

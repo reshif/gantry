@@ -17,11 +17,11 @@ describe("item 11: separation of duties is judged when votes are counted", () =>
     const project = s.projects.find((p) => p.id === wo.project)!;
     const other = s.people.find((p) => p.id !== wo.requestedBy)!;
     // The author approved while SoD was off (1 of 2) ...
-    project.approvers[gate] = rule({ sod: false });
+    project.approvers[gate] = rule({ sod: false, people: [wo.requestedBy, other.id] });
     wo.gates[gate]!.approvals = [{ by: wo.requestedBy, at: 1 } as never];
     expect(gateProgress(project, wo, gate, s.people).have).toBe(1);
     // ... then SoD is turned on and someone else approves: that is 1 of 2, not 2 of 2.
-    project.approvers[gate] = rule({ sod: true });
+    project.approvers[gate] = rule({ sod: true, people: [wo.requestedBy, other.id] });
     wo.gates[gate]!.approvals = [{ by: wo.requestedBy, at: 1 } as never, { by: other.id, at: 2 } as never];
     const p = gateProgress(project, wo, gate, s.people);
     expect(p).toMatchObject({ have: 1, need: 2, passes: false, authorExcluded: true });
@@ -30,7 +30,7 @@ describe("item 11: separation of duties is judged when votes are counted", () =>
     const { s, wo, gate } = waitingGate();
     const project = s.projects.find((p) => p.id === wo.project)!;
     const other = s.people.find((p) => p.id !== wo.requestedBy)!;
-    project.approvers[gate] = rule({ sod: false });
+    project.approvers[gate] = rule({ sod: false, people: [wo.requestedBy, other.id] });
     wo.gates[gate]!.approvals = [{ by: wo.requestedBy, at: 1 } as never, { by: other.id, at: 2 } as never];
     expect(gateProgress(project, wo, gate, s.people)).toMatchObject({ have: 2, passes: true });
   });
@@ -52,5 +52,19 @@ describe("item 14: a delegate counts only while the away window is active", () =
     expect(during.reason).toMatch(/Delegate for/);
     expect(before.reason).not.toMatch(/Delegate for/);
     expect(after.reason).not.toMatch(/Delegate for/);
+  });
+});
+
+describe("S-46: votes are judged when counted, for who voted", () => {
+  it("a vote by a deactivated person stays on record but does not count; a Factory Admin vote still does", () => {
+    const { s, wo, gate } = waitingGate();
+    const project = s.projects.find((p) => p.id === wo.project)!;
+    const [x, y] = s.people.filter((p) => p.id !== wo.requestedBy && p.status === "active");
+    project.approvers[gate] = rule({ sod: true, required: 2, people: [x!.id, y!.id] });
+    wo.gates[gate]!.approvals = [{ by: x!.id, at: 1 } as never, { by: y!.id, at: 2 } as never];
+    expect(gateProgress(project, wo, gate, s.people)).toMatchObject({ have: 2, passes: true, leaverExcluded: false });
+    x!.status = "deactivated";
+    expect(gateProgress(project, wo, gate, s.people)).toMatchObject({ have: 1, passes: false, leaverExcluded: true });
+    expect(wo.gates[gate]!.approvals).toHaveLength(2);
   });
 });

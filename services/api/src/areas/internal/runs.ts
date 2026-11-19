@@ -7,7 +7,7 @@ import { job } from "../../core/jobs-contract.js";
 import { refuse, Refusal } from "../../core/errors.js";
 import { activeStopsFor, guardRun, loadRunCtx, type Denial, type RunCtx } from "./context.js";
 import { composeRunSpec, LEASE_SECONDS, mcpServersInScope } from "./spec.js";
-import { budgetBreach, costMicros, currentPrices } from "./metering.js";
+import { budgetBreach, costMicros, currentPrices, type Breach } from "./metering.js";
 import { resolveRoute } from "./route.js";
 import { runEgressHosts, systemEgressHosts } from "./egress.js";
 import { ResultBody, Token } from "./result-body.js";
@@ -20,7 +20,25 @@ const runId = (req: FastifyRequest): string => RunParams.parse(req.params).id;
 const nonneg = z.number().int().nonnegative().max(2 ** 53 - 1);
 const edgeUrl = (): string => process.env.EDGE_URL ?? "http://gantry-edge:8443";
 
-const AuthorizeBody = z.object({ token: Token, model: z.string().min(1).max(200).optional() });
+/** Spec 10.4 Budget: a work order that reached a budget gets a system halt with cause budget (once, and never over a stop that already holds it). Written by usage and by authorize. */
+async function writeBudgetHalt(tx: Tx, c: RunCtx, runId: string, br: Breach): Promise<{ stopId: string; events: EventSpec[]; jobs: ReturnType<typeof job>[] } | null> {
+  if ((await activeStopsFor(tx, c)).some((s) => s.scopeType === "wo" || s.scopeType === "factory" || s.scopeType === "project")) return null;
+  const n = Number((await tx.query<{ n: string }>(`select count(*)::text as n from stops where org_id = $1 and scope_type = 'wo' and wo_id = $2`, [c.orgId, c.woId])).rows[0]!.n) + 1;
+  const stopId = `wo:${c.woId}:${n}`;
+  const reason = `Budget reached: the ${br.scope === "wo" ? "work order" : br.scope === "run" ? "run" : br.scope === "plan" ? "approved research plan" : "project"} has spent $${(br.spentMicros / 1e6).toFixed(2)} of $${(br.limitMicros / 1e6).toFixed(2)}.`;
+  const ins = await tx.query(
+    `insert into stops (org_id, id, scope_type, wo_id, mode, reason, cause, set_by, in_flight) values ($1,$2,'wo',$3,'halt',$4,'budget','system',$5) on conflict do nothing`,
+    [c.orgId, stopId, c.woId, reason, `run ${runId}`],
+  );
+  if (!ins.rowCount) return null;
+  return {
+    stopId,
+    events: [{ type: "stop.set", category: "kill", subject: { type: "wo", id: c.woId }, projectId: c.projectId, woId: c.woId, after: { stop: stopId, scope: "wo", mode: "halt", cause: "budget", breach: br.scope, reason } }],
+    jobs: [job("stop.enforce", { stopId, scope: "wo", targetId: c.woId, mode: "halt" }, { dedupeKey: `stop.enforce:${stopId}` })],
+  };
+}
+
+const AuthorizeBody =z.object({ token: Token, model: z.string().min(1).max(200).optional() });
 const UsageBody = z.object({
   token: Token,
   requestId: z.string().min(1).max(200).optional(),
@@ -107,7 +125,12 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
       if (d) return deny(d.code, d.reason, c);
       if ((await tx.query(`select 1 from station_results where org_id = $1 and id = $2`, [c.orgId, `sr-${id}`])).rowCount) return deny("finished", "This run already delivered its result.", c);
       const br = await budgetBreach(tx, c);
-      if (br) return deny("budget", `The ${br.scope === "wo" ? "work order" : br.scope === "plan" ? "research plan" : br.scope} budget is spent ($${(br.spentMicros / 1e6).toFixed(2)} of $${(br.limitMicros / 1e6).toFixed(2)}).`, c);
+      if (br) {
+        // A refusal for budget is never silent (S-44): the work order gets the same budget halt a usage report writes, so it shows on the order, in its events and on Home, and raising the cap lifts it.
+        const h = await writeBudgetHalt(tx, c, id, br);
+        const denied = deny("budget", `The ${br.scope === "wo" ? "work order" : br.scope === "plan" ? "research plan" : br.scope} budget is spent ($${(br.spentMicros / 1e6).toFixed(2)} of $${(br.limitMicros / 1e6).toFixed(2)}).`, c);
+        return h ? { ...denied, events: [...denied.events, ...h.events], jobs: h.jobs, changes: ["stops", "workOrders", "models"], project: c.projectId } : denied;
+      }
       const r = await resolveRoute(tx, c, b.model);
       if (!r.ok) return deny("route", r.reason, c);
       return {
@@ -155,19 +178,9 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
         events.push({ type: "model.fallback", ...evBase(c, id), category: "agents", outcome: b.fallback === "cross_model" ? "regression" : "ok", after: fb });
       }
       const br = await budgetBreach(tx, c);
-      if (br && !(await activeStopsFor(tx, c)).some((s) => s.scopeType === "wo" || s.scopeType === "factory" || s.scopeType === "project")) {
-        const n = Number((await tx.query<{ n: string }>(`select count(*)::text as n from stops where org_id = $1 and scope_type = 'wo' and wo_id = $2`, [c.orgId, c.woId])).rows[0]!.n) + 1;
-        const stopId = `wo:${c.woId}:${n}`;
-        const reason = `Budget reached: the ${br.scope === "wo" ? "work order" : br.scope === "run" ? "run" : br.scope === "plan" ? "approved research plan" : "project"} has spent $${(br.spentMicros / 1e6).toFixed(2)} of $${(br.limitMicros / 1e6).toFixed(2)}.`;
-        const ins = await tx.query(
-          `insert into stops (org_id, id, scope_type, wo_id, mode, reason, cause, set_by, in_flight) values ($1,$2,'wo',$3,'halt',$4,'budget','system',$5) on conflict do nothing`,
-          [c.orgId, stopId, c.woId, reason, `run ${id}`],
-        );
-        if (ins.rowCount) {
-          halted = stopId;
-          events.push({ type: "stop.set", category: "kill", subject: { type: "wo", id: c.woId }, projectId: c.projectId, woId: c.woId, after: { stop: stopId, scope: "wo", mode: "halt", cause: "budget", breach: br.scope, reason } });
-          jobs.push(job("stop.enforce", { stopId, scope: "wo", targetId: c.woId, mode: "halt" }, { dedupeKey: `stop.enforce:${stopId}` }));
-        }
+      if (br) {
+        const h = await writeBudgetHalt(tx, c, id, br);
+        if (h) { halted = h.stopId; events.push(...h.events); jobs.push(...h.jobs); }
       }
       return {
         msg: "Usage recorded.",

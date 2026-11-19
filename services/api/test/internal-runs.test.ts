@@ -253,8 +253,11 @@ d("internal runs API", () => {
       const denied = (await authorize(c)).json();
       expect(denied).toMatchObject({ allow: false, code: "budget" });
       expect(denied.reason).toMatch(/project budget is spent/);
-      await q(`update budgets set monthly_limit_micros = 0 where project_id = 'identity'`); // 0 = no cap configured
-      expect((await authorize(c)).json().allow).toBe(true);
+      // The refusal is not silent (S-44): the work order carries a budget halt, which stays until the cap is raised.
+      expect(await q(`select cause from stops where wo_id = $1 and lifted_at is null`, [c.woId])).toEqual([expect.objectContaining({ cause: "budget" })]);
+      await q(`update budgets set monthly_limit_micros = 0, monthly_zero_cap = false where project_id = 'identity'`); // an older row: 0 without the flag = no cap configured
+      const d = await makeRun({ project: "identity" });
+      expect((await authorize(d)).json().allow).toBe(true);
     });
   });
 

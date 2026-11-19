@@ -167,6 +167,7 @@ describe("invariants (spec 5.1 and 14.4)", () => {
     const wo = structuredClone(S.workOrders.find((w) => w.project === "payments" && w.gates.G5))!;
     project.approvers.G5!.sod = false;
     project.approvers.G5!.required = 1;
+    project.approvers.G5!.people = [wo.requestedBy, "p-meera", "p-priya"];
     wo.gates.G5!.approvals = [{ by: wo.requestedBy, at: NOW, via: "web" }];
     const alone = gateProgress(project, wo, "G5", S.people);
     expect(alone).toMatchObject({ have: 1, need: 1, onlyRequester: true });

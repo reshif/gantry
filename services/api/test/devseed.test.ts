@@ -54,7 +54,7 @@ d("dev seed loader and read mappers (rows -> legacy shapes)", () => {
     for (const [i, p] of norm(S.projects as never).entries()) {
       const g = norm(got)[i]!;
       // created timestamps pass through ms -> timestamptz; compare to the millisecond
-      expect(g, p.id).toEqual(p);
+      expect(g, p.id).toEqual({ ...p, budget: { ...p.budget, capped: p.budget.monthly > 0 } });
     }
   });
 
