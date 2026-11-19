@@ -562,10 +562,11 @@ const PROPOSE: ToolDef[] = [
     async run(ctx, i) {
       const cellId = str(i.cell);
       let cell: Json | undefined;
+      let switchOn = true;
       for (const p of await visibleProjectsOf(ctx)) {
         const r = await api(ctx, `/api/v1/trust/cells?project=${encodeURIComponent(String(p.id))}`);
         cell = (r.status === 200 ? (arr(obj(r.body).cells) as Json[]) : []).find((c) => c.id === cellId);
-        if (cell) break;
+        if (cell) { switchOn = obj(r.body).levelsAboveL1 !== false; break; }
       }
       if (!cell) return { error: `No visible trust cell ${cellId}.` };
       const level = num(i.level, -1, -1, 4);
@@ -573,7 +574,13 @@ const PROPOSE: ToolDef[] = [
       const cap = Number(obj(cell.ceiling).max ?? 4);
       return mk(ctx, {
         kind: "trust", title: `Set ${cellId} to L${level}`, summary: str(i.reason) ?? "",
-        steps: [`Now L${String(cell.level)}; ceiling L${cap}`, ...(level > cap ? [`Capped at L${cap} by a ceiling: the change will be refused.`] : [])],
+        steps: [
+          `Now L${String(cell.level)}; ceiling L${cap}`,
+          ...(level < Number(cell.level) ? ["Lowering a level is always allowed."] : [
+            ...(level > cap ? [`Capped at L${cap} by a ceiling: the change will be refused.`] : []),
+            ...(level > 1 && !switchOn ? ["Trust levels above L1 are switched off: raising to this level will be refused until the switch is on."] : []),
+          ]),
+        ],
         call: { method: "POST", path: "/api/v1/trust/grants", body: { target: cellId, level, reason: str(i.reason) ?? "", via: "console" }, idempotent: false },
         perm: { action: "trust.grant", project: String(cell.project) }, needsReason: 1, phrase: null, danger: false, entities: [{ type: "project", id: String(cell.project) }], scope: { project: String(cell.project) },
       });

@@ -60,7 +60,8 @@ export async function grantTrust(tx: Tx, a: Actor, b: z.infer<typeof GrantBody>)
   const cell: CellRow = existing ?? (await ensureCell(tx, a.orgId, spec, a.id, a.now, "Cell created"));
   const from = lvlNum(cell.level);
   if (b.level === from) throw conflict(`${cell.id} is already ${lvlCode(b.level)}.`);
-  await checkLevel(tx, a.orgId, spec, b.level);
+  // Lowering is always allowed (a safety-down never waits on the switch or a ceiling); only raising is gated.
+  if (b.level > from) await checkLevel(tx, a.orgId, spec, b.level);
   const ev = await applyLevel(tx, a.orgId, cell, b.level, { kind: b.level > from ? "grant" : "demote", reason: b.reason, by: a.id }, a.now);
   return { msg: `${cell.id.replaceAll("|", " · ")} is now ${lvlCode(b.level)}.`, events: [{ ...ev, ...(ev.type === "trust.demote" ? { type: "trust.grant", outcome: "ok" as const } : {}) }], changes: ["trust", "audit"], project: cell.project_id, extra: { cell: cell.id, level: b.level } };
 }
