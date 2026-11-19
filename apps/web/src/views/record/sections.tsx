@@ -11,6 +11,7 @@ import { updatePrefs } from "../../lib/prefs";
 import { ClassChip, classOf } from "../projects/kit";
 import { StateChip } from "../../ui/primitives";
 import { bayLabel, clsName, plural, stName, type TWo } from "../traveler/model";
+import { RecordContext } from "./Context";
 import { Fold, Kv, None, Prov, useIsAgent, useName, when } from "./bits";
 import { briefDiff, endAt, qaPairs, routeTaken, srcName, stateLine, visitsOf, type RecordData } from "./data";
 import type { Catalog } from "@gantry/domain";
@@ -356,7 +357,12 @@ export function Stations({ c }: { c: Ctx }) {
   const { wo, rec, cat, project } = c;
   const name = useName();
   const vs = visitsOf(wo, rec);
-  if (!vs.length) return <None text="No station visits yet." />;
+  if (!vs.length) return (
+    <>
+      <RecordContext c={c} />
+      <None text="No station visits yet." />
+    </>
+  );
   const raised = wo.conv?.raised ?? [];
   const sbs = wo.sendbacks ?? [];
   const sbVisit = sbs.map((s) => {
@@ -370,6 +376,7 @@ export function Stations({ c }: { c: Ctx }) {
   void project;
   return (
     <div>
+      <RecordContext c={c} />
       <div className="rec-subhead">
         <span className="small muted">{`${plural(vs.length, "station visit")} · ${plural(sbs.length, "send-back")}`}</span>
         <Prov kind="agent" text="Summaries reported by the agents" />

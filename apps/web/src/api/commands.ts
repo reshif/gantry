@@ -22,6 +22,7 @@ export const commands = {
   attachSkill: ops.attachSkill,
   setSkillProjects: ops.setSkillProjects,
   editBrief: ops.editBrief,
+  refreshContext: ops.refreshContext,
   sendBack: ops.sendBack,
   setFactoryRole: ops.setFactoryRole,
   setMemberRole: ops.setMemberRole,

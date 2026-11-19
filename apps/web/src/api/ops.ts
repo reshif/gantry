@@ -183,6 +183,8 @@ export const ops = {
   reassign: (woId: string, agentId: string, via?: Via, v?: Versioned) =>
     run(["workOrders"], post(api(`work-orders/${enc(woId)}/reassign`), { agent: agentId, via }, opts(v))),
   retry: (woId: string, via?: Via, v?: Versioned) => run(["workOrders"], post(api(`work-orders/${enc(woId)}/retry`), { via }, opts(v))),
+  /** Refresh instructions: re-pin the work order's context (layers, guidelines, agent and skill versions) to what is published now. Audited as wo.context.repin. */
+  refreshContext: (woId: string, reason?: string, v?: Versioned) => run(["record", "workOrders"], post(api(`work-orders/${enc(woId)}/refresh-context`), reason ? { reason } : {}, opts(v))),
   /** Retry with a higher limit: the next attempt only runs with these limits; the agent and the project keep theirs. */
   retryWithLimits: (woId: string, limits: { turns?: number; wallClockSeconds?: number; costUsd?: number }, reason?: string, v?: Versioned) =>
     run(["workOrders", "projects"], post(api(`work-orders/${enc(woId)}/retry-with-limits`), { limits, ...(reason ? { reason } : {}) }, opts(v))),

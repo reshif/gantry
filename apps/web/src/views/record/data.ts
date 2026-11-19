@@ -60,6 +60,22 @@ export interface RecFile {
   state?: string;
   preview?: Array<{ t: string; s: string }>;
 }
+/** What instructions the work order runs on (GET .../record `context`): the pin written at its first dispatch, every re-pin, and per run the seed commit and what was read as conventions. */
+export interface RecContext {
+  pin: { id: string; pinnedAt: string; base: number | null; project: number | null; guidelines: { hash: string; commit: string | null } | null; agents: Record<string, { version: number; skills: Record<string, number> }> } | null;
+  repins: Array<{ seq: number; at: string | null; by: string; detail: { reason?: string; trigger?: string; id?: string } | null }>;
+  runs: Array<{
+    run: string;
+    station: string;
+    contextPin: string | null;
+    seed: { commit: string | null; source: string | null; why: string | null } | null;
+    conventions: { state: "read"; commit: string; hash: string | null } | { state: "unavailable"; reason: string | null } | { state: "none" };
+    proposedChanges: Array<{ path: string; status: string }>;
+    promptDrift: boolean;
+  }>;
+  notices: Array<{ kind: "conventions_unavailable" | "prompt_drift"; run: string; station: string; text: string }>;
+}
+
 export interface RecordData {
   id: string;
   version: number;
@@ -76,6 +92,8 @@ export interface RecordData {
   brief: Brief;
   criteria: Criterion[];
   journey: HistoryEntry[];
+  /** The instructions the work order runs on; absent from a server that does not pin context. */
+  context?: RecContext;
   gates: RecGate[];
   /** The Review agent's verdict, or null before Review has run. */
   review?: ReviewVerdict | null;
