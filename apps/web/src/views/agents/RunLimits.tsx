@@ -15,7 +15,7 @@ export function RunLimitsPanel({ a, ro, perm, saveLimits }: Pick<TabProps, "a" |
   const { value, errors } = parseLimits(t);
   const bad = Object.keys(errors).length > 0;
   const dirty = JSON.stringify(t) !== JSON.stringify(saved);
-  const ph = inheritedText({ budget: a.budget });
+  const ph = inheritedText({ liveBudget: a.liveBudget });
   const set = (k: keyof LimitText) => (e: React.ChangeEvent<HTMLInputElement>) => setT((x) => ({ ...x, [k]: e.target.value }));
   const save = async () => {
     if (bad || busy) return;
@@ -32,7 +32,7 @@ export function RunLimitsPanel({ a, ro, perm, saveLimits }: Pick<TabProps, "a" |
         <Field label="Max time (minutes)" htmlFor="ag-lim-min" error={errors.minutes} hint={`Default ${LIMIT_DEFAULTS.minutes}. ${LIMIT_RANGE.minutes[0]} to ${LIMIT_RANGE.minutes[1]}.`}>
           <Input id="ag-lim-min" type="number" inputMode="decimal" className="mono" min={LIMIT_RANGE.minutes[0]} max={LIMIT_RANGE.minutes[1]} placeholder={ph.minutes} disabled={ro} value={t.minutes} onChange={set("minutes")} />
         </Field>
-        <Field label="Max cost per run (optional)" htmlFor="ag-lim-cost" error={errors.costUsd} hint={`Dollars. Unset: the agent's per-run budget ($${a.budget}) applies.`}>
+        <Field label="Max cost per run (optional)" htmlFor="ag-lim-cost" error={errors.costUsd} hint={`Dollars. Unset: the per-run budget of the version on the floor ($${a.liveBudget ?? a.budget}) applies.`}>
           <Input id="ag-lim-cost" type="number" inputMode="decimal" className="mono" min={LIMIT_RANGE.costUsd[0]} step="0.01" placeholder={ph.costUsd} disabled={ro} value={t.costUsd} onChange={set("costUsd")} />
         </Field>
       </div>

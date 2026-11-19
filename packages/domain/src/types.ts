@@ -878,6 +878,8 @@ export interface Agent {
   limits?: RunLimits;
   /** The limits of the version on the floor: what a run is bound by. `limits` is the working copy, which only a new version and its promotion puts on the floor. */
   liveLimits?: RunLimits;
+  /** The per-run budget of the version on the floor: the cost limit a run has when none is set. */
+  liveBudget?: number;
   suite: Id;
   instructions: string;
   overrides: Record<string, { model?: string; autonomy?: Autonomy; budget?: number }>;

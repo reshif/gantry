@@ -538,7 +538,7 @@ describe("Run limits panel", () => {
   const type = (id: string, v: string) => fireEvent.change(input(id), { target: { value: v } });
 
   it("shows the defaults as placeholders when nothing is set, and Save is off until something changes", async () => {
-    setup();
+    setup({ "GET /api/v1/agents": () => ({ body: [{ ...BUILD, liveBudget: 12 }, REVIEW] }) });
     mountAgent();
     await byId("ag-limits");
     expect(input("ag-lim-turns").placeholder).toBe("40");
@@ -555,6 +555,15 @@ describe("Run limits panel", () => {
     expect(input("ag-lim-turns").value).toBe("90"); // the working copy is what the fields edit
     expect(document.getElementById("ag-limits")!.parentElement!.textContent).toContain("On the floor now: defaults.");
     expect(input("ag-lim-turns").placeholder).toBe("40");
+  });
+
+  it("G-R7: the cost placeholder and hint use the floor version's per-run budget, not the working copy's", async () => {
+    setup({ "GET /api/v1/agents": () => ({ body: [{ ...BUILD, budget: 50, liveBudget: 12, liveLimits: {} }, REVIEW] }) });
+    mountAgent();
+    await byId("ag-limits");
+    expect(input("ag-lim-cost").placeholder).toBe("12");
+    expect(document.getElementById("ag-limits")!.textContent).toContain("($12)");
+    expect(document.getElementById("ag-limits")!.textContent).not.toContain("$50");
   });
 
   it("refuses an out of range value before sending anything, and shows what the agent has set", async () => {
