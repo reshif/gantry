@@ -54,6 +54,8 @@ export const NO_AGENT_WO_TEXT = "No agent is available to talk to right now, so 
 
 const active = new Set<string>();
 /** The runners of the running app (tests call them directly; the app runs them on a timer). */
+/** A follow-up claimed longer ago than this is orphaned: its turn is bounded at 180 s. */
+const FOLLOWUP_STALE_MS = 5 * 60_000;
 export const woSessionJobs = { classify: async (): Promise<number> => 0, followUps: async (): Promise<number> => 0, scan: async (): Promise<number> => 0, open: async (): Promise<number> => 0 };
 
 type Gate = Awaited<ReturnType<typeof stationAgentGate>>;
@@ -304,8 +306,12 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
 
   /** Follow-ups: an update that asked for one (data.followUp = pending) gets an agent turn that says what it means and puts up the next proposal. Never writes anything about the work. */
   async function runFollowUps(): Promise<number> {
+    // A claim whose process died (or whose status write failed) stays 'running' with nobody working on it: after the turn's own bound plus slack, it fails if it was already retried once, else goes back to pending once (statechart edge-blips, EventuallyTerminal).
+    const stale = `org_id = $1 and data->>'followUp' = 'running' and coalesce((data->>'followUpClaimedAt')::bigint, 0) < $2::bigint - ${FOLLOWUP_STALE_MS}`;
+    await g.pool.query(`update workorder_messages set data = jsonb_set(data, '{followUp}', '"failed"') where ${stale} and data->>'followUpRetried' = 'true'`, [g.orgId, Date.now()]);
+    await g.pool.query(`update workorder_messages set data = jsonb_set(jsonb_set(jsonb_set(data, '{followUp}', '"pending"'), '{followUpRetried}', 'true'), '{followUpRetryAt}', '0') where ${stale}`, [g.orgId, Date.now()]);
     const { rows } = await g.pool.query<{ id: string; wo_id: string; body: string; ev: string | null; retried: string | null }>(
-      `update workorder_messages set data = jsonb_set(data, '{followUp}', '"running"') where org_id = $1 and id in (select id from workorder_messages where org_id = $1 and data->>'followUp' = 'pending' and coalesce((data->>'followUpRetryAt')::bigint, 0) <= $2::bigint order by created_at limit 3 for update skip locked) returning id, wo_id, body, data->>'event' as ev, data->>'followUpRetried' as retried`,
+      `update workorder_messages set data = jsonb_set(jsonb_set(data, '{followUp}', '"running"'), '{followUpClaimedAt}', to_jsonb($2::bigint)) where org_id = $1 and id in (select id from workorder_messages where org_id = $1 and data->>'followUp' = 'pending' and coalesce((data->>'followUpRetryAt')::bigint, 0) <= $2::bigint order by created_at limit 3 for update skip locked) returning id, wo_id, body, data->>'event' as ev, data->>'followUpRetried' as retried`,
       [g.orgId, Date.now()],
     );
     const done = (id: string, status: string) => g.pool.query(`update workorder_messages set data = jsonb_set(data, '{followUp}', to_jsonb($3::text)) where org_id = $1 and id = $2`, [g.orgId, id, status]);

@@ -37,6 +37,20 @@ describe("fetchRiding", () => {
     expect(n).toBe(1);
     expect(Date.now() - t).toBeLessThan(2000);
   });
+  it("never retries once a response exists, even an error status (statechart edge-blips: NoRetryAfterResponse)", async () => {
+    let n = 0;
+    const res = await fetchRiding(async () => { n++; return new Response("busy", { status: 503 }); }, new AbortController().signal, () => undefined, [1, 1, 1]);
+    expect(res.status).toBe(503);
+    expect(n).toBe(1);
+  });
+  it("makes at most 4 attempts with the default backoff and 2 with the fallback backoff (BoundedAttempts)", async () => {
+    let n = 0;
+    await expect(fetchRiding(() => { n++; return Promise.reject(boom()); }, new AbortController().signal, () => undefined, BLIP_BACKOFF_MS.map(() => 1))).rejects.toThrow();
+    expect(n).toBe(4);
+    n = 0;
+    await expect(fetchRiding(() => { n++; return Promise.reject(boom()); }, new AbortController().signal, () => undefined, [1])).rejects.toThrow();
+    expect(n).toBe(2);
+  });
   it("causeOf carries only the message and the cause", () => {
     expect(causeOf(boom())).toEqual({ err: "fetch failed", code: "ETIMEDOUT", cause: "connect ETIMEDOUT" });
   });

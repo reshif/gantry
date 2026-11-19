@@ -208,5 +208,39 @@ d("intake questions: closing, replacing and verifying", () => {
       await woSessionJobs.followUps();
       expect(edge.calls.length).toBe(calls);
     });
+
+    // statechart edge-blips: a claim whose process died stays 'running' forever without recovery (EventuallyTerminal), and two runners must not take one message (NotRunTwice).
+    const orphan = (retried: boolean, age: number) => q(`update workorder_messages set data = jsonb_set(jsonb_set(data, '{followUp}', '"running"'), '{followUpClaimedAt}', to_jsonb($1::bigint)) || $2::jsonb where id = 'wm-blip'`, [Date.now() - age, JSON.stringify(retried ? { followUpRetried: "true" } : {})]);
+
+    it("an orphaned claim (process died mid-turn) is retried once, not left running forever", async () => {
+      await nudge();
+      await orphan(false, 10 * 60_000);
+      edge.script = [say("Hello, what do you need?")] as never;
+      await woSessionJobs.followUps();
+      expect(await state()).toMatchObject({ f: "done", r: "true" });
+      expect(edge.calls.length).toBe(1);
+    });
+
+    it("an orphaned claim that was already retried once is failed without another model call", async () => {
+      await nudge();
+      await orphan(true, 10 * 60_000);
+      edge.script = [say("never")] as never;
+      await woSessionJobs.followUps();
+      expect((await state()).f).toBe("failed");
+      expect(edge.calls.length).toBe(0);
+    });
+
+    it("a fresh claim still running is left alone, and two runners at once make one model call", async () => {
+      await nudge();
+      await orphan(false, 1000);
+      await woSessionJobs.followUps();
+      expect((await state()).f).toBe("running");
+      expect(edge.calls.length).toBe(0);
+      await q(`update workorder_messages set data = jsonb_set(data, '{followUp}', '"pending"') where id = 'wm-blip'`);
+      edge.script = [say("Hello"), say("Hello again")] as never;
+      await Promise.all([woSessionJobs.followUps(), woSessionJobs.followUps()]);
+      expect(edge.calls.length).toBe(1);
+      expect((await state()).f).toBe("done");
+    });
   });
 });
