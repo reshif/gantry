@@ -29,11 +29,13 @@ export interface EmitCtx {
   woFacts?: { cls: string; risk: string | null; position?: string } | null;
   /** The person a "mention" notification is about: the email keyword "mentioned" reaches them. */
   mentioned?: string | null;
+  /** An on-call page (the default page for urgent events): marked in the delivery log's request. */
+  page?: boolean;
 }
 
 export type EmitInput = Omit<EmitCtx, "deliveryId"> & { deliveryId?: string; reuseDeliveryId?: string };
 
-export interface Emitted { deliveryId: string; status: "pending" | "failed"; error: string }
+export interface Emitted { deliveryId: string; status: "pending" | "failed"; error: string; /** The email addresses the delivery goes to (lower case), when it is an email. */ to?: string[] }
 
 const destKey = (transport: string, instId: string, target: string): string => `${transport}:${instId}:${target}`.slice(0, 300);
 
@@ -42,7 +44,7 @@ async function nextId(db: Queryable): Promise<string> {
 }
 
 /** The request the delivery was made from, kept so a retry of an unresolved destination can be rebuilt. */
-const requestOf = (c: EmitCtx, skipped?: Array<{ address: string; reason: string }>): Record<string, unknown> => ({ dest: c.dest, route: c.route, event: c.event, repo: c.repo, wo: c.wo, mandatory: c.mandatory, isTest: c.isTest ?? false, ...(skipped?.length ? { skipped } : {}) });
+const requestOf = (c: EmitCtx, skipped?: Array<{ address: string; reason: string }>): Record<string, unknown> => ({ dest: c.dest, route: c.route, event: c.event, repo: c.repo, wo: c.wo, mandatory: c.mandatory, isTest: c.isTest ?? false, ...(c.page ? { page: true } : {}), ...(skipped?.length ? { skipped } : {}) });
 
 export type Prepared =
   | { ok: false; error: string; resolvedInst: InstInfo | null; skipped?: Array<{ address: string; reason: string }> }
@@ -105,8 +107,9 @@ export async function emitOne(db: Queryable, c0: EmitInput): Promise<Emitted> {
   }
   const ob = await enqueueOutbox(db, { orgId: c.orgId, eventId: c.eventId!, destination: p.destination, payload: p.payload });
   // The same event and destination already queued (a route listing a destination twice, a replayed event): one delivery, not two.
-  if (!ob.created) return { deliveryId: c.deliveryId, status: "pending", error: "" };
+  const to = p.transport === "smtp" && Array.isArray(p.payload.to) ? (p.payload.to as string[]).map((x) => x.toLowerCase()) : undefined;
+  if (!ob.created) return { deliveryId: c.deliveryId, status: "pending", error: "", ...(to ? { to } : {}) };
   await recordDelivery(db, c, p, ob.id);
   await publishChange(db, { org: c.orgId, keys: ["deliveries"], ...(c.project ? { project: c.project } : {}) });
-  return { deliveryId: c.deliveryId, status: "pending", error: "" };
+  return { deliveryId: c.deliveryId, status: "pending", error: "", ...(to ? { to } : {}) };
 }

@@ -28,9 +28,9 @@ export const CAP_NAME: Record<BudgetCap, string> = { project: "the project's mon
 export async function overBudget(db: Queryable, orgId: string, woId: string): Promise<Over[]> {
   const w = (await db.query<{ project_id: string; budget: unknown }>(`select project_id, data->'budgetUsd' as budget from work_orders where org_id = $1 and id = $2`, [orgId, woId])).rows[0];
   if (!w) return [];
-  const b = (await db.query<{ m: string; w: string; z: boolean }>(`select monthly_limit_micros::text as m, wo_limit_micros::text as w, monthly_zero_cap as z from budgets where org_id = $1 and project_id = $2`, [orgId, w.project_id])).rows[0];
+  const b = (await db.query<{ m: string; w: string }>(`select monthly_limit_micros::text as m, wo_limit_micros::text as w from budgets where org_id = $1 and project_id = $2`, [orgId, w.project_id])).rows[0];
   const cfg = (await db.query<{ extra: Record<string, unknown> | null }>(`select config->'extra' as extra from projects where org_id = $1 and id = $2`, [orgId, w.project_id])).rows[0];
-  const projectLimit = b ? (Number(b.m) > 0 ? Number(b.m) : b.z ? 0 : null) : null;
+  const projectLimit = b && Number(b.m) > 0 ? Number(b.m) : null;
   const woLimit = toMicros(w.budget) ?? (b && Number(b.w) > 0 ? Number(b.w) : null) ?? toMicros(cfg?.extra?.woBudgetUsd);
   const spent = (await db.query<{ project: string; wo: string }>(
     `select (select coalesce(sum(cost_micros),0) from usage_meter where org_id = $1 and project_id = $2 and at >= date_trunc('month', now() at time zone 'UTC') at time zone 'UTC')::text as project,

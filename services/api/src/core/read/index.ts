@@ -106,7 +106,7 @@ export async function readProjects(db: Queryable, orgId: string, stops?: ActiveS
         [orgId],
       ),
     () => db.query(`select id, project_id, event, destinations, template, conditions, fields, enabled from notification_routes where org_id = $1 and project_id is not null order by created_at, id`, [orgId]),
-    () => db.query(`select project_id, monthly_limit_micros, monthly_zero_cap, alert_at from budgets where org_id = $1`, [orgId]),
+    () => db.query(`select project_id, monthly_limit_micros, alert_at from budgets where org_id = $1`, [orgId]),
     // The project's onboarding guidelines (spec 8.6): every published version, newest last.
     () => db.query(`select project_id, version, body, note, published_at, published_by from guideline_versions where org_id = $1 and scope = 'project' and published_at is not null order by project_id, version`, [orgId]),
     () => (stops ? Promise.resolve(stops) : readActiveStops(db, orgId)),
@@ -132,8 +132,10 @@ export async function readProjects(db: Queryable, orgId: string, stops?: ActiveS
         id: String(x.id).slice(String(r.id).length + 1), event: x.event, dest: x.destinations, template: x.template, cond: x.conditions, enabled: x.enabled, fields: x.fields,
       })),
       mcp: Array.isArray(cfg.mcp) ? cfg.mcp : [],
+      pageOnCall: cfg.oncallPage !== false,
+      pagedFor: pagedFor(cfg.oncallPage !== false),
       oncall: Array.isArray(cfg.oncall) ? (cfg.oncall as unknown[]).filter((x): x is string => typeof x === "string") : [],
-      budget: { monthly: b ? Math.round(num(b.monthly_limit_micros) / 1_000_000) : 0, capped: b ? num(b.monthly_limit_micros) > 0 || b.monthly_zero_cap === true : false, mtd: num(spend.rows.find((x) => x.project_id === r.id)?.micros) / 1_000_000, alertAt: b ? num(b.alert_at) : 0.8 },
+      budget: { monthly: b ? Math.round(num(b.monthly_limit_micros) / 1_000_000) : 0, capped: b ? num(b.monthly_limit_micros) > 0 : false, mtd: num(spend.rows.find((x) => x.project_id === r.id)?.micros) / 1_000_000, alertAt: b ? num(b.alert_at) : 0.8 },
       created: ms(r.created_at) ?? 0,
       halted: halt ? haltInfo(halt) : null,
       killed: kill ? killInfo(kill) : null,
@@ -243,6 +245,9 @@ export async function readSecurity(db: Queryable, orgId: string): Promise<Versio
   const r = rows[0];
   return r ? { version: r.version, value: { ...DEFAULT_SECURITY, ...(r.body as SecuritySettings) } } : { version: 0, value: DEFAULT_SECURITY };
 }
+
+/** What the on-call page covers, in words the page shows: kill and restore always, the rest while the project keeps the default page on. */
+const pagedFor = (on: boolean): string[] => (on ? ["kill", "restore", "halts", "blocked", "security hold", "escalations"] : ["kill", "restore"]);
 
 export const DEFAULT_SECURITY: SecuritySettings = {
   sso: { provider: "OpenID Connect", domain: "", enforced: false, entity: "" },
