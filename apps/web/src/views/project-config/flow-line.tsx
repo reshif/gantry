@@ -13,10 +13,11 @@ import { useAgents, useTemplates } from "../../api/queries";
 import { useLeaveGuard } from "../../lib/useLeaveGuard";
 import { DraftConflictBanner } from "../../ui/DraftConflict";
 import { useUI } from "../../ui/overlay-context";
-import { Btn, Input, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
+import { Btn, Field, Input, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { OverrideReason } from "../work/override";
 import { nextVersion } from "../govern/data";
+import { inheritedText, limitsLine, parseLimits, textOf, type LimitText } from "../../lib/runLimits";
 import { metricsOf, useRes, type PView } from "../projects/kit";
 import { flowFrom, type Tpl } from "../projects/templates-kit";
 import { ClassRoutes } from "./flow-routes";
@@ -35,7 +36,7 @@ export const MODE_TEXT: Record<GateKind | "off", { label: string; help: string }
 type Mode = GateKind | "off";
 const MODES: GateKind[] = ["human", "auto", "mixed"];
 
-interface StOv { enabled?: boolean; wip?: number }
+interface StOv { enabled?: boolean; wip?: number; runLimits?: LimitText }
 /** When a reason box opens near the bottom, bring it above the sticky Save bar (once, on mount). */
 const scrollIntoViewOnce = (el: HTMLElement | null): void => { if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" }); };
 
@@ -76,6 +77,10 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
   const gateMode = (g: Gate): GateKind => (f.gates.find((x) => x.id === g.id)?.mode ?? p.flow.gates[g.id]?.mode ?? g.kind) as GateKind;
   const gCur = (g: Gate): Mode => (p.flow.gates[g.id]?.enabled ? gateMode(g) : "off");
   const stEff = (s: Station) => ({ ...stCur(s), ...stOv[s.id] });
+  /** The station's run limits override as typed (the draft, else what is saved) and what is wrong with it. */
+  const rlCur = (s: Station): LimitText => textOf(p.flow.stations[s.id]?.runLimits);
+  const rlEff = (s: Station): LimitText => stOv[s.id]?.runLimits ?? rlCur(s);
+  const rlChanged = (s: Station): boolean => !!stOv[s.id]?.runLimits && JSON.stringify(stOv[s.id]!.runLimits) !== JSON.stringify(rlCur(s));
   const gOn = (g: Gate): boolean => gOv[g.id]?.on ?? !!p.flow.gates[g.id]?.enabled;
   const gKind = (g: Gate): GateKind => gOv[g.id]?.kind ?? gateMode(g);
   const gEff = (g: Gate): Mode => (gOn(g) ? gKind(g) : "off");
@@ -104,6 +109,7 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
       const cur = stCur(s);
       const o = stOv[s.id];
       if (o?.wip !== undefined && o.wip !== cur.wip) out.push({ key: `wip-${s.id}`, what: `${s.no} ${s.name} WIP limit`, from: String(cur.wip), to: String(o.wip) });
+      if (rlChanged(s)) out.push({ key: `rl-${s.id}`, what: `${s.no} ${s.name} run limits (override)`, from: limitsLine(p.flow.stations[s.id]?.runLimits).replace("defaults", "inherited"), to: limitsLine(parseLimits(rlEff(s)).value).replace("defaults", "inherited") });
       if (o?.enabled !== undefined && o.enabled !== cur.enabled) out.push({ key: `on-${s.id}`, what: `${s.no} ${s.name}`, from: cur.enabled ? "on" : "off", to: o.enabled ? "on" : "off" });
     }
     for (const g of gates) {
@@ -132,6 +138,8 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
       ui.toast(`${missing.map((g) => g.name).join(", ")}: give a reason of at least ${minReason} characters to override the lock.`, "error");
       return;
     }
+    const badLimits = f.stations.filter((s) => rlChanged(s) && Object.keys(parseLimits(rlEff(s)).errors).length);
+    if (badLimits.length) { ui.toast(`${badLimits.map((s) => s.name).join(", ")}: fix the run limits first.`, "error"); return; }
     setReasonErr({});
     const offs = gates.filter((g) => gEff(g) === "off" && gCur(g) !== "off" && g.id !== "G1f");
     if (offs.length) {
@@ -160,6 +168,13 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
       const o = stOv[s.id];
       const cur = stCur(s);
       if (o?.wip !== undefined && o.wip !== cur.wip) { if (!(await run(ops.setProject(p.id, `flow.stations.${s.id}.wip`, o.wip, { ifMatch: ver }), `${s.name} WIP limit set to ${o.wip}.`))) break; done.push(`wip-${s.id}`); }
+      if (rlChanged(s)) {
+        const v = parseLimits(rlEff(s)).value;
+        // every field is sent: a blank one is null, which clears the override for that field
+        const body = { turns: v.turns ?? null, wallClockSeconds: v.wallClockSeconds ?? null, costUsd: v.costUsd ?? null };
+        if (!(await run(ops.setProject(p.id, `flow.stations.${s.id}.runLimits`, body, { ifMatch: ver }), `${s.name} run limits saved.`))) break;
+        done.push(`rl-${s.id}`);
+      }
       if (o?.enabled !== undefined && o.enabled !== cur.enabled) { if (!(await run(ops.setProject(p.id, `flow.stations.${s.id}.enabled`, o.enabled, { ifMatch: ver }), `${s.name}${o.enabled ? " turned on." : " turned off."}`))) break; done.push(`on-${s.id}`); }
     }
     if (!failed) {
@@ -222,7 +237,7 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
     const ag = agents.data?.find((a) => a.id === s.agent);
     const agent = ag ? ag.name : s.agent || "No agent";
     const trav = classesAt(cat, order, p.flow.classes, s.id);
-    const changed = changes.some((c) => c.key.endsWith(`-${s.id}`) && (c.key.startsWith("wip-") || c.key.startsWith("on-")));
+    const changed = changes.some((c) => c.key.endsWith(`-${s.id}`) && (c.key.startsWith("wip-") || c.key.startsWith("on-") || c.key.startsWith("rl-")));
     return (
       <li key={s.id} className={cls(key, !eff.enabled, changed)} id={`flw-st-${s.id}`} {...hover(key)}>
         <div className="flw-line">
@@ -249,6 +264,23 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
           <div className="flw-more small" id={`flw-d-s-${s.id}`}>
             <div><span className="muted">Agent: </span>{agent}</div>
             <div><span className="muted">Routes: </span>{eff.enabled && trav.length ? trav.map((c) => c.name).join(", ") : eff.enabled ? "no class" : "none while off"}</div>
+            {(() => {
+              const ph = inheritedText(ag);
+              const e = rlEff(s);
+              const er = parseLimits(e).errors;
+              const set = (k: keyof LimitText) => (ev: React.ChangeEvent<HTMLInputElement>) => setStOv((o) => ({ ...o, [s.id]: { ...o[s.id], runLimits: { ...rlEff(s), [k]: ev.target.value } } }));
+              return (
+                <fieldset className="flw-limits" id={`pcf-rl-${s.id}`} disabled={!d.allowed}>
+                  <legend className="small">Run limits (override)</legend>
+                  <div className="small muted">Overrides the agent's limits for runs at this station in this project. Blank inherits.</div>
+                  <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+                    <Field label="Max turns" htmlFor={`pcf-rl-turns-${s.id}`} error={er.turns}><Input id={`pcf-rl-turns-${s.id}`} type="number" className="mono pcf-num" min={1} max={500} placeholder={ph.turns} value={e.turns} onChange={set("turns")} /></Field>
+                    <Field label="Max time (minutes)" htmlFor={`pcf-rl-min-${s.id}`} error={er.minutes}><Input id={`pcf-rl-min-${s.id}`} type="number" className="mono pcf-num" min={1} max={240} placeholder={ph.minutes} value={e.minutes} onChange={set("minutes")} /></Field>
+                    <Field label="Max cost per run" htmlFor={`pcf-rl-cost-${s.id}`} error={er.costUsd}><Input id={`pcf-rl-cost-${s.id}`} type="number" className="mono pcf-num" min={0.01} step="0.01" placeholder={ph.costUsd} value={e.costUsd} onChange={set("costUsd")} /></Field>
+                  </div>
+                </fieldset>
+              );
+            })()}
             <div className="muted">{s.id === "intake" ? "Every work order starts here, so it cannot be turned off." : eff.enabled ? "Turning it off skips this station for new work orders." : "Off: new work orders skip this station."}</div>
           </div>
         ) : null}

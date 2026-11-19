@@ -4,6 +4,7 @@ import { Chip, Select, Toggle, Panel, type Decision } from "../../ui/primitives"
 import { DataTable, type SortCol } from "../../ui/SortTable";
 import { Icon } from "../../ui/Icon";
 import { useEvalsFactory } from "../../api/queries";
+import { RunLimitsPanel } from "./RunLimits";
 import { AUTONOMY, TOOLS, autonomyCheck, useModels, useStations, type AgentRow } from "./kit";
 
 export interface TabProps {
@@ -16,9 +17,11 @@ export interface TabProps {
   apply: (patch: Record<string, unknown>, msg: string) => void;
   /** Instructions tab: save the text, then cut a version from it. */
   saveAsVersion: (text: string) => void;
+  /** Run limits: save them, then cut a new version from them (so they ship through the normal promote and eval flow). */
+  saveLimits: (limits: { turns?: number; wallClockSeconds?: number; costUsd?: number }) => Promise<void>;
 }
 
-export function ConfigTab({ a, ro, perm, projects, policies, apply }: TabProps) {
+export function ConfigTab({ a, ro, perm, projects, policies, apply, saveLimits }: TabProps) {
   const m = useModels();
   const st = useStations();
   const station = st.find(a.station);
@@ -59,6 +62,7 @@ export function ConfigTab({ a, ro, perm, projects, policies, apply }: TabProps) 
           </div>
         </Panel>
       </div>
+      <RunLimitsPanel key={`${a.id}-${a.rev}`} a={a} ro={ro} perm={perm} saveLimits={saveLimits} />
       <Panel title="Guardrail paths">
         {paths.length ? <pre className="pre">{paths.join("\n")}</pre> : <div className="empty">No protected paths for this agent.</div>}
       </Panel>

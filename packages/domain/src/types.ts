@@ -209,11 +209,21 @@ export interface FlowOverrideMark {
   /** For a mode override: the mode before. */
   from?: GateKind;
 }
-/** A safety rail on one agent run: turns, wall-clock seconds and (optionally) dollars. Every field is optional; what is unset is inherited. */
+/** A safety rail on one agent run. Every field is optional; what is unset is inherited (station override, then the agent version, then the defaults: 40 turns, 60 minutes). */
 export interface RunLimits {
   turns?: number;
   wallClockSeconds?: number;
   costUsd?: number;
+}
+/** What a run that stopped on a limit reports: which limit and the numbers (used 40 of 40 turns). */
+export interface LimitStop {
+  limit: "turns" | "time" | "cost";
+  used: number;
+  max: number;
+  unit: "turns" | "seconds" | "usd";
+  text: string;
+  station: string;
+  attempt: string;
 }
 export interface StationConfig {
   enabled: boolean;
@@ -792,6 +802,8 @@ export interface WorkOrder {
   pr: PullRequest | null;
   blockReason: string | null;
   failReason: string | null;
+  /** Set while the work order's station stopped on a run limit: which one and the numbers. */
+  limitStop?: LimitStop | null;
   /** Why the work order sits in the Needs a person bay: "failed" when the station failed or lost its run repeatedly, "merge" when the approved merge could not happen (so Retry or Retry merge applies). */
   bayCause?: string;
   /** "start" when the failed run never started (workspace seeding, the launcher, no model). */
@@ -868,6 +880,10 @@ export interface Agent {
   guardrails: { paths: string[]; maxDiff: number };
   /** Run limits a person set on the working copy (versioned with the agent). Empty: the defaults apply. */
   limits?: RunLimits;
+  /** The limits of the version on the floor: what a run is bound by. `limits` is the working copy, which only a new version and its promotion puts on the floor. */
+  liveLimits?: RunLimits;
+  /** The per-run budget of the version on the floor: the cost limit a run has when none is set. */
+  liveBudget?: number;
   suite: Id;
   instructions: string;
   overrides: Record<string, { model?: string; autonomy?: Autonomy; budget?: number }>;

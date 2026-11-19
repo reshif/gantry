@@ -136,13 +136,23 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
       if (r2.ok) ui_.toast(`Saved v${label}`, "ok"); else out(r2);
     })();
   };
+  /** Run limits: written to the working copy, then a version snapshots them; it goes live after its suite passes. An unchanged set only cuts the version. */
+  const saveLimits = async (limits: { turns?: number; wallClockSeconds?: number; costUsd?: number }): Promise<void> => {
+    if (JSON.stringify(limits) !== JSON.stringify(a.limits ?? {})) {
+      const r = await ops.saveAgent(a.id, { limits }, "run limits", { ifMatch: a.rev });
+      if (!r.ok) { out(r); return; }
+    }
+    const label = nextVersion(a);
+    const r2 = await ops.newAgentVersion(a.id, label, "Run limits changed in web");
+    if (r2.ok) ui_.toast(`Saved v${label}`, "ok"); else out(r2);
+  };
   const paused = a.status === "paused";
   const [tab, setTab] = useRouteTab(["config", "instr", "skills", "proj", "versions"], "config");
   const tabs = [
     { id: "config", label: "Configuration" }, { id: "instr", label: "Instructions" }, { id: "skills", label: "Skills and MCP", count: a.skills.length + a.mcp.length },
     { id: "proj", label: "Per-project", count: Object.keys(a.overrides ?? {}).length || undefined }, { id: "versions", label: "Versions", count: a.versions.length },
   ];
-  const tp: TabProps = { a, ro, perm, projects, policies, apply, saveAsVersion };
+  const tp: TabProps = { a, ro, perm, projects, policies, apply, saveAsVersion, saveLimits };
   const body = tab === "instr" ? <InstructionsTab key={`${a.id}-${a.rev}`} {...tp} />
     : tab === "skills" ? <SkillsTab {...tp} />
     : tab === "proj" ? <OverridesTab {...tp} />

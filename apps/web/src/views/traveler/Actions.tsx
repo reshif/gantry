@@ -10,7 +10,7 @@ import { useCatalog } from "../projects/kit";
 import { useProjectRepos } from "../floor/kit";
 import { ReclassifyDialog } from "../work-orders/intake";
 import { ApproveGateDialog, RejectGateDialog } from "../record/GateDialogs";
-import { ParkDialog, ReassignDialog, RedoDialog, SendBackDialog } from "./Dialogs";
+import { ParkDialog, ReassignDialog, RedoDialog, RetryLimitDialog, SendBackDialog } from "./Dialogs";
 import { anywayLabel, overrideKindOf } from "../work/override";
 import { bayLabel, dec, isClosed, no, ok, stName, type TDecision, type TWo } from "./model";
 
@@ -41,6 +41,7 @@ export function useActionSpecs(wo: TWo, page = false): ActionSpec[] | null {
   const killD = useCan("kill.workorder", { project: wo.project });
   const restoreD = useCan("restore.workorder", { project: wo.project });
   const approveGate = useCan("gate.approve", { project: wo.project });
+  const limitD = useCan("project.config", { project: wo.project });
   if (!cat || !me) return null;
   const stops = makeStopActions(ui, me);
   const stop = wo.stop;
@@ -134,6 +135,10 @@ export function useActionSpecs(wo: TWo, page = false): ActionSpec[] | null {
   // A station that failed repeatedly is parked in the Needs a person bay: retrying it is what that person is there for.
   if (wo.state === "failed" || wo.state === "blocked" || (wo.bay === "person" && (wo.bayCause === "failed" || wo.bayCause === "merge")))
     out.push({ key: "retry", label: wo.bayCause === "merge" ? "Retry merge" : `Retry ${stName(cat, stationId)}`, kind: "primary", icon: "refresh", id: "trv-retry", guard: stop ? no(stopWhy) : dec(wo, "sendback"), group: "main", onClick: () => void ops.retry(wo.id, undefined, ifm).then((r) => res(r)) });
+  // A run that stopped on a limit (turns, time or cost) offers a one-off raise for the next attempt, to whoever may change limits (the server decides and checks).
+  const costHalt = !!halted && /^Budget reached: the run /.test(halted.reason ?? "");
+  if (wo.limitStop || costHalt)
+    out.push({ key: "retry-limit", label: "Retry with a higher limit", icon: "refresh", id: "trv-retry-limit", guard: limitD as TDecision, group: "main", onClick: () => void ui.open((close) => <RetryLimitDialog woId={wo.id} decision={limitD as TDecision} onClose={close} />) });
   if (wo.bay) {
     let dU: TDecision = stop ? no(stopWhy) : dec(wo, "park");
     if (dU.allowed && wo.bay === "sechold" && !approveGate.allowed) dU = no(`Security hold can only be released by someone who may approve gates in this project.`);
