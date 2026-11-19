@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 import { world } from "./flow-helpers.js";
-import { advance, enterStation, finish, flushFx } from "../src/areas/workorders/engine.js";
+import { advance, enterStation, finish, flushFx, promoteWip } from "../src/areas/workorders/engine.js";
 import { lockWo, saveWo } from "../src/areas/workorders/model.js";
 
 const d = TEST_URL ? describe : describe.skip;
@@ -275,20 +275,26 @@ d("station WIP limits", () => {
       expect([b.position, b.state, b.data.wipWait]).toEqual(["verify", "running", undefined]);
     });
 
-    it("a retry into a full station waits (the order stays failed) and runs when a place frees", async () => {
+    it("a retry of an order Needs a person (a bay) into a full station waits there; a failed order already at its station is never held", async () => {
       await reset();
       await setWip(1);
       await w.insertWo("WO-9521", { position: "verify", state: "running" });
-      await w.insertWo("WO-9522", { position: "verify", state: "failed" });
+      await w.insertWo("WO-9522", { position: "person", state: "parked", data: { bayFrom: "verify", bayCause: "failed", bayReason: "Failed three times", history: [], log: [] } });
       const r = await w.call("p-meera", "POST", `/api/v1/work-orders/WO-9522/retry`, {});
       expect(r.status, JSON.stringify(r.body)).toBe(200);
       expect(r.body.msg).toMatch(/Verify is full \(1\/1\)/);
       const b = await pos("WO-9522");
-      expect([b.state, b.data.wipWait?.kind]).toEqual(["failed", "retry"]);
+      expect([b.position, b.state, b.data.wipWait?.kind]).toEqual(["person", "parked", "retry"]);
       expect((await park("WO-9521")).status).toBe(200);
       const a = await pos("WO-9522");
       expect([a.position, a.state, a.data.wipWait]).toEqual(["verify", "running", undefined]);
       expect((await w.liveAttempt("WO-9522"))?.station).toBe("verify");
+      // G-W5: failed at the station it is at, so it holds its place: the retry is never held
+      await w.insertWo("WO-9523", { position: "verify", state: "failed" });
+      await w.insertWo("WO-9524", { position: "verify", state: "running" });
+      const r2 = await w.call("p-meera", "POST", `/api/v1/work-orders/WO-9523/retry`, {});
+      expect(r2.status, JSON.stringify(r2.body)).toBe(200);
+      expect([(await pos("WO-9523")).state, (await pos("WO-9523")).data.wipWait]).toEqual(["running", undefined]);
     });
 
     it("a return from a bay into a full station waits in the bay and goes in when a place frees", async () => {
@@ -356,6 +362,126 @@ d("station WIP limits", () => {
       expect(await evs("wo.wip.enter", "WO-9562")).toHaveLength(1);
       await setWip(0, "build");
       await setWip(0, "verify");
+    });
+  });
+
+  /** The statechart gate's replays (G-W1 to G-W5). */
+  describe("every way into a station is checked", () => {
+    const park = (id: string) => w.call("p-meera", "POST", `/api/v1/work-orders/${id}/park`, { bay: "hold", reason: "Parked to free a place" });
+    const adv = (id: string) => w.tx(async (tx) => { const fx = await w.fxIn(tx); const wo = await lockWo(tx, t.orgId, id); await advance(fx, wo, "system"); await saveWo(tx, t.orgId, wo); await flushFx(fx); });
+
+    it("G-W1: answering a question in Needs a person waits in the bay when the station is full, and goes in when a place frees", async () => {
+      await reset();
+      await setWip(1);
+      await w.insertWo("WO-9601", { position: "verify", state: "running" });
+      await w.insertWo("WO-9602", { position: "person", state: "parked", data: { bayFrom: "verify", bayReason: "q", waitingOn: { station: "verify", questions: [] }, history: [], log: [] } });
+      const { maybeResume } = await import("../src/areas/workorders/dialogue.js");
+      const resumed = await w.tx(async (tx) => { const fx = await w.fxIn(tx); const wo = await lockWo(tx, t.orgId, "WO-9602"); const r = await maybeResume(fx, wo, "p-asha"); await saveWo(tx, t.orgId, wo); await flushFx(fx); return r; });
+      expect(resumed).toBe(false);
+      expect(await liveAt("verify")).toBe(1);
+      const b = await pos("WO-9602");
+      expect([b.position, b.data.wipWait?.kind]).toEqual(["person", "unpark"]);
+      expect((await park("WO-9601")).status).toBe(200);
+      expect((await pos("WO-9602")).position).toBe("verify");
+      expect(await liveAt("verify")).toBe(1);
+    });
+
+    it("G-W1: a new head commit that returns an order from a bay does not push a full station over its limit", async () => {
+      await reset();
+      await setWip(1, "review");
+      await w.insertWo("WO-9605", { position: "review", state: "waiting" });
+      await w.insertWo("WO-9606", { position: "person", state: "parked", data: { bayFrom: "review", bayCause: "merge", bayReason: "Merge blocked", merging: { prNumber: 7, headSha: "aaaaaaa" }, history: [], log: [] } });
+      const { recordNewHead } = await import("../src/areas/workorders/station.js");
+      await w.tx((tx) => recordNewHead(tx, t.orgId, "WO-9606", "bbbbbbb"));
+      expect(await liveAt("review")).toBe(1);
+      expect((await pos("WO-9606")).position).toBe("person");
+      await setWip(0, "review");
+    });
+
+    it("G-W2: restoring a killed order into a station that filled meanwhile waits (kind restore) and resumes when a place frees", async () => {
+      await reset();
+      await setWip(1);
+      await w.insertWo("WO-9611", { position: "verify", state: "running" });
+      await w.insertWo("WO-9612", { position: "build", state: "running" });
+      await adv("WO-9612");
+      expect((await pos("WO-9612")).data.wipWait?.station).toBe("verify");
+      const k = await w.call("p-asha", "POST", "/api/v1/stops", { scope: "wo", id: "WO-9611", mode: "kill", reason: "Bad output seen", inFlight: "cancel", confirmText: "WO-9611" });
+      expect(k.status, JSON.stringify(k.body)).toBeLessThan(300);
+      const { reconcileStop } = await import("../src/areas/stops/enforce.js");
+      const stopId = (await w.q<{ id: string }>(`select id from stops where lifted_at is null order by set_at desc limit 1`))[0]!.id;
+      await w.tx((tx) => reconcileStop(tx, stopId));
+      expect((await pos("WO-9612")).position).toBe("verify"); // the freed place went to the waiter
+      const r = await w.call("p-asha", "POST", `/api/v1/stops/${encodeURIComponent("workorder:WO-9611")}/restore`, { reason: "The incident is over" });
+      expect(r.status, JSON.stringify(r.body)).toBeLessThan(300);
+      const row2 = (await w.q<{ id: string }>(`select id from stops where org_id = $1 order by set_at desc limit 1`, [t.orgId]))[0]!.id;
+      await w.tx((tx) => reconcileStop(tx, row2));
+      expect(await liveAt("verify")).toBe(1);
+      const a = await pos("WO-9611");
+      expect([a.state, a.data.wipWait?.kind]).toEqual(["parked", "restore"]);
+      expect((await park("WO-9612")).status).toBe(200);
+      const b = await pos("WO-9611");
+      expect([b.position, b.state, b.data.wipWait]).toEqual(["verify", "running", undefined]);
+      expect(await liveAt("verify")).toBe(1);
+    });
+
+    it("G-W3: a waiter that holds while the occupant leaves for an unlimited station is not stranded (the promotion takes the lock first)", async () => {
+      await reset();
+      await setWip(1);
+      await w.insertWo("WO-9621", { position: "verify", state: "running" }); // occupant
+      await w.insertWo("WO-9622", { position: "build", state: "running" }); // will wait for verify
+      const { withTx } = await import("@gantry/db");
+      let releaseW!: () => void;
+      const gate = new Promise<void>((r) => (releaseW = r));
+      let wHeld!: () => void;
+      const wReady = new Promise<void>((r) => (wHeld = r));
+      const txW = withTx(t.db.app, async (tx) => {
+        const fx = await w.fxIn(tx);
+        const wo = await lockWo(tx, t.orgId, "WO-9622");
+        await advance(fx, wo, "system");
+        await saveWo(tx, t.orgId, wo);
+        await flushFx(fx);
+        wHeld();
+        await gate;
+      });
+      await wReady;
+      const yP = adv("WO-9621"); // the occupant advances to an unlimited station; its promotion must wait for the waiter's commit
+      await new Promise((r) => setTimeout(r, 1500));
+      releaseW();
+      await txW;
+      await yP;
+      const wv = await pos("WO-9622");
+      expect([wv.position, wv.state, wv.data.wipWait]).toEqual(["verify", "running", undefined]);
+    });
+
+    it("G-W4: a backed-up line (7 stations, 15 waiters at each) promotes in well under a second", async () => {
+      await reset();
+      const stations = ["research", "spec", "design", "plan", "build", "verify", "review"];
+      const k = 15;
+      for (const st of stations) expect((await setWip(k, st)).status).toBe(200);
+      let n = 0;
+      for (let i = 0; i < stations.length - 1; i++) {
+        for (let j = 0; j < k; j++) {
+          const id = `WO-97${String(++n).padStart(3, "0")}`;
+          await w.insertWo(id, { position: stations[i]!, state: "waiting", data: { wipWait: { station: stations[i + 1], since: 1000 + n, live: k, limit: k, kind: i % 2 ? "forward" : "back" } } });
+        }
+      }
+      for (let j = 0; j < k; j++) await w.insertWo(`WO-98${String(j).padStart(3, "0")}`, { position: "review", state: "running" });
+      const t0 = Date.now();
+      await w.tx(async (tx) => { const fx = await w.fxIn(tx); await promoteWip(fx, proj); });
+      const ms = Date.now() - t0;
+      expect(ms, `promotion took ${ms} ms`).toBeLessThan(1000);
+      for (const st of stations) await setWip(0, st);
+    });
+
+    it("G-W5: a redo of a failed order at its own full station is never held", async () => {
+      await reset();
+      await setWip(1);
+      await w.insertWo("WO-9651", { position: "verify", state: "running" });
+      await w.insertWo("WO-9652", { position: "verify", state: "failed" });
+      const r = await w.call("p-meera", "POST", `/api/v1/work-orders/WO-9652/send-back`, { toStation: "verify", note: "Redo the checks please" });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      const b = await pos("WO-9652");
+      expect([b.state, b.data.wipWait]).toEqual(["running", undefined]);
     });
   });
 });

@@ -89,10 +89,10 @@ export async function createWorkOrder(fx: Fx, i: CreateInput): Promise<Created> 
     // No agent ran at Intake for an inherited brief: no history entry is invented.
     w.data.history = [];
     note(w, fx, by, `Created from epic ${i.childOf.parent}.`);
-    await enterStation(fx, w, "build", { project });
+    await enterStation(fx, w, "build", { project, noWip: true });
     await saveWo(fx.tx, fx.orgId, w);
   } else {
-    await enterStation(fx, w, "intake", { project });
+    await enterStation(fx, w, "intake", { project, noWip: true });
     await saveWo(fx.tx, fx.orgId, w);
   }
   return {

@@ -10,7 +10,7 @@
 import { can, evaluateGuardrails, stationDef } from "@gantry/domain";
 import { flowFor } from "./ctx.js";
 import { schedule, type Tx } from "@gantry/db";
-import { flushFx, attemptIsCurrent, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, advance, coveringStop, enterBay, enterStation, ev, leaveBay, loadOne, note, openGate, openInstanceOf, releaseSlot, startAttempt, stationIdOf, dispatchQueued, type Fx } from "./engine.js";
+import { flushFx, attemptIsCurrent, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, advance, coveringStop, enterBay, enterStation, ev, leaveBay, loadOne, note, openGate, openInstanceOf, releaseSlot, startAttempt, stationIdOf, dispatchQueued, wipHoldCheck, type Fx } from "./engine.js";
 import { readCatalog, readOrg } from "../../core/read/index.js";
 import { lockWo, saveWo, type Wo } from "./model.js";
 import { ensureStationDocument } from "./station-docs.js";
@@ -382,6 +382,13 @@ export async function recordNewHead(tx: Tx, orgId: string, woId: string, headSha
   const merging = asObj(w.data.merging);
   if (typeof merging.prNumber === "number" && merging.headSha !== headSha && w.state !== "done" && w.state !== "killed") {
     if (bayOf(fx.catalog, w)) {
+      // Back on the belt means a place at its station again: a full station keeps it in its bay until one frees.
+      if (await wipHoldCheck(fx, w, String(w.data.bayFrom ?? "review"), "unpark", { by: "system" })) {
+        await saveWo(tx, orgId, w);
+        await dispatchQueued(fx, w.project);
+        await flushFx(fx);
+        return { reopened: null };
+      }
       await leaveBay(fx, w);
       w.position = String(w.data.bayFrom ?? "review");
       for (const k of ["bayReason", "bayFrom", "bayAt", "bayCause"]) delete w.data[k];

@@ -75,7 +75,7 @@ export async function sendBackCore(fx: Fx, w: Wo, project: Project, cur: string,
   await closeOpenInstances(fx, w.id, "send_back");
   await resetGatesFrom(fx, w, project, to);
   // The station it goes back to may be full: the order then waits where it is until a place frees (a send-back is let in before work going forward).
-  if (!(await wipHoldCheck(fx, w, to, "back", { by }))) await enterStation(fx, w, to, { project });
+  if (!(await wipHoldCheck(fx, w, to, "back", { by }))) await enterStation(fx, w, to, { project, noWip: true });
   note(w, fx, by, redo ? `Redo ${stationDef(fx.catalog, to)?.name ?? to}${noteText ? `: ${noteText}` : "."}` : `Sent back from ${stationDef(fx.catalog, cur)?.name ?? cur} to ${stationDef(fx.catalog, to)?.name ?? to}${noteText ? `: ${noteText}` : "."}`);
   ev(fx, w, "wo.sendback", { text: noteText, from: cur, to, station: to, ...(redo ? { redo: true } : {}), ...(by === "system" ? { by: "system" } : {}) });
   await saveWo(fx.tx, fx.orgId, w);
@@ -132,9 +132,11 @@ async function unparkInner(fx: Fx, actor: Actor, w: Wo, reason?: string): Promis
   // The station it returns to may be full: the order then stays in its bay until a place frees (the Queue already counts at Build, so it is never held here).
   if (await wipHoldCheck(fx, w, back, "unpark", { by, ...(reason ? { reason } : {}) })) {
     await saveWo(fx.tx, fx.orgId, w);
+    await dispatchQueued(fx, w.project); // the limit may have moved since the count: a place that is free now is used now
     const live = w.data.wipWait as { live: number; limit: number };
     return done(fx, `${w.id} waits in ${bayDef(fx.catalog, from)?.name ?? from}: ${stationDef(fx.catalog, back)?.name ?? back} is full (${live.live}/${live.limit}).`, w.project, { version: w.version, waiting: true });
   }
+  fx.wipAdmit = w.id;
   await unparkCore(fx, w, by, reason);
   return done(fx, `${w.id} is back at ${stationDef(fx.catalog, stationIdOf(fx.catalog, w))?.name ?? back}.`, w.project, { version: w.version });
 }
@@ -156,7 +158,7 @@ export async function unparkCore(fx: Fx, w: Wo, by: string, reason?: string): Pr
     delete w.data.bayAt;
     w.position = "build";
     w.state = "running";
-    await enterStation(fx, w, "build", { project });
+    await enterStation(fx, w, "build", { project, noWip: true });
   } else if (from === "sechold" && !routeGates(fx.catalog, await pinned(fx, w), w.cls).includes("G3G3s")) {
     // Plan and security was switched off (a Factory Admin override) after the hold began: there is no gate left to reopen, so the work order goes on to the next station.
     delete w.data.bayReason;
@@ -231,9 +233,11 @@ export async function retry(tx: Tx, actor: Actor, woId: string): Promise<CmdResu
   // The station may be full: the retry then waits (the order stays failed, or in its bay) until a place frees.
   if (await wipHoldCheck(fx, w, sid, "retry", { by })) {
     await saveWo(fx.tx, fx.orgId, w);
+    await dispatchQueued(fx, w.project); // the limit may have moved since the count: a place that is free now is used now
     const live = w.data.wipWait as { live: number; limit: number };
     return done(fx, `${w.id}: ${stationDef(fx.catalog, sid)?.name ?? sid} is full (${live.live}/${live.limit}); the retry waits for a place.`, w.project, { version: w.version, waiting: true });
   }
+  fx.wipAdmit = w.id;
   await retryCore(fx, w, by);
   return done(fx, `${w.id} is running again.`, w.project, { version: w.version });
 }
