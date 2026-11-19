@@ -84,6 +84,7 @@ export interface RecordData {
   attempts: Array<{ id: string; station: string; visit: number; fencing: number; state: string; outcome: string | null; startedAt: string | null; endedAt: string | null; agent: string | null }>;
   results: Array<{ id: string; attempt: string; station: string; outcome: string; summary: string; at: string | null; output: unknown }>;
   runs: Array<{ id: string; attempt: string; state: string; model: string | null; at: string | null }>;
+  wait?: { label: string; reason: string | null; since: string | null; kind: "slot" | "disk" | "disk_critical" } | null;
   code: { pullRequests: RecPr[]; commits: RecCommit[]; files: RecFile[]; diff: { plus: number; minus: number; files: number }; tests: { passed: number; failed: number; added: number } };
   outcomes: Outcome[];
   totals: { tokens: number; cost: number };
