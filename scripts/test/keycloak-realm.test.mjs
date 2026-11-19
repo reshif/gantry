@@ -74,7 +74,9 @@ test("S-125: the API's identity-provider account is a service account that can m
     assert.equal(c.directAccessGrantsEnabled, false);
     assert.equal(c.secret, "${GANTRY_ADMIN_CLIENT_SECRET}", "the secret is read from a file at import, never written in the realm");
     const u = r.users.find((x) => x.serviceAccountClientId === "gantry-admin");
-    assert.deepEqual(u.clientRoles, { "realm-management": ["manage-users"] });
+    assert.deepEqual(u.clientRoles, { "realm-management": ["manage-users", "view-events"] }, "manage-users to act, view-events to read the admin events the watcher compares (G-M1)");
+    assert.equal(r.adminEventsEnabled, true, `${name}: admin events are recorded`);
+    assert.equal(r.adminEventsDetailsEnabled, true);
     assert.equal(u.realmRoles, undefined);
   }
 });
@@ -99,4 +101,12 @@ test("S-125: the API container never gets the Keycloak master-admin password; th
   assert.match(dev, /keycloak:[\s\S]*?secrets: \[[^\]]*idp_admin_client_secret/);
   assert.ok(dev.includes("GANTRY_ADMIN_CLIENT_SECRET"));
   assert.ok(read("deploy/compose.prod.yml").includes("GANTRY_ADMIN_CLIENT_SECRET"));
+});
+
+test("G-M8: admin-cli takes no password-only direct grant in this realm", () => {
+  for (const [name, r] of Object.entries(realms())) {
+    const c = r.clients.find((x) => x.clientId === "admin-cli");
+    assert.ok(c, `${name}: admin-cli is defined`);
+    assert.equal(c.directAccessGrantsEnabled, false);
+  }
 });

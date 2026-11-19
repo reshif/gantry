@@ -9,6 +9,7 @@ import { hasSecondFactor } from "../oidc.js";
 import { BOOTSTRAP_EMAIL_DOMAIN } from "./bootstrap-admin.js";
 import { holdsFactoryAdmin, MFA_REQUIRED_MSG } from "./mfa.js";
 import { createSession, refreshAuthTime } from "./sessions.js";
+import { recordMfaChangedOutside } from "./mfa-alert.js";
 import { bindRecoveryWindow, consumeRecoveryWindow } from "./ip-recovery.js";
 
 export interface SignInRequest {
@@ -20,6 +21,8 @@ export interface SignInRequest {
   existingSession?: { id: string; personId: string } | null;
   /** A step-up must refresh the held session and must never switch it to another person. */
   stepUpOnly?: boolean;
+  /** When the authorize request was made (ms): the provider's auth_time must not be older than this (S-129, G-M4), or a silent provider session signs someone in. */
+  authorizedAt?: number;
   /** The one-time token from an invite link. Required to claim an invited person by email address. */
   inviteToken?: string;
 }
@@ -37,7 +40,7 @@ const DENY = {
   different_person: "That sign-in was a different person, so the change was cancelled. Sign in again as yourself.",
   identity_mismatch: "This account is linked to a different identity at the provider.",
   mfa_required: MFA_REQUIRED_MSG,
-  stale_auth: "That sign-in was not fresh enough to confirm the change, so it was cancelled. Sign in again and complete both steps.",
+  stale_auth: "That sign-in was not fresh (it reused an older session at the identity provider), so it was cancelled. Sign in again and complete both steps.",
   invite_required: "This account has not been linked to your sign-in yet. Open the invite link from your email to join (it is valid for 14 days), or ask an administrator to invite you again.",
 } as const;
 
@@ -122,11 +125,15 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
     // A step-up keeps asking for it: the same check refuses a step-up whose token lost the factor, and the session is left as it was.
     // Only the dev waiver (GANTRY_DEV_ADMIN_MFA_OPTIONAL, never the default, refused off localhost) lets a password-only sign-in through.
     if (!g.config.adminMfaOptional && !secondFactor && !(person && (person.status === "deactivated" || person.status === "suspended"))) return deny("mfa_required", person?.id ?? null);
-    // A step-up must be a sign-in that happened now (S-129): a token with no auth_time, or one older than the step-up window, is not a confirmation
-    // (the provider is asked for max_age=0 but is not trusted to have honoured it).
-    if (r.stepUpOnly) {
+    // EVERY sign-in must be fresh (S-129, G-M4): the provider is asked for prompt=login, but a request with it stripped returns the provider's own old session
+    // (acr 2, old auth_time) with no credentials. So auth_time must exist and be no older than the authorize request (a few seconds of clock slack), and a
+    // step-up must also be inside the step-up window.
+    {
+      const floor = r.authorizedAt ? r.authorizedAt / 1000 - 5 : Date.now() / 1000 - 120;
       const window = (sec.stepUpWindowMinutes ?? 15) * 60;
-      if (!claims.authTime || Date.now() / 1000 - claims.authTime > window) return deny("stale_auth", person?.id ?? null);
+      if (!g.config.adminMfaOptional || r.stepUpOnly) { // the dev waiver only skips this for a plain sign-in
+        if (!claims.authTime || claims.authTime < floor || (r.stepUpOnly && Date.now() / 1000 - claims.authTime > window)) return deny("stale_auth", person?.id ?? null);
+      }
     }
     if (!person) {
       const id = await freePersonId(tx, orgId, claims.gantryId, claims.preferredUsername ?? email.split("@")[0]!);
@@ -165,7 +172,7 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
     }
     // A token that does not say when the person signed in gives a session with an unknown sign-in time, which satisfies no step-up (S-129).
     const authTime = claims.authTime ? new Date(claims.authTime * 1000) : null;
-    if (secondFactor) await recordMfa(tx, orgId, person.id, idpFactors, r);
+    if (secondFactor) await recordMfa(tx, orgId, person.id, idpFactors, r, bootUser);
     const ex = r.existingSession;
     if (ex && ex.personId === person.id) {
       await refreshAuthTime(tx, orgId, ex.id, authTime!, secondFactor); // a step-up always has an auth_time (checked above)
@@ -182,26 +189,29 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
   });
 }
 
+/** A hash of the person's second factors at the provider: type, id AND creation time, so a factor deleted and re-planted with a reused id still differs (G-M2). */
+export const fingerprintOf = (factors: Array<{ id: string; type: string; createdDate?: number }>): string =>
+  createHash("sha256").update(factors.map((f) => `${f.type}:${f.id}:${f.createdDate ?? 0}`).sort().join("\n")).digest("hex");
+
 /**
  * Records that the person signed in with a second factor (the per-person status the People list and the Security page show, S-127) and, when the
- * provider told us which factors they hold, notices a change since the last sign-in: the ids of their authenticators differ because an operator
- * reset or replaced one in the provider's own console, behind Gantry (S-124). The first recording is not a change. Never refuses a sign-in.
+ * provider told us which factors they hold, audits two things that are NOT refusals (G-M2): their authenticators differ from the last sighting (changed at the
+ * provider outside Gantry, e.g. a console reset or a planted credential), and a factor seen for the first time with no baseline and no enrolment link Gantry
+ * sent (a plant before the first sign-in). Both write `auth.mfa_changed_outside` and email the Factory Admins. A Gantry reset clears the baseline and notes the link.
  */
-async function recordMfa(tx: Tx, orgId: string, personId: string, factors: Array<{ id: string; type: string }> | null, r: SignInRequest): Promise<void> {
+async function recordMfa(tx: Tx, orgId: string, personId: string, factors: Array<{ id: string; type: string; createdDate?: number }> | null, r: SignInRequest, bootstrap: boolean): Promise<void> {
   if (!factors) {
     await tx.query(`update people set mfa = true, mfa_checked_at = now() where org_id = $1 and id = $2`, [orgId, personId]);
     return;
   }
-  const fp = createHash("sha256").update(factors.map((f) => `${f.type}:${f.id}`).sort().join("\n")).digest("hex");
+  const fp = fingerprintOf(factors);
   const types = [...new Set(factors.map((f) => f.type))].sort();
-  const prev = (await tx.query<{ mfa_fingerprint: string | null; mfa_types: string[] }>(`select mfa_fingerprint, mfa_types from people where org_id = $1 and id = $2 for update`, [orgId, personId])).rows[0];
+  const prev = (await tx.query<{ mfa_fingerprint: string | null; mfa_types: string[]; mfa_link_at: Date | null }>(`select mfa_fingerprint, mfa_types, mfa_link_at from people where org_id = $1 and id = $2 for update`, [orgId, personId])).rows[0];
   await tx.query(`update people set mfa = true, mfa_checked_at = now(), mfa_fingerprint = $3, mfa_types = $4 where org_id = $1 and id = $2`, [orgId, personId, fp, types]);
   if (prev?.mfa_fingerprint && prev.mfa_fingerprint !== fp) {
-    await appendEvent(tx, {
-      orgId, type: "auth.mfa_changed", category: "auth", actor: "system", channel: "system", subject: { type: "person", id: personId },
-      before: { types: prev.mfa_types }, after: { types, note: "The second factors held at the identity provider changed since this person's last sign-in, outside Gantry (a reset or a new authenticator in the provider's console)." },
-      sourceIp: r.ip || null, requestId: r.requestId,
-    });
+    await recordMfaChangedOutside(tx, orgId, personId, { why: "credentials_changed", detail: { before: prev.mfa_types, types }, requestId: r.requestId, sourceIp: r.ip || null });
+  } else if (!prev?.mfa_fingerprint && !prev?.mfa_link_at && !bootstrap) {
+    await recordMfaChangedOutside(tx, orgId, personId, { why: "first_seen_without_enrolment", detail: { types }, requestId: r.requestId, sourceIp: r.ip || null });
   }
 }
 

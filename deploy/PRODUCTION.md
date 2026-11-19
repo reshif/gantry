@@ -110,13 +110,27 @@ admin it lets in still signs in with both factors.
 - **Reset (S-124).** People > Reset authenticator (`POST /api/v1/people/{id}/mfa-reset`): needs `people.manage`, a fresh two-factor
   sign-in and a reason, is refused for yourself, removes the person's second factors at Keycloak, ends their Keycloak and Gantry
   sessions, emails a new one-time link and records `people.mfa_reset` in the ledger. A reset done directly in the Keycloak console
-  is noticed at that person's next sign-in (their authenticator ids changed) and recorded as `auth.mfa_changed`; their open
-  Gantry sessions run until they end (back-channel logout, S-72, would end them at once). A sole Factory Admin who lost their device
+  is noticed at that person's next sign-in (their authenticator ids changed) and recorded as `auth.mfa_changed_outside` (ledger and an email to the Factory Admins); their open
+  Gantry sessions run until they end (back-channel logout, S-72, would end them at once); the `auth.mfa_changed_outside` alarm above fires within a minute. A sole Factory Admin who lost their device
   cannot reset themselves from Gantry: use the Keycloak console as `admin` (Users > Credentials > delete the OTP, then Credential
-  reset > send the actions email with Update Password and Configure OTP), then they sign in with the one-time link.
-- **Identity-provider account (S-125).** The API never has the Keycloak master-admin password. It uses the realm client
-  `gantry-admin` (a service account that can manage users in the `gantry` realm and nothing else: not the realm, its flows or
-  its clients) with the secret file `idp_admin_client_secret`. Only the `keycloak` service reads `keycloak_admin_password`, to start.
+  reset > send the actions email with Update Password and Configure OTP), then they sign in with the one-time link. That email needs the realm's
+  mail server; with no mail the only ways in are a break-glass plant with the master admin's REST API (the same primitive as above) or, in the
+  console, Authentication > Flows > bind the built-in `browser` flow to the realm until mail works (the old gantry flows are replaced, the built-in one remains).
+- **Identity-provider account (S-125, G-M1).** The API never has the Keycloak master-admin password. It uses the realm client
+  `gantry-admin`, a service account with `manage-users` and `view-events` in the `gantry` realm, and the secret file
+  `idp_admin_client_secret`. It cannot change the realm, its flows or its clients, impersonate, or touch another realm (probed: all 403).
+  **It can still set any user's password and create or update a user with a second factor whose secret it chose, so whoever controls the
+  API process or that secret file can plant a factor on any account, a Factory Admin included, and sign in as them. MFA does not survive a
+  compromise of the API or of `idp_admin_client_secret`.** That is a smaller hole than the master password, not a closed one. What
+  reduces and detects it: every change the API's own client makes is logged (`idp_admin_log`); each minute the API reads the realm's admin
+  events and records `auth.mfa_changed_outside` in the ledger, and emails the Factory Admins, for any credential or password change that
+  is not one of those logged calls (the provider's console, the master admin, or someone using the secret directly); each sign-in compares
+  the person's authenticators (type, id and creation time) with the last sighting, and a factor first seen with no Gantry enrolment link
+  is audited the same way. These are alarms, not walls: nothing is refused or undone automatically. Keycloak's fine-grained admin permissions
+  (26.4.7: `admin-fine-grained-authz` is a preview feature that needs `--features=admin-fine-grained-authz:v2` at build/start) can scope a
+  service account to a group of users but have no "everyone except" rule, so excluding Factory Admins would mean Gantry maintaining a
+  "managed users" group at every grant; that is not done. Keep `idp_admin_client_secret` readable by the two services only and rotate it
+  if the API host is ever suspect. Only the `keycloak` service reads `keycloak_admin_password`, to start.
 - **Sign-out (S-130).** Signing out of Gantry also sends the browser to Keycloak's end-session endpoint, with or without the
   stored id-token, and every sign-in is `prompt=login`, so a leftover Keycloak session cannot sign anyone back in silently.
   The Keycloak session itself lasts up to 30 minutes idle / 10 hours (realm `ssoSessionIdleTimeout`, `ssoSessionMaxLifespan`) if
@@ -130,20 +144,36 @@ admin it lets in still signs in with both factors.
   `compose.prod.yml`) waives the check on a throwaway local stack with password-only demo users. The API refuses to start with it
   on unless `GANTRY_PUBLIC_URL` is localhost.
 
-### Switching MFA on for an existing install
+### MFA rollout runbook (an existing install)
 
-1. Create the secret file `deploy/secrets/idp_admin_client_secret` (a long random string; the file is not generated for you). It
-   must be the same file the `keycloak` and `gantry-api` services mount (compose does this).
-2. Apply the realm configuration to the running Keycloak, once, from the host (the admin console is on loopback):
-   `node deploy/keycloak/apply-mfa-realm.mjs --url http://127.0.0.1:8081/idp --realm gantry --master-password-file deploy/secrets/keycloak_admin_password --admin-secret-file deploy/secrets/idp_admin_client_secret --realm-json deploy/keycloak/realm-gantry.prod.json --public-url https://$GANTRY_HOSTNAME`
-   (add `--dry-run` first to see the calls; use `realm-gantry.json` on a dev stack). It reads both files itself and prints neither. It
-   builds the new browser flow beside the old, switches, then removes the old; it registers the required actions, sets the OTP / WebAuthn
-   policy, adds the `gantry-admin` client with only `manage-users`, and does not touch users or their credentials. Safe to run again.
-3. Redeploy: `docker compose ... up -d` (the API image has migration 0053; `gantry-api` now mounts `idp_admin_client_secret` instead of
-   `keycloak_admin_password`, and `GANTRY_DEV_ADMIN_MFA_OPTIONAL` is false).
-4. Everyone is asked to enrol at their next sign-in: a person with no authenticator is refused with "Two-step sign-in" and needs a
-   one-time link. In People, use **Reset authenticator** on each person (or invite them again) so Keycloak emails it. People who already
-   have an authenticator app are unaffected. Gantry sessions made without a second factor end at their next request.
+Do these in order. Do not switch the realm before a mail server is set and you have received a link once: from the moment the realm switches,
+everyone without an authenticator is refused at the provider and can only be let in by a link.
+
+1. **Check the recovery routes.** In the Keycloak console (ssh tunnel to 8081, master admin) confirm the first Factory Admin has an OTP
+   credential, and that a second Factory Admin exists with one too (enrol one first if not). The master-admin console is outside Gantry's
+   MFA; it is the recovery route.
+2. **Mail and secret.** Make sure the realm has a working mail server and that your own address receives mail (production: `GANTRY_SMTP_*` in
+   your environment; dev: mailpit). Create `deploy/secrets/idp_admin_client_secret` (a long random string, not generated for you).
+3. **Apply the realm, once, from the host.** Export the same `GANTRY_SMTP_*` variables the production stack uses, then:
+   `node deploy/keycloak/apply-mfa-realm.mjs --url http://127.0.0.1:8081/idp --realm gantry --master-password-file deploy/secrets/keycloak_admin_password --admin-secret-file deploy/secrets/idp_admin_client_secret --realm-json deploy/keycloak/realm-gantry.prod.json --public-url https://$GANTRY_HOSTNAME --smtp-test-to <an address you read>`
+   (`--dry-run` first: it lists the calls and works on a realm that lacks the new required actions; use `realm-gantry.json` and mailpit on a dev stack.)
+   It removes any half-built flow from an interrupted run, sets the realm's mail server from the realm JSON (the production placeholders are read
+   from your environment and never printed), **sends a test mail and stops, changing nothing else, if it fails**, then sets the OTP / WebAuthn
+   policy and the required actions, builds the new browser flow beside the old, switches, removes the old, turns on admin events, turns off
+   password-only direct grants on `admin-cli`, and creates `gantry-admin` with only `manage-users` and `view-events`. It does not touch users,
+   credentials or sessions and is safe to run again. Then confirm the realm's browser flow is `gantry-browser` and that the first admin can sign in
+   at the provider with password and code (the account console works for this test).
+4. **Deploy the API and the web together, right after step 3** (migrations 0053 and 0054; `gantry-api` mounts `idp_admin_client_secret` instead of
+   `keycloak_admin_password`; `GANTRY_DEV_ADMIN_MFA_OPTIONAL` is false). At start the API reads each person's authenticators once so the People
+   status is right (until then it shows "Unknown", never "Not enrolled"). Sign the first admin out and in once: their old session had no recorded factor.
+5. **Send enrolment links.** People > Reset authenticator (or invite again) for each other person; confirm one arrives and works before telling
+   anyone. Do not delete the master-admin password or rely on removing the old flows until everyone is in. A person who already has an
+   authenticator app is unaffected.
+6. **Rollback if the first admin cannot sign in.** Console > Authentication > Flows: bind the built-in `browser` flow to the realm (it is still
+   there; the script deletes only the old `gantry-*` flows), then investigate.
+
+On a dev stack the `GANTRY_DEV_ADMIN_MFA_OPTIONAL` waiver only helps while the realm has NOT been switched: once the realm's browser flow is the new one,
+a password-only login is refused at the provider before Gantry sees it, so enrol demo people from the mail in mailpit instead.
 
 ## TLS
 

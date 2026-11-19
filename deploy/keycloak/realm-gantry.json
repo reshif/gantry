@@ -351,6 +351,22 @@
         "basic"
       ],
       "optionalClientScopes": []
+    },
+    {
+      "clientId": "admin-cli",
+      "name": "${client_admin-cli}",
+      "description": "Built-in client for the master realm's admin REST; unused in this realm. A password-only direct grant is off (G-M8).",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "attributes": {},
+      "fullScopeAllowed": false
     }
   ],
   "components": {
@@ -718,7 +734,8 @@
       "serviceAccountClientId": "gantry-admin",
       "clientRoles": {
         "realm-management": [
-          "manage-users"
+          "manage-users",
+          "view-events"
         ]
       }
     }

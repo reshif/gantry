@@ -3,7 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { needsStepUp } from "@gantry/domain";
 import { createOidcAdapter } from "../src/core/oidc.js";
-import type { IdpAdmin, IdpCredential } from "../src/core/auth/idp-admin.js";
+import type { IdpAdmin, IdpAdminEvent, IdpCredential } from "../src/core/auth/idp-admin.js";
 import { SESSION_KEY, TEST_URL, startApp, testConfig, type TestApp } from "./helpers.js";
 import { startIssuer } from "./issuer.js";
 
@@ -12,17 +12,18 @@ type Issuer = Awaited<ReturnType<typeof startIssuer>>;
 const d = TEST_URL ? describe : describe.skip;
 
 /** An identity provider the API can administer: records what Gantry asks of it. */
-function fakeIdp(): IdpAdmin & { calls: string[]; creds: Map<string, IdpCredential[]>; failLink: boolean } {
+function fakeIdp(): IdpAdmin & { calls: string[]; creds: Map<string, IdpCredential[]>; failLink: boolean; failReset: boolean; events: IdpAdminEvent[] } {
   const calls: string[] = [];
   const creds = new Map<string, IdpCredential[]>();
   const users = new Map<string, { id: string; username: string; email: string | null }>();
   const fake = {
-    calls, creds, failLink: false,
+    calls, creds, failLink: false, failReset: false, events: [] as IdpAdminEvent[],
     async findUser(q: { username?: string; email?: string }) { return [...users.values()].find((u) => (q.username && u.username === q.username) || (q.email && u.email === q.email)) ?? null; },
     async findUserId(username: string) { return (await fake.findUser({ username }))?.id ?? null; },
     async createUser(u: { username: string; email?: string }) { const id = `kc-${u.username}`; users.set(id, { id, username: u.username, email: u.email ?? null }); calls.push(`create:${u.username}`); return id; },
     async secondFactors(id: string) { return creds.get(id) ?? []; },
-    async resetSecondFactors(id: string) { const n = (creds.get(id) ?? []).length; creds.set(id, []); calls.push(`reset:${id}`, `logout:${id}`); return n; }, // the real client also ends the provider sessions
+    async resetSecondFactors(id: string, only?: string[]) { if (fake.failReset) throw new Error("provider refused"); const held = (creds.get(id) ?? []).filter((c) => !only || only.includes(c.id)); creds.set(id, (creds.get(id) ?? []).filter((c) => !held.includes(c))); calls.push(`reset:${id}`, `logout:${id}`); return held.length; }, // the real client also ends the provider sessions
+    async credentialEvents(since: number) { return fake.events.filter((e) => e.time > since); },
     async sendEnrolmentLink(id: string, o?: { lifespanSec?: number }) { if (fake.failLink) throw new Error("smtp down"); calls.push(`link:${id}:${o?.lifespanSec}`); },
     async endSessions(id: string) { calls.push(`logout:${id}`); },
   };
@@ -90,8 +91,7 @@ d("MFA for everyone (S-120..S-130)", () => {
   });
 
   it("S-121: a step-up with only a password is refused, leaves the session as it was, and cannot mint a key", async () => {
-    const x = await flow({ ...daniel, auth_time: now() - 4000, acr: "2" });
-    const cookie = cookieOf(x);
+    const cookie = (await t.session("p-daniel", { authAgeSec: 4000, secondFactor: true })).cookie; // a two-factor session whose sign-in is old
     const body = { name: "mfa probe", project: "payments", actions: ["wo.read"] };
     expect((await post(cookie, "/api/v1/api-keys", body)).json().needs).toBe("step_up");
     const weak = await flow({ ...daniel, auth_time: now(), acr: "1" }, "?step_up=1", cookie);
@@ -114,18 +114,23 @@ d("MFA for everyone (S-120..S-130)", () => {
 
   /* ---- S-129: the sign-in time is never assumed */
 
-  it("S-129: a token without auth_time does not count as just signed in; a step-up without it, or with an old one, is refused", async () => {
-    const x = await flow({ ...daniel, acr: "2" }); // no auth_time claim
-    expect(x.session).toBeTruthy();
-    const cookie = cookieOf(x);
-    expect((await t.db.admin.query(`select auth_time from sessions where person_id = 'p-daniel' order by created_at desc limit 1`)).rows[0].auth_time).toBeNull();
-    expect((await post(cookie, "/api/v1/api-keys", { name: "k", project: "payments", actions: ["wo.read"] })).json().needs).toBe("step_up");
+  it("S-129: a token without auth_time is refused at sign-in and at step-up; a step-up with an old one is refused", async () => {
+    expect((await flow({ ...daniel, acr: "2" })).session).toBeUndefined(); // no auth_time claim: the sign-in time is unknown
+    const cookie = (await t.session("p-daniel", { authAgeSec: 4000, secondFactor: true })).cookie;
     const noTime = await flow({ ...daniel, acr: "2" }, "?step_up=1", cookie);
     expect(String(noTime.r.headers.location)).toContain("auth_error");
     const old = await flow({ ...daniel, auth_time: now() - 4000, acr: "2" }, "?step_up=1", cookie);
     expect(String(old.r.headers.location)).toContain("auth_error");
     expect((await post(cookie, "/api/v1/api-keys", { name: "k", project: "payments", actions: ["wo.read"] })).json().needs).toBe("step_up");
     expect((await flow({ ...daniel, auth_time: now(), acr: "2" }, "?step_up=1", cookie)).r.headers.location).toBe("/");
+  });
+
+  it("G-M4: a sign-in whose auth_time is older than the authorize request (a silent provider session, prompt=login stripped) creates no session", async () => {
+    const old = await flow({ ...daniel, auth_time: now() - 600, acr: "2" });
+    expect(old.session).toBeUndefined();
+    expect(String(old.r.headers.location)).toContain("auth_error");
+    expect((await t.db.admin.query(`select reason from signins where outcome = 'denied' order by id desc limit 1`)).rows[0].reason).toBe("stale_auth");
+    expect((await flow({ ...daniel, auth_time: now() - 2, acr: "2" })).session).toBeTruthy(); // a login a moment before the callback is fine
   });
 
   /* ---- S-123: the step-up list is only what exists (plus another agent's vendor/integration/MCP edits); no gate, budget, trust or merge */
@@ -177,13 +182,14 @@ d("MFA for everyone (S-120..S-130)", () => {
 
     expect((await post(adminCookie, url, { reason: "x" })).statusCode).toBe(422); // a reason is required
     expect((await post(adminCookie, "/api/v1/people/p-asha/mfa-reset", { reason: "lost phone, myself" })).statusCode).toBeGreaterThanOrEqual(400); // not for oneself
-    const stale = await flow({ ...asha, auth_time: now() - 4000, acr: "2" });
-    expect((await post(cookieOf(stale), url, { reason: "lost phone" })).json().needs).toBe("step_up");
+    const stale = await t.session("p-asha", { authAgeSec: 4000, secondFactor: true });
+    expect((await post(stale.cookie, url, { reason: "lost phone" })).json().needs).toBe("step_up");
     expect(idp.calls.filter((c) => c.startsWith("reset"))).toEqual([]);
 
     const r = await post(adminCookie, url, { reason: "lost phone, verified by video call" });
     expect(r.statusCode, r.body).toBe(200);
     expect(idp.calls).toEqual(expect.arrayContaining(["reset:kc-daniel", expect.stringMatching(/^link:kc-daniel:\d+$/), "logout:kc-daniel"]));
+    expect(idp.calls.findIndex((c) => c.startsWith("link:kc-daniel"))).toBeLessThan(idp.calls.findIndex((c) => c === "reset:kc-daniel")); // G-M6: the link first
     expect((await t.app.inject({ url: "/api/v1/me", headers: { cookie: victimCookie } })).statusCode).toBe(401); // sessions ended
     const ev = (await t.db.admin.query(`select actor, after from events where type = 'people.mfa_reset' order by id desc limit 1`)).rows[0];
     expect(ev.actor).toBe("p-asha");
@@ -205,28 +211,107 @@ d("MFA for everyone (S-120..S-130)", () => {
     expect(bad.json().enrolment.reason).toMatch(/Reset authenticator/);
   });
 
-  it("S-124: a failed link leaves a clear refusal, and with no identity-provider connection the reset says so", async () => {
+  it("G-M6: when the one-time link cannot be sent the reset changes nothing and answers 409 with the reason; when only the removal fails the sessions still end and the ledger says so", async () => {
     const admin = await flow({ ...asha, auth_time: now(), acr: "2" });
     await idp.createUser({ username: "priya", email: "priya@acme.dev" });
+    idp.creds.set("kc-priya", [{ id: "pr1", type: "otp" }]);
+    const victim = await flow({ ...tomas, auth_time: now(), acr: "2" }); // a second person, to see the sessions
+    await idp.createUser({ username: "tomas", email: "tomas@acme.dev" });
+    idp.creds.set("kc-tomas", [{ id: "t1", type: "otp" }]);
     idp.failLink = true;
-    const bad = await post(cookieOf(admin), "/api/v1/people/p-priya/mfa-reset", { reason: "lost phone again" });
+    const bad = await post(cookieOf(admin), "/api/v1/people/p-tomas/mfa-reset", { reason: "lost phone, link down" });
     idp.failLink = false;
-    expect(bad.statusCode).toBeGreaterThanOrEqual(400);
-    expect(bad.json().msg).toMatch(/link/i);
+    expect(bad.statusCode).toBe(409);
+    expect(bad.json().msg).toMatch(/link could not be sent.*nothing was changed/i);
+    expect(idp.creds.get("kc-tomas")).toHaveLength(1); // factors untouched
+    expect((await t.app.inject({ url: "/api/v1/me", headers: { cookie: cookieOf(victim) } })).statusCode).toBe(200); // session untouched
+    expect((await t.db.admin.query(`select count(*)::int n from events where type = 'people.mfa_reset' and after->>'reason' = 'lost phone, link down'`)).rows[0].n).toBe(0);
+    idp.failReset = true;
+    const half = await post(cookieOf(admin), "/api/v1/people/p-tomas/mfa-reset", { reason: "lost phone, removal fails" });
+    idp.failReset = false;
+    expect(half.statusCode, half.body).toBe(200);
+    expect(half.json().msg).toMatch(/did not remove/i);
+    expect((await t.app.inject({ url: "/api/v1/me", headers: { cookie: cookieOf(victim) } })).statusCode).toBe(401); // sessions ended anyway
+    const ev = (await t.db.admin.query(`select after from events where type = 'people.mfa_reset' and after->>'reason' = 'lost phone, removal fails'`)).rows[0];
+    expect(ev.after).toMatchObject({ linkSent: true, factorRemovalFailed: "provider refused" });
   });
 
-  it("S-124: a reset done directly at the identity provider is noticed at the next sign-in (the credential id changed) and audited", async () => {
-    idp.creds.set("kc-meera", [{ id: "m1", type: "otp" }]);
-    await flow({ sub: "kc-meera", email: "meera@acme.dev", email_verified: true, gantry_id: "p-meera", auth_time: now(), acr: "2" });
-    const quiet = (await t.db.admin.query(`select count(*)::int n from events where type = 'auth.mfa_changed' and subject->>'id' = 'p-meera'`)).rows[0].n;
-    expect(quiet).toBe(0); // the first recording is not a change
-    idp.creds.set("kc-meera", [{ id: "m2", type: "otp" }]); // an operator removed the old authenticator and the person enrolled another, in the Keycloak console
-    await flow({ sub: "kc-meera", email: "meera@acme.dev", email_verified: true, gantry_id: "p-meera", auth_time: now(), acr: "2" });
-    const ev = (await t.db.admin.query(`select after from events where type = 'auth.mfa_changed' and subject->>'id' = 'p-meera'`)).rows;
+  it("G-M5: only a Factory Admin resets a Factory Admin's authenticator; a people.manage holder who is not one gets 403 and nothing changes", async () => {
+    await t.db.admin.query(`insert into role_matrix_versions (org_id, version, matrix, published_at, published_by) select org_id, version + 1, jsonb_set(matrix, '{auditor,people.manage}', 'true'), now(), 'test' from role_matrix_versions order by version desc limit 1`);
+    const sam = await flow({ sub: "kc-sam", email: "sam@acme.dev", email_verified: true, gantry_id: "p-sam", auth_time: now(), acr: "2" });
+    const omar = await flow({ sub: "kc-omar", email: "omar@acme.dev", email_verified: true, gantry_id: "p-omar", auth_time: now(), acr: "2" });
+    await idp.createUser({ username: "omar", email: "omar@acme.dev" });
+    idp.creds.set("kc-omar", [{ id: "o1", type: "otp" }]);
+    const before = idp.calls.length;
+    const r = await post(cookieOf(sam), "/api/v1/people/p-omar/mfa-reset", { reason: "not really lost" });
+    expect(r.statusCode).toBe(403);
+    expect(r.json().msg).toMatch(/Only a Factory Admin/);
+    expect(idp.calls.length).toBe(before);
+    expect((await t.app.inject({ url: "/api/v1/me", headers: { cookie: cookieOf(omar) } })).statusCode).toBe(200);
+    // a Factory Admin may
+    const admin = await flow({ ...asha, auth_time: now(), acr: "2" });
+    expect((await post(cookieOf(admin), "/api/v1/people/p-omar/mfa-reset", { reason: "lost phone, verified" })).statusCode).toBe(200);
+  });
+
+  it("S-124/G-M2: a change at the provider outside Gantry is audited at the next sign-in, including a re-planted factor with a reused id (the creation time differs)", async () => {
+    const meera = { sub: "kc-meera", email: "meera@acme.dev", email_verified: true, gantry_id: "p-meera", acr: "2" };
+    const count = async () => (await t.db.admin.query(`select count(*)::int n from events where type = 'auth.mfa_changed_outside' and subject->>'id' = 'p-meera'`)).rows[0].n;
+    await t.db.admin.query(`update people set mfa_link_at = now() where id = 'p-meera'`); // Gantry sent the enrolment link: the first sighting is expected
+    idp.creds.set("kc-meera", [{ id: "m1", type: "otp", createdDate: 1000 }]);
+    await flow({ ...meera, auth_time: now() });
+    expect(await count()).toBe(0);
+    await flow({ ...meera, auth_time: now() });
+    expect(await count()).toBe(0); // unchanged: nothing
+    idp.creds.set("kc-meera", [{ id: "m1", type: "otp", createdDate: 2000 }]); // deleted and re-created with the same id (a planted secret)
+    await flow({ ...meera, auth_time: now() });
+    expect(await count()).toBe(1);
+    idp.creds.set("kc-meera", [{ id: "m2", type: "otp", createdDate: 3000 }]);
+    await flow({ ...meera, auth_time: now() });
+    expect(await count()).toBe(2);
+    const ev = (await t.db.admin.query(`select after from events where type = 'auth.mfa_changed_outside' and subject->>'id' = 'p-meera' order by id desc limit 1`)).rows[0];
+    expect(ev.after).toMatchObject({ why: "credentials_changed", types: ["otp"] });
+    // and the Factory Admins are emailed
+    const mail = (await t.db.admin.query(`select payload from outbox where destination = 'smtp' and payload->>'subject' like '%second factor changed outside%' order by created_at desc limit 1`)).rows[0];
+    expect(mail.payload.to).toEqual(expect.arrayContaining(["asha@acme.dev"]));
+  });
+
+  it("G-M2: a factor first seen with no Gantry enrolment link and no baseline is audited, not refused", async () => {
+    idp.creds.set("kc-fatima", [{ id: "f1", type: "webauthn", createdDate: 5 }]);
+    const x = await flow({ sub: "kc-fatima", email: "fatima@acme.dev", email_verified: true, gantry_id: "p-fatima", auth_time: now(), acr: "2" });
+    expect(x.session).toBeTruthy();
+    const ev = (await t.db.admin.query(`select after from events where type = 'auth.mfa_changed_outside' and subject->>'id' = 'p-fatima'`)).rows;
     expect(ev).toHaveLength(1);
-    expect(ev[0].after).toMatchObject({ types: ["otp"] });
-    await flow({ sub: "kc-meera", email: "meera@acme.dev", email_verified: true, gantry_id: "p-meera", auth_time: now(), acr: "2" });
-    expect((await t.db.admin.query(`select count(*)::int n from events where type = 'auth.mfa_changed' and subject->>'id' = 'p-meera'`)).rows[0].n).toBe(1); // unchanged: no repeat
+    expect(ev[0].after).toMatchObject({ why: "first_seen_without_enrolment" });
+  });
+
+  it("G-M1: a credential or password change at the provider that Gantry did not make is recorded and emailed; Gantry's own calls are not", async () => {
+    const { checkIdpAdminEvents } = await import("../src/core/auth/idp-watch.js");
+    await t.db.admin.query(`update people set idp_subject = 'kc-lena' where id = 'p-lena'`);
+    const t0 = Date.now();
+    await t.db.admin.query(`insert into idp_admin_log (org_id, method, path, at) values ($1, 'DELETE', 'users/kc-priya/credentials/x', now())`, [t.orgId]);
+    idp.events.push(
+      { time: t0 + 1, operation: "DELETE", resourceType: "CREDENTIAL", resourcePath: "users/kc-priya/credentials/x", clientId: "gantry-admin", userId: "svc", realmId: "gantry" }, // Gantry's own (logged)
+      { time: t0 + 2, operation: "UPDATE", resourceType: "USER", resourcePath: "users/kc-lena/reset-password", clientId: null, userId: "admin", realmId: "master" }, // a console user
+    );
+    const r = await checkIdpAdminEvents(t.app.gantry, t0 + 10);
+    expect(r).toEqual({ checked: 2, flagged: 1 });
+    const ev = (await t.db.admin.query(`select subject, after from events where type = 'auth.mfa_changed_outside' and after->>'why' = 'provider_admin_event'`)).rows;
+    expect(ev).toHaveLength(1);
+    expect(ev[0].subject).toMatchObject({ id: "p-lena" });
+    expect(ev[0].after).toMatchObject({ operation: "UPDATE", resource: "users/kc-lena/reset-password" });
+    expect((await checkIdpAdminEvents(t.app.gantry, t0 + 20)).flagged).toBe(0); // the cursor moved on: not reported twice
+  });
+
+  it("G-M9: the backfill records who holds a factor from the provider, and the People status is unknown (null) until something has been read", async () => {
+    const { backfillMfa } = await import("../src/core/auth/idp-watch.js");
+    await t.db.admin.query(`update people set idp_subject = 'kc-sam', mfa = false, mfa_checked_at = null where id = 'p-sam'`);
+    const unknown = (await t.app.inject({ url: "/api/v1/people", headers: { cookie: (await t.session("p-asha", { secondFactor: true })).cookie } })).json().find((p: { id: string }) => p.id === "p-sam");
+    expect(unknown.mfa).toBeNull();
+    idp.creds.set("kc-sam", [{ id: "s1", type: "otp", createdDate: 1 }]);
+    await backfillMfa(t.app.gantry);
+    const row = (await t.db.admin.query(`select mfa, mfa_types, mfa_fingerprint from people where id = 'p-sam'`)).rows[0];
+    expect(row).toMatchObject({ mfa: true, mfa_types: ["otp"] });
+    expect(row.mfa_fingerprint).toBeTruthy();
   });
 });
 

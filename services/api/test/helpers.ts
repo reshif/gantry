@@ -80,7 +80,7 @@ export interface TestApp {
   config: Config;
   close(): Promise<void>;
   /** A signed-in browser for `personId`: cookie header and CSRF token. */
-  session(personId: string, o?: { authAgeSec?: number; ip?: string }): Promise<{ cookie: string; csrf: string; id: string; headers: Record<string, string> }>;
+  session(personId: string, o?: { authAgeSec?: number; ip?: string; secondFactor?: boolean }): Promise<{ cookie: string; csrf: string; id: string; headers: Record<string, string> }>;
 }
 
 export async function startApp(o: { config?: Partial<Config>; build?: Partial<BuildOptions>; seed?: boolean; seedNow?: number; /** Load the dev seed's audit history into the ledger (off by default so tests count only their own events). */ seedAudit?: boolean; /** Load the dev seed's demo eval suites, run history and trust ladder (off by default so tests count only their own rows). */ seedEvals?: boolean } = {}): Promise<TestApp> {
@@ -96,7 +96,7 @@ export async function startApp(o: { config?: Partial<Config>; build?: Partial<Bu
     },
     async session(personId, so = {}) {
       const s = await createSession(db.app, SESSION_KEY, {
-        orgId, personId, method: "sso", ip: so.ip ?? "203.0.113.9", userAgent: "vitest", absoluteHours: 12, authTime: new Date(Date.now() - (so.authAgeSec ?? 0) * 1000),
+        orgId, personId, method: "sso", ip: so.ip ?? "203.0.113.9", userAgent: "vitest", absoluteHours: 12, authTime: new Date(Date.now() - (so.authAgeSec ?? 0) * 1000), secondFactor: so.secondFactor ?? false,
       });
       const csrf = csrfFor(SESSION_KEY, s.id);
       const cookie = `${config.sessionCookie}=${s.token}`;

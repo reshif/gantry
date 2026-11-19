@@ -31,8 +31,8 @@ d("dev seed loader and read mappers (rows -> legacy shapes)", () => {
 
   it("people round-trip, including roles, teams, away, on-call and legacy extras", async () => {
     const got = (await readPeople(t.db.app, t.orgId)) as unknown as Array<Record<string, unknown>>;
-    // `mfa` is a boolean column: absent in the seed reads back as false.
-    const norm = (ps: Array<Record<string, any>>) => ps.map(({ version: _v, ...p }) => ({ mfa: false, ...p, teams: [...p.teams].sort() }));
+    // `mfa` reads back true when set, null (unknown until a sign-in or the provider read) when the seed says nothing.
+    const norm = (ps: Array<Record<string, any>>) => ps.map(({ version: _v, ...p }) => ({ mfa: null, ...p, teams: [...p.teams].sort() }));
     // on call is read back derived (owner decision 7): on call for any project, or a Factory Admin; the seed's global switch is not stored
     const want = S.people.map((p) => ({ ...p, oncall: isOnCall(S as never, p as never, null) }));
     expect(norm(got)).toEqual(norm(want as never));

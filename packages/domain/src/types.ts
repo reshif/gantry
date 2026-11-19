@@ -189,7 +189,8 @@ export interface Person {
   oncall: boolean;
   github: string;
   away: Away | null;
-  mfa?: boolean;
+  /** Holds a second factor: true; known not to: false; null = unknown until their next sign-in (not read from the provider yet). */
+  mfa?: boolean | null;
   /** Record version (read only). Sent as If-Match by offboarding. */
   version?: number;
   invitedBy?: Id;

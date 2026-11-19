@@ -99,3 +99,11 @@ docker compose -f deploy/compose.yml exec gantry-api node dist/cli/allowlist-rec
 - The command refuses a person who is not an active Factory Admin, and an allow-list that is empty. A second run replaces the admin's earlier unused window.
 - Audited: `auth.allowlist_recovery.opened` (actor `operator`), `auth.allowlist_recovery.used` (the admin, with the address) and `auth.allowlist_recovery.address_added` or `.address_declined`, all in Audit under Auth.
 - No HTTP route opens a window. Nobody without shell access to the server host can use it.
+
+## MFA rollout runbook
+
+MFA is required for everyone. To switch an existing install, follow "MFA rollout runbook (an existing install)" in [PRODUCTION.md](PRODUCTION.md). In short:
+1. check the first Factory Admin (and a second one) has an authenticator in the Keycloak console; 2. set the realm's mail server and create `deploy/secrets/idp_admin_client_secret`;
+3. run `deploy/keycloak/apply-mfa-realm.mjs ... --smtp-test-to <address>` once (it refuses to switch the flow unless a test mail is sent; `--dry-run` first);
+4. deploy the API and web together, then sign the first admin out and in once; 5. send enrolment links from People > Reset authenticator and confirm one works;
+6. rollback: bind the built-in `browser` flow in the console. A compromise of the API or of the service-account secret can plant a factor (it is detected and emailed, not prevented): see PRODUCTION.md.

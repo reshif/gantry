@@ -2,13 +2,23 @@ import { readSecretOptional } from "@gantry/db";
 
 /**
  * The identity provider's admin API as Gantry uses it at run time, through ONE scoped service account (the `gantry-admin` client of the
- * gantry realm, role manage-users in that realm and nothing else). The Keycloak master-admin password is never given to the API (S-125):
- * the service account cannot change the realm, its flows, its clients or any other realm, so code execution in the API cannot switch MFA off.
+ * gantry realm: manage-users and view-events in that realm). The Keycloak master-admin password is never given to the API (S-125): the
+ * service account cannot change the realm, its flows or its clients, nor reach any other realm.
+ *
+ * WHAT IT CAN STILL DO, plainly: manage-users lets it set any user's password (`reset-password`) and create or update a user with an `otp`
+ * credential whose secret it chose, so whoever controls the API process or the `idp_admin_client_secret` file can plant a factor on ANY
+ * account, a Factory Admin included, and sign in as them. MFA does not survive a compromise of the API or of that secret. This is a smaller hole
+ * than the master password (no realm, flow or client changes), not a closed one. The controls are detective: every call this client makes is
+ * logged (idp_admin_log), and core/auth/idp-watch.ts reads the realm's admin events and records `auth.mfa_changed_outside` (ledger and an
+ * email to the Factory Admins) for any credential or password change that did not come from a logged Gantry call, and sign-in compares each
+ * person's authenticators (ids and creation times) with the last sighting.
  *
  * What it is for: the one-time enrolment link (the only way a person gets a first authenticator, S-122), an authenticator reset (S-124),
  * reading which second factors a person holds (the per-person status and the "reset behind our back" check), and creating the bootstrap admin.
  */
-export interface IdpCredential { id: string; type: string }
+export interface IdpCredential { id: string; type: string; /** When the provider created it (ms); a re-planted factor with a reused id differs here. */ createdDate?: number }
+/** One admin-API change at the provider (admin events), as far as Gantry reads it. */
+export interface IdpAdminEvent { time: number; operation: string; resourceType: string; resourcePath: string; /** The client that made the change (`gantry-admin`), or null for a person in a console. */ clientId: string | null; userId: string | null; realmId: string | null }
 export interface IdpUser { id: string; username: string; email: string | null }
 
 export interface KeycloakAdminApi {
@@ -35,8 +45,10 @@ export interface IdpAdmin extends KeycloakAdminApi {
   findUser(q: { username?: string; email?: string }): Promise<IdpUser | null>;
   /** The second factors the person holds now (authenticator app, security key, recovery codes). The password is not one. */
   secondFactors(userId: string): Promise<IdpCredential[]>;
-  /** Removes every second factor and ends the person's provider sessions; returns how many factors were removed. */
-  resetSecondFactors(userId: string): Promise<number>;
+  /** Removes second factors (only `only` when given, else every one) and ends the person's provider sessions; returns how many were removed. */
+  resetSecondFactors(userId: string, only?: string[]): Promise<number>;
+  /** Credential and password changes the provider recorded since `sinceMs` (admin events). Needs the view-events role. */
+  credentialEvents(sinceMs: number): Promise<IdpAdminEvent[]>;
   /** Emails the person a one-time link that sets a password and enrols a second factor. It expires after `lifespanSec`. */
   sendEnrolmentLink(userId: string, o?: { lifespanSec?: number; redirectUri?: string }): Promise<void>;
   /** Ends the person's sessions at the provider. */
@@ -56,6 +68,8 @@ export interface KeycloakAdminOptions {
   clientId: string;
   clientSecret: string;
   fetchImpl?: typeof fetch;
+  /** Called for every change this client makes (not reads), so the watcher can tell Gantry's own changes from anyone else's. */
+  onCall?: (method: string, path: string) => void | Promise<void>;
 }
 
 /** Keycloak admin REST API over fetch, authenticated as the realm's `gantry-admin` service account (client_credentials). */
@@ -78,11 +92,13 @@ export function keycloakAdminClient(o: KeycloakAdminOptions): IdpAdmin {
     cached = { token: j.access_token, until: Date.now() + (j.expires_in ?? 60) * 1000 };
     return j.access_token;
   };
-  const call = async (method: string, path: string, body?: unknown): Promise<Response> =>
-    f(`${admin}${path}`, {
+  const call = async (method: string, path: string, body?: unknown): Promise<Response> => {
+    if (method !== "GET") await Promise.resolve(o.onCall?.(method, path)).catch(() => undefined);
+    return f(`${admin}${path}`, {
       method, headers: { authorization: `Bearer ${await token()}`, ...(body !== undefined ? { "content-type": "application/json" } : {}) },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(10_000),
     });
+  };
   const users = async (q: Record<string, string>): Promise<Array<{ id: string; username: string; email?: string }>> => {
     const res = await call("GET", `/users?${new URLSearchParams({ ...q, exact: "true" })}`);
     if (!res.ok) throw new Error(`identity provider user lookup failed (HTTP ${res.status})`);
@@ -96,7 +112,7 @@ export function keycloakAdminClient(o: KeycloakAdminOptions): IdpAdmin {
   const secondFactors: IdpAdmin["secondFactors"] = async (id) => {
     const res = await call("GET", `/users/${encodeURIComponent(id)}/credentials`);
     if (!res.ok) throw new Error(`identity provider credential lookup failed (HTTP ${res.status})`);
-    return ((await res.json()) as Array<{ id: string; type: string }>).filter((c) => SECOND_FACTOR_TYPES.has(c.type)).map((c) => ({ id: c.id, type: c.type }));
+    return ((await res.json()) as Array<{ id: string; type: string; createdDate?: number }>).filter((c) => SECOND_FACTOR_TYPES.has(c.type)).map((c) => ({ id: c.id, type: c.type, ...(typeof c.createdDate === "number" ? { createdDate: c.createdDate } : {}) }));
   };
   const endSessions = async (id: string): Promise<void> => {
     const res = await call("POST", `/users/${encodeURIComponent(id)}/logout`);
@@ -123,8 +139,8 @@ export function keycloakAdminClient(o: KeycloakAdminOptions): IdpAdmin {
       return id;
     },
     secondFactors,
-    async resetSecondFactors(id) {
-      const held = await secondFactors(id);
+    async resetSecondFactors(id, only) {
+      const held = (await secondFactors(id)).filter((c) => !only || only.includes(c.id));
       for (const c of held) {
         const res = await call("DELETE", `/users/${encodeURIComponent(id)}/credentials/${encodeURIComponent(c.id)}`);
         if (!res.ok && res.status !== 404) throw new Error(`identity provider could not remove a second factor (HTTP ${res.status})`);
@@ -137,6 +153,16 @@ export function keycloakAdminClient(o: KeycloakAdminOptions): IdpAdmin {
       const res = await call("PUT", `/users/${encodeURIComponent(id)}/execute-actions-email?${q}`, ENROLMENT_ACTIONS);
       if (!res.ok) throw new Error(`identity provider could not send the enrolment link (HTTP ${res.status})`);
     },
+    async credentialEvents(sinceMs) {
+      const q = new URLSearchParams({ max: "200", dateFrom: new Date(sinceMs - 86_400_000).toISOString().slice(0, 10) });
+      q.append("resourceTypes", "USER"); // credential deletes and password resets are recorded as USER events (there is no CREDENTIAL resource type)
+      const res = await call("GET", `/admin-events?${q}`);
+      if (!res.ok) throw new Error(`identity provider admin events could not be read (HTTP ${res.status})`);
+      const rows = (await res.json()) as Array<{ time: number; operationType: string; resourceType: string; resourcePath?: string; authDetails?: { clientId?: string; userId?: string; realmId?: string } }>;
+      return rows.filter((e) => e.time > sinceMs && (/(^|\/)(reset-password|credentials)(\/|$)/.test(e.resourcePath ?? "") || (e.operationType === "CREATE" && /^users\/[^/]+$/.test(e.resourcePath ?? "")))).map((e) => ({
+        time: e.time, operation: e.operationType, resourceType: e.resourceType, resourcePath: e.resourcePath ?? "", clientId: e.authDetails?.clientId ?? null, userId: e.authDetails?.userId ?? null, realmId: e.authDetails?.realmId ?? null,
+      }));
+    },
     endSessions,
   };
 }
@@ -148,9 +174,9 @@ export function keycloakFromIssuer(url: string): { baseUrl: string; realm: strin
 }
 
 /** Production wiring: the secret is read from the file `idp_admin_client_secret` (never from the environment). Null when it is not provided. */
-export async function wireIdpAdmin(o: { config: { oidc: { issuer: string; internalUrl: string | null } }; env?: NodeJS.ProcessEnv }): Promise<IdpAdmin | null> {
+export async function wireIdpAdmin(o: { config: { oidc: { issuer: string; internalUrl: string | null } }; env?: NodeJS.ProcessEnv; onCall?: KeycloakAdminOptions["onCall"] }): Promise<IdpAdmin | null> {
   const env = o.env ?? process.env;
   const at = keycloakFromIssuer(o.config.oidc.internalUrl ?? o.config.oidc.issuer);
   const secret = await readSecretOptional("idp_admin_client_secret", env).catch(() => null);
-  return at && secret ? keycloakAdminClient({ ...at, clientId: env.IDP_ADMIN_CLIENT_ID || "gantry-admin", clientSecret: secret }) : null;
+  return at && secret ? keycloakAdminClient({ ...at, clientId: env.IDP_ADMIN_CLIENT_ID || "gantry-admin", clientSecret: secret, ...(o.onCall ? { onCall: o.onCall } : {}) }) : null;
 }

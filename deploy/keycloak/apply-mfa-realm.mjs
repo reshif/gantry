@@ -11,8 +11,14 @@
 // The new flows are built beside the old ones, the realm is switched, then the old ones are deleted and the new ones renamed, so the realm is never
 // without a flow that requires a second factor (a person is refused for a moment rather than let in).
 //
+// ORDER (nothing here can leave the realm unable to send a link): 1 remove a leftover half-built flow from an interrupted run; 2 set the realm's mail server
+// and send a TEST MAIL (the run stops here, flows untouched, if either fails: --smtp-test-to is required); 3 only then the OTP / WebAuthn policy, required actions,
+// the new flows (beside the old), the switch, the clients and the service account. A prod realm's mail settings come from the realm JSON's ${GANTRY_SMTP_*}
+// placeholders, read from THIS process's environment (export them first; nothing is printed); the dev realm's are mailpit.
+//
 //   node deploy/keycloak/apply-mfa-realm.mjs --url http://127.0.0.1:8081/idp --realm gantry \
 //        --master-password-file <file with the Keycloak master admin password> --admin-secret-file <deploy/secrets/idp_admin_client_secret> \
+//        --smtp-test-to <an address you read> \
 //        [--realm-json deploy/keycloak/realm-gantry.prod.json --public-url https://your.site] [--master-user admin] [--dry-run]
 //
 // It reads the two files itself and never prints their contents. Run it once per realm; running it again is safe (it converges).
@@ -31,6 +37,8 @@ const base = need("url").replace(/\/+$/, "");
 const realm = typeof args.get("realm") === "string" ? args.get("realm") : "gantry";
 const dry = args.get("dry-run") === true;
 const jsonPath = typeof args.get("realm-json") === "string" ? args.get("realm-json") : new URL("./realm-gantry.prod.json", import.meta.url).pathname;
+const smtpTestTo = typeof args.get("smtp-test-to") === "string" ? args.get("smtp-test-to") : null;
+if (!smtpTestTo && !dry) { console.error("--smtp-test-to <address> is required: a test mail must arrive before any flow is switched, or nobody could be given an enrolment link"); process.exit(2); }
 const masterUser = typeof args.get("master-user") === "string" ? args.get("master-user") : "admin";
 const masterPassword = readFileSync(need("master-password-file"), "utf8").replace(/\r?\n$/, "");
 const adminSecret = readFileSync(need("admin-secret-file"), "utf8").replace(/\r?\n$/, "");
@@ -59,11 +67,40 @@ const api = async (method, path, body, ok = [200, 201, 204]) => {
 };
 const log = (m) => console.log(m);
 
-/* ---- realm settings */
+/* ---- 1. a half-built flow left by an interrupted run */
+const NEW = "~new";
+{
+  const left = ((await api("GET", "/authentication/flows")).json ?? []).filter((f) => f.alias.endsWith(NEW));
+  for (const f of left) { log(`leftover flow ${f.alias} from an interrupted run: removing it`); await api("DELETE", `/authentication/flows/${f.id}`, undefined, [200, 204, 404]); }
+}
+
+/* ---- 2. the mail server, and a test mail, before anything else changes */
+const resolveEnv = (v) => typeof v !== "string" ? v : v.replace(/\$\{([A-Z0-9_]+)(?::([^}]*))?\}/g, (_m, name, dflt) => process.env[name] ?? (dflt !== undefined ? dflt : `\u0000${name}`));
+const smtp = Object.fromEntries(Object.entries(want.smtpServer ?? {}).map(([k, v]) => [k, resolveEnv(v)]));
+const missing = Object.entries(smtp).filter(([, v]) => typeof v === "string" && v.includes("\u0000")).map(([k, v]) => String(v).replace(/[^A-Z0-9_]/g, ""));
+if (!smtp.host || !smtp.from || missing.length) {
+  console.error(`the realm JSON's mail server is incomplete (${missing.length ? `set ${[...new Set(missing)].join(", ")} in this shell` : "no host or from address"}); nothing was changed`);
+  process.exit(1);
+}
+log(`mail server: ${smtp.host}:${smtp.port ?? "25"} from ${smtp.from} (values from the realm JSON and this environment; not printed beyond host and from)`);
+const before = (await api("GET", "")).json;
+await api("PUT", "", { ...before, smtpServer: smtp });
+if (!dry) {
+  const probe = `gantry-smtp-test-${Date.now()}`;
+  const mk = await api("POST", "/users", { username: probe, email: smtpTestTo, enabled: true, emailVerified: false }, [201, 409]);
+  const probeId = mk.headers.get("location")?.split("/").pop();
+  let sent = false;
+  try { await api("PUT", `/users/${probeId}/execute-actions-email?lifespan=300`, ["VERIFY_EMAIL"], [200, 204]); sent = true; } catch (e) { console.error(`the test mail could not be sent: ${String(e.message).replace(/\s+/g, " ").slice(0, 160)}`); }
+  if (probeId) await api("DELETE", `/users/${probeId}`, undefined, [200, 204, 404]);
+  if (!sent) { console.error("STOPPED before any flow change: fix the mail server (Realm settings > Email > Test connection) and run this again"); process.exit(1); }
+  log(`test mail sent to ${smtpTestTo}: confirm it arrived before relying on enrolment links`);
+} else log(`[dry-run] would send a test mail to ${smtpTestTo ?? "(address not given)"} and stop if it fails`);
+
+/* ---- 3. realm settings */
 const current = (await api("GET", "")).json;
 const settings = {};
-for (const k of ["otpPolicyType", "otpPolicyAlgorithm", "otpPolicyDigits", "otpPolicyPeriod", "otpPolicyLookAheadWindow", "otpPolicyCodeReusable", "webAuthnPolicyRpEntityName", "webAuthnPolicySignatureAlgorithms", "webAuthnPolicyUserVerificationRequirement", "webAuthnPolicyRequireResidentKey", "webAuthnPolicyAuthenticatorAttachment", "webAuthnPolicyAttestationConveyancePreference", "webAuthnPolicyCreateTimeout", "webAuthnPolicyAvoidSameAuthenticatorRegister", "actionTokenGeneratedByAdminLifespan", "resetPasswordAllowed"]) if (want[k] !== undefined) settings[k] = want[k];
-log("realm: OTP and WebAuthn policy, admin link lifespan");
+for (const k of ["otpPolicyType", "otpPolicyAlgorithm", "otpPolicyDigits", "otpPolicyPeriod", "otpPolicyLookAheadWindow", "otpPolicyCodeReusable", "webAuthnPolicyRpEntityName", "webAuthnPolicySignatureAlgorithms", "webAuthnPolicyUserVerificationRequirement", "webAuthnPolicyRequireResidentKey", "webAuthnPolicyAuthenticatorAttachment", "webAuthnPolicyAttestationConveyancePreference", "webAuthnPolicyCreateTimeout", "webAuthnPolicyAvoidSameAuthenticatorRegister", "actionTokenGeneratedByAdminLifespan", "resetPasswordAllowed", "adminEventsEnabled", "adminEventsDetailsEnabled"]) if (want[k] !== undefined) settings[k] = want[k];
+log("realm: OTP and WebAuthn policy, admin link lifespan, admin events on");
 await api("PUT", "", { ...current, ...settings });
 
 /* ---- required actions */
@@ -76,6 +113,7 @@ for (const a of want.requiredActions ?? []) {
     if (!u) { log(`  skip ${a.alias}: this Keycloak has no such action`); continue; }
     await api("POST", "/authentication/register-required-action", { providerId: u.providerId, name: u.name });
   }
+  if (dry && !have.some((h) => h.alias === a.alias)) { log(`  ${a.alias}: would be registered and ${a.enabled ? "enabled" : "disabled"}`); continue; }
   const cur = (await api("GET", `/authentication/required-actions/${encodeURIComponent(a.alias)}`)).json;
   await api("PUT", `/authentication/required-actions/${encodeURIComponent(a.alias)}`, { ...cur, enabled: a.enabled, defaultAction: a.defaultAction, priority: a.priority });
   log(`  ${a.alias}: ${a.enabled ? "enabled" : "disabled"}`);
@@ -85,7 +123,6 @@ for (const a of want.requiredActions ?? []) {
 log("browser flow");
 const flowsByAlias = new Map((want.authenticationFlows ?? []).map((f) => [f.alias, f]));
 const top = want.browserFlow;
-const NEW = "~new";
 const fin = (alias) => alias; // final alias
 const created = [];
 async function buildFlow(alias, parentAlias, isTop) {
@@ -153,6 +190,8 @@ if (web && wantWeb) {
   const uris = [...new Set([...(web.redirectUris ?? []), ...wantWeb.redirectUris])];
   if (uris.length !== (web.redirectUris ?? []).length) { await api("PUT", `/clients/${web.id}`, { ...web, redirectUris: uris }); log("  gantry-web: added the enrolment-link return address"); }
 }
+const cli = clients.find((c) => c.clientId === "admin-cli");
+if (cli && cli.directAccessGrantsEnabled) { await api("PUT", `/clients/${cli.id}`, { ...cli, directAccessGrantsEnabled: false }); log("  admin-cli: password-only direct grants turned off in this realm"); }
 let svc = clients.find((c) => c.clientId === "gantry-admin");
 const wantSvc = want.clients.find((c) => c.clientId === "gantry-admin");
 if (!svc) {
@@ -164,10 +203,13 @@ if (svc || dry) {
   const rm = ((await api("GET", "/clients")).json ?? []).find((c) => c.clientId === "realm-management");
   if (svc && rm) {
     const su = (await api("GET", `/clients/${svc.id}/service-account-user`)).json;
-    const role = (await api("GET", `/clients/${rm.id}/roles/manage-users`)).json;
     const held = (await api("GET", `/users/${su.id}/role-mappings/clients/${rm.id}`)).json ?? [];
-    if (!held.some((r) => r.name === "manage-users")) await api("POST", `/users/${su.id}/role-mappings/clients/${rm.id}`, [role]);
-    log(`  gantry-admin service account: manage-users in ${realm} only (${held.filter((r) => r.name !== "manage-users").length} other roles held)`);
+    for (const name of ["manage-users", "view-events"]) {
+      if (held.some((r) => r.name === name)) continue;
+      const role = (await api("GET", `/clients/${rm.id}/roles/${name}`)).json;
+      await api("POST", `/users/${su.id}/role-mappings/clients/${rm.id}`, [role]);
+    }
+    log(`  gantry-admin service account: manage-users and view-events in ${realm} only (${held.filter((r) => !["manage-users", "view-events"].includes(r.name)).length} other roles held)`);
   }
 }
 log(dry ? "dry run done: nothing was changed" : "done. Every person without a second factor is now refused at sign-in until an administrator sends them an enrolment link.");

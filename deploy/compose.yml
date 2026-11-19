@@ -101,7 +101,7 @@ services:
       GANTRY_AUDIT_ANCHOR_FILE: /anchors/audit-anchors.jsonl
       # EVERYONE signs in with a second factor (an authenticator app, a security key or a recovery code at the identity provider; the API checks acr/amr
       # on every request). The seeded demo users are password-only until they enrol through the one-time link an administrator issues (mail lands in
-      # mailpit), so a throwaway local stack may opt in to waiving it with GANTRY_DEV_ADMIN_MFA_OPTIONAL=true. Off by default; the API refuses to start
+      # mailpit). The waiver (GANTRY_DEV_ADMIN_MFA_OPTIONAL=true) only relaxes Gantry's own check: once the realm's browser flow is the two-step one, a password-only login is refused at Keycloak first. Off by default; the API refuses to start
       # with it on when the public URL is not localhost, and compose.prod.yml forces it off.
       GANTRY_DEV_ADMIN_MFA_OPTIONAL: ${GANTRY_DEV_ADMIN_MFA_OPTIONAL:-false}
       # Off by default: the org starts empty. The first Factory Admin is the identity-provider user GANTRY_BOOTSTRAP_ADMIN_USERNAME, created by the

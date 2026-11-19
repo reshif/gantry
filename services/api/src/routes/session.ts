@@ -43,6 +43,8 @@ interface OidcState {
   method: "sso" | "github";
   stepUp: boolean;
   returnTo: string;
+  /** When the authorize request was made (ms), so the callback can refuse a token whose auth_time is older (a silent provider session). */
+  at?: number;
   /** Opened in a small window by the app: the callback answers by redirecting to the app's step-up result page, which tells the opener. */
   popup?: boolean;
   /** One-time invite token from the invite email's link, checked at the callback before an invited person is claimed. */
@@ -127,7 +129,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       req.log.error({ err: e }, "OIDC discovery failed");
       return toApp(reply, "/", "The identity provider is not reachable. Try again shortly.");
     }
-    const st: OidcState = { state, nonce, verifier, method, stepUp: q.data.step_up === "1", returnTo: safeReturn(q.data.return_to), ...(q.data.popup === "1" && q.data.step_up === "1" ? { popup: true } : {}), ...(q.data.invite ? { invite: q.data.invite } : {}) };
+    const st: OidcState = { state, nonce, verifier, method, at: Date.now(), stepUp: q.data.step_up === "1", returnTo: safeReturn(q.data.return_to), ...(q.data.popup === "1" && q.data.step_up === "1" ? { popup: true } : {}), ...(q.data.invite ? { invite: q.data.invite } : {}) };
     reply.setCookie(OIDC_COOKIE, seal(st, oidcKey, "oidc-state"), { ...cookieOpts, maxAge: 600 });
     return reply.redirect(url.toString(), 302);
   });
@@ -155,7 +157,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       const s = await findSession(g.pool, g.config.secrets.sessionKey, g.orgId, tok, (await g.security.get()).value.idleMin);
       if (s) existing = { id: s.id, personId: s.personId };
     }
-    const r = await signIn(g, claims, { ...meta, existingSession: existing, stepUpOnly: st.stepUp, ...(st.invite ? { inviteToken: st.invite } : {}) });
+    const r = await signIn(g, claims, { ...meta, existingSession: existing, stepUpOnly: st.stepUp, authorizedAt: st.at, ...(st.invite ? { inviteToken: st.invite } : {}) });
     if (!r.ok) return st.popup ? popupDone(reply, false, r.msg) : toApp(reply, "/", r.msg, r.reason === "mfa_required" ? "mfa_setup" : undefined);
     if (r.token && r.expiresAt) reply.setCookie(g.config.sessionCookie, r.token, { path: "/", httpOnly: true, sameSite: "lax", secure: g.config.cookieSecure, expires: r.expiresAt });
     if (claims.idToken) reply.setCookie(IDT_COOKIE, seal({ t: claims.idToken }, idtKey, "id-token"), { ...cookieOpts, ...(r.expiresAt ? { expires: r.expiresAt } : { maxAge: 12 * 3600 }) });
