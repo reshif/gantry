@@ -126,7 +126,9 @@ export async function loadSample(db: Queryable, i: SampleInput): Promise<CardSam
     "gate.decided": [`${gate ? gate.label : "Gate"} ${/rejected/.test(text) ? "rejected" : "approved"} on ${id}`, text && /rejected/.test(text) ? text : `${who(a.mode) === "auto" ? "Passed automatically" : "Approved"}${a.by ? ` by ${who(a.by)}` : ""}. The work order moved on.`],
     blocked: [`${id} is blocked`, text || "The agent stopped and needs a decision."],
     "security.hold": [`${id} moved to Security hold`, text || "A security check flagged a finding."],
-    andon: [`Andon halt on ${p.name}`, text || "A person halted the line. Agents finish their current step and wait."],
+    andon: i.source?.type === "resume"
+      ? [`${p.name || "The factory"} resumed after a halt`, text || "The halt was lifted. Work resumes from the last checkpoint."]
+      : [`Andon halt on ${p.name}`, text || "A person halted the line. Agents finish their current step and wait."],
     kill: [`Kill switch pulled on ${p.name || "the factory"}`, text || "Hard stop. In-flight work is held in place until restored."],
     restore: [`${p.name || "The factory"} restored after kill`, text || "Work resumes from where it was held."],
     "onboarding.pr": [`Onboarding PR ${a.number ? `#${String(a.number)}` : ""} for ${str(a.repo) || "a repo"}`.replace("  ", " "), text || "The Onboarding agent proposes the changes this repo needs before work orders can run."],

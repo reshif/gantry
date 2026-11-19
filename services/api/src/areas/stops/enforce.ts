@@ -139,25 +139,27 @@ async function enforceOn(fx: Fx, w: Wo, s: StopDb, graceMs: number): Promise<{ c
   return { cancelled };
 }
 
-/** One work order after its stop was lifted. */
+/**
+ * One work order after a stop was lifted, called only when no other stop still covers it (`stillCovered`). Whatever scope or mode marked the order, the last
+ * lift revives it: layered kills can be lifted in any order, so the marker's scope is not compared with the stop being lifted (S-34).
+ */
 async function restoreOne(fx: Fx, w: Wo, s: StopDb, catalog: Catalog): Promise<void> {
   const killed = w.data.killed as { scope?: string; prev?: { state: string; position: string; station: string; bayFrom: string | null } } | null | undefined;
-  const scopeName = s.scope_type === "wo" ? "workorder" : s.scope_type;
-  const heldThisScope = w.data.heldByKill === scopeName;
-  // An order this very scope killed (a work order's own kill, or a project, repo or factory kill with 'cancel') comes back from the state it was killed in.
-  // One that an inner stop killed first (its own kill) keeps that kill: `stillCovered` already kept it out of here while that stop is active.
-  if (w.state === "killed" && killed && s.mode === "kill" && (s.scope_type === "wo" || killed.scope === scopeName)) {
+  // A killed order (cancel) comes back from the state it was killed in.
+  if (w.state === "killed" && killed) {
     const prev = killed.prev ?? { state: "running", position: w.position, station: w.position, bayFrom: null };
     w.data.restoredFrom = killed;
     delete w.data.killed;
+    delete w.data.heldByKill;
     w.state = (prev.state === "running" || prev.state === "waiting" || prev.state === "parked" ? prev.state : "running") as Wo["state"];
     w.position = prev.position;
-    note(w, fx, fx.actor, `Restored after kill: ${s.reason}`);
+    note(w, fx, fx.actor, `Restored after ${s.mode === "kill" ? "kill" : "halt"}: ${s.reason}`);
     await resume(fx, w, prev.station, catalog, true, s);
     ev(fx, w, "wo.state", { from: "killed", to: w.state, station: prev.station, text: "restored" }, { category: "kill" });
     return;
   }
-  if (s.mode === "kill" && heldThisScope) {
+  // Held in place (kill with hold), by whichever scope: released and re-validated.
+  if (w.data.heldByKill) {
     delete w.data.heldByKill;
     note(w, fx, fx.actor, `Released after ${s.scope_type} restore; re-validated.`);
     await resume(fx, w, stationIdOf(catalog, w), catalog, true, s);

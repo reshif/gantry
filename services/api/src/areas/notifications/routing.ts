@@ -78,11 +78,14 @@ export function resolveDest(insts: InstInfo[], d: Dest, project: string | null, 
 }
 
 /** Email recipients: addresses as written, or a role keyword (submitter, approvers, project admins) resolved against people and role assignments. */
-export async function resolveRecipients(db: Queryable, orgId: string, target: string, ctx: { project: string | null; woId: string | null; gateId: string | null; mentioned?: string | null }): Promise<string[]> {
+export async function resolveRecipients(db: Queryable, orgId: string, target: string, ctx: { project: string | null; woId: string | null; gateId: string | null; mentioned?: string | null }, skipped: Array<{ address: string; reason: string }> = []): Promise<string[]> {
   const out = new Set<string>();
   for (const tok of target.split(/[,;]+/).map((s) => s.trim()).filter(Boolean)) {
     if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(tok)) {
-      out.add(tok.toLowerCase());
+      // A typed address that belongs to a deactivated person gets nothing (S-36); an address nobody owns is an outside recipient and stays.
+      const owners = (await db.query<{ status: string }>(`select status from people where org_id = $1 and lower(email) = lower($2)`, [orgId, tok])).rows;
+      if (owners.length && !owners.some((o) => o.status !== "deactivated")) skipped.push({ address: tok.toLowerCase(), reason: "recipient deactivated" });
+      else out.add(tok.toLowerCase());
       continue;
     }
     const kw = tok.toLowerCase();

@@ -121,8 +121,9 @@ d("outbox dispatcher (spec 12.2)", () => {
     await push(normal, "webhook", { integration: "hook-c", text: "n" });
     await push(kill, "webhook", { integration: "hook-c", text: "k" });
     await out.drain();
-    expect(hook.received).toHaveLength(1);
-    expect(JSON.parse(hook.received[0]!.body).type).toBe("kill");
+    // The kill goes out through the disabled connection: the pushed row, and the producer's own fallback (a kill with no route reaches every connection that can carry it, S-35).
+    expect(hook.received.length).toBeGreaterThanOrEqual(1);
+    expect(hook.received.every((m) => JSON.parse(m.body).type === "kill")).toBe(true);
     const r = await row(normal, "webhook");
     expect(r.status).toBe("delivered");
     expect(r.last_error).toMatch(/skipped/);

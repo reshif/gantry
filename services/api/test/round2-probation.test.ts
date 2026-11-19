@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { trustCellId } from "@gantry/domain";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 import { world } from "./flow-helpers.js";
-import { agentOffKind } from "../src/areas/session/core.js";
 import { afterFinish } from "../src/areas/trust/record.js";
 
 const d = TEST_URL ? describe : describe.skip;

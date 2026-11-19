@@ -42,11 +42,11 @@ async function nextId(db: Queryable): Promise<string> {
 }
 
 /** The request the delivery was made from, kept so a retry of an unresolved destination can be rebuilt. */
-const requestOf = (c: EmitCtx): Record<string, unknown> => ({ dest: c.dest, route: c.route, event: c.event, repo: c.repo, wo: c.wo, mandatory: c.mandatory, isTest: c.isTest ?? false });
+const requestOf = (c: EmitCtx, skipped?: Array<{ address: string; reason: string }>): Record<string, unknown> => ({ dest: c.dest, route: c.route, event: c.event, repo: c.repo, wo: c.wo, mandatory: c.mandatory, isTest: c.isTest ?? false, ...(skipped?.length ? { skipped } : {}) });
 
 export type Prepared =
-  | { ok: false; error: string; resolvedInst: InstInfo | null }
-  | { ok: true; destination: string; payload: Record<string, unknown>; cardKey: string | null; inst: InstInfo; transport: string; target: string };
+  | { ok: false; error: string; resolvedInst: InstInfo | null; skipped?: Array<{ address: string; reason: string }> }
+  | { ok: true; destination: string; payload: Record<string, unknown>; cardKey: string | null; inst: InstInfo; transport: string; target: string; skipped?: Array<{ address: string; reason: string }> };
 
 /** Resolves the destination and builds what the worker will send. No writes. */
 export async function prepare(db: Queryable, c: EmitCtx): Promise<Prepared> {
@@ -62,11 +62,12 @@ export async function prepare(db: Queryable, c: EmitCtx): Promise<Prepared> {
   const cardKey = transport === "slack" && c.event === "gate.waiting" && s.instance ? `gate:${s.instance}` : null;
   const common = { integration: inst.id, deliveryId: c.deliveryId, target, mandatory: c.mandatory, text: `${s.head}${s.body ? `\n${s.body}` : ""}` };
   let payload: Record<string, unknown>;
+  const skipped: Array<{ address: string; reason: string }> = [];
   if (transport === "slack") {
     payload = { ...common, mode: "post", card: slackBlocks(s, rows, actions), ...(cardKey ? { cardKey } : {}) };
   } else if (transport === "smtp") {
-    const to = await resolveRecipients(db, c.orgId, target, { project: c.project, woId: c.wo, gateId: s.gate?.id ?? null, mentioned: c.mentioned ?? null });
-    if (!to.length) return { ok: false, error: `no recipient for "${target}"`, resolvedInst: inst };
+    const to = await resolveRecipients(db, c.orgId, target, { project: c.project, woId: c.wo, gateId: s.gate?.id ?? null, mentioned: c.mentioned ?? null }, skipped);
+    if (!to.length) return { ok: false, error: skipped.length ? `no recipient for "${target}" (${skipped.map((x) => `${x.address}: ${x.reason}`).join("; ")})` : `no recipient for "${target}"`, resolvedInst: inst, ...(skipped.length ? { skipped } : {}) };
     const m = emailParts(s, rows, actions, { ...(c.route ? { route: c.route.id } : {}), showLink: fields.link !== false });
     payload = { ...common, to, subject: m.subject, text: m.text, html: m.html };
   } else if (inst.httpTemplate && inst.httpTemplate.body.trim()) {
@@ -75,7 +76,7 @@ export async function prepare(db: Queryable, c: EmitCtx): Promise<Prepared> {
   } else {
     payload = { ...common, data: webhookData(s, fields) };
   }
-  return { ok: true, destination: destKey(transport, inst.id, target), payload, cardKey, inst, transport, target };
+  return { ok: true, destination: destKey(transport, inst.id, target), payload, cardKey, inst, transport, target, ...(skipped.length ? { skipped } : {}) };
 }
 
 /** The delivery-log row. `outboxId` is known when the outbox row was made in the same breath. */
@@ -86,7 +87,7 @@ export async function recordDelivery(db: Queryable, c: EmitCtx, p: Prepared, out
      values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,0)
      on conflict (org_id, id) do update set status = excluded.status, error = excluded.error, outbox_id = excluded.outbox_id, destination = excluded.destination, integration_id = excluded.integration_id, attempts = 0, updated_at = now()`,
     [
-      c.orgId, c.deliveryId, p.ok ? p.inst.id : p.resolvedInst?.id ?? c.dest.integration ?? null, c.eventId ?? null, JSON.stringify(requestOf(c)), c.project, c.event, channel, c.dest.target, c.route?.id ?? null, c.dest.override ?? null, c.repo, c.wo, c.isTest ?? false,
+      c.orgId, c.deliveryId, p.ok ? p.inst.id : p.resolvedInst?.id ?? c.dest.integration ?? null, c.eventId ?? null, JSON.stringify(requestOf(c, p.skipped)), c.project, c.event, channel, c.dest.target, c.route?.id ?? null, c.dest.override ?? null, c.repo, c.wo, c.isTest ?? false,
       p.ok ? p.destination : `${c.dest.channel}:${c.dest.target}`, p.ok ? "pending" : "failed", p.ok ? "" : `Not delivered: ${p.error}.`, outboxId, p.ok ? p.cardKey : null,
     ],
   );

@@ -124,6 +124,10 @@ export async function acquireSlot(fx: Fx, w: Wo, project: Project): Promise<numb
   const held = await fx.tx.query<{ id: string }>(`select id from slots where org_id = $1 and wo_id = $2 and state = 'held'`, [fx.orgId, w.id]);
   if (held.rows[0]) return Number(held.rows[0].id.split(":").pop());
   const limit = Math.max(0, Number(project.flow.slots) || 0);
+  // The limit counts live holders, not slot numbers: after the limit is lowered, holders on numbers above it still count (S-33). The project's slot table is serialised so two dispatches cannot both see room for one.
+  await fx.tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [`slots:${fx.orgId}:${project.id}`]);
+  const holders = Number((await fx.tx.query<{ n: string }>(`select count(*) n from slots where org_id = $1 and project_id = $2 and state = 'held'`, [fx.orgId, project.id])).rows[0]?.n ?? 0);
+  if (holders >= limit) return null;
   for (let n = 1; n <= limit; n++) {
     const r = await fx.tx.query(
       `insert into slots (org_id, id, project_id, repo_id, wo_id, state, acquired_at, released_at) values ($1, $2, $3, $4, $5, 'held', $6, null)
