@@ -99,3 +99,10 @@ export function waitingQuestion(s: Pick<WoSession, "dialogue">): StationQuestion
   const open = s.dialogue.questions.filter((q) => q.status === "open" && q.mine && views.get(q.id)?.shown !== false);
   return open.find((q) => q.blocking) ?? open[0] ?? null;
 }
+
+/** Two letters for the avatar tag: "Intake Clerk" is IC, "Tomás Ferreira" is TF. */
+export const initialsOf = (name: string): string => {
+  const w = name.trim().split(/\s+/).filter(Boolean);
+  return ((w.length > 1 ? `${w[0]![0]}${w[w.length - 1]![0]}` : (w[0] ?? "·").slice(0, 2)) || "·").toUpperCase();
+};
+

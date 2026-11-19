@@ -160,10 +160,9 @@ d("intake questions: closing, replacing and verifying", () => {
 
   it("the 'conversation is open' nudge does not start a second Intake turn once the agent has already spoken", async () => {
     const id = await submit();
-    await woSessionJobs.open();
     await turn(id, [ask({ question: "Which screen or flow first?", options: ["Sign-up"], blocking: true }), say("Which first?")], undefined);
     const calls = edge.calls.length;
-    await q(`update workorder_messages set data = jsonb_set(data, '{followUp}', '"pending"') where wo_id = $1 and data->>'event' = 'session.opened'`, [id]);
+    await q(`insert into workorder_messages (org_id, id, wo_id, role, author, body, data, created_at, updated_at) values ($1, 'wm-opened', $2, 'system', 'system', 'The Intake conversation is open.', '{"kind":"update","event":"session.opened","followUp":"pending","cards":[]}'::jsonb, now(), now())`, [t.orgId, id]);
     edge.script = [ask({ question: "Which screen or flow first?", options: ["Sign-up"], blocking: true }), say("again")] as never;
     await woSessionJobs.followUps();
     expect(edge.calls.length).toBe(calls);

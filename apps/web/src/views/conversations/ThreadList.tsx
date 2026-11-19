@@ -1,13 +1,12 @@
 /** The thread list: grouped Needs you / Active / Done, each row a station avatar, "WO-id · time", the full title and why it is there. Search and filter live in the URL. */
 import { fmt } from "@gantry/domain";
 import { Empty, Segmented, SearchBox } from "../../ui/primitives";
-import { groupThreads, reasonOf, type ThreadFilter } from "./chat";
+import { groupThreads, initialsOf, reasonOf, type ThreadFilter } from "./chat";
 import type { WoSessionRow } from "./session-api";
 
 /** The station as a letter badge: no '?' for an agent the people list does not know. */
 export function StationAvatar({ name }: { name: string | null | undefined }) {
-  const t = (name ?? "").trim();
-  return <span className="avatar av av-agent cv-st-av" aria-hidden="true">{t ? t.slice(0, 2).toUpperCase() : "·"}</span>;
+  return <span className="avatar av av-agent cv-st-av" aria-hidden="true">{initialsOf(name ?? "")}</span>;
 }
 
 const FILTERS: Array<{ id: ThreadFilter; label: string }> = [{ id: "all", label: "All" }, { id: "needs", label: "Needs you" }, { id: "active", label: "Active" }, { id: "done", label: "Done" }];
@@ -30,12 +29,15 @@ export function ThreadList({ rows, picked, q, filter, setQ, setFilter, href }: {
                   const why = reasonOf(w);
                   return (
                     <li key={w.id} id={`conv-item-${w.id}`} className={`cv-row${w.id === picked ? " is-on" : ""}`} aria-current={w.id === picked ? "true" : undefined}>
-                      <StationAvatar name={w.stationName} />
+                      <StationAvatar name={w.agentName ?? w.stationName} />
                       <a className="cv-row-main" href={href(w.id, w.project)}>
-                        <span className="cv-row-top"><span className="mono cv-row-id">{w.id}</span>{w.unread ? <span className="cv-unread" role="img" aria-label="Unread messages" /> : null}<span className="muted small cv-row-t">{w.latest ? fmt.ago(w.latest.at, Date.now()) : ""}</span></span>
-                        <span className="cv-row-title">{w.title}</span>
-                        <span className="cv-row-why"><span className={`chip ${why.tone}`.trim()}>{why.text}</span><span className="muted small">{w.latest?.text ?? ""}</span></span>
+                        <span className="cv-row-title" title={w.title}><span className="mono cv-row-id">{w.id}</span>{` · ${w.title}`}</span>
+                        <span className="cv-row-last small muted">{w.latest?.text.replace(/\s+/g, " ") ?? ""}</span>
                       </a>
+                      <span className="cv-row-side">
+                        <span className={`chip ${why.tone}`.trim()}>{why.text}</span>
+                        <span className="cv-row-meta">{w.unread ? <span className="cv-unread" role="img" aria-label="Unread messages" /> : null}<span className="muted small cv-row-t">{w.latest ? fmt.ago(w.latest.at, Date.now()) : ""}</span></span>
+                      </span>
                     </li>
                   );
                 })}

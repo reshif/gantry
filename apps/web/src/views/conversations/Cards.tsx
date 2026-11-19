@@ -152,10 +152,12 @@ function Folded({ title, children }: { title: string; children: ReactNode }) {
   return <details className="cv-fold"><summary>{title}</summary>{children}</details>;
 }
 
-export function Cards({ m, s, agent, send, last, view }: { m: WoSessionMessage; s: WoSession; agent: string; send: (b: { kind: "message" | "continue"; text?: string }) => void; last: boolean; view?: CardsView }) {
+export function Cards({ m, s, agent, send, last, view, part }: { m: WoSessionMessage; s: WoSession; agent: string; send: (b: { kind: "message" | "continue"; text?: string }) => void; last: boolean; view?: CardsView; part?: "questions" | "rest" }) {
   return (
     <>
       {(m.data.cards ?? []).map((c, i) => {
+        // the chat draws the agent's question as its own panel, outside the bubble
+        if (part && (c.kind === "question") !== (part === "questions")) return null;
         if (view) {
           if (c.kind === "document") return <DocChip key={i} s={s} c={c} />;
           if (c.kind === "station_question") {
@@ -181,7 +183,7 @@ export function Cards({ m, s, agent, send, last, view }: { m: WoSessionMessage; 
           }
         }
         if (c.kind === "progress") return <ProgressLine key={i} text={c.text} detail={c.detail} />;
-        if (c.kind === "question") return <QuestionCard key={i} question={c.question} options={c.options} answered={c.answered} last={last} answer={(t) => send({ kind: "message", text: t })} />;
+        if (c.kind === "question") return <QuestionCard key={i} asker={agent} question={c.question} options={c.options} answered={c.answered} answeredBy={c.answeredBy} via={c.via} answeredAt={c.answeredAt} answerQuote={c.answerQuote} superseded={c.superseded} supersededBy={c.supersededBy} last={last} answer={(t) => send({ kind: "message", text: t })} />;
         if (c.kind === "document") return <DocLine key={i} s={s} c={c} />;
         if (c.kind === "swarm") return s.swarm ? <SwarmBoard key={i} woId={s.woId} sw={s.swarm} canStop={!!s.can.park} stopWhy={s.can.parkWhy} /> : null;
         if (c.kind === "objection") {

@@ -1,11 +1,10 @@
 /** The conversation as a chat: agent turns on the left with the station's avatar, the person's on the right, line events folded into one quiet row per run. */
 import { fromAgentModel } from "../../lib/wo-message";
-import { useState, type ReactNode } from "react";
+import { Fragment, useState } from "react";
 import { fmt } from "@gantry/domain";
-import { Avatar } from "../../ui/primitives";
 import { Markdown } from "../console/Markdown";
 import { AnswerLead, Cards } from "./Cards";
-import { buildTranscript, cap, questionViews, repliedTo, type Block } from "./chat";
+import { buildTranscript, cap, initialsOf, questionViews, repliedTo, type Block } from "./chat";
 import type { WoSession, WoSessionMessage } from "./session-api";
 
 /** The prototype's message time: "13 Nov 15:43" (IST, as everywhere in the app). */
@@ -33,7 +32,7 @@ function EventRun({ items }: { items: WoSessionMessage[] }) {
   );
 }
 
-export function Transcript({ s, blocks, agent, nameOf, mine, send, lastId }: { s: WoSession; blocks: Block[]; agent: string; nameOf: (m: WoSessionMessage) => ReactNode; mine: string | undefined; send: (b: { kind: "message" | "continue"; text?: string }) => void; lastId: string | undefined }) {
+export function Transcript({ s, blocks, agent, nameOf, mine, send, lastId }: { s: WoSession; blocks: Block[]; agent: string; nameOf: (m: WoSessionMessage) => string; mine: string | undefined; send: (b: { kind: "message" | "continue"; text?: string }) => void; lastId: string | undefined }) {
   const view = { views: questionViews(s.dialogue.questions) };
   return (
     <>
@@ -41,19 +40,33 @@ export function Transcript({ s, blocks, agent, nameOf, mine, send, lastId }: { s
         if (b.t === "events") return <EventRun key={b.key} items={b.items} />;
         const first = b.msgs[0]!;
         const you = b.side === "person" && b.author === mine;
+        const name = nameOf(first);
+        const head = <div className="cv-who">{you ? "You" : name}<span className="muted">{` · ${panelDate(first.at)}`}</span></div>;
         return (
           <div key={b.key} className={`cv-turn is-${b.side}${you ? " is-you" : ""}`}>
-            {b.side === "agent" ? <Avatar id={b.author} /> : null}
+            <span className={`avatar av cv-av ${b.side === "agent" ? "bot av-agent" : "av-person"}`} title={name} aria-hidden="true">{initialsOf(name)}</span>
             <div className="cv-col">
-              <div className="cv-who">{you ? "You" : nameOf(first)}<span className="muted">{` · ${panelDate(first.at)}`}</span></div>
-              {b.msgs.map((m) => (
-                <div key={m.id} className={`cv-msg${m.data.kind === "answer" ? " is-answer" : ""}${!m.text && (m.data.cards ?? []).length ? " is-cards" : ""}`} title={panelDate(m.at)}>
-                  {m.data.kind === "answer" ? <Reply m={m} s={s} />
-                    : m.text ? (fromAgentModel(m) && m.data.mode === "agent" ? <div className="cv-text"><Markdown text={m.text} /></div> : <p className="cv-text">{m.text}</p>) : null}
-                  {(m.data.mentions ?? []).filter((x) => !x.access).map((x) => <p key={x.id} className="small muted wos-mention-note">{`${x.name} cannot open this project yet. Mentioning them did not give them access: a project admin was asked.`}</p>)}
-                  <Cards m={m} s={s} agent={agent} send={send} last={m.id === lastId} view={view} />
-                </div>
-              ))}
+              {b.msgs.map((m, k) => {
+                const cards = m.data.cards ?? [];
+                const hasText = !!m.text || m.data.kind === "answer";
+                const hasRest = cards.some((c) => c.kind !== "question");
+                // the header sits inside the first bubble; a turn that opens with a card alone gets it as a line of its own
+                return (
+                  <Fragment key={m.id}>
+                    {k === 0 && !hasText ? head : null}
+                    {hasText || hasRest ? (
+                      <div className={`cv-msg${m.data.kind === "answer" ? " is-answer" : ""}${!hasText ? " is-cards" : ""}`} title={panelDate(m.at)}>
+                        {k === 0 && hasText ? head : null}
+                        {m.data.kind === "answer" ? <Reply m={m} s={s} />
+                          : m.text ? (fromAgentModel(m) && m.data.mode === "agent" ? <div className="cv-text"><Markdown text={m.text} /></div> : <p className="cv-text">{m.text}</p>) : null}
+                        {(m.data.mentions ?? []).filter((x) => !x.access).map((x) => <p key={x.id} className="small muted wos-mention-note">{`${x.name} cannot open this project yet. Mentioning them did not give them access: a project admin was asked.`}</p>)}
+                        <Cards m={m} s={s} agent={agent} send={send} last={m.id === lastId} view={view} part="rest" />
+                      </div>
+                    ) : null}
+                    <Cards m={m} s={s} agent={agent} send={send} last={m.id === lastId} view={view} part="questions" />
+                  </Fragment>
+                );
+              })}
             </div>
           </div>
         );

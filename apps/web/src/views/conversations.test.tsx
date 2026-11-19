@@ -72,7 +72,7 @@ const withClosedCards = (): WoSession => session({
 describe("Question cards", () => {
   it("collapses an answered or replaced question with its answer, keeps the open one live, and shows a long option whole", async () => {
     await showSession(withClosedCards());
-    const closed = document.querySelectorAll("details.osx-question.is-closed");
+    const closed = document.querySelectorAll("details.cv-ask.is-closed");
     expect(closed).toHaveLength(2);
     closed.forEach((d) => expect((d as HTMLDetailsElement).open).toBe(false));
     expect(screen.getByText(/Answered by your message at 14:05: “all three together”/)).toBeTruthy();
@@ -80,7 +80,7 @@ describe("Question cards", () => {
     // the open question stays a live card, and its long suggestion is complete (no ellipsis)
     const btn = screen.getByRole("button", { name: longOption });
     expect(btn.textContent).toBe(longOption);
-    expect(document.querySelectorAll("article.osx-question")).toHaveLength(1);
+    expect(document.querySelectorAll("article.cv-ask")).toHaveLength(1);
   });
 });
 
@@ -188,7 +188,7 @@ describe("Work-order session", () => {
 
   it("the Conversations page draws the prototype's panel: no status banner, no Traveler button, '<Agent> asks' callout with quick answers, 'DD Mon HH:MM' times, no side facts", async () => {
     const calls = await showSession(session({ ruleQuestion: { id: "q1", text: "What is in scope?", chips: ["Only the API"] } }), { [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Saved." } }) });
-    expect(await screen.findByText("Intake Clerk asks")).toBeTruthy();
+    expect((await screen.findAllByText("Intake Clerk asks")).length).toBeGreaterThan(0);
     expect(document.getElementById("wos-status")).toBeNull();
     expect(screen.queryByRole("button", { name: "Traveler" })).toBeNull();
     expect(screen.queryByRole("list", { name: "The belt" })).toBeNull();

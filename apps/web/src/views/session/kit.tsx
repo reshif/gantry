@@ -19,7 +19,7 @@ export interface QuestionState { answered?: string | undefined; answeredBy?: str
 
 /** What closed a question, in words: "Answered by your message at 14:05: '...'", "You answered: ...", or "Replaced by a newer question". */
 function closedLine(q: QuestionState): string {
-  if (q.superseded && q.answered === undefined) return q.supersededBy ? `Replaced by a newer question (${q.supersededBy}).` : "Replaced by a newer question.";
+  if (q.superseded && q.answered === undefined) return "Replaced by a newer question.";
   if (q.via === "message") {
     const t = q.answeredAt ? Date.parse(q.answeredAt) : NaN;
     return `Answered by your message${Number.isNaN(t) ? "" : ` at ${fmt.ist(t)}`}: “${q.answerQuote ?? q.answered ?? ""}”`;
@@ -27,21 +27,29 @@ function closedLine(q: QuestionState): string {
   return `You answered: ${q.answered ?? ""}`;
 }
 
-/** An open question is a live card with its suggested answers (shown in full, wrapped). One that was answered or replaced is collapsed to its wording, and opens to the answer. */
-export function QuestionCard({ question, options, answered, answeredBy, via, answeredAt, answerQuote, superseded, supersededBy, answer, last }: { question: string; options: string[]; answer: (t: string) => void; last: boolean } & QuestionState) {
+/**
+ * The agent's question as its own panel ("Intake Clerk asks"): the wording in normal weight and the suggested answers as chips (shown whole, wrapped),
+ * only while it is open and the latest. An answered or replaced question is one quiet line ("Answered: All three together") that opens to the full wording and what closed it.
+ */
+export function QuestionCard({ question, options, asker, answered, answeredBy, via, answeredAt, answerQuote, superseded, supersededBy, answer, last }: { question: string; options: string[]; asker?: string | undefined; answer: (t: string) => void; last: boolean } & QuestionState) {
   const closed = answered !== undefined || superseded === true;
   if (closed) {
+    const replaced = superseded === true && answered === undefined;
     return (
-      <details className={`osx-card osx-question is-closed${superseded && answered === undefined ? " is-superseded" : " is-answered"}`} aria-label="Question from the agent, closed">
-        <summary className="osx-q-sum"><strong className="osx-q-text">{question}</strong></summary>
-        <p className="small muted osx-answered">{closedLine({ answered, answeredBy, via, answeredAt, answerQuote, superseded, supersededBy })}</p>
+      <details className={`cv-ask osx-question is-closed${replaced ? " is-superseded" : " is-answered"}`} aria-label="Question from the agent, closed">
+        <summary className="cv-ask-sum"><Icon name={replaced ? "undo" : "check"} /><span className="cv-ask-state">{replaced ? "Replaced:" : "Answered:"}</span><span className="cv-ask-a">{replaced ? question : (answerQuote ?? answered)}</span></summary>
+        <div className="cv-ask-body small">
+          <p className="cv-ask-q">{question}</p>
+          <p className="muted osx-answered">{closedLine({ answered, answeredBy, via, answeredAt, answerQuote, superseded, supersededBy })}</p>
+        </div>
       </details>
     );
   }
   return (
-    <article className="osx-card osx-question" aria-label="Question from the agent">
-      <strong>{question}</strong>
-      {options.length && last ? <div className="osx-options">{options.map((o) => <Btn key={o} small cls="osx-opt" label={o} onClick={() => answer(o)} />)}</div> : null}
+    <article className="cv-ask osx-question" aria-label="Question from the agent">
+      <h4 className="cv-ask-h">{asker ? `${asker} asks` : "Asks"}</h4>
+      <p className="cv-ask-q">{question}</p>
+      {options.length && last ? <div className="cv-ask-opts osx-options" role="group" aria-label="Suggested answers">{options.map((o) => <Btn key={o} small cls="osx-opt cv-chip" label={o} onClick={() => answer(o)} />)}</div> : null}
     </article>
   );
 }
