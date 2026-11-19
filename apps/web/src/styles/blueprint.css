@@ -561,6 +561,6 @@ textarea.input{height:auto;min-height:84px}
 .md-vcard .md-kv dt,.md-vcard .md-kv dd{margin:0}
 /* T-49: proposal cards stay inside the agent bubble that introduces them; a card the person may not run shows a locked, quiet button */
 .msg:has(.ccard) .bub{flex:1 1 0;max-width:100%;overflow-x:hidden}
-.bub .ccard{grid-template-columns:minmax(0,1fr);min-width:0;box-sizing:border-box;max-width:100%}
+.bub .ccard{grid-template-columns:minmax(0,1fr);min-width:0;max-width:100%}
 .bub .ccard .input{min-width:0;width:100%;box-sizing:border-box}
 .btn.con-cf-locked{border-style:dashed;color:var(--ink3);opacity:1}

@@ -66,7 +66,3 @@
 .aud-topic:hover { background: var(--sunk); }
 .aud-topic.is-on { border-style: solid; border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
 .aud-topic:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-/* T-47: the When column is one line ("14 Nov 13:34"), never two. */
-.aud-when { white-space: nowrap; }
-#aud-table td:first-child, #aud-table th:first-child { white-space: nowrap; min-width: max-content; }

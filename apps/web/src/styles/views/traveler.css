@@ -10,8 +10,7 @@
 .trv-killed strong { font-family: var(--f-display); font-size: 17px; letter-spacing: 0.1em; }
 .trv-killed .ic { width: 20px; height: 20px; flex: none; }
 
-.trv-actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
-.trv-actions .drawer-actions { min-width: 0; }
+.trv-actions { display: grid; gap: 6px; }
 .trv-actions-2 .btn { font-size: var(--t-sm); }
 
 /* journey timeline additions */
