@@ -146,8 +146,20 @@ async function storePullRequest(
   const id = prIdOf(repo.id, pr.number);
   const candidate = woFromBranch(pr.headBranch, prefix);
   const woId = candidate && (await woExists(tx, orgId, candidate)) ? candidate : null;
-  const prev = (await tx.query<{ state: string; head_sha: string | null; draft: boolean; wo_id: string | null }>(`select state, head_sha, draft, wo_id from pull_requests where org_id = $1 and id = $2 for update`, [orgId, id])).rows[0];
-  const data = { labels: pr.labels, author: pr.author ?? null, mergeCommitSha: pr.mergeCommitSha ?? null };
+  const prev = (await tx.query<{ state: string; head_sha: string | null; draft: boolean; wo_id: string | null; seen: string | null }>(`select state, head_sha, draft, wo_id, data->>'sourceUpdatedAt' as seen from pull_requests where org_id = $1 and id = $2 for update`, [orgId, id])).rows[0];
+  // S-63: webhooks are hints and the newest fact wins. A delivery older than what is stored changes nothing; a merged pull request is never set back, and a closed one is reopened only by
+  // a delivery that is newer (a real reopen carries a newer updated_at).
+  if (prev) {
+    const at = pr.updatedAt ? Date.parse(pr.updatedAt) : NaN;
+    const seen = prev.seen ? Date.parse(prev.seen) : NaN;
+    const older = Number.isFinite(at) && Number.isFinite(seen) && at < seen;
+    const backFromMerged = prev.state === "merged" && pr.state !== "merged";
+    const reopenedStale = source === "hook" && prev.state === "closed" && pr.state === "open" && !(Number.isFinite(at) && (!Number.isFinite(seen) || at > seen));
+    if (older || backFromMerged || reopenedStale) {
+      return { events: [{ subject: { type: "pull_request", id: `${full}#${pr.number}` }, projectId: repo.project_id, woId: prev.wo_id, category: "integrations", type: "github.pull_request.stale_ignored", before: { state: prev.state, headSha: prev.head_sha }, after: { state: pr.state, headSha: pr.headSha, updatedAt: pr.updatedAt ?? null, seenUpdatedAt: prev.seen, source } }], changed: false, drift: 0, merged: false };
+    }
+  }
+  const data = { labels: pr.labels, author: pr.author ?? null, mergeCommitSha: pr.mergeCommitSha ?? null, ...(pr.updatedAt ? { sourceUpdatedAt: pr.updatedAt } : {}) };
   await tx.query(
     `insert into pull_requests (org_id, id, repo_id, wo_id, number, github_id, title, state, draft, head_sha, base_branch, head_branch, url, merged_at, data)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)

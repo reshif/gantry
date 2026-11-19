@@ -11,6 +11,7 @@ import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
 import { job } from "../../core/jobs-contract.js";
 import { loadPolicyState } from "../../core/read/state.js";
 import { readCatalog, readPeople, readRoles, readTemplates } from "../../core/read/index.js";
+import { pruneOncall } from "./oncall.js";
 import { parseConfigEdit, type ConfigEdit } from "./config.js";
 import { addBay, addClass, type OverrideRecord, addGate, addStation, draftOf, moveStation, removeStation, replaceClasses, setEnabled, setGateMode, setWip, updateClass, type FlowDraft } from "./flowedit.js";
 import { approversPreset, flowFrom, routesPreset } from "./presets.js";
@@ -478,9 +479,11 @@ export async function setMemberRole(tx: Tx, a: Actor, projectId: string, personI
   }
   const version = Number((await tx.query(`update people set version = version + 1, updated_at = now() where org_id = $1 and id = $2 returning version`, [org, personId])).rows[0].version);
   const after = add ? [...had, roleId] : had.filter((r) => r !== roleId);
+  // S-65: the last role on the project ends the person's place on its on-call list.
+  const pruned = add ? null : await pruneOncall(tx, org, projectId);
   return {
-    msg: `${add ? "Granted " : "Removed "}${role.name}${add ? " to " : " from "}${person.name} on ${project.name}.`,
-    events: [evt(add ? "role.grant" : "role.revoke", projectId, { type: "person", id: personId }, had.join(","), after.join(","), "access")],
+    msg: `${add ? "Granted " : "Removed "}${role.name}${add ? " to " : " from "}${person.name} on ${project.name}.${pruned?.note ?? ""}`,
+    events: [evt(add ? "role.grant" : "role.revoke", projectId, { type: "person", id: personId }, had.join(","), after.join(","), "access"), ...(pruned?.events ?? [])],
     extra: { version }, changes: ["people", "projects", "matrix"], project: projectId,
   };
 }

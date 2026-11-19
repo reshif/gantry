@@ -20,6 +20,8 @@ export const PullRequestFact = z.object({
   url: z.string().max(1000).nullable().optional(),
   mergedAt: when,
   mergeCommitSha: sha.nullable().optional(),
+  /** When GitHub last changed the pull request (`updated_at`): the order of deliveries, which can arrive late (S-63). */
+  updatedAt: when,
   labels: z.array(z.string().max(100)).max(100).default([]),
   author: z.string().max(200).nullable().optional(),
 });

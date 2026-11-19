@@ -338,6 +338,8 @@ export async function recordMerged(tx: Tx, orgId: string, woId: string, o: { prN
   if (merging.prNumber !== o.prNumber) return { applied: false, reason: "No merge was waiting for that pull request." };
   const fx = await fxFor(tx, orgId, "system", o.now ?? new Date());
   // The pull request merged while the order waited for a person (a blocked merge that was fixed on GitHub): it leaves the bay and moves on.
+  // S-60: only the bay a blocked merge itself uses (cause "merge") may hold an order whose approval is still pending; a decline, park or hold cancels the approval first.
+  if (bayOf(fx.catalog, w) && w.data.bayCause !== "merge") return { applied: false, reason: "The work order is in a bay; a merge never takes it out of one." };
   if (bayOf(fx.catalog, w)) {
     await leaveBay(fx, w);
     for (const k of ["bayReason", "bayAt", "bayCause"]) delete w.data[k];

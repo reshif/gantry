@@ -4,7 +4,7 @@ import type { Tx } from "@gantry/db";
 import type { Actor } from "../../core/command.js";
 import { conflict, invalid, refuse } from "../../core/errors.js";
 import {
-  acquireSlot, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, dispatchQueued, enterStation, ev, leaveBay, note, openGate, pinned, advance, projectOf, resetGatesFrom, stationIdOf, type Fx,
+  acquireSlot, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, closeOpenQuestions, dispatchQueued, enterStation, ev, leaveBay, note, openGate, pinned, advance, projectOf, resetGatesFrom, stationIdOf, type Fx,
 } from "./engine.js";
 import { begin, done, flowFor, person, type CmdResult } from "./ctx.js";
 import { approveInner } from "./gates.js";
@@ -71,6 +71,7 @@ export async function sendBackCore(fx: Fx, w: Wo, project: Project, cur: string,
   closeEntry(w, fx, redo ? "redo" : "sent back", noteText);
   w.data.sendbacks = [...(Array.isArray(w.data.sendbacks) ? (w.data.sendbacks as unknown[]) : []), { from: cur, to, note: noteText, at: fx.now.getTime(), by, ...(redo ? { redo: true } : {}), ...extra }];
   await cancelAttempts(fx, w, redo ? "redo" : "sent back");
+  await closeOpenQuestions(fx, w.id, redo ? "The station was redone; it asks again if it still needs to." : `The work order was sent back to ${to}; the station asks again if it still needs to.`);
   await closeOpenInstances(fx, w.id, "send_back");
   await resetGatesFrom(fx, w, project, to);
   await enterStation(fx, w, to, { project });

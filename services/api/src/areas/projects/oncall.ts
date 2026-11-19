@@ -5,7 +5,7 @@
  */
 import { isFactoryAdminPerson, type Person } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
-import type { Actor, CommandResult } from "../../core/command.js";
+import type { Actor, CommandResult, EventSpec } from "../../core/command.js";
 import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
 import { readPeople } from "../../core/read/index.js";
 
@@ -61,6 +61,9 @@ export async function handOverOncall(tx: Tx, a: Actor, projectId: string, to: st
   if (!me) throw refuse("denied", "Only a person who is on call can hand over.");
   const { name, list, people } = await load(tx, a.orgId, projectId);
   if (!list.includes(me)) throw conflict(`You are not on call for ${name}, so there is nothing to hand over. A project admin chooses who is on call.`);
+  // S-65: handing over is for someone who still holds a role on the project (or is a Factory Admin).
+  const self = people.find((x) => x.id === me);
+  if (!self || !self.roles.some((g) => g.scope === projectId || g.scope === "factory")) throw refuse("denied", `You hold no role on ${name}, so you cannot change who is on call for it. A project admin chooses who is on call.`);
   if (to === me) throw invalid("Pick someone else to hand over to.");
   const target = eligible(people, projectId, to);
   if (isFactoryAdminPerson(target)) throw invalid(`${target.name} is a Factory Admin and is always on call. Pick someone else, or ask a project admin to take you off.`);
@@ -72,5 +75,25 @@ export async function handOverOncall(tx: Tx, a: Actor, projectId: string, to: st
     extra: { oncall: next, version },
     changes: ["projects", "people", "matrix"],
     project: projectId,
+  };
+}
+
+/**
+ * S-65: only someone who holds a role on the project is on its on-call list. When a role or team grant ends, whoever no longer holds any role on the project is taken off the list
+ * (a Factory Admin or any factory-level role still counts as a role here, as in `eligible`). Returns the audit events and a sentence for the response (empty when nothing changed).
+ */
+export async function pruneOncall(tx: Tx, orgId: string, projectId: string): Promise<{ events: EventSpec[]; note: string; removed: string[]; empty: boolean }> {
+  const row = (await tx.query<{ name: string; oncall: unknown }>(`select name, config -> 'oncall' as oncall from projects where org_id = $1 and id = $2 for update`, [orgId, projectId])).rows[0];
+  const list = row && Array.isArray(row.oncall) ? row.oncall.filter((x): x is string => typeof x === "string") : [];
+  if (!row || !list.length) return { events: [], note: "", removed: [], empty: false };
+  const people = await readPeople(tx, orgId);
+  const keep = list.filter((id) => people.find((p) => p.id === id)?.roles.some((g) => g.scope === projectId || g.scope === "factory"));
+  if (keep.length === list.length) return { events: [], note: "", removed: [], empty: false };
+  const removed = list.filter((id) => !keep.includes(id));
+  await save(tx, orgId, projectId, keep);
+  return {
+    events: [{ type: "project.oncall_pruned", category: "access", subject: { type: "project", id: projectId }, projectId, before: list, after: keep }],
+    note: ` ${names(people, removed)} no longer holds a role on ${row.name}, so they are off its on-call list.${keep.length ? "" : ` The on-call list for ${row.name} is now empty (Factory Admins are always on call); a project admin should choose someone.`}`,
+    removed, empty: keep.length === 0,
   };
 }

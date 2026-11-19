@@ -678,6 +678,19 @@ export async function cancelAttempts(fx: Fx, w: Pick<Wo, "id">, reason: string):
   return r.rowCount ?? 0;
 }
 
+/**
+ * S-62: a station question nobody can act on any more is closed (status dismissed, with the reason in the answer and "system" as who closed it), so it leaves the Inbox and is not counted
+ * by the feasibility check of a new run. Used when the work order is declined or killed, and when it is sent back (the station asks again if it still needs to).
+ */
+export async function closeOpenQuestions(fx: Fx, woId: string, reason: string): Promise<number> {
+  const r = await fx.tx.query(
+    `update wo_questions set status = 'dismissed', answer = $3, answered_by = 'system', answered_at = $4, updated_at = $4 where org_id = $1 and wo_id = $2 and status = 'open'`,
+    [fx.orgId, woId, reason, fx.now],
+  );
+  if (r.rowCount) fx.changes.add("home");
+  return r.rowCount ?? 0;
+}
+
 export async function enterBay(fx: Fx, w: Wo, bay: string, reason: string): Promise<void> {
   await fx.tx.query(`insert into bay_stays (org_id, id, wo_id, bay, reason, entered_by, entered_at) values ($1,$2,$3,$4,$5,$6,$7)`, [fx.orgId, `BS-${w.id}-${fx.now.getTime().toString(36)}${Math.random().toString(36).slice(2, 6)}`, w.id, bay, reason, fx.actor, fx.now]);
 }

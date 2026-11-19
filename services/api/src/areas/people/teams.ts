@@ -9,6 +9,7 @@ import type { z } from "zod";
 import { conflict, invalid, notFound, Refusal } from "../../core/errors.js";
 import type { CommandResult } from "../../core/command.js";
 import { readTeams } from "../../core/read/index.js";
+import { pruneOncall } from "../projects/oncall.js";
 import { lockOrgConfig, stateIn } from "../access/config.js";
 import type { CreateTeamBody, TeamGrantBody, UpdateTeamBody } from "./schemas.js";
 
@@ -129,9 +130,11 @@ export async function revokeTeamRole(tx: Tx, orgId: string, teamId: string, gran
   if (!g.project_id && !reason) throw invalid("Removing a factory-level grant needs a reason: say why, in a few words.");
   await tx.query(`update team_role_assignments set revoked_at = now(), updated_at = now() where org_id = $1 and id = $2`, [orgId, grantId]);
   const name = (await stateIn(tx, orgId)).catalog.roles.find((r) => r.id === g.role_id)?.name ?? g.role_id;
+  // S-65: members who held their only role on the project through this grant leave its on-call list.
+  const pruned = g.project_id ? await pruneOncall(tx, orgId, g.project_id) : null;
   return {
-    msg: `Removed ${name} from ${team.name}.`,
-    events: [{ type: "team.role.revoke", category: "access", subject: { type: "team", id: teamId }, before: { role: g.role_id, scope: g.project_id ?? "factory" }, after: reason ? { reason } : null, projectId: g.project_id }],
+    msg: `Removed ${name} from ${team.name}.${pruned?.note ?? ""}`,
+    events: [...(pruned?.events ?? []), { type: "team.role.revoke", category: "access", subject: { type: "team", id: teamId }, before: { role: g.role_id, scope: g.project_id ?? "factory" }, after: reason ? { reason } : null, projectId: g.project_id }],
     changes: ["teams", "people", "matrix"],
     project: null,
   };

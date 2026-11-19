@@ -7,7 +7,7 @@ import { loadFlowState } from "../../core/read/state.js";
 import { closeConversation, replaceConversation, saveConversation } from "./conversation.js";
 import { createWorkOrder, newWoId } from "./create.js";
 import {
-  bayOf, cancelAttempts, closeEntry, advance, closeOpenInstances, dispatchQueued, enterBay, enterStation, ev, leaveBay, loadOne, note, openInstanceOf, projectOf, releaseSlot, stationIdOf, type Fx,
+  bayOf, cancelAttempts, closeEntry, closeOpenQuestions, advance, closeOpenInstances, dispatchQueued, enterBay, enterStation, ev, leaveBay, loadOne, note, openInstanceOf, projectOf, releaseSlot, stationIdOf, type Fx,
 } from "./engine.js";
 import { begin, done, flowFor, makeFx, person, type CmdResult } from "./ctx.js";
 import { saveWo, type Wo } from "./model.js";
@@ -163,6 +163,18 @@ export async function parkInto(fx: Fx, w: Wo, bay: string, reason: string): Prom
   w.data.bayReason = reason;
   delete w.data.bayCause;
   w.data.bayAt = fx.now.getTime();
+  // S-60: a person's decline, park or hold is a later word than the approval: the pending merge is dropped and its queued job cancelled, so nothing merges from a bay.
+  const merging = w.data.merging as { prNumber?: number } | undefined;
+  if (merging) {
+    delete w.data.merging;
+    w.data.blockReason = null;
+    await fx.tx.query(
+      `update jobs set status = 'done', result = $3::jsonb, completed_at = now(), updated_at = now()
+        where org_id = $1 and kind = 'merge.request' and status = 'queued' and payload->>'woId' = $2`,
+      [fx.orgId, w.id, JSON.stringify({ cancelled: `the work order was moved to ${bay}` })],
+    );
+    ev(fx, w, "wo.merge.cancelled", { text: `Merge of #${merging.prNumber ?? "?"} cancelled: moved to ${bay} (${reason}).`, bay }, { category: "flow" });
+  }
   w.position = bay;
   w.state = "parked";
   closeEntry(w, fx, "parked", reason);
@@ -201,7 +213,10 @@ export async function reclassify(tx: Tx, actor: Actor, woId: string, cls: string
   const { wo } = await flowFor(fx, w);
   const before = w.cls;
   w.cls = cls;
-  w.priority = classOf(fx.catalog, project, cls).priority;
+  // S-61: a priority somebody asked for stays; only the old class's own default follows the class.
+  const oldDefault = classOf(fx.catalog, project, before).priority;
+  const priorityBefore = w.priority;
+  if (w.priority === oldDefault) w.priority = classOf(fx.catalog, project, cls).priority;
   w.data.clsOverridden = { by, at: fx.now.getTime(), from: before, reason: reason.trim() };
   const created = wo.createdAt;
   const fresh = startConversation(fx.catalog, project, { cls, title: w.title, description: String(w.data.description ?? ""), repo: w.repo ?? "", createdAt: created, clsConfidence: Number(w.data.clsConfidence) || 0, clsRationale: String(w.data.clsRationale ?? "") }, wo.conv.awaiting);
@@ -221,7 +236,7 @@ export async function reclassify(tx: Tx, actor: Actor, woId: string, cls: string
   ev(fx, w, "wo.classify", { text: reason.trim(), from: before, to: cls }, { before: { cls: before } });
   await saveWo(fx.tx, fx.orgId, w);
   const r = route(fx.catalog, project, cls);
-  return done(fx, `${w.id} is now ${classOf(fx.catalog, project, cls).name}. Route: ${r.map((s) => stationDef(fx.catalog, s)?.name ?? s).join(" → ")}.`, w.project, { route: r, gates: routeGates(fx.catalog, project, cls), version: w.version });
+  return done(fx, `${w.id} is now ${classOf(fx.catalog, project, cls).name}${w.priority !== priorityBefore ? ` (priority ${priorityBefore} → ${w.priority})` : `, priority ${w.priority} kept`}. Route: ${r.map((s) => stationDef(fx.catalog, s)?.name ?? s).join(" → ")}.`, w.project, { route: r, gates: routeGates(fx.catalog, project, cls), version: w.version });
 }
 
 /** Decline the request: it moves to the Declined bay with the reason. */
@@ -239,6 +254,7 @@ export async function declineInner(fx: Fx, actor: Actor, w: Wo, reason: string, 
   await closeOpenInstances(fx, w.id, "send_back");
   await parkInto(fx, w, "declined", reason.trim());
   await closeConversation(fx, w.id);
+  await closeOpenQuestions(fx, w.id, `The work order was declined: ${reason.trim()}`);
   note(w, fx, by, `Declined: ${reason.trim()}`);
   ev(fx, w, "wo.decline", { text: reason.trim(), station: sid, ...(o.fromGate ? { instance: o.fromGate.id } : {}) });
   await saveWo(fx.tx, fx.orgId, w);
