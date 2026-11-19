@@ -8,6 +8,7 @@ import type { Tx } from "@gantry/db";
 import type { z } from "zod";
 import type { Actor, CommandResult } from "../../core/command.js";
 import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
+import { startProbation } from "../trust/record.js";
 import { pinSkills } from "./compose.js";
 import { AUTONOMY_LEVELS, autonomyCheck, cfgOf, diffKeys, sha256, slug, snapshotOf, VERSIONED_KEYS, type AgentCfg } from "./config.js";
 import type { AgentPatch, CreateBody } from "./schemas.js";
@@ -224,9 +225,10 @@ export async function promoteAgent(tx: Tx, a: Actor, id: string, ref: string): P
   }
   const liveLabel = vers.find((x) => x.version === row.live_version);
   await tx.query(`update agents set live_version = $3, data = $4::jsonb, version = version + 1 where org_id = $1 and id = $2`, [a.orgId, id, v.version, json({ ...row.data, promoted: [...promoted, v.version] })]);
+  const probation = await startProbation(tx, a.orgId, id, { kind: "promote", fromVersion: liveLabel ? labelOf(liveLabel) : null, toVersion: label, by: a.id }, a.now);
   return {
-    msg: `${row.name} ${label} is on the floor.`, changes: ["agents", "audit"], project: null, extra: { version: label, score: el.score },
-    events: [{ type: "agent.promote", category: cat, subject: subject(id), projectId: null, before: { version: liveLabel ? labelOf(liveLabel) : null }, after: { version: label, n: v.version, suite: el.suite, run: el.run, score: el.score, threshold: el.threshold } }],
+    msg: `${row.name} ${label} is on the floor.${probation.length ? ` Its ${probation.length} trust cell${probation.length === 1 ? "" : "s"} run one level lower for a probation period.` : ""}`, changes: ["agents", "audit", ...(probation.length ? ["trust"] : [])], project: null, extra: { version: label, score: el.score, probation: probation.length },
+    events: [...probation, { type: "agent.promote", category: cat, subject: subject(id), projectId: null, before: { version: liveLabel ? labelOf(liveLabel) : null }, after: { version: label, n: v.version, suite: el.suite, run: el.run, score: el.score, threshold: el.threshold } }],
   };
 }
 
@@ -248,9 +250,10 @@ export async function rollbackAgent(tx: Tx, a: Actor, id: string, ref: string | 
     const have = new Set((await tx.query<{ id: string }>(`select id from skills where org_id = $1 and id = any($2)`, [a.orgId, v.body.skills])).rows.map((r) => r.id));
     await writeSkills(tx, a.orgId, id, (v.body.skills as unknown[]).filter((s): s is string => typeof s === "string" && have.has(s)));
   }
+  const probation = await startProbation(tx, a.orgId, id, { kind: "rollback", fromVersion: from ? labelOf(from) : null, toVersion: label, by: a.id }, a.now);
   return {
-    msg: `${row.name} rolled back to ${label}.`, changes: ["agents", "audit"], project: null, extra: { version: label },
-    events: [{ type: "agent.rollback", category: cat, subject: subject(id), projectId: null, before: { version: from ? labelOf(from) : null }, after: { version: label, n: v.version } }],
+    msg: `${row.name} rolled back to ${label}.${probation.length ? ` Its ${probation.length} trust cell${probation.length === 1 ? "" : "s"} run one level lower for a probation period.` : ""}`, changes: ["agents", "audit", ...(probation.length ? ["trust"] : [])], project: null, extra: { version: label, probation: probation.length },
+    events: [...probation, { type: "agent.rollback", category: cat, subject: subject(id), projectId: null, before: { version: from ? labelOf(from) : null }, after: { version: label, n: v.version } }],
   };
 }
 

@@ -58,3 +58,40 @@ d("round 2: agent turn-on gate (S-13)", () => {
     expect((await turnOn("ag-classifier")).status).toBe(200);
   });
 });
+
+d("round 2: a version change puts trust cells on probation (S-14)", () => {
+  let t: TestApp;
+  beforeAll(async () => {
+    t = await startApp({ seedEvals: true });
+  });
+  afterAll(async () => {
+    await t.close();
+  });
+  const w = world(() => t);
+  const q = w.q;
+  const CELL = "ag-spec|feature|payments";
+  const cell = async () => (await w.call(ADMIN, "GET", "/api/v1/trust/cells")).body.cells.find((c: any) => c.id === CELL);
+  let runN = 0;
+  const pass = async (suite: string, version: string) =>
+    q(`insert into eval_runs (org_id, id, suite_id, status, score, data) values ($1,$2,$3,'completed',0.97,$4::jsonb)`, [t.orgId, `RUN-P-${++runN}`, suite, JSON.stringify({ agent: "ag-spec", version })]);
+
+  it("promote and rollback drop the cell one level and mark it, audited; the marker shows on the cell", async () => {
+    expect((await w.call(ADMIN, "PUT", "/api/v1/trust/switch", { on: true, reason: "Enough evidence on payments" })).status).toBe(200);
+    expect((await w.call(ADMIN, "POST", "/api/v1/trust/grants", { target: CELL, level: 3, reason: "Specs have been clean for a month" })).status).toBe(200);
+    expect(await cell()).toMatchObject({ level: 3, effective: 3, probation: null });
+    const v = await w.call(ADMIN, "POST", "/api/v1/agents/ag-spec/versions", { label: "9.9.0" });
+    expect(v.status, JSON.stringify(v.body)).toBe(200);
+    const suite = (await q(`select data->>'suite' as s from agents where id = 'ag-spec'`))[0].s;
+    await pass(suite, "9.9.0");
+    const p = await w.call(ADMIN, "POST", "/api/v1/agents/ag-spec/versions/9.9.0/promote");
+    expect(p.status, JSON.stringify(p.body)).toBe(200);
+    expect(await cell()).toMatchObject({ level: 3, effective: 2, probation: { runsLeft: 5, kind: "promote", toVersion: "9.9.0" } });
+    const ev = (await w.events("trust.probation")).find((e: any) => e.subject.id === CELL)!;
+    expect(ev.subject).toMatchObject({ id: CELL });
+    expect(ev.after).toMatchObject({ runsAt: "L2", runs: 5, kind: "promote" });
+    // a rollback starts it again
+    await q(`update trust_cells set data = data - 'probation' where id = $1`, [CELL]);
+    expect((await w.call(ADMIN, "POST", "/api/v1/agents/ag-spec/rollback", { version: 1 })).status).toBe(200);
+    expect(await cell()).toMatchObject({ effective: 2, probation: { kind: "rollback" } });
+  });
+});

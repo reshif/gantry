@@ -11,7 +11,7 @@ import { trust, trustAgentFor, trustCellId, type Catalog, type TrustCeiling } fr
 import type { EventSpec } from "../../core/command.js";
 import { policyProjects } from "../../core/read/state.js";
 import { readCatalog } from "../../core/read/index.js";
-import { DEFAULT_SAMPLE_RATE, lvlCode, lvlNum, MAX_GRANTABLE, PROPOSAL_CAP, PROPOSAL_DAY, REPROPOSE_MS, levelsAboveL1, readCriteria } from "./config.js";
+import { DEFAULT_SAMPLE_RATE, PROBATION_RUNS, probationCap, probationOf, lvlCode, lvlNum, MAX_GRANTABLE, PROPOSAL_CAP, PROPOSAL_DAY, REPROPOSE_MS, levelsAboveL1, readCriteria } from "./config.js";
 import { cellRows, ceilingRows, loadInsight, toCeiling, type CellRow } from "./store.js";
 
 /** Gates a person always decides, whatever a cell has earned: the brief, plan and security (G3+G3s), the merge itself (first version), and release confirmation (needs L4, which nobody can be granted). */
@@ -39,13 +39,15 @@ export interface InForce {
   /** What the gate runs at: the grant capped by ceilings, and by 1 while levels above L1 are switched off. */
   effective: number;
   switchOn: boolean;
+  /** Set while the cell runs one level lower after an agent version change (spec 13.3). */
+  probation: { runsLeft: number; kind: string; fromVersion: string | null; toVersion: string | null } | null;
 }
 
 /** The trust level in force for a work order at a gate (spec 13.1 "trust level in force"): its repo cell, else its project cell, else L1. */
 export async function trustInForce(tx: Tx, orgId: string, catalog: Catalog, o: { gateId: string; cls: string; project: string; repo: string | null }): Promise<InForce> {
   const agent = trustAgentFor({ catalog }, o.gateId);
   const switchOn = await levelsAboveL1(tx, orgId);
-  const none: InForce = { agent, cellId: null, grantId: null, granted: 1, ceiling: 4, ceilingIds: [], effective: 1, switchOn };
+  const none: InForce = { agent, cellId: null, grantId: null, granted: 1, ceiling: 4, ceilingIds: [], effective: 1, switchOn, probation: null };
   if (!agent) return none;
   const ids = [o.repo ? trustCellId(agent, o.cls, o.project, o.repo) : null, trustCellId(agent, o.cls, o.project)].filter((x): x is string => !!x);
   const cell = (await cellRows(tx, orgId)).filter((c) => ids.includes(c.id)).sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id))[0];
@@ -53,8 +55,9 @@ export async function trustInForce(tx: Tx, orgId: string, catalog: Catalog, o: {
   const ceil = ceilingFor((await ceilingRows(tx, orgId)).map(toCeiling), { regulated: !!proj?.regulated, cls: o.cls, project: o.project, gate: o.gateId });
   const granted = cell ? lvlNum(cell.level) : 1;
   const grant = cell ? (await tx.query<{ id: string }>(`select id from trust_grants where org_id = $1 and cell_id = $2 and revoked_at is null order by created_at desc limit 1`, [orgId, cell.id])).rows[0] : undefined;
-  const capped = Math.min(granted, ceil.max, MAX_GRANTABLE);
-  return { agent, cellId: cell?.id ?? null, grantId: grant?.id ?? null, granted, ceiling: ceil.max, ceilingIds: ceil.ceilings.map((c) => c.id), effective: switchOn ? capped : Math.min(capped, 1), switchOn };
+  const prob = cell ? probationOf(cell.data) : null;
+  const capped = Math.min(granted, ceil.max, MAX_GRANTABLE, prob ? probationCap(granted) : 4);
+  return { agent, cellId: cell?.id ?? null, grantId: grant?.id ?? null, granted, ceiling: ceil.max, ceilingIds: ceil.ceilings.map((c) => c.id), effective: switchOn ? capped : Math.min(capped, 1), switchOn, probation: prob ? { runsLeft: prob.runsLeft, kind: prob.kind, fromVersion: prob.fromVersion, toVersion: prob.toVersion } : null };
 }
 
 /* ------------------------------------------------------------------------------------------- cells and levels */
@@ -87,6 +90,20 @@ export async function applyLevel(tx: Tx, orgId: string, cell: CellRow, to: numbe
     type: c.kind === "demote" ? "trust.demote" : "trust.grant", category: "trust", subject: { type: "trust", id: cell.id }, projectId: cell.project_id,
     before: { level: lvlCode(from) }, after: { level: lvlCode(to), reason: c.reason, ...(c.cause ? { cause: c.cause } : {}), ...(c.proposal ? { proposal: c.proposal } : {}) }, ...(c.kind === "demote" ? { outcome: "regression" as const } : {}),
   };
+}
+
+/**
+ * Spec 13.3 "Version change": a new agent version, or a rollback to an older one, runs one level lower for a probation period. Every cell of the agent above L1
+ * gets a probation marker; the level in force drops one (never below L1) until PROBATION_RUNS finished runs pass without a demotion. The grant itself is kept.
+ */
+export async function startProbation(tx: Tx, orgId: string, agentId: string, v: { kind: "promote" | "rollback"; fromVersion: string | null; toVersion: string | null; by: string }, now: Date): Promise<EventSpec[]> {
+  const events: EventSpec[] = [];
+  for (const c of (await cellRows(tx, orgId)).filter((x) => x.agent_id === agentId && lvlNum(x.level) >= 2)) {
+    const marker = { since: now.toISOString(), fromVersion: v.fromVersion, toVersion: v.toVersion, kind: v.kind, runsLeft: PROBATION_RUNS };
+    await tx.query(`update trust_cells set data = data || jsonb_build_object('probation', $3::jsonb), version = version + 1, updated_at = now() where org_id = $1 and id = $2`, [orgId, c.id, json(marker)]);
+    events.push({ type: "trust.probation", category: "trust", subject: { type: "trust", id: c.id }, projectId: c.project_id, before: { level: c.level }, after: { granted: c.level, runsAt: lvlCode(probationCap(lvlNum(c.level))), runs: PROBATION_RUNS, reason: `${v.kind === "rollback" ? "Rolled back to" : "Promoted"} ${v.toVersion ?? "a new version"}: runs one level lower for ${PROBATION_RUNS} clean runs (spec 13.3).`, ...marker } });
+  }
+  return events;
 }
 
 /* ------------------------------------------------------------------------------------------- auto pass (L2 and L3) */
@@ -136,7 +153,19 @@ export async function afterFinish(tx: Tx, orgId: string, woId: string, now: Date
   const agents = [...new Set(gates.map((g) => trustAgentFor({ catalog }, g)).filter((a): a is string => !!a))];
   if (!agents.length) return;
   for (const agent of agents) await ensureCell(tx, orgId, { agent, cls: wo.class, project: wo.project_id }, "system", now);
-  await evaluateCells(tx, orgId, { project: wo.project_id, cls: wo.class, agents }, now, sink);
+  const res = await evaluateCells(tx, orgId, { project: wo.project_id, cls: wo.class, agents }, now, sink);
+  // A finished run that did not demote its cell counts toward the end of its probation; a demotion resets the cell's evidence, so it ends it.
+  for (const agent of agents) {
+    const row = (await cellRows(tx, orgId, trustCellId(agent, wo.class, wo.project_id), true))[0];
+    const prob = row ? probationOf(row.data) : null;
+    if (!row || !prob) continue;
+    const left = lvlNum(row.level) < 2 || res.demoted > 0 ? 0 : prob.runsLeft - 1;
+    if (left > 0) await tx.query(`update trust_cells set data = jsonb_set(data, '{probation,runsLeft}', to_jsonb($3::int)), updated_at = now() where org_id = $1 and id = $2`, [orgId, row.id, left]);
+    else {
+      await tx.query(`update trust_cells set data = data - 'probation', version = version + 1, updated_at = now() where org_id = $1 and id = $2`, [orgId, row.id]);
+      sink({ type: "trust.probation.end", category: "trust", subject: { type: "trust", id: row.id }, projectId: row.project_id, after: { level: row.level, reason: left === 0 && lvlNum(row.level) >= 2 && res.demoted === 0 ? `${PROBATION_RUNS} clean runs: probation over.` : "Probation ended by a demotion." } });
+    }
+  }
 }
 
 /** Looks at the cells of one project (and class and agents, when given): demotes where the rule says so and proposes promotions. */
