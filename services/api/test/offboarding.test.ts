@@ -82,6 +82,8 @@ d("offboarding", () => {
 
   it("deactivates: ends sessions and keys, clears away and on-call links, lists open work, audits each effect", async () => {
     const cookie = await t.session(leaver);
+    // Keys act only while their maker holds the right to make keys (S-51): both makers are project admins here.
+    for (const who of [leaver, engineer]) await q(`insert into role_assignments (org_id, id, person_id, role_id, scope_type, project_id, granted_by) values ($1,$2,$3,'project_admin','project','payments','test')`, [t.orgId, `ra-off-${who}`, who]);
     const k = generateApiKey();
     await q(`insert into api_keys (org_id, id, name, project_id, key_hash, key_prefix, scopes, created_by, expires_at) values ($1,'key-leaver','ci','payments',$2,$3,'["wo.submit"]',$4, now() + interval '30 days')`, [t.orgId, k.hash, k.prefix, leaver]);
     const k2 = generateApiKey();
@@ -157,6 +159,7 @@ d("offboarding", () => {
 
   it("keepKeys leaves keys live and lists them in the audit event", async () => {
     const k = generateApiKey();
+    // keepKeys is the explicit, audited choice to leave the key live although the maker no longer holds the right.
     await q(`insert into api_keys (org_id, id, name, project_id, key_hash, key_prefix, scopes, created_by) values ($1,'key-kept','kept','payments',$2,$3,'["wo.submit"]','p-meera')`, [t.orgId, k.hash, k.prefix]);
     const cookie = await t.session("p-meera");
     expect((await t.app.inject({ method: "GET", url: "/api/v1/me", headers: cookie.headers })).statusCode).toBe(200);

@@ -175,8 +175,8 @@ export async function buildWorkOrders(db: Queryable, orgId: string, catalog: Cat
     serial(() => loadFlowDocs(db, orgId, wos)),
     q<{ id: string; wo_id: string; gate_id: string; status: string; closed_reason: string | null; opened_at: Date; closed_at: Date | null; basis: Data }>(
       `select id, wo_id, gate_id, status, closed_reason, opened_at, closed_at, basis from gate_instances where org_id = $1 and wo_id = any($2::text[]) order by opened_at, id`),
-    q<{ gate_instance_id: string; wo_id: string; voter: string; vote: string; comment: string; at: Date; via: string }>(
-      `select v.gate_instance_id, g.wo_id, v.voter, v.vote, v.comment, v.at, v.via from gate_votes v join gate_instances g on g.org_id = v.org_id and g.id = v.gate_instance_id where v.org_id = $1 and g.wo_id = any($2::text[]) order by v.at, v.id`),
+    q<{ gate_instance_id: string; wo_id: string; voter: string; vote: string; comment: string; at: Date; via: string; for_person: string | null }>(
+      `select v.gate_instance_id, g.wo_id, v.voter, v.vote, v.comment, v.at, v.via, v.for_person from gate_votes v join gate_instances g on g.org_id = v.org_id and g.id = v.gate_instance_id where v.org_id = $1 and g.wo_id = any($2::text[]) order by v.at, v.id`),
     q<{ gate_instance_id: string; wo_id: string; decision: string; decided_by: string | null; detail: Data; at: Date; trust_level: string | null }>(
       `select gate_instance_id, wo_id, decision, decided_by, detail, at, trust_level from gate_decisions where org_id = $1 and wo_id = any($2::text[]) order by at, id`),
     q<{ id: string; wo_id: string; status: string; data: Data }>(`select id, wo_id, status, data from conversations where org_id = $1 and wo_id = any($2::text[]) and kind = 'intake'`),
@@ -233,7 +233,7 @@ export async function buildWorkOrders(db: Queryable, orgId: string, catalog: Cat
       const checksFor = Array.isArray(obj(d.gateChecks)[gid]) ? (obj(d.gateChecks)[gid] as LegacyGate["checks"]) : [];
       const g: LegacyGate = { status: "pending", approvals: [], rejections, checks: checksFor };
       const voteList = last ? (votesBy.get(w.id) ?? []).filter((v) => v.gate_instance_id === last.id && v.vote === "approve") : [];
-      const approvals = voteList.map((v) => ({ by: v.voter, at: ms(v.at) ?? 0, via: v.via }));
+      const approvals = voteList.map((v) => ({ by: v.voter, at: ms(v.at) ?? 0, via: v.via, ...(v.for_person ? { for: v.for_person } : {}) }));
       if (last?.status === "open") {
         g.status = "waiting";
         g.approvals = approvals;

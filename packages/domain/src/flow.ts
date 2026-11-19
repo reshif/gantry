@@ -9,7 +9,7 @@ import { HOUR } from "./format.js";
 import { actorName, can, effectiveStop, findPerson, findProject, findRepo, isFactoryAdmin, isOnCall, rolesIn } from "./policy.js";
 import type { OverrideMarks, PolicyState } from "./policy.js";
 import type {
-  ApproverCondition, ApproverNeeds, ApproverRule, Bay, Brief, Catalog, Conversation, ConvMiss, ConvQuestion, Decision, DecisionRule, Gate, GateKind, GateInstance,
+  Approval, ApproverCondition, ApproverNeeds, ApproverRule, Bay, Brief, Catalog, Conversation, ConvMiss, ConvQuestion, Decision, DecisionRule, Gate, GateKind, GateInstance,
   Person, Priority, Project, Repo, Station, WorkClass, WorkOrder,
 } from "./types.js";
 
@@ -436,8 +436,10 @@ export function gateProgress(project: Project, wo: Pick<WorkOrder, "cls" | "risk
   const conds = conditionsFor(project, wo, gateId);
   // Separation of duties is judged when votes are counted, not only when one is cast: a vote the author made while it was off stays on record and stops counting once it is on.
   const sodNow = gateId !== "G0G1" && !!rule.sod;
-  const counted = sodNow ? st.approvals.filter((a) => a.by !== wo.requestedBy) : st.approvals;
-  const authorExcluded = counted.length !== st.approvals.length;
+  const sodCounted = sodNow ? st.approvals.filter((a) => a.by !== wo.requestedBy && (a.for ?? a.by) !== wo.requestedBy) : st.approvals;
+  // N approvals are N different seats (S-53): a named approver and their stand-in fill one seat.
+  const counted = sodCounted.filter((a, i) => sodCounted.findIndex((b) => (b.for ?? b.by) === (a.for ?? a.by)) === i);
+  const authorExcluded = sodCounted.length !== st.approvals.length;
   const unmet = conds.filter((cd) => !counted.some((a) => {
     const pp = people.find((x) => x.id === a.by);
     return !!pp && satisfies(pp, project, cd.needs);
@@ -448,6 +450,32 @@ export function gateProgress(project: Project, wo: Pick<WorkOrder, "cls" | "risk
   const need = classSet ? requiredFor(rule, wo.cls) : Math.max(requiredFor(rule, wo.cls), Number((st as { openedRequired?: number }).openedRequired) || 0);
   const onlyRequester = gateId !== "G0G1" && counted.length > 0 && counted.every((a) => a.by === wo.requestedBy);
   return { have: counted.length, need, unmet, conds, onlyRequester, passes: counted.length >= need && !unmet.length && !onlyRequester, authorExcluded };
+}
+
+/**
+ * The away person whose seat this voter would fill as their stand-in, or why no seat is open (S-53, S-54). A stand-in never votes for someone separation of
+ * duties refuses on this work order (the author), and a seat already voted (by the away person) is not filled twice.
+ */
+function delegateSeat(state: FlowState, project: Project, rule: ApproverRule, approvals: Approval[], wo: Pick<WorkOrder, "requestedBy" | "id">, gateId: string, personId: string, now: number): { seat: Person | undefined; refused: string | null } {
+  const cands = state.people.filter((x) => x.away && x.away.delegate === personId && x.away.from <= now && x.away.to > now && (rule.people.includes(x.id) || rule.roles.some((r) => rolesIn(x, project.id).includes(r))));
+  let refused: string | null = null;
+  for (const x of cands) {
+    if (rule.sod && gateId !== "G0G1" && wo.requestedBy === x.id) { refused ??= "Separation of duties: " + x.name + " is the author of " + wo.id + ", so a stand-in cannot approve for them."; continue; }
+    if (approvals.some((a) => (a.for ?? a.by) === x.id)) { refused ??= x.name + " already has a vote on this gate; a seat counts once, so their stand-in does not vote too."; continue; }
+    return { seat: x, refused: null };
+  }
+  return { seat: undefined, refused };
+}
+
+/** The seat a vote fills: the away person the voter stands in for, only when no other way lets them in (their own seat otherwise). Null for the voter's own seat. */
+export function delegatedSeat(state: FlowState, personId: string, wo: WorkOrder, gateId: string, now: number): string | null {
+  const project = state.projects.find((p) => p.id === wo.project) as Project;
+  const rule = project.approvers[gateId] ?? { ...NO_RULE };
+  const person = findPerson(state, personId);
+  if (!person) return null;
+  const roles = rolesIn(person, project.id);
+  if (rule.people.includes(personId) || rule.roles.some((r) => roles.includes(r))) return null;
+  return delegateSeat(state, project, rule, wo.gates[gateId]?.approvals ?? [], wo, gateId, personId, now).seat?.id ?? null;
 }
 
 function deny(reason: string, needs?: string, rule?: string): Decision {
@@ -498,6 +526,7 @@ function gateDecisionCore(state: FlowState, personId: string | null | undefined,
   if (base.overrideKind) marks.kind = base.overrideKind;
   const rule = project.approvers[gateId] ?? { ...NO_RULE };
   if (st.approvals.some((a) => a.by === personId)) return deny("You already approved " + g.label + " on " + wo.id + ".", "Another approver", "APR-" + gateId);
+  if (st.approvals.some((a) => a.for === personId)) return deny("Your stand-in already approved " + g.label + " on " + wo.id + " for you; a seat counts once.", "Another approver", "APR-" + gateId);
   const roles = rolesIn(person, project.id);
   const aprRule: DecisionRule = { kind: "approver", id: "APR-" + gateId, name: g.label + " approvers" };
   // Factory Admin is universal (owner decision 2026-11-19): a normal approver on every gate. Only the author under separation of duties (or the
@@ -509,7 +538,8 @@ function gateDecisionCore(state: FlowState, personId: string | null | undefined,
   if (rule.sod && wo.requestedBy === personId) return deny("Separation of duties on " + g.label + ": the author of " + wo.id + " cannot approve it.", "Someone other than the author", "APR-" + gateId);
   const byRole = rule.roles.some((r) => roles.includes(r));
   const byName = rule.people.includes(personId as string);
-  const delegateFor = state.people.find((x) => x.away && x.away.delegate === personId && x.away.from <= now && x.away.to > now && (rule.people.includes(x.id) || rule.roles.some((r) => rolesIn(x, project.id).includes(r))));
+  const delegation = delegateSeat(state, project, rule, st.approvals, wo, gateId, personId as string, now);
+  const delegateFor = delegation.seat;
   const conds = conditionsFor(project, wo, gateId);
   const byCond = conds.find((cd) => satisfies(person, project, cd.needs));
   // Once the gate has waited past its escalation limit the rule's fallback approver (the project owner when none is named) may approve it. Only after escalation, and still under
@@ -517,6 +547,7 @@ function gateDecisionCore(state: FlowState, personId: string | null | undefined,
   const fallbackId = st.escalated ? rule.fallback ?? project.owner : null;
   const byFallback = !!fallbackId && fallbackId === personId;
   if (!byRole && !byName && !delegateFor && !byCond && !byFallback) {
+    if (delegation.refused) return deny(delegation.refused, "Someone who is not the author's stand-in", "APR-" + gateId);
     const cn = conds.filter((cd) => cd.needs.oncall && cd.needs.roles.some((r) => roles.includes(r)));
     const roleList = (rs: string[]) => rs.map((r) => state.catalog.roles.find((x) => x.id === r)?.name ?? r).join(" or ");
     if (cn.length && !isOnCall({ projects: [project] }, person, project.id)) return deny((cn[0] as ApproverCondition).text + "; " + person.name + " is not on call.", "On-call " + roleList((cn[0] as ApproverCondition).needs.roles), "APR-" + gateId);

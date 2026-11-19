@@ -102,6 +102,7 @@ export async function deactivatePerson(tx: Tx, a: Actor, id: string, body: z.inf
     `select id, name, key_prefix, project_id from api_keys where org_id = $1 and created_by = $2 and revoked_at is null and (expires_at is null or expires_at > $3) order by id for update`,
     [a.orgId, id, a.now],
   )).rows;
+  if (body.keepKeys && keys.length) await tx.query(`update api_keys set keep_live = true, updated_at = now() where org_id = $1 and id = any($2::text[])`, [a.orgId, keys.map((k) => k.id)]);
   if (!body.keepKeys && keys.length) {
     await tx.query(`update api_keys set revoked_at = $3, revoked_by = $4, updated_at = now() where org_id = $1 and id = any($2::text[])`, [a.orgId, keys.map((k) => k.id), a.now, a.personId]);
   }

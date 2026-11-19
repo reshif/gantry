@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
-import { gateLock, ruleWarning, isFactoryAdminPerson, type ApproverRule, type Project, type ProjectFlow, type Template, type WorkClass } from "@gantry/domain";
-import type { Tx } from "@gantry/db";
+import { can, gateLock, ruleWarning, isFactoryAdminPerson, type ApproverRule, type Project, type ProjectFlow, type Template, type WorkClass } from "@gantry/domain";
+import { cancel, schedule, type Tx } from "@gantry/db";
 import type { z } from "zod";
 import type { Actor, CommandResult, EventSpec } from "../../core/command.js";
 import { capOfReason, overBudget, overText } from "../workorders/budget-state.js";
@@ -8,6 +8,8 @@ import { liftBudgetHalt } from "../workorders/budget.js";
 import { isMandatoryEvent } from "../notifications/events.js";
 import { dispatchQueued, newFx } from "../workorders/engine.js";
 import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
+import { job } from "../../core/jobs-contract.js";
+import { loadPolicyState } from "../../core/read/state.js";
 import { readCatalog, readPeople, readRoles, readTemplates } from "../../core/read/index.js";
 import { parseConfigEdit, type ConfigEdit } from "./config.js";
 import { addBay, addClass, type OverrideRecord, addGate, addStation, draftOf, moveStation, removeStation, replaceClasses, setEnabled, setGateMode, setWip, updateClass, type FlowDraft } from "./flowedit.js";
@@ -73,7 +75,7 @@ export async function createProject(tx: Tx, a: Actor, body: NewProjectBody): Pro
     if (bad.length) throw invalid(`A regulated project keeps every gate on, so ${tpl.name} cannot be used with ${bad.join(", ")} off.`);
   }
   const flow = flowFrom(catalog, tpl);
-  const approvers: Record<string, ApproverRule> = (body.approvers as Record<string, ApproverRule> | null | undefined) ?? approversPreset(tpl.approverPreset, catalog);
+  const approvers: Record<string, ApproverRule> = (body.approvers as Record<string, ApproverRule> | null | undefined) ?? (tpl.approvers ? (JSON.parse(json(tpl.approvers)) as Record<string, ApproverRule>) : approversPreset(tpl.approverPreset, catalog));
   const draft = draftOf(id, flow, approvers, catalog);
   const custom = customCount(customOf(tpl as Template & { custom?: unknown })) ? await replayCustom(tx, org, draft, tpl as Template & { custom?: unknown }) : { done: [] as string[], failed: [] as string[] };
   if (draft.catalogChanged) await saveCatalog(tx, org, draft.catalog);
@@ -396,6 +398,26 @@ export function updateClassCmd(tx: Tx, a: Actor, projectId: string, classId: str
 
 /* ---------------------------------------------------------------- approvers -- */
 
+/**
+ * S-55: the escalation limit in force is the one saved. Re-arms the timers of the gates already waiting: a new limit measured from when each gate opened (it fires
+ * at once when already overdue), cancelled when the limit is 0. An instance that already escalated keeps its outcome.
+ */
+async function rearmEscalations(tx: Tx, orgId: string, projectId: string, gateId: string, hours: number): Promise<{ waiting: number; changed: number }> {
+  const open = (await tx.query<{ id: string; wo_id: string; opened_at: Date }>(
+    `select g.id, g.wo_id, g.opened_at from gate_instances g join work_orders w on w.org_id = g.org_id and w.id = g.wo_id
+      where g.org_id = $1 and w.project_id = $2 and g.gate_id = $3 and g.status = 'open' and coalesce(g.basis->>'escalated', 'false') <> 'true' order by g.id`, [orgId, projectId, gateId],
+  )).rows;
+  let changed = 0;
+  for (const g of open) {
+    await cancel(tx, { orgId, dedupeKey: `escalation:${g.id}` });
+    if (hours > 0) {
+      await schedule(tx, { orgId, kind: "flow.timer", fireAt: new Date(g.opened_at.getTime() + hours * 3_600_000), subject: g.id, dedupeKey: `escalation:${g.id}`, payload: { kind: "escalation", woId: g.wo_id, gateInstanceId: g.id } });
+      changed++;
+    }
+  }
+  return { waiting: open.length, changed };
+}
+
 export async function putApprovers(tx: Tx, a: Actor, projectId: string, gateId: string, rule: ApproverRule): Promise<Out<{ version: number; ruleVersion: number }>> {
   await lockProject(tx, a.orgId, projectId, a.ifMatch);
   const project = (await readProject(tx, a.orgId, projectId))!;
@@ -405,16 +427,25 @@ export async function putApprovers(tx: Tx, a: Actor, projectId: string, gateId: 
   const catalog = await readCatalog(tx, a.orgId);
   const ctx = await ruleContext(tx, a.orgId, projectId, catalog.roles);
   checkRule(gateId, cfg.mode ?? def.kind, rule, ctx, new Set(project.flow.classes.map((c) => c.id)), project.name);
+  // S-56: a fallback who cannot approve this gate would leave an escalation reaching nobody. Refused with the way forward.
+  if (rule.fallback) {
+    const st = await loadPolicyState(tx, a.orgId);
+    const fb = st.people.find((x) => x.id === rule.fallback);
+    if (!fb) throw invalid(`The fallback approver ${rule.fallback} does not exist.`);
+    const d = fb.status === "active" ? can(st, fb.id, def.action || "gate.approve", { project: projectId }) : null;
+    if (!d?.allowed) throw invalid(`${fb.name} cannot approve ${def.label} in ${project.name}${d ? `: ${d.reason}` : " (not an active person)"}. Pick a fallback who holds the right to approve gates there, or give ${fb.name} that role first.`);
+  }
   const before = project.approvers[gateId] ?? null;
   const ruleVersion = await publishRule(tx, a.orgId, projectId, gateId, rule, a.id);
   const version = await bumpProject(tx, a.orgId, projectId);
+  const rearmed = await rearmEscalations(tx, a.orgId, projectId, gateId, Number(rule.escalateH) || 0);
   // Non-blocking: a rule that fewer people can satisfy than it requires saves, and says so.
   const warning = ruleWarning((await readPeople(tx, a.orgId)) as never, project, rule, def.label);
   // The per-class count override is part of the audited change: before and after always carry `classRequired` (empty when none), and the message names it.
   const withCls = (r: ApproverRule | null) => (r ? { ...r, classRequired: r.classRequired ?? {} } : r);
   const clsText = Object.entries(rule.classRequired ?? {}).map(([c, n]) => `${project.flow.classes.find((x) => x.id === c)?.name ?? c} ${n} (base ${rule.required})`).join(", ");
   return {
-    msg: `Saved approvers.${gateId}.${clsText ? ` Per-class approvals: ${clsText}.` : ""}${warning ? ` Warning: ${warning}` : ""}`, events: [evt("approvers.edit", projectId, { type: "gaterule", id: `${projectId}:${gateId}` }, jsonOf(withCls(before)), jsonOf(withCls(rule)))],
+    msg: `Saved approvers.${gateId}.${clsText ? ` Per-class approvals: ${clsText}.` : ""}${rearmed.waiting ? ` The escalation limit applies to ${rearmed.waiting} waiting work order${rearmed.waiting === 1 ? "" : "s"}.` : ""}${warning ? ` Warning: ${warning}` : ""}`, events: [evt("approvers.edit", projectId, { type: "gaterule", id: `${projectId}:${gateId}` }, jsonOf(withCls(before)), jsonOf(withCls(rule)))],
     extra: { version, ruleVersion, ...(warning ? { warning } : {}) }, changes: ["projects"], project: projectId,
   };
 }
@@ -453,23 +484,54 @@ export async function setMemberRole(tx: Tx, a: Actor, projectId: string, personI
 
 /* ------------------------------------------------------------------ archive -- */
 
-export async function archiveProject(tx: Tx, a: Actor, projectId: string, body: z.infer<typeof ArchiveBody>): Promise<Out<{ version: number }>> {
+/** Work orders still in play in a project: what an archive holds in place (S-57). */
+const LIVE_WOS = `state not in ('done','killed','declined') and source not in ('eval','onboarding')`;
+const liveOrders = async (tx: Tx, org: string, projectId: string): Promise<number> =>
+  Number((await tx.query<{ n: string }>(`select count(*)::text n from work_orders where org_id = $1 and project_id = $2 and ${LIVE_WOS}`, [org, projectId])).rows[0]?.n ?? 0);
+
+export async function archiveProject(tx: Tx, a: Actor, projectId: string, body: z.infer<typeof ArchiveBody>): Promise<Out<{ version: number; held: number }>> {
   const row = await lockProject(tx, a.orgId, projectId, a.ifMatch);
   if (row.status === "archived") throw conflict(`${row.name} is already archived.`);
-  if (body.confirmText !== row.name) throw invalid(`Type the project name exactly: ${row.name}`);
+  const live = await liveOrders(tx, a.orgId, projectId);
+  const impact = live ? ` ${live} live work order${live === 1 ? " is" : "s are"} held in place (nothing new starts); unarchiving releases ${live === 1 ? "it" : "them"}.` : "";
+  if (body.confirmText !== row.name) throw invalid(`Type the project name exactly: ${row.name}.${impact}`);
   await tx.query(`update projects set status = 'archived', archived_at = now() where org_id = $1 and id = $2`, [a.orgId, projectId]);
   const version = await bumpProject(tx, a.orgId, projectId);
-  return { msg: `${row.name} archived.`, events: [evt("project.archive", projectId, { type: "project", id: projectId }, row.status, "archived")], extra: { version }, changes: ["projects", "me"], project: projectId };
+  const events: EventSpec[] = [evt("project.archive", projectId, { type: "project", id: projectId }, row.status, "archived")];
+  const jobs: NonNullable<Out["jobs"]> = [];
+  // S-57: live work orders are held with the existing hold mechanism (a project halt with cause `archive`), so no attempt, spend or gate decision continues in a read-only project.
+  if (live) {
+    await tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [`stop:${a.orgId}:project:${projectId}`]);
+    const have = await tx.query(`select 1 from stops where org_id = $1 and scope_type = 'project' and project_id = $2 and mode = 'halt' and lifted_at is null`, [a.orgId, projectId]);
+    if (!have.rowCount) {
+      const n = Number((await tx.query(`select count(*)::int + 1 as n from stops where org_id = $1 and starts_with(id, $2)`, [a.orgId, `project:${projectId}:`])).rows[0].n);
+      const stopId = `project:${projectId}:${n}`;
+      const reason = `${row.name} was archived with ${live} live work order${live === 1 ? "" : "s"}: held in place until it is unarchived.`;
+      await tx.query(`insert into stops (org_id, id, scope_type, project_id, mode, reason, cause, set_by, set_at) values ($1,$2,'project',$3,'halt',$4,'archive',$5,$6)`, [a.orgId, stopId, projectId, reason, a.id, a.now]);
+      events.push({ type: "stop.set", category: "kill", subject: { type: "project", id: projectId }, projectId, after: { stop: stopId, scope: "project", mode: "halt", cause: "archive", reason, held: live } });
+      jobs.push(job("stop.enforce", { stopId, scope: "project", targetId: projectId, mode: "halt" }, { dedupeKey: `stop.enforce:${stopId}:v1`, priority: 100 }));
+    }
+  }
+  return { msg: `${row.name} archived.${impact}`, events, ...(jobs.length ? { jobs } : {}), extra: { version, held: live }, changes: ["projects", "me", ...(live ? ["workOrders", "floor", "home", "stops"] : [])], project: projectId };
 }
 
-export async function unarchiveProject(tx: Tx, a: Actor, projectId: string): Promise<Out<{ version: number; status: string }>> {
+export async function unarchiveProject(tx: Tx, a: Actor, projectId: string): Promise<Out<{ version: number; status: string; released: number }>> {
   const row = await lockProject(tx, a.orgId, projectId, a.ifMatch);
   if (row.status !== "archived") throw conflict(`${row.name} is not archived.`);
   const repos = (await tx.query<{ onboarding_stage: string }>(`select onboarding_stage from repos where org_id = $1 and project_id = $2`, [a.orgId, projectId])).rows;
   const next = repos.length && repos.every((r) => r.onboarding_stage === "ready") ? "active" : repos.length ? "onboarding" : "new";
   await tx.query(`update projects set status = $3, archived_at = null where org_id = $1 and id = $2`, [a.orgId, projectId, next]);
   const version = await bumpProject(tx, a.orgId, projectId);
-  return { msg: `${row.name} is back (${next}).`, events: [evt("project.unarchive", projectId, { type: "project", id: projectId }, "archived", next)], extra: { version, status: next }, changes: ["projects", "me"], project: projectId };
+  const events: EventSpec[] = [evt("project.unarchive", projectId, { type: "project", id: projectId }, "archived", next)];
+  const jobs: NonNullable<Out["jobs"]> = [];
+  await tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [`stop:${a.orgId}:project:${projectId}`]);
+  const held = (await tx.query<{ id: string; version: number }>(`update stops set lifted_by = $3, lifted_at = $4, version = version + 1, updated_at = now() where org_id = $1 and scope_type = 'project' and project_id = $2 and mode = 'halt' and cause = 'archive' and lifted_at is null returning id, version`, [a.orgId, projectId, a.id, a.now])).rows;
+  const released = held.length ? await liveOrders(tx, a.orgId, projectId) : 0;
+  for (const h of held) {
+    events.push({ type: "resume", category: "kill", subject: { type: "project", id: projectId }, projectId, before: { stop: h.id }, after: { stop: h.id, scope: "project", text: "Unarchived: held work orders are released.", released } });
+    jobs.push(job("stop.enforce", { stopId: h.id, scope: "project", targetId: projectId, mode: "halt" }, { dedupeKey: `stop.enforce:${h.id}:v${h.version}`, priority: 100 }));
+  }
+  return { msg: `${row.name} is back (${next}).${released ? ` ${released} held work order${released === 1 ? " is" : "s are"} released.` : ""}`, events, ...(jobs.length ? { jobs } : {}), extra: { version, status: next, released }, changes: ["projects", "me", ...(held.length ? ["workOrders", "floor", "home", "stops"] : [])], project: projectId };
 }
 
 /* ---------------------------------------------------------------- templates -- */
@@ -510,7 +572,7 @@ export async function saveTemplate(tx: Tx, a: Actor, body: z.infer<typeof Templa
   const c = customOf(template as Template & { custom?: unknown });
   const n = customCount(c);
   return {
-    msg: `Template ${name} saved.${n ? ` Carries ${n} custom flow entr${n === 1 ? "y" : "ies"}: ${customText(c)}.` : ""}`,
+    msg: `Template ${name} saved.${"fromProject" in body ? " Approver rules (counts, escalation hours, conditions, fallback and separation of duties) are kept." : ""}${n ? ` Carries ${n} custom flow entr${n === 1 ? "y" : "ies"}: ${customText(c)}.` : ""}`,
     events: [{ type: "template.save", category: "config", subject: { type: "template", id }, after: `${name} ${from}`, projectId: null }],
     extra: { template }, changes: ["templates"], project: null,
   };
@@ -537,6 +599,7 @@ export async function updateTemplate(tx: Tx, a: Actor, id: string, patch: z.infe
   const pick = (b: Record<string, unknown>) => ({ name: undefined as unknown, stationsOff: b.stationsOff, gatesOff: b.gatesOff, classesSkip: b.classesSkip });
   const before = { ...pick(row.body), name: row.name };
   const nextBody = { ...row.body, ...JSON.parse(json(rest)) } as Record<string, unknown>;
+  if (rest.approverPreset !== undefined) delete nextBody.approvers; // choosing a preset replaces the rules saved from a project
   const version = Number(
     (await tx.query(`update templates set name = $3, description = $4, body = $5::jsonb, version = version + 1, updated_at = now() where org_id = $1 and id = $2 returning version`, [org, id, name?.trim() ?? row.name, desc ?? row.description, json(nextBody)])).rows[0].version,
   );

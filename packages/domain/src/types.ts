@@ -112,6 +112,8 @@ export interface Template {
   classesSkip: Record<string, string[]>;
   mcp: Id[];
   approverPreset: "standard" | "light" | "strict";
+  /** Approver rules saved from a project (counts, escalation hours, conditions, fallback, separation of duties); a project made from it starts with these instead of the preset (S-58). */
+  approvers?: Record<string, ApproverRule>;
   notify: "standard" | "light" | "strict";
   builtIn: boolean;
   order?: string[];
@@ -483,6 +485,8 @@ export interface Approval {
   by: Id;
   at: Ms;
   via: string;
+  /** The seat this vote fills when the voter acted as the stand-in of an away approver (S-53): the away person's id. Absent for a vote in the voter's own seat. */
+  for?: Id;
 }
 export interface Rejection {
   by: Id;

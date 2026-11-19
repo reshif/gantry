@@ -1,5 +1,5 @@
 /** Gate votes and decisions (spec 9.5): approve, reject and the brief confirmation. Each approver counts once (F6) and a vote is judged by the rule in force at that moment. */
-import { briefBase, briefGateOff, gateDef, gateProgress, gateDecision, route, stationDef, type Catalog } from "@gantry/domain";
+import { briefBase, briefGateOff, gateDef, gateProgress, delegatedSeat, gateDecision, route, stationDef, type Catalog } from "@gantry/domain";
 import type { Actor } from "../../core/command.js";
 import { conflict, invalid, refuse } from "../../core/errors.js";
 import { coveringStop, pinned, closeEntry, closeInstance, advance, bayOf, enterStation, finish, note, openInstanceOf, recordDecision, ev, stationIdOf, cancelAttempts, type Fx } from "./engine.js";
@@ -47,7 +47,7 @@ async function openInstanceFor(fx: Fx, w: Wo, gateId: string, n: number | null) 
   return inst;
 }
 
-async function insertVote(fx: Fx, w: Wo, instId: string, voter: string, vote: "approve" | "reject", comment: string, via: string): Promise<void> {
+async function insertVote(fx: Fx, w: Wo, instId: string, voter: string, vote: "approve" | "reject", comment: string, via: string, seat: string | null = null): Promise<void> {
   const role = (
     await fx.tx.query<{ role_id: string; id: string }>(
       `select id, role_id from effective_role_assignments where org_id = $1 and person_id = $2 and revoked_at is null and (expires_at is null or expires_at > now()) and (project_id = $3 or project_id is null) order by (project_id is null), created_at limit 1`,
@@ -55,8 +55,8 @@ async function insertVote(fx: Fx, w: Wo, instId: string, voter: string, vote: "a
     )
   ).rows[0];
   const r = await fx.tx.query(
-    `insert into gate_votes (org_id, id, gate_instance_id, voter, role_id, role_assignment_id, vote, comment, at, via) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) on conflict (org_id, gate_instance_id, voter) do nothing`,
-    [fx.orgId, `GV-${instId}-${voter}`, instId, voter, role?.role_id ?? null, role?.id ?? null, vote, comment, fx.now, via],
+    `insert into gate_votes (org_id, id, gate_instance_id, voter, role_id, role_assignment_id, vote, comment, at, via, for_person) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) on conflict (org_id, gate_instance_id, voter) do nothing`,
+    [fx.orgId, `GV-${instId}-${voter}`, instId, voter, role?.role_id ?? null, role?.id ?? null, vote, comment, fx.now, via, seat],
   );
   if (!r.rowCount) throw refuse("denied", "You already voted on this gate instance.", { rule: { kind: "approver", id: "APPROVERS", name: "Approver rules" }, needs: "Another approver" });
 }
@@ -107,7 +107,7 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   if (stopKind && !reason5) throw refuse("denied", `${covering ? covering.reason : "A stop is in force"} As Factory Admin you can approve anyway. Give a reason of at least 5 characters; it is recorded in the audit.`, { needs: "override_reason", rule: { kind: "stop", id: "STOP-" + (covering?.scope ?? "project").toUpperCase(), name: "Stop state" } });
   if (!d.allowed) throw refuse("denied", d.reason, { rule: d.rule, ...(d.needs ? { needs: d.needs } : {}) });
   if (gateId === "G5") await requireMergeablePr(fx, w);
-  await insertVote(fx, w, inst.id, by, "approve", "", via ?? actor.channel);
+  await insertVote(fx, w, inst.id, by, "approve", "", via ?? actor.channel, d.override ? null : delegatedSeat(st, by, wo, gateId, fx.now.getTime()));
   const after = await flowFor(fx, w);
   const project = after.st.projects.find((p) => p.id === w.project)!;
   const prog = gateProgress(project, after.wo, gateId, after.st.people);
