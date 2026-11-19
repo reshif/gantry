@@ -8,6 +8,7 @@ import { WoActions } from "../work/WoActions";
 import { navigate } from "../../lib/router";
 import { gotoWithQuery } from "../../lib/urlState";
 import { getPrefs, setProject } from "../../lib/prefs";
+import { useActors } from "../../ui/actors";
 import { Avatar, Btn, Chip, Empty, Panel } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { TrendChart } from "./TrendChart";
@@ -19,7 +20,7 @@ import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { makeStopActions } from "../../shell/stopActions";
 import { useOpenTraveler } from "../../shell/useTraveler";
-import { metricsOf, useCatalog, type PView } from "../projects/kit";
+import { eventSentence, metricsOf, useCatalog, type PView } from "../projects/kit";
 import { goAttention, type Approval, type AttentionItem, type HomeSections, type SetupStep } from "./data";
 
 /** From Home to the New project wizard on the Projects screen, once that screen has mounted and registered it. */
@@ -277,6 +278,9 @@ export function TaskSuccess() {
 /** §4 Recent activity: the seven newest events, an avatar (square for agents, round for people), the text, "type · WO · ago". */
 export function RecentActivity() {
   const q = useActivity();
+  const cat = useCatalog();
+  const actor = useActors();
+  const name = (id: string | null | undefined) => actor(id).name.replace(" (agent)", "");
   return (
     <Section id="hm-activity" title="Recent activity" flush>
       <Async query={q} what="recent activity" id="hm-activity-state" isEmpty={(d) => (Array.isArray(d) ? d : d.items).length === 0} empty={<Empty id="hm-activity-empty" title="No activity yet" text="Events appear here as work moves." />}>
@@ -288,8 +292,8 @@ export function RecentActivity() {
                 <li key={e.id}>
                   <Avatar id={e.by} />
                   <div className="grow">
-                    <div className="trunc">{e.text || e.type}</div>
-                    <div className="small muted">{`${e.type} · ${e.wo ? e.wo + " · " : ""}${agoMs(Date.now() - e.at)}`}</div>
+                    <div>{eventSentence(e, { cat, name })}</div>
+                    <div className="small muted">{`${e.wo ? e.wo + " · " : ""}${agoMs(Date.now() - e.at)}`}</div>
                   </div>
                 </li>
               ))}

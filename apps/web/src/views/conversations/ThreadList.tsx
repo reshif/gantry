@@ -34,7 +34,7 @@ export function ThreadList({ rows, picked, q, filter, setQ, setFilter, href }: {
                       <a className="cv-row-main" href={href(w.id, w.project)}>
                         <span className="cv-row-top"><span className="mono cv-row-id">{w.id}</span>{w.unread ? <span className="cv-unread" role="img" aria-label="Unread messages" /> : null}<span className="muted small cv-row-t">{w.latest ? fmt.ago(w.latest.at, Date.now()) : ""}</span></span>
                         <span className="cv-row-title">{w.title}</span>
-                        <span className="cv-row-why"><span className={`chip ${why.tone}`.trim()}>{why.text}</span><span className="muted small trunc">{w.latest?.text ?? ""}</span></span>
+                        <span className="cv-row-why"><span className={`chip ${why.tone}`.trim()}>{why.text}</span><span className="muted small">{w.latest?.text ?? ""}</span></span>
                       </a>
                     </li>
                   );

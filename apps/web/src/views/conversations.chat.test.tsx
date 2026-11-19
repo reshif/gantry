@@ -243,7 +243,7 @@ describe("side threads", () => {
   });
   it("the hub route still works", async () => {
     await open(session());
-    fireEvent.click(screen.getByRole("button", { name: "All side threads" }));
+    fireEvent.click(screen.getByRole("button", { name: "All agent chats" }));
     await waitFor(() => expect(window.location.hash).toBe("#workspace/inbox"));
   });
 });

@@ -9,6 +9,7 @@ import { Picker } from "./record/Picker";
 import { splitQuery } from "./dossier/hashQuery";
 import { Dossier, type DossierTab } from "./dossier/Dossier";
 import "../styles/views/record.css";
+import "../styles/views/dossier.css";
 
 export default function RecordView() {
   const hash = useHash();

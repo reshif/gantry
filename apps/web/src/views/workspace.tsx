@@ -112,7 +112,7 @@ export default function WorkspaceView() {
       <div className={`ws-grid${key === "inbox" ? " ws-nosel" : ""}`}>
         <Inbox me={me.person.id} items={items} loading={filter === "archived" ? archived.isLoading : all.isLoading} current={key} filter={cur} onFilter={setFilter} onPick={(k) => open(k)} onNew={newChat} onSearch={(s) => setQ(s)}
           operator={operator ? { show: true, active: key === "operator", onOpen: () => open("operator") } : null} />
-        <main className="ws-main" aria-label="Conversation" ref={pane}>{main}</main>
+        <section className="ws-main" aria-label="Conversation" ref={pane}>{main}</section>
       </div>
     </div>
   );

@@ -176,6 +176,20 @@ describe("Home: one page", () => {
     for (const here of ["Needs you", "Line at a glance", "Task success, 8 weeks", "Recent activity"]) expect(titles.some((t) => t.includes(here))).toBe(true);
   });
 
+  it("T-29: Recent activity reads as plain sentences, never the event key", async () => {
+    const at = Date.now() - 3600_000;
+    setup(ASHA, adminHome({}, { setup: undefined }), { extra: { "GET /api/v1/activity": () => ({ body: { items: [
+      { id: "e1", type: "wo.enter", at, by: "ag-intake", wo: "WO-2473", station: "build" },
+      { id: "e2", type: "gate.decision", at, by: "p-asha", wo: "WO-2473", gate: "G0+G1" },
+      { id: "e3", type: "wo.submit", at, by: "p-asha", wo: "WO-2400", text: "Final data export" },
+    ], next: null } }) } });
+    mount();
+    const panel = (await screen.findByRole("heading", { level: 2, name: /Recent activity/ })).closest("section") as HTMLElement;
+    await waitFor(() => expect(within(panel).getByText(/WO-2473 moved to/)).toBeTruthy());
+    for (const key of ["wo.enter", "gate.decision", "wo.submit"]) expect(panel.textContent).not.toContain(key);
+    expect(within(panel).getByText(/submitted WO-2400/)).toBeTruthy();
+  });
+
   it("Needs you keeps the server's order and its Approve, Request changes and Reject buttons sit directly in the row (so the phone layout can wrap them)", async () => {
     const A = (wo: string, waitMs: number) => ({ wo, title: `T ${wo}`, gate: "G2", gateLabel: "G2", gateName: "Spec", instance: `${wo}:G2:1`, project: "payments", projectName: "Payments", have: 0, need: 1, waitMs });
     setup(ASHA, adminHome({}, { setup: undefined, attention: [], waiting: { approvals: [A("WO-1", 1000), A("WO-2", 9_000_000)], conversations: [] } }));
