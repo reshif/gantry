@@ -30,6 +30,11 @@ const BASE: Record<string, Handler> = {
   "GET /api/v1/people": () => ({ body: PEOPLE }),
   "GET /api/v1/agents": () => ({ body: [] }),
   "GET /api/v1/security": () => ({ body: SEC }),
+  "GET /api/v1/security/egress-hosts": () => ({ body: { hosts: [
+    { host: "github.com", list: "run", kind: "built-in", source: "Built-in defaults" },
+    { host: "hook.partner.example", list: "worker", kind: "integration", source: "Integration Lake (int-lake-1a2b)" },
+    { host: "llm.partner.example", list: "worker", kind: "vendor", source: "Vendor Partner LLM (partner-llm), model discovery" },
+  ] } }),
   "GET /api/v1/sessions": () => ({ body: SESSIONS }),
   "GET /api/v1/signins": () => ({ body: SIGNINS }),
 };
@@ -74,6 +79,29 @@ afterEach(() => {
 });
 
 describe("Security screen", () => {
+  it("S-67: lists the egress hosts with where each came from, and a vendor host only on the worker's list", async () => {
+    setup();
+    mount();
+    await byId("sec-egress");
+    await waitFor(() => expect(text()).toContain("hook.partner.example"));
+    expect(text()).toContain("Worker · Integration Lake (int-lake-1a2b)");
+    expect(text()).toContain("Worker · Vendor Partner LLM (partner-llm), model discovery");
+    expect(text()).toContain("Runs · Built-in defaults");
+  });
+
+  it("S-68: adds an on-prem vendor range as one audited setting, and refuses a range that is not private", async () => {
+    const calls = setup({ "PATCH /api/v1/security": () => ({ body: { ok: true, msg: "Security settings saved.", version: 4 } }) });
+    mount();
+    fireEvent.change(await byId("sec-lan-new"), { target: { value: "8.8.8.0/24" } });
+    fireEvent.click(await byId("sec-lan-add"));
+    await waitFor(() => expect(document.getElementById("sec-lan")?.textContent).toContain("Enter a private IPv4 range"));
+    expect(writes(calls)).toHaveLength(0);
+    fireEvent.change(await byId("sec-lan-new"), { target: { value: "192.168.50.0/24" } });
+    fireEvent.click(await byId("sec-lan-add"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]).toMatchObject({ method: "PATCH", path: "/api/v1/security", body: { path: "vendorLanRanges", value: ["192.168.50.0/24"] } });
+  });
+
   it("shows the sign-in settings and the header summary, with every control enabled for an admin", async () => {
     setup();
     mount();

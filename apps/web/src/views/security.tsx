@@ -13,7 +13,7 @@ import { Async, failureOf, qState } from "../ui/async";
 import { ExplainDenial } from "./console/ExplainDenial";
 import { useQueryParam } from "./floor/urlState";
 import { PolicyPanels } from "./security/Policy";
-import { ChatCapPanel, DomainsPanel, ResearchPanel, SignInExtras } from "./security/More";
+import { ChatCapPanel, DomainsPanel, EgressHostsPanel, ResearchPanel, SignInExtras, VendorLanPanel } from "./security/More";
 import { SessionsTab } from "./security/Sessions";
 import { SignInsTab } from "./security/SignIns";
 import { StopTab } from "./security/Stop";
@@ -79,6 +79,8 @@ export default function SecurityView() {
             <SignInExtras perm={perm} sec={sec} />
             <DomainsPanel perm={perm} sec={sec} mine={me.person.email.split("@")[1] ?? null} />
             <ResearchPanel perm={perm} sec={sec} />
+            <VendorLanPanel perm={perm} sec={sec} />
+            <EgressHostsPanel />
             <ChatCapPanel perm={perm} sec={sec} />
             <StopTab sec={sec} />
           </>

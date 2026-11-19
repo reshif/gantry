@@ -6,8 +6,9 @@
 import { useState } from "react";
 import type { SecuritySettings } from "@gantry/domain";
 import { setSecurity } from "./commands";
-import { usePeople } from "../../api/queries";
-import { Btn, Field, Panel, Select, Toggle, type Decision } from "../../ui/primitives";
+import { useEgressHosts, usePeople } from "../../api/queries";
+import { Async } from "../../ui/async";
+import { Btn, Field, Panel, Select, TextInput, Toggle, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { lockd, useOutcome, versionOf } from "../govern/data";
 
@@ -172,6 +173,70 @@ export function SignInExtras({ perm, sec }: { perm: Decision; sec: SecuritySetti
           </label>
           <Toggle id="sec-kill-stepup" checked={sec.killNeedsStepUp !== false} decision={perm} onChange={(v) => void set("killNeedsStepUp", v, v ? "Kill needs a fresh sign-in." : "Kill no longer needs a fresh sign-in. Restore still does.")} />
         </div>
+      </div>
+    </Panel>
+  );
+}
+
+const LAN_RE = /^(10\.|192\.168\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)\d{1,3}\.\d{1,3}(\/(\d|[12]\d|3[0-2]))?$/;
+
+/** The LAN ranges an on-prem vendor endpoint may be in (S-68). Empty: vendor endpoints must be public addresses. Saving needs a fresh sign-in (the step-up prompt handles it). */
+export function VendorLanPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
+  const set = useSet(sec);
+  const [val, setVal] = useState("");
+  const [err, setErr] = useState("");
+  const list = sec.vendorLanRanges ? sec.vendorLanRanges : [];
+  const submit = async () => {
+    if (!perm.allowed) return;
+    const c = val.trim();
+    if (!LAN_RE.test(c)) return setErr("Enter a private IPv4 range such as 192.168.50.0/24 (inside 10.0.0.0/8, 192.168.0.0/16 or 100.64.0.0/10).");
+    if (list.includes(c)) return setErr(`${c} is already on the list.`);
+    setErr("");
+    setVal("");
+    await set("vendorLanRanges", [...list, c].sort(), `${c} added to the on-prem vendor ranges.`);
+  };
+  return (
+    <Panel title="On-prem vendor ranges">
+      <div className="form-grid" id="sec-lan">
+        <p className="small muted">A vendor endpoint must be a public address. An on-prem model server on your network is let through only when its address is inside a range listed here. Loopback, link-local (cloud metadata), Gantry&apos;s own networks (10.89.17.0/24 and Docker&apos;s 172.16.0.0/12) and Gantry&apos;s service names are never allowed, and a range that overlaps them is refused. Keep each range as narrow as the model host. Changing it needs a fresh sign-in and is audited.</p>
+        {list.length ? (
+          <ul className="sec-list">
+            {list.map((c) => (
+              <li key={c}>
+                <Icon name="page" /><span className="mono">{c}</span><span />
+                <Btn label="Remove" small kind="ghost" icon="x" id={`sec-lan-rm-${c.replace(/\W/g, "_")}`} guard={perm.allowed ? null : perm} onClick={() => void set("vendorLanRanges", list.filter((x) => x !== c), `${c} removed from the on-prem vendor ranges.`)} />
+              </li>
+            ))}
+          </ul>
+        ) : <p className="small">No ranges: every vendor endpoint must be a public address.</p>}
+        <form className="inline-form" id="sec-lan-form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+          <TextInput id="sec-lan-new" className="mono" placeholder="Range, e.g. 192.168.50.0/24" value={val} disabled={!perm.allowed} autoComplete="off" aria-label="LAN range to allow for on-prem vendors" onChange={(e) => setVal(e.target.value)} />
+          <Btn label="Add range" type="submit" small icon="plus" id="sec-lan-add" guard={perm} />
+        </form>
+        <div className="form-err" role="alert">{err}</div>
+      </div>
+    </Panel>
+  );
+}
+
+/** Every host a run or the worker may reach, and what put it there: built-in, a Security setting, an integration or a vendor (S-67). A run's list never holds a vendor host. */
+export function EgressHostsPanel() {
+  const q = useEgressHosts();
+  return (
+    <Panel title="Egress hosts and where they came from">
+      <div className="form-grid" id="sec-egress">
+        <p className="small muted">Runs reach models only through Gantry&apos;s model gateway, so a vendor&apos;s host is on the worker&apos;s list (model discovery and notification delivery), never a run&apos;s. A host an integration or a vendor adds is recorded in the audit log as <span className="mono">egress.host.added</span>.</p>
+        <Async query={q} what="egress hosts" id="sec-egress-list">
+          {(d) => (
+            <ul className="sec-list">
+              {d.hosts.map((h) => (
+                <li key={`${h.list}:${h.host}:${h.source}`}>
+                  <Icon name="page" /><span className="mono">{h.host}</span><span className="small muted">{h.list === "run" ? "Runs" : "Worker"} · {h.source}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Async>
       </div>
     </Panel>
   );
