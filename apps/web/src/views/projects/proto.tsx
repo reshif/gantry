@@ -18,8 +18,8 @@ export function Kv({ rows }: { rows: Array<[ReactNode, ReactNode] | null | false
 /** Prototype `toggleRow`: a label with an optional hint under it and a switch on the right. */
 export function ToggleRow({ id, label, hint, checked, onChange, decision }: { id: string; label: ReactNode; hint?: ReactNode; checked: boolean; onChange: (v: boolean) => void; decision?: Decision | null }) {
   return (
-    <div className="check" style={{ justifyContent: "space-between", padding: "6px 0", borderBottom: "1px dotted var(--line)" }}>
-      <span>{label}{hint ? <span className="sub muted small" style={{ display: "block" }}>{hint}</span> : null}</span>
+    <div className="check" style={{ justifyContent: "space-between", flexWrap: "nowrap", padding: "6px 0", borderBottom: "1px dotted var(--line)" }}>
+      <span style={{ flex: "1 1 0", minWidth: 0, overflowWrap: "anywhere" }}>{label}{hint ? <span className="sub muted small" style={{ display: "block" }}>{hint}</span> : null}</span>
       <Toggle id={id} checked={checked} decision={decision} label={typeof label === "string" ? label : id} onChange={onChange} />
     </div>
   );

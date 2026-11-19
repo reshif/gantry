@@ -121,14 +121,14 @@ describe("People", () => {
     setup();
     mount(<PeopleView />);
     fireEvent.click(await screen.findByRole("tab", { name: /Teams/ }));
-    expect(window.location.search).toContain("ppl.tab=teams");
+    expect(window.location.hash).toContain("ppl.tab=teams");
     expect(await byId("ppl-teams")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: /People/ }));
     fireEvent.change(await screen.findByLabelText("Search person"), { target: { value: "zzz" } });
-    expect(window.location.search).toContain("ppl.q=zzz");
+    expect(window.location.hash).toContain("ppl.q=zzz");
     expect(await screen.findByText("Nothing matches these filters")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(window.location.search).not.toContain("ppl.q");
+    expect(window.location.hash).not.toContain("ppl.q");
   });
 
   it("shows teams as a card grid with member avatars and a members and projects line, with team admin in a menu", async () => {
@@ -278,7 +278,7 @@ describe("Access", () => {
     expect(screen.getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Role matrix", "Roles", "Policies", "Freezes", "Access check"]);
     expect(await screen.findByText("3 actions")).toBeTruthy();
     fireEvent.change(await byId("acc-mx-q"), { target: { value: "policy" } });
-    expect(window.location.search).toContain("acc.q=policy");
+    expect(window.location.hash).toContain("acc.q=policy");
     expect(screen.getByLabelText("Factory Admin can Edit policy")).toBeTruthy();
     expect(screen.queryByLabelText("Engineer can Release")).toBeNull();
     // the cell is a square checkbox, not a switch
@@ -286,7 +286,7 @@ describe("Access", () => {
     fireEvent.change(await byId("acc-mx-q"), { target: { value: "zzz" } });
     expect(await screen.findByText("Nothing matches these filters")).toBeTruthy();
     fireEvent.click(await byId("acc-tab-roles"));
-    expect(window.location.search).toContain("acc.tab=roles");
+    expect(window.location.hash).toContain("acc.tab=roles");
     const heads = Array.from((await byId("acc-roles-table")).querySelectorAll("thead th")).map((h) => h.textContent?.replace(/[\u2191\u2193]/g, ""));
     expect(heads).toEqual(["Role", "Level", "Members", "Actions"]);
   });

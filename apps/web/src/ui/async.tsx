@@ -22,6 +22,8 @@ export function failureOf(error: unknown): { hidden: boolean; msg: string } {
     if (error.status === 0) return { hidden: false, msg: "Could not reach Gantry. Check your connection." };
     return { hidden: false, msg: error.message || `The server answered ${error.status}.` };
   }
+  // react-query words an empty answer as `["factory","stops"] data is undefined`: a person reads a plain sentence, never the query key
+  if (error instanceof Error && /\bdata is undefined\b/.test(error.message)) return { hidden: false, msg: "The server sent no answer. Try again." };
   return { hidden: false, msg: error instanceof Error && error.message ? error.message : "Something went wrong." };
 }
 

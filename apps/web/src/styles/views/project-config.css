@@ -70,7 +70,8 @@ tr.is-disabled th { text-decoration: line-through; text-decoration-color: var(--
 }
 @media (max-width: 560px) {
   .pcf-preview { position: static; }
-  .pcf-dl { grid-template-columns: 3.5em minmax(0, 1fr); }
+  .pcf-dl { display: flex; flex-wrap: wrap; gap: 2px 8px; }
+  .pcf-dl > :nth-child(3) { flex-basis: 100%; overflow-wrap: anywhere; }
 }
 @media (max-width: 720px) { .pcf > .tabs { flex-wrap: wrap; overflow-x: visible; } .pcf > .tabs .tab { padding: 6px 9px; } }
 .pcf .two-col { align-items: start; }

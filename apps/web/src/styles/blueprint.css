@@ -421,7 +421,7 @@ textarea.input{height:auto;min-height:84px}
 .panel>header h2 .sec::before{counter-increment:sec;content:"\00A7" counter(sec)}
 .panel>header h2 .sec:empty{display:inline}
 .top{flex-wrap:nowrap}
-.top .btn.proj-btn{min-width:0;min-height:34px}
+.top .btn.proj-btn{min-width:0;min-height:34px;flex:none}@media (min-width:721px){.top .search-btn{flex:0 1 340px}}
 .top .btn.sm.ghost{border-color:var(--line)}
 .top .user-btn .avatar{width:22px;height:22px;font-size:10px}
 .inbox-btn{position:relative}
@@ -544,9 +544,9 @@ textarea.input{height:auto;min-height:84px}
 .md-vcard .md-vhead{padding:10px 12px;align-items:center;gap:8px}
 .md-vcard .vendor-name{font-size:18px}
 .md-vcard.is-selected{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
-.md-vcard .md-kv{grid-template-columns:auto minmax(0,1fr);padding:8px 12px;gap:4px 12px}
+.md-vcard .md-kv{grid-template-columns:minmax(0,1fr);padding:8px 12px;gap:0}.md-vcard .md-kv dt{border-bottom:0;padding:6px 0 0}.md-vcard .md-kv dd{padding:0 0 6px;text-align:left;overflow-wrap:break-word}
 .md-vcard .meter{margin:0 12px 6px}
-.md-resid{padding:0 12px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.md-resid{padding:0 12px 10px;display:block;overflow-wrap:break-word}
 .md-vfoot{padding:0 12px 10px}
 .md-vadd{align-items:center;justify-content:center;gap:6px;border-style:dashed;padding:16px;min-height:120px}
 .md-used,.md-needs{display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center}

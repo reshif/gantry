@@ -404,7 +404,8 @@ export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, cru
   const me = useMe();
   // the scope key follows the page: a project page shows that project, a factory page shows the chosen scope
   const prefs = usePrefs();
-  const key = isProjectRoute(route) ? me?.projects.find((p) => p.id === loc.project)?.key : (prefs.scopeAll ? undefined : me?.projects.find((p) => p.id === prefs.project)?.key);
+  const allLines = typeof kicker === "string" && kicker.toUpperCase() === "ALL LINES"; // a page that is about every line says so, whatever the switcher holds
+  const key = allLines ? undefined : isProjectRoute(route) ? me?.projects.find((p) => p.id === loc.project)?.key : (prefs.scopeAll ? undefined : me?.projects.find((p) => p.id === prefs.project)?.key);
   const Eyebrow = (crumbs ? "nav" : "div") as "div";
   return (
     <header className="ph vhead">

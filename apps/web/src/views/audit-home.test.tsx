@@ -117,7 +117,7 @@ describe("Audit", () => {
     expect(document.querySelector(".filterbar-count")?.textContent).toBe("3 entries");
     fireEvent.change(document.getElementById("aud-f-category")!, { target: { value: "config" } });
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/audit" && c.query.get("category") === "config")).toBe(true));
-    expect(window.location.search).toContain("cat=config");
+    expect(window.location.hash).toContain("cat=config");
     expect(document.querySelector(".lock-note")).toBeNull();
   });
 

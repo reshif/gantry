@@ -331,7 +331,7 @@ describe("Floor: prototype drawers and links", () => {
     await screen.findAllByText("PAY");
     fireEvent.click(document.getElementById("floor-view-board") as HTMLElement);
     expect(document.getElementById("floor-board")).toBeTruthy();
-    expect(window.location.search).toMatch(/view=board/);
+    expect(window.location.hash).toMatch(/view=board/);
     (first as { unmount?: () => void } | undefined)?.unmount?.();
     window.history.replaceState(null, "", "/"); // the address without ?view=board
     window.location.hash = "#/p/payments/floor";
@@ -415,18 +415,18 @@ describe("Floor: precision sheet", () => {
     expect(btn.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(btn);
     expect(document.getElementById("floor-parts")).toBeTruthy();
-    expect(window.location.search).toMatch(/parts=open/);
+    expect(window.location.hash).toMatch(/parts=open/);
     expect(btn.getAttribute("aria-pressed")).toBe("true");
     expect(document.querySelector(".fp-main")?.classList.contains("has-parts")).toBe(true);
     // grouped by what each part needs, a part per work order
     expect(document.querySelector("#floor-parts .fp-gh")?.textContent).toMatch(/NEEDS YOU · AT G/);
     expect(document.querySelectorAll("#floor-parts .fp-pr").length).toBeGreaterThan(10);
     fireEvent.click(document.getElementById("floor-parts-sort-wait") as HTMLElement);
-    expect(window.location.search).toMatch(/psort=wait/);
+    expect(window.location.hash).toMatch(/psort=wait/);
     expect(document.querySelector("#floor-parts .fp-gh")).toBeNull();
     fireEvent.click(document.getElementById("floor-parts-close") as HTMLElement);
     expect(document.getElementById("floor-parts")).toBeNull();
-    expect(window.location.search).not.toMatch(/parts=/);
+    expect(window.location.hash).not.toMatch(/parts=/);
     window.history.replaceState(null, "", "/");
   });
 
@@ -502,7 +502,7 @@ describe("Floor: precision sheet", () => {
     expect(document.querySelector(".fp-main")?.classList.contains("is-focus")).toBe(false);
     fireEvent.click(btn);
     expect(document.querySelector(".fp-main")?.classList.contains("is-focus")).toBe(true);
-    expect(window.location.search).toMatch(/focus=1/);
+    expect(window.location.hash).toMatch(/focus=1/);
     expect(btn.getAttribute("aria-pressed")).toBe("true");
     window.history.replaceState(null, "", "/");
   });

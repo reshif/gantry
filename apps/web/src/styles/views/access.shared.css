@@ -5,7 +5,7 @@
 .freeze { border-radius: var(--r2); }
 .freeze.is-past { opacity: 0.6; }
 .freeze.is-hl { box-shadow: 0 0 0 3px var(--accent); }
-.matrix th[scope="row"] { min-width: 200px; }
+.matrix th[scope="row"] { min-width: 170px; }
 .mx-cell.is-on { background: var(--accent-soft); }
 .mx-cell.is-hl, th.mx-role.is-hl { box-shadow: inset 0 0 0 2px var(--accent); }
 .matrix tr.is-hl th[scope="row"] { color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }

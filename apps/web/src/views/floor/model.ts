@@ -3,6 +3,7 @@
  * balloons, the gates between them, the side-bay trays, the groups of work that need a person (oldest first) and the headline figures.
  * Everything comes from the floor read (FloorCtx) and the agents list; nothing is invented here.
  */
+import { gateLabelOf } from "../../lib/gate-label";
 import { gateAfter, gateKind, type Agent, type Bay, type Gate, type Station } from "@gantry/domain";
 import { gateHaveNeed, gateOfStation, gateStateOf, isLive, since, stationIdx, waitingGateId, type FloorCtxValue, type FWo } from "./kit";
 
@@ -189,7 +190,7 @@ const stationGateLabel = (stations: StationModel[], gid: string): string => stat
 
 /** "At G5", "Parked", "Split ×2": the word the revisions strip and the parts list put after a work order's number. */
 export function revWord(b: Bal, bayName: (id: string) => string): string {
-  if (b.kind === "gate" || (b.gate && b.kind === "run")) return `At ${b.gate}`;
+  if (b.kind === "gate" || (b.gate && b.kind === "run")) return `At ${gateLabelOf(null, b.gate)}`;
   if (b.w.bay) return bayName(b.w.bay);
   if (b.kind === "split") return `Split ×${b.w.children.length}`;
   if (b.kind === "stuck") return "Stuck";

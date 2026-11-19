@@ -405,3 +405,35 @@ describe("Person page: team membership", () => {
     expect(writes(calls)[0]).toMatchObject({ method: "PUT", path: "/api/v1/people/p-tomas/teams", body: { teams: ["payments", "platform"] } });
   });
 });
+
+describe("People list (T-23, T-25, T-31)", () => {
+  it("shows one chip per role, with a count when the role is held in several places", async () => {
+    const dup = person("p-dan", "Daniel Okafor", ["platform"], [{ role: "project_admin", scope: "payments" }, { role: "project_admin", scope: "storefront" }, { role: "reviewer", scope: "payments" }]);
+    setup({ "GET /api/v1/people": () => ({ body: [PEOPLE[0], dup] }) });
+    mount();
+    const row = await byId("ppl-row-p-dan");
+    const chips = Array.from(row.querySelectorAll(".chip")).map((c) => c.textContent);
+    expect(chips.filter((t) => /Project Admin/i.test(t ?? ""))).toEqual(["Project Admin ×2"]);
+    expect(chips).toContain("Reviewer");
+  });
+
+  it("a failed people read leaves no 0 in the stat or the tab count", async () => {
+    setup({ "GET /api/v1/people": () => ({ status: 500, body: { ok: false, msg: "boom" } }) });
+    mount();
+    await waitFor(() => expect(document.getElementById("ppl-tab-people")).toBeTruthy());
+    const tab = document.getElementById("ppl-tab-people") as HTMLElement;
+    expect(tab.textContent).toBe("People");
+    expect(document.getElementById("ppl-stats")?.textContent).not.toMatch(/0 active/);
+  });
+
+  it("the tab is in the hash, not before it, and a link restores it", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("ppl-tab-teams"));
+    expect(window.location.hash).toContain("ppl.tab=teams");
+    expect(window.location.search).toBe("");
+    cleanup();
+    mount();
+    expect((await byId("ppl-tab-teams")).getAttribute("aria-selected")).toBe("true");
+  });
+});

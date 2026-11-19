@@ -156,7 +156,7 @@ describe("Onboarding: pipeline", () => {
     const calls = api([GREEN], { "PUT /api/v1/guidelines": () => ok("Saved.") });
     mount(<OnboardingView />);
     fireEvent.click(await byId("onb-tab-guidelines"));
-    expect(window.location.search).toBe("?tab=guidelines");
+    expect(window.location.hash).toMatch(/\?tab=guidelines$/);
     const sw = await byId(`onb-gl-sw-${GUIDELINES.items[3]!.id}`);
     expect(document.querySelectorAll("[id^=onb-gl-sw-]")).toHaveLength(GUIDELINES.items.length);
     expect(document.querySelector(".callout")?.textContent).toContain("The agent may never");

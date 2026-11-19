@@ -36,6 +36,11 @@ export default function SecurityView() {
   const perm = dec(manage);
   const [tabParam, setTab] = useQueryParam("tab");
   const tab = TABS.includes(tabParam ?? "") ? (tabParam as string) : "auth";
+  // the stop section is on the Authentication tab, far down the page: this brings it up from wherever the person is
+  const jumpToStop = (): void => {
+    if (tab !== "auth") setTab(null);
+    window.setTimeout(() => document.getElementById("sec-stop-section")?.scrollIntoView?.({ block: "start" }), 0);
+  };
   if (!me) return null;
   // not allowed to read it: the prototype's locked sheet with a way home, never a blank page
   if (!sec && ((secQ.isError && failureOf(secQ.error).hidden) || (!manage.pending && !manage.allowed && !view.pending && !view.allowed))) {
@@ -54,7 +59,7 @@ export default function SecurityView() {
 
   return (
     <div className="view view-security">
-      <ViewHead title="Security" kicker="All lines" sub="Who can sign in, how, and from where." />
+      <ViewHead title="Security" kicker="All lines" sub="Who can sign in, how, and from where." actions={<Btn label="Emergency stop" kind="ghost" icon="halt" id="sec-jump-stop" aria="Jump to Emergency stop" onClick={jumpToStop} />} />
       <StatRow id="sec-stats">
         <Stat label="SSO" value={sec.sso.enforced ? "Enforced" : "Optional"} sub={sec.sso.provider} tone={sec.sso.enforced ? "done" : "wait"} />
         <Stat label="MFA" value={<span title="Recorded only: Gantry does not check it at sign-in.">{sec.mfa.policy}</span>} sub={sec.mfa.methods.length ? sec.mfa.methods.join(", ") : "no methods"} />

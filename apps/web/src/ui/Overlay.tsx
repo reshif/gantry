@@ -324,7 +324,8 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
   }, []);
   const toast = useCallback((text: string, kind: ToastKind = "info", action?: ToastAction) => {
     const id = seq.current++;
-    setToasts((l) => [...l, { id, text, kind, out: false, action }].slice(-3));
+    // the same message twice (a refresh clicked twice) is one toast, with a fresh timer
+    setToasts((l) => [...l.filter((t) => t.text !== text || t.kind !== kind), { id, text, kind, out: false, action }].slice(-3));
     const timers = toastTimers.current;
     const later = (fn: () => void, ms: number): void => {
       const t = setTimeout(() => { timers.delete(t); fn(); }, ms);
