@@ -665,6 +665,16 @@ describe("Project config", () => {
     expect(calls.find((c) => c.path === "/api/v1/projects/payments/routes/test")?.body).toEqual({ dest: { channel: "email", target: "on-call", integration: null }, event: "andon" });
   });
 
+  it("T-63: Send test page says it was sent even when the server answers without a message", async () => {
+    withPayments({ "POST /api/v1/projects/payments/routes/test": () => ({ body: { ok: true } }) });
+    tab("members");
+    mount(<ProjectConfigView />);
+    const test = (await byId("pcf-oncall-test")) as HTMLButtonElement;
+    await waitFor(() => expect(test.disabled).toBe(false));
+    fireEvent.click(test);
+    expect(await screen.findByText(/Test page sent to the people on call/)).toBeTruthy();
+  });
+
   it("members tab: the default-page switch is bound to pageOnCall and PATCHes notifications.oncallPage; off lists only kill and restore", async () => {
     const calls = withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, pageOnCall: true, pagedFor: ["kill", "restore", "halts", "blocked", "security hold", "escalations"] }, RISK] }), "PATCH /api/v1/projects/payments/config": () => ok({ version: 8 }) });
     tab("members");

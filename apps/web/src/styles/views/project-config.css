@@ -154,3 +154,8 @@ tr.is-custom > th, tr.is-custom > td:first-child { box-shadow: inset 3px 0 0 var
 .pcf .check-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
 .pcf .check { flex-wrap: wrap; row-gap: 2px; }
 .pcf .check .pcf-tag-custom { margin-left: 0; flex: none; }
+
+/* T-58: the three run-limit fields of a station sit on one row inside the fieldset; one column when narrow. */
+.flw-limits .row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.flw-limits .pcf-num { width: 100%; }
+@media (max-width: 600px) { .flw-limits .row { grid-template-columns: minmax(0, 1fr); } }

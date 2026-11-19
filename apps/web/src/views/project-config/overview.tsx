@@ -217,12 +217,12 @@ function OnCallPanel({ p, people, canSet }: { p: PcProps["p"]; people: PcProps["
           <p className="small muted" id="pcf-oncall-none">Nobody besides the Factory Admins is on call for {p.name}.</p>
         )}
         {Array.isArray(p.pagedFor) && p.pagedFor.length ? <p className="small muted" id="pcf-oncall-paged">{`Paged for: ${p.pagedFor.join(", ")}.`}</p> : null}
-        <div className="row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
+        <div className="row" style={{ justifyContent: "flex-start", gap: 12, flexWrap: "wrap" }}>
           <span>Page the people on call by default (halts, blocked, security hold, escalations)</span>
           <Toggle id="pcf-oncall-page" checked={p.pageOnCall !== false} decision={notify} label="Page the people on call by default" onChange={(v) => void ops.setProject(p.id, "notifications.oncallPage", v, { ifMatch: v0 }).then((r) => res(r))} />
         </div>
         <div className="filters">
-          <Btn small icon="send" id="pcf-oncall-test" guard={notify} label="Send test page" onClick={async () => res(await ops.sendTest(p.id, { channel: "email", target: "on-call", integration: null }, "", "andon"))} />
+          <Btn small icon="send" id="pcf-oncall-test" guard={notify} label="Send test page" onClick={async () => { const r = await ops.sendTest(p.id, { channel: "email", target: "on-call", integration: null }, "", "andon"); res(r.ok && !r.msg ? { ...r, msg: "Test page sent to the people on call." } : r); }} />
         </div>
         <p className="small muted">{`Always on call: ${admins.map((x) => x.name).join(", ") || "no Factory Admin"} (Factory Admin).`}</p>
         <div className="filters">

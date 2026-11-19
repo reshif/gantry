@@ -106,3 +106,6 @@
 
 /* a detail page is never wider than the screen: the tab bar scrolls inside it, long lines wrap */
 .ag-panel > .tabs { overflow-x: auto; }
+
+/* T-63: the run-limit inputs are number fields, not page-wide bars. */
+#ag-limits { grid-template-columns: repeat(auto-fit, minmax(150px, 220px)); align-items: start; }
