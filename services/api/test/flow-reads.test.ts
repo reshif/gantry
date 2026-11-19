@@ -48,6 +48,37 @@ d("flow reads: list, traveler, floor and replay, record, home", () => {
     expect((await w.call("p-diego", "GET", `/api/v1/work-orders/${ids.run}`)).status).toBe(404);
   });
 
+  it("R1: the traveler, the record and the home attention list say why a run is waiting, and for a disk wait at once", async () => {
+    const q = async (sql: string, p: unknown[] = []) => (await t.db.admin.query(sql, p)).rows;
+    const att = (await q(`select id from attempts where wo_id = $1 order by created_at desc limit 1`, [ids.run]))[0];
+    await q(`delete from runs where wo_id = $1`, [ids.run]);
+    await q(`insert into runs (org_id, id, attempt_id, wo_id, data) values ($1, 'run-r1-wait', $2, $3, $4::jsonb)`, [t.orgId, att.id, ids.run, JSON.stringify({ dispatchWait: { label: "Waiting for a run slot (2 queued)", reason: "at the concurrent run limit (3)", deferrals: 4, since: new Date().toISOString() } })]);
+    const wo = (await w.call("p-asha", "GET", `/api/v1/work-orders/${ids.run}`)).body;
+    expect(wo.wait).toMatchObject({ label: "Waiting for a run slot (2 queued)", kind: "slot" });
+    expect((await w.call("p-asha", "GET", `/api/v1/work-orders/${ids.run}/record`)).body.wait).toMatchObject({ kind: "slot" });
+    let home = (await w.call("p-asha", "GET", "/api/v1/home")).body.sections.attention as Array<{ id: string }>;
+    expect(home.map((a) => a.id)).not.toContain(`hm-att-wait-${ids.run}`); // a slot wait is quiet for the first 10 minutes
+    await q(`update runs set data = jsonb_set(data, '{dispatchWait,since}', to_jsonb($1::text)) where id = 'run-r1-wait'`, [new Date(Date.now() - 11 * 60_000).toISOString()]);
+    home = (await w.call("p-asha", "GET", "/api/v1/home")).body.sections.attention;
+    expect(home.map((a) => a.id)).toContain(`hm-att-wait-${ids.run}`);
+    await q(`update runs set data = jsonb_set(jsonb_set(data, '{dispatchWait,label}', '"Waiting: host disk low"'), '{dispatchWait,since}', to_jsonb($1::text)) where id = 'run-r1-wait'`, [new Date().toISOString()]);
+    await q(`update runs set data = jsonb_set(data, '{dispatchWait,reason}', '"host free disk is 3.0 GB, under the 20.0 GB floor"') where id = 'run-r1-wait'`);
+    const diskWo = (await w.call("p-asha", "GET", `/api/v1/work-orders/${ids.run}`)).body;
+    expect(diskWo.wait).toMatchObject({ label: "Waiting: host disk low", kind: "disk", reason: null });
+    expect(JSON.stringify(diskWo.wait)).not.toMatch(/\d GB/);
+    home = (await w.call("p-asha", "GET", "/api/v1/home")).body.sections.attention;
+    expect(home.find((a: any) => a.id === `hm-att-wait-${ids.run}`)).toMatchObject({ title: expect.stringContaining("host disk low"), sub: expect.stringContaining("3.0 GB") });
+    await q(`update runs set data = '{"blocker":{"code":"host_disk_critical","label":"Host disk critically low"}}'::jsonb, ended_at = now() where id = 'run-r1-wait'`);
+    expect((await w.call("p-asha", "GET", `/api/v1/work-orders/${ids.run}`)).body.wait).toMatchObject({ label: "Host disk critically low", kind: "disk_critical" });
+    // the list and the floor card carry the label only
+    await q(`update runs set ended_at = null, data = '{"dispatchWait":{"label":"Waiting for a run slot (1 queued)","reason":"x","since":"2020-01-01T00:00:00Z"}}'::jsonb where id = 'run-r1-wait'`);
+    const listed = (await w.call("p-asha", "GET", "/api/v1/projects/payments/work-orders")).body.items.find((x: any) => x.id === ids.run);
+    expect(listed.wait).toEqual({ label: "Waiting for a run slot (1 queued)", kind: "slot" });
+    const floor = (await w.call("p-asha", "GET", "/api/v1/projects/payments/floor")).body;
+    expect(floor.workOrders.find((x: any) => x.id === ids.run).wait.kind).toBe("slot");
+    await q(`delete from runs where id = 'run-r1-wait'`);
+  });
+
   it("the traveler carries gate progress and what the viewer may do", async () => {
     const wo = await w.call("p-priya", "GET", `/api/v1/work-orders/${ids.gate}`);
     expect(wo.status).toBe(200);

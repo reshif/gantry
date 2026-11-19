@@ -78,6 +78,17 @@ export const KNOWN_BUILTIN_TOOLS = [
   "Agent", "Bash", "Cron", "CronCreate", "CronDelete", "CronList", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "TodoWrite", "WebFetch", "WebSearch", "Workflow", "Write",
 ];
 
+/**
+ * Paths no file tool may touch, whatever the allow-list says (S-91): git runs programs named in `.git/config` (filter, textconv, aliases, sshCommand ...)
+ * and in `.git/hooks`, so a "may write the branch" agent that could edit them could run commands. Listed as deny rules for every editing tool and
+ * every spelling of the path (relative, nested, absolute). `.gitattributes` and `.gitmodules` are named too: they select the filters and drivers.
+ * The git front (bin/git) is the second rail: it refuses to run when the config names such a program.
+ */
+export const GIT_PATH_DENIES: string[] = ["Edit", "Write", "NotebookEdit"].flatMap((t) => [`${t}(.git)`, `${t}(.git/**)`, `${t}(**/.git)`, `${t}(**/.git/**)`, `${t}(**/gitdir)`, `${t}(//workspace/.git)`, `${t}(//workspace/.git/**)`, `${t}(**/.gitattributes)`, `${t}(**/.gitmodules)`]);
+
+/** Directory of the git front, first on the harness's PATH (runner/wrapper/bin, installed at /opt/gantry-wrapper/bin). */
+export const GIT_FRONT_DIR = fileURLToPath(new URL("../../bin", import.meta.url));
+
 const toolBase = (entry: string): string => entry.replace(/\(.*$/s, "").trim();
 
 /** Built-in tool names an allow-list grants. An entry may carry a specifier, `Bash(npm test:*)`, which grants the tool and narrows approval; MCP entries are not built-ins. */
@@ -144,7 +155,7 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, relayUrl: stri
   // `--disallowedTools` names the rest as a second rail. MCP tools (station tools, registry servers in scope) are gated by the edge and stay.
   const granted = builtinTools(spec.toolAllowList);
   args.push("--tools", granted.join(","));
-  args.push("--disallowedTools", KNOWN_BUILTIN_TOOLS.filter((t) => !granted.includes(t)).join(","));
+  args.push("--disallowedTools", [...KNOWN_BUILTIN_TOOLS.filter((t) => !granted.includes(t)), ...GIT_PATH_DENIES].join(","));
   args.push("--allowedTools", [...narrowShell(spec.toolAllowList), ...STATION_TOOL_NAMES].join(","));
 
   const cloneEnv: Record<string, string> = {};
@@ -152,8 +163,11 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, relayUrl: stri
     const v = baseEnv[k];
     if (v !== undefined) cloneEnv[k] = v;
   }
+  // The git front first: it refuses config-borne commands (see bin/git). The real git is whatever the image has.
+  cloneEnv.PATH = [GIT_FRONT_DIR, cloneEnv.PATH ?? "/usr/local/bin:/usr/bin:/bin"].join(":");
   Object.assign(cloneEnv, {
     HOME: join(SCRATCH, "home"),
+    GANTRY_WORKSPACE: env.workspace,
     ...cacheEnv(env.workspace),
     CLAUDE_CONFIG_DIR: join(SCRATCH, "claude-config"),
     // The harness talks to the edge's model gateway through the loopback relay, which adds the run token; the vendor key never enters the runner.
@@ -169,10 +183,17 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, relayUrl: stri
     // The image sets the git identity and the hardening (hooks off, fsmonitor off, /workspace trusted) in its environment, but this clean environment
     // dropped them, and `git commit` refuses without an identity. Same values as runner/Dockerfile; no token is among them.
     GIT_AUTHOR_NAME: "Gantry Agent", GIT_AUTHOR_EMAIL: "agent@gantry.invalid", GIT_COMMITTER_NAME: "Gantry Agent", GIT_COMMITTER_EMAIL: "agent@gantry.invalid",
-    GIT_CONFIG_COUNT: "3",
+    // S-91: no system or global config, hooks and fsmonitor off, no external diff, no ssh command, no pager or editor. These are "command" scope
+    // and beat anything in the repository's own config.
+    GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_ATTR_NOSYSTEM: "1", GIT_EDITOR: "true", GIT_PAGER: "cat",
+    GIT_CONFIG_COUNT: "7",
     GIT_CONFIG_KEY_0: "core.hooksPath", GIT_CONFIG_VALUE_0: "/dev/null",
     GIT_CONFIG_KEY_1: "safe.directory", GIT_CONFIG_VALUE_1: "/workspace",
     GIT_CONFIG_KEY_2: "core.fsmonitor", GIT_CONFIG_VALUE_2: "false",
+    GIT_CONFIG_KEY_3: "diff.external", GIT_CONFIG_VALUE_3: "",
+    GIT_CONFIG_KEY_4: "core.sshCommand", GIT_CONFIG_VALUE_4: "false",
+    GIT_CONFIG_KEY_5: "core.pager", GIT_CONFIG_VALUE_5: "cat",
+    GIT_CONFIG_KEY_6: "protocol.ext.allow", GIT_CONFIG_VALUE_6: "never",
     GIT_TERMINAL_PROMPT: "0",
     DISABLE_AUTOUPDATER: "1",
     DISABLE_TELEMETRY: "1",

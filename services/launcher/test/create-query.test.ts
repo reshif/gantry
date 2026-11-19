@@ -7,10 +7,11 @@ import type { AddressInfo } from "node:net";
 import Docker from "dockerode";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { BIG_HOST } from "./host.js";
 import { DEFAULT_LIMITS, checkContainer } from "../src/sockpolicy.js";
 import { createRequest, runnerContainerOptions } from "../src/template.js";
 
-const cfgR = loadConfig({ RUNNER_VARIANTS: "base=gantry-runner:dev", EDGE_URL: "http://gantry-edge:8443" });
+const cfgR = loadConfig({ RUNNER_VARIANTS: "base=gantry-runner:dev", EDGE_URL: "http://gantry-edge:8443" }, BIG_HOST);
 if (!cfgR.ok) throw new Error(cfgR.error.msg);
 let server: http.Server;
 let seen: { url: string; body: string }[] = [];

@@ -46,6 +46,29 @@ d("internal runs API", () => {
   const setStop = (scope: string, target: string, mode: "halt" | "kill", id = `${scope}:${target}:t${++n}`) =>
     q(`insert into stops (org_id, id, scope_type, ${scope === "wo" ? "wo_id" : scope === "project" ? "project_id" : "repo_id"}, mode, reason, set_by) values ($1,$2,$3,$4,$5,'test stop','p-asha')`, [t.orgId, id, scope, target, mode]).then(() => id);
 
+  describe("S-94: a run past its wall clock", () => {
+    it("is refused model calls by authorize even though its token is live and the launcher has not stopped it", async () => {
+      const r = await makeRun({ runData: { wallClockSeconds: 60, dispatch: { phase: "started" } } });
+      await q(`update runs set started_at = now() - interval '2 hours' where id = $1`, [r.runId]);
+      const res = await authorize(r, "claude-test-1");
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ allow: false, code: "ended" });
+      expect(JSON.stringify(res.json())).toMatch(/wall-clock limit of 60 seconds/);
+      // a run inside its limit is still allowed
+      const ok = await makeRun({ runData: { wallClockSeconds: 3600, dispatch: { phase: "started" } } });
+      await q(`update runs set started_at = now() - interval '2 minutes' where id = $1`, [ok.runId]);
+      expect((await authorize(ok, "claude-test-1")).json()).toMatchObject({ allow: true });
+    });
+  });
+
+  describe("G-S9: the wall clock starts when the runner starts", () => {
+    it("a run still waiting for a slot (old row, no started dispatch) is not past its wall clock", async () => {
+      const r = await makeRun({ runData: { wallClockSeconds: 900 } });
+      await q(`update runs set started_at = now() - interval '20 minutes' where id = $1`, [r.runId]);
+      expect((await authorize(r, "claude-test-1")).json()).toMatchObject({ allow: true });
+    });
+  });
+
   describe("service auth", () => {
     it("refuses a missing or wrong service token and a browser-style caller", async () => {
       const r = await makeRun();

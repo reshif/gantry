@@ -95,7 +95,8 @@ async function recordRepoContext(deps: Deps, a: AttemptInfo, runId: string, rc: 
 
 async function markStarted(deps: Deps, a: AttemptInfo, runId: string, startupLeaseMs: number): Promise<void> {
   await withTx(deps.pool, async (tx) => {
-    await tx.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, runId, JSON.stringify({ dispatch: { phase: "started", at: deps.now().toISOString() } })]);
+    // G-S9: the wall clock runs from the moment the runner starts, not from the run row (which a wait for a slot may have made old).
+    await tx.query(`update runs set data = (data - 'dispatchWait') || $3::jsonb, started_at = now(), updated_at = now() where org_id = $1 and id = $2`, [a.orgId, runId, JSON.stringify({ dispatch: { phase: "started", at: deps.now().toISOString() } })]);
     // F9: from here the attempt is a leased external job. A run that never heartbeats loses its lease and is retried.
     await tx.query(
       `update attempts set state = 'running', lease_holder = 'runner', lease_until = $3, started_at = coalesce(started_at, $4), updated_at = now(), version = version + 1
@@ -128,11 +129,51 @@ async function failDispatch(deps: Deps, a: AttemptInfo, runId: string, code: str
   return { failed: code, applied: out.applied };
 }
 
-/** Launcher at capacity: wait for room without spending the queue's retry budget. A new job carries the count of deferrals. */
+/** Why this attempt must not (or no longer) start a runner: superseded, or covered by a stop. Undefined when it may. */
+async function startBlock(deps: Deps, orgId: string, a: AttemptInfo): Promise<string | undefined> {
+  const cur = await attemptIsCurrent(deps.pool, orgId, a.attemptId, a.fencing);
+  if (!cur.current) return cur.reason;
+  const stops = await coveringStops(deps.pool, orgId, a);
+  return stops.length ? `${stops[0]!.mode} at ${stops[0]!.scopeType} scope` : undefined;
+}
+
+/** A dispatch that is skipped because the attempt was stopped or superseded: a runner an earlier try left behind (G-S4: its removal failed) goes now. */
+async function skipClean(deps: Deps, a: AttemptInfo, why: string): Promise<unknown> {
+  const runId = runIdFor(a.attemptId);
+  const left = (await deps.launcher.list().catch(() => [])).find((r) => r.runId === runId);
+  if (left?.container) await abandonStart(deps, runId, why);
+  return { skipped: why };
+}
+
+async function abandonStart(deps: Deps, runId: string, why: string): Promise<unknown> {
+  // G-S4: a stop that fails (the launcher is down) is retried by the job queue, not only logged: the runner must not wait for the reaper.
+  try {
+    await deps.launcher.stop(runId, { keepWorkspace: false });
+  } catch (e) {
+    throw new TransientError(`removing a run that was stopped while it started failed: ${errMsg(e)}`, "stop_failed");
+  }
+  return { skipped: why, abandonedStart: true };
+}
+
+/** S-96: a token issued for a start that did not happen is revoked now, not at the retry's prepareRun or teardown (a new one is issued on the retry). */
+async function revokeUnused(deps: Deps, orgId: string, runId: string, reason: string): Promise<void> {
+  await withTx(deps.pool, (tx) => revokeRunTokens(tx, { orgId, runIds: [runId], reason })).catch((e) => deps.log.warn({ run: runId, err: errMsg(e) }, "revoking the token of a run that did not start"));
+}
+
+/**
+ * Launcher at capacity (no run slot, or the host disk under its floor): wait for room, for as long as it takes (G-S3). Waiting is never a failure and
+ * never spends a retry budget; only a real start failure does. The order shows why it waits: "Waiting for a run slot (n queued)" or "Waiting: host disk low".
+ */
 async function defer(deps: Deps, job: Job, a: AttemptInfo, runId: string, reason: string): Promise<unknown> {
   const n = Number((job.payload as { deferrals?: unknown }).deferrals ?? 0) + 1;
   await deps.launcher.stop(runId, { keepWorkspace: false }).catch(() => undefined);
-  if (n > deps.cfg.maxDispatchDeferrals) return failDispatch(deps, a, runId, "capacity", `No room to start the run after ${n - 1} waits: ${reason}`);
+  await revokeUnused(deps, a.orgId, runId, "dispatch deferred");
+  const disk = /disk/i.test(reason);
+  await withTx(deps.pool, async (tx) => {
+    const q = Number((await tx.query(`select count(*)::int as n from runs where org_id = $1 and data ? 'dispatchWait' and id <> $2`, [a.orgId, runId])).rows[0]?.n ?? 0) + 1;
+    const label = disk ? "Waiting: host disk low" : `Waiting for a run slot (${q} queued)`;
+    await tx.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, runId, JSON.stringify({ dispatchWait: { label, reason: reason.slice(0, 300), deferrals: n, since: deps.now().toISOString() } })]);
+  }).catch((e) => deps.log.warn({ run: runId, err: errMsg(e) }, "recording why a dispatch waits"));
   await enqueue(deps.pool, {
     orgId: a.orgId, queue: "flow", kind: "attempt.dispatch", payload: { ...(job.payload as object), deferrals: n }, runAt: new Date(deps.now().getTime() + 15_000), dedupeKey: `attempt:${a.attemptId}:defer:${n}`,
   });
@@ -150,9 +191,9 @@ export async function attemptDispatch(job: Job, ctx: HandlerCtx): Promise<unknow
   const a = await loadAttempt(deps.pool, job.orgId, p.value.attemptId);
   if (!a) return { skipped: "unknown attempt" };
   const cur = await attemptIsCurrent(deps.pool, job.orgId, a.attemptId, p.value.fencing);
-  if (!cur.current) return { skipped: cur.reason };
+  if (!cur.current) return await skipClean(deps, a, cur.reason);
   const stops = await coveringStops(deps.pool, job.orgId, a);
-  if (stops.length) return { skipped: `${stops[0]!.mode} at ${stops[0]!.scopeType} scope` };
+  if (stops.length) return await skipClean(deps, a, `${stops[0]!.mode} at ${stops[0]!.scopeType} scope`);
 
   // A station's agent that is turned off (or whose live version never passed its eval suite) does not run: the order waits for a person with the way forward.
   // Eval cases run the version the person picked and onboarding steps have their own gate, so neither is held here.
@@ -191,13 +232,23 @@ export async function attemptDispatch(job: Job, ctx: HandlerCtx): Promise<unknow
       // and the record (paths, sizes, hashes, what was inlined or withheld) shows later exactly what the agent was offered.
       await recordRepoContext(deps, a, runId, seeded.repoContext);
     }
+    // S-95: a kill that landed while the workspace was being seeded must not get a runner. Checked again right before the start.
+    const before = await startBlock(deps, job.orgId, a);
+    if (before) return await abandonStart(deps, runId, before);
     const go = await deps.launcher.start({ ...base, seedComplete: true });
     if (go.state === "capacity") return await defer(deps, job, a, runId, go.msg);
+    // ...and once more after it: a kill that landed between that check and the start has already been enforced (tokens revoked, the run removed),
+    // so the start has just recreated a runner nobody owns. Remove it now instead of leaving it to the next reaper pass.
+    const after = await startBlock(deps, job.orgId, a);
+    if (after) return await abandonStart(deps, runId, after);
     await markStarted(deps, a, runId, deps.cfg.startupLeaseMs);
     return { started: true, runId, seeded: a.repo?.full ?? null };
   } catch (e) {
     const transient = e instanceof TransientError;
-    if (transient && !ctx.last) throw e;
+    if (transient && !ctx.last) {
+      await revokeUnused(deps, a.orgId, runId, "dispatch retry");
+      throw e;
+    }
     const code = e instanceof PermanentError || e instanceof TransientError ? e.code : "dispatch_error";
     deps.log.warn({ attempt: a.attemptId, err: errMsg(e), code }, "dispatch gave up");
     return failDispatch(deps, a, runId, code, `The run could not be started: ${errMsg(e)}`);

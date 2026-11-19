@@ -4,5 +4,6 @@
 !runner/wrapper/package-lock.json
 !runner/wrapper/tsconfig.json
 !runner/wrapper/src
+!runner/wrapper/bin
 !runner/harness/package.json
 !runner/harness/package-lock.json

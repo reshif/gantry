@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import Docker from "dockerode";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { BIG_HOST } from "./host.js";
 import { RunManager } from "../src/manager.js";
 import { buildServer } from "../src/server.js";
 
@@ -202,7 +203,7 @@ d("launcher against real Docker", () => {
   });
 
   it("refuses to start when the image is missing and leaves nothing behind", async () => {
-    const cfg2 = loadConfig({ RUNNER_VARIANTS: `base=${P}-missing:none`, RUN_SUBNET_POOL: "10.213.200.0/24", MAX_CONCURRENT_RUNS: "2", EDGE_CONTAINER: EDGE });
+    const cfg2 = loadConfig({ RUNNER_VARIANTS: `base=${P}-missing:none`, RUN_SUBNET_POOL: "10.213.200.0/24", MAX_CONCURRENT_RUNS: "2", EDGE_CONTAINER: EDGE }, BIG_HOST);
     if (!cfg2.ok) throw new Error(cfg2.error.msg);
     const app2 = buildServer({ cfg: cfg2.value, manager: new RunManager(docker, cfg2.value), token: TOKEN, logger: false });
     const r = await app2.inject({ method: "POST", url: "/v1/runs", headers: auth, payload: body("it5") });
