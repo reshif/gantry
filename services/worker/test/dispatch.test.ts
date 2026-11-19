@@ -33,6 +33,27 @@ d("attempt.dispatch and run.result", () => {
     expect(att.lease_until).not.toBeNull();
   });
 
+  it("records on the run the limits it is bound by (station override, agent version, one-off raise, per field) and the watchdog's wall clock is the resolved one", async () => {
+    await w.q(`update repos set github_full_name = 'acme/payments-api' where org_id = $1 and id = 'payments-api'`, [w.orgId]);
+    await w.q(`insert into repo_config (org_id, repo_id, data) values ($1,'payments-api','{"baseSha":"${"1".repeat(40)}"}') on conflict (org_id, repo_id) do update set data = excluded.data`, [w.orgId]);
+    // the agent version: 90 turns, 2 hours; the project's build station overrides turns to 150
+    await w.q(`insert into agent_versions (org_id, agent_id, version, body, model_id, published_at) select org_id, agent_id, version + 100, body || '{"limits":{"turns":90,"wallClockSeconds":7200}}'::jsonb, model_id, now() from agent_versions where org_id = $1 and agent_id = 'ag-build' and version = (select live_version from agents where org_id = $1 and id = 'ag-build')`, [w.orgId]);
+    await w.q(`update agents set live_version = live_version + 100, data = case when data ? 'promoted' then jsonb_set(data, '{promoted}', (data->'promoted') || to_jsonb(live_version + 100)) else data end where org_id = $1 and id = 'ag-build'`, [w.orgId]);
+    await w.q(`insert into flow_versions (org_id, project_id, version, doc, note, published_at, published_by) select org_id, project_id, version + 100, jsonb_set(doc, '{stations,build,runLimits}', '{"turns":150}'), 'test', now(), 'test' from flow_versions where org_id = $1 and project_id = 'payments' and version = (select current_flow_version from projects where org_id = $1 and id = 'payments')`, [w.orgId]);
+    await w.q(`update projects set current_flow_version = current_flow_version + 100 where org_id = $1 and id = 'payments'`, [w.orgId]);
+    const { runId } = await w.workOrderAt("WO-9040", { agent: "ag-build" });
+    await w.drain();
+    const data = (await w.q(`select data from runs where id = $1`, [runId]))[0].data;
+    expect(data.limits).toMatchObject({ turns: 150, wallClockSeconds: 7200 });
+    expect(data.wallClockSeconds).toBe(7200);
+    // a one-off raise recorded on the attempt wins for that attempt only
+    const { runId: r2, attemptId, fencing } = await w.workOrderAt("WO-9041", { agent: "ag-build", dispatch: false });
+    await w.q(`update attempts set data = data || '{"limitRaise":{"limits":{"wallClockSeconds":10800}}}'::jsonb where id = $1`, [attemptId]);
+    await w.enqueue("attempt.dispatch", { woId: "WO-9041", station: "build", attemptId, fencing }, { dedupeKey: `attempt:${attemptId}` });
+    await w.drain();
+    expect((await w.q(`select data from runs where id = $1`, [r2]))[0].data).toMatchObject({ wallClockSeconds: 10800, limits: { turns: 150, wallClockSeconds: 10800 } });
+  });
+
   it("seeds the pull request's head together with the target branch head, and records both on the run so the agents can diff offline", async () => {
     await w.q(`update repos set github_full_name = 'acme/payments-api' where org_id = $1 and id = 'payments-api'`, [w.orgId]);
     await w.q(`insert into repo_config (org_id, repo_id, data) values ($1,'payments-api','{"baseSha":"${"1".repeat(40)}"}') on conflict (org_id, repo_id) do update set data = excluded.data`, [w.orgId]);

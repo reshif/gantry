@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { applyStationResult, attemptIsCurrent, recordDispatchPrompt, refuseStationRun, stationRunBlock, endCarrierAttempt, isCarrier, issueRunToken, parseJob, pinRunConfig, revokeRunTokens, type RunPin } from "@gantry/api/core";
+import { applyStationResult, attemptIsCurrent, recordDispatchPrompt, refuseStationRun, stationRunBlock, endCarrierAttempt, isCarrier, issueRunToken, parseJob, pinRunConfig, revokeRunTokens, loadRunLimits, type RunPin } from "@gantry/api/core";
 import type { RepoContext } from "@gantry/domain";
 import { enqueue, withTx, type Job, type Tx } from "@gantry/db";
 import type { Deps } from "../deps.js";
@@ -16,6 +16,8 @@ interface Pinned {
   model: string | null;
   adapter: "claude" | "stub";
   wallClockSeconds: number;
+  /** The limits the run is bound by, recorded on the run so a stop can say "used 40 of 40 turns". */
+  limits: { turns: number; wallClockSeconds: number; costUsd?: number };
   /** The composition recorded on the run (spec 10.2): layer versions, instruction hash, skill versions. */
   record: Record<string, unknown> | null;
 }
@@ -23,7 +25,7 @@ interface Pinned {
 /** Pins the agent version that will run (spec 13.1: agent version, skill versions, instruction hash, harness, model) and records it on the attempt. */
 async function pinTuple(tx: Tx, a: AttemptInfo): Promise<Pinned> {
   const agentId = typeof a.attemptData.agent === "string" ? a.attemptData.agent : "";
-  const none: Pinned = { tupleId: null, model: null, adapter: "stub", wallClockSeconds: 3600, record: null };
+  const none: Pinned = { tupleId: null, model: null, adapter: "stub", wallClockSeconds: 3600, limits: { turns: 40, wallClockSeconds: 3600 }, record: null };
   if (!agentId) return none;
   const found = (await tx.query<{ live_version: number | null; data: Record<string, unknown> }>(`select live_version, data from agents where org_id = $1 and id = $2`, [a.orgId, agentId])).rows[0];
   // An eval case runs the version (and model) the person picked for the run, which need not be the live one (spec 13.2); real work always runs the live version.
@@ -57,10 +59,11 @@ async function pinTuple(tx: Tx, a: AttemptInfo): Promise<Pinned> {
     [a.orgId, id, agentId, ag.live_version, JSON.stringify(skillVersions), instruction, v.harness_version, model ?? ""],
   );
   await tx.query(`update attempts set tuple_id = $3, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, a.attemptId, id]);
-  const lim = (v.body.limits ?? ag.data.limits ?? {}) as { wallClockSeconds?: unknown };
-  const wall = typeof lim.wallClockSeconds === "number" && Number.isInteger(lim.wallClockSeconds) && lim.wallClockSeconds > 0 ? lim.wallClockSeconds : 3600;
+  // The watchdog enforces the same wall clock the run is told: attempt one-off raise, station override, agent version, default.
+  const resolved = await loadRunLimits(tx, { orgId: a.orgId, projectId: a.projectId, station: a.station, attemptData: a.attemptData }, { body: v.body, data: ag.data });
+  const wall = resolved.wallClockSeconds;
   const record = run ? { instructionPin: run.pin, promptManifest: run.manifest, composed: { hash: run.composed.hash, layers: run.composed.layers.map((l) => ({ name: l.name, version: l.version, hash: l.hash })), skills: run.skills.map((x) => ({ id: x.id, version: x.version })), agentVersion: ag.live_version, tupleId: id } } : null;
-  return { tupleId: id, model: model && model !== "" ? model : null, adapter: model ? "claude" : "stub", wallClockSeconds: wall, record };
+  return { tupleId: id, model: model && model !== "" ? model : null, adapter: model ? "claude" : "stub", wallClockSeconds: wall, limits: { turns: resolved.turns, wallClockSeconds: resolved.wallClockSeconds, ...(resolved.costUsd !== undefined ? { costUsd: resolved.costUsd } : {}) }, record };
 }
 
 /** Records the run, pins the tuple and issues a fresh per-run token (any earlier token of the run is revoked). All in one transaction. */
@@ -70,7 +73,7 @@ async function prepareRun(deps: Deps, a: AttemptInfo, runId: string): Promise<{ 
     await tx.query(
       `insert into runs (org_id, id, attempt_id, wo_id, state, model_id, data) values ($1,$2,$3,$4,'starting',$5,$6::jsonb)
        on conflict (org_id, id) do update set data = runs.data || excluded.data, model_id = excluded.model_id, updated_at = now()`,
-      [a.orgId, runId, a.attemptId, a.woId, pinned.model, JSON.stringify({ adapter: pinned.adapter, wallClockSeconds: pinned.wallClockSeconds, ...(pinned.record ?? {}), dispatch: { phase: "preparing", worker: deps.workerId } })],
+      [a.orgId, runId, a.attemptId, a.woId, pinned.model, JSON.stringify({ adapter: pinned.adapter, wallClockSeconds: pinned.wallClockSeconds, limits: pinned.limits, ...(pinned.record ?? {}), dispatch: { phase: "preparing", worker: deps.workerId } })],
     );
     await revokeRunTokens(tx, { orgId: a.orgId, runIds: [runId], reason: "re-dispatched" });
     const t = await issueRunToken(tx, runId, a.attemptId, a.fencing, { orgId: a.orgId });

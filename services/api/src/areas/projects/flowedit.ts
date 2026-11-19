@@ -1,5 +1,6 @@
-import { gateLock, gateModeLock, gateOverridable, OVERRIDE_REASON_MIN, type ApproverRule, type FlowOverrideMark, type Bay, type Catalog, type Gate, type GateKind, type ProjectFlow, type Station, type WorkClass } from "@gantry/domain";
+import { gateLock, gateModeLock, gateOverridable, OVERRIDE_REASON_MIN, type ApproverRule, type FlowOverrideMark, type Bay, type Catalog, type Gate, type GateKind, type ProjectFlow, type RunLimits, type Station, type WorkClass } from "@gantry/domain";
 import { conflict, invalid, refuse, type Refusal } from "../../core/errors.js";
+import { limitInRange, limitRangeText, type LimitField } from "../agents/run-limits.js";
 
 /**
  * Pure flow editing (legacy `G.catalog.*` and the checks in `ops3.js`). A `FlowDraft` is a deep copy of one project's flow, its approver
@@ -307,6 +308,24 @@ export function setWip(d: FlowDraft, stationId: string, wip: number): { name: st
   const before = cfg.wip;
   cfg.wip = wip;
   return { name: def.name, before };
+}
+
+/** The station's run limits override, per field (`null` clears a field; an empty result removes the override). Returns what was there and what is there now. */
+export function setRunLimits(d: FlowDraft, stationId: string, patch: Record<string, unknown>): { name: string; before: RunLimits; after: RunLimits } {
+  const cfg = d.flow.stations[stationId];
+  const def = station(d, stationId);
+  if (!cfg || cfg.absent || !def) throw invalid(`This project has no station ${stationId}.`);
+  const before: RunLimits = { ...(cfg.runLimits ?? {}) };
+  const next: RunLimits = { ...before };
+  for (const [k, v] of Object.entries(patch)) {
+    if (k !== "turns" && k !== "wallClockSeconds" && k !== "costUsd") throw invalid(`${k} is not a run limit.`);
+    if (v === null) { delete next[k as LimitField]; continue; }
+    if (!limitInRange(k, v)) throw invalid(limitRangeText(k));
+    next[k] = k === "costUsd" ? Math.round(v * 100) / 100 : v;
+  }
+  if (Object.keys(next).length) cfg.runLimits = next;
+  else delete cfg.runLimits;
+  return { name: def.name, before, after: next };
 }
 
 /** The whole class list replaced (route edits, reset to template). Classes cannot disappear or turn off while open work uses them. */

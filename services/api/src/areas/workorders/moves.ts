@@ -4,12 +4,15 @@ import type { Tx } from "@gantry/db";
 import type { Actor } from "../../core/command.js";
 import { conflict, invalid, refuse } from "../../core/errors.js";
 import {
-  acquireSlot, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, closeOpenQuestions, dispatchQueued, enterStation, ev, leaveBay, note, openGate, pinned, advance, projectOf, resetGatesFrom, stationIdOf, type Fx,
+  acquireSlot, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, closeOpenQuestions, dispatchQueued, enterStation, ev, leaveBay, note, openEntry, openGate, pinned, advance, projectOf, resetGatesFrom, stationIdOf, type Fx,
 } from "./engine.js";
 import { begin, done, flowFor, person, type CmdResult } from "./ctx.js";
 import { approveInner } from "./gates.js";
 import { declineInner, parkInto, resumeAt } from "./intake.js";
 import { saveWo, type Wo } from "./model.js";
+import { limitInRange, limitRangeText, loadRunLimits } from "../agents/run-limits.js";
+import { liftBudgetHalt } from "./budget.js";
+import { capOfReason } from "./budget-state.js";
 
 /** The dry run of a move for the board (spec 9.4): `moveCheck` against the live state, for whoever asks. No state changes, so no command pipeline. */
 export async function dryRunMove(db: Tx | import("pg").Pool, orgId: string, principalId: string | null, woId: string, to: string, now = Date.now()): Promise<MoveCheck & { allowed: boolean }> {
@@ -187,10 +190,63 @@ export async function reassign(tx: Tx, actor: Actor, woId: string, agentId: stri
   return done(fx, `${w.id} now staffed by ${ag.name}. It applies from the next run of the station.`, w.project, { version: w.version, agent: agentId });
 }
 
+export interface LimitRaiseIn { limits: Record<string, unknown>; reason?: string | undefined }
+
+/**
+ * Retry with a higher limit: the same retry, and the next attempt (only) runs with the raised limits. The raise is recorded on that attempt (attempts.data.limitRaise) and in
+ * the audit with who, why and the numbers before and after; the agent and the project are not changed. The caller holds the right to change limits (project.config),
+ * decided by the route; a Factory Admin's reason is passed through the pipeline's override and kept in the audit.
+ */
+export async function retryWithLimits(tx: Tx, actor: Actor, woId: string, raise: LimitRaiseIn): Promise<CmdResult> {
+  // A run that reached its cost limit was stopped by the budget halt (cause budget, the run's cap): the raise is recorded for the next attempt and the halt is lifted, which runs the station again.
+  const halt = (await tx.query<{ reason: string }>(`select reason from stops where org_id = $1 and scope_type = 'wo' and wo_id = $2 and mode = 'halt' and cause = 'budget' and lifted_at is null`, [actor.orgId, woId])).rows[0];
+  if (!halt || capOfReason(halt.reason) !== "run") return retry(tx, actor, woId, raise);
+  const { fx, w } = await begin(tx, actor, woId, "wo.sendback", { skipStop: true });
+  const by = person(actor, "Retrying is");
+  const checked = checkRaise(raise.limits, undefined);
+  if (checked.costUsd === undefined) throw invalid("This run stopped on its cost limit: raise the cost per run for the next attempt.");
+  const sid = stationIdOf(fx.catalog, w);
+  const prior = await resolvedFor(fx, w, sid);
+  if (checked.costUsd <= (prior.costUsd ?? 0)) throw invalid(`The run stopped at $${(prior.costUsd ?? 0).toFixed(2)}; ask for more than that.`);
+  w.data.limitRaise = { station: sid, limits: checked, by, at: fx.now.getTime(), ...(raise.reason ? { reason: raise.reason } : {}), stoppedOn: "cost" };
+  note(w, fx, by, `Raised the cost limit for the next attempt only (${limitsText(checked)}).${raise.reason ? ` ${raise.reason}` : ""}`);
+  ev(fx, w, "wo.limit.raise", { station: sid, limits: checked, oneOff: true, stoppedOn: "cost", ...(raise.reason ? { reason: raise.reason } : {}) }, { category: "config", before: prior });
+  await saveWo(fx.tx, fx.orgId, w);
+  const lifted = await liftBudgetHalt(tx, actor, woId, `One-off cost limit raise for the next attempt: $${checked.costUsd.toFixed(2)}`);
+  return { ...done(fx, `${w.id} is running again with a one-off higher cost limit.`, w.project, { version: w.version + 1 }), events: [...fx.events, ...lifted.events], jobs: [...fx.jobs, ...lifted.jobs], changes: [...new Set([...fx.changes, "stops", "workOrders", "floor", "home"])] };
+}
+
+const limitsText = (l: Record<string, number>): string => [l.turns !== undefined ? `${l.turns} turns` : "", l.wallClockSeconds !== undefined ? `${Math.round((l.wallClockSeconds / 60) * 10) / 10} minutes` : "", l.costUsd !== undefined ? `$${l.costUsd.toFixed(2)} per run` : ""].filter(Boolean).join(", ");
+
+/** The one-off limits a person asked for: each field in range, at least one, and the one that stopped the run must really go up. */
+function checkRaise(v: Record<string, unknown>, stopped: { limit?: string; max?: number } | undefined): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, x] of Object.entries(v)) {
+    if (x === undefined || x === null) continue;
+    if (k !== "turns" && k !== "wallClockSeconds" && k !== "costUsd") throw invalid(`${k} is not a run limit.`);
+    if (!limitInRange(k, x)) throw invalid(limitRangeText(k));
+    out[k] = k === "costUsd" ? Math.round(x * 100) / 100 : x;
+  }
+  if (!Object.keys(out).length) throw invalid("Say which limit to raise for the next attempt.");
+  const field = stopped?.limit === "turns" ? "turns" : stopped?.limit === "time" ? "wallClockSeconds" : null;
+  if (field && typeof stopped?.max === "number" && out[field] !== undefined && out[field] <= stopped.max) throw invalid(`The run stopped at ${stopped.max}; ask for more than that.`);
+  return out;
+}
+
+/** What the station's next run would be bound by with no one-off raise: the audit's "before". */
+async function resolvedFor(fx: Fx, w: Wo, sid: string): Promise<Record<string, number>> {
+  const agent = String(openEntry(w)?.agent ?? stationDef(fx.catalog, sid)?.agent ?? "");
+  const row = agent ? (await fx.tx.query<{ body: Record<string, unknown> | null; data: Record<string, unknown> }>(`select v.body, a.data from agents a left join agent_versions v on v.org_id = a.org_id and v.agent_id = a.id and v.version = a.live_version where a.org_id = $1 and a.id = $2`, [fx.orgId, agent])).rows[0] : undefined;
+  const r = await loadRunLimits(fx.tx, { orgId: fx.orgId, projectId: w.project, station: sid, attemptData: {} }, { body: row?.body ?? {}, data: row?.data ?? {}, budgetUsd: row?.body?.budget ?? row?.data.budget });
+  return { turns: r.turns, wallClockSeconds: r.wallClockSeconds, ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) };
+}
+
 /** Retry a failed or blocked work order: the station runs again as a fresh attempt. */
-export async function retry(tx: Tx, actor: Actor, woId: string): Promise<CmdResult> {
+export async function retry(tx: Tx, actor: Actor, woId: string, raise?: LimitRaiseIn): Promise<CmdResult> {
   const { fx, w } = await begin(tx, actor, woId, "wo.sendback");
   const by = person(actor, "Retrying is");
+  const stopped = w.data.limitStop as { limit?: string; max?: number } | undefined;
+  const checked = raise ? checkRaise(raise.limits, stopped) : null;
   // A station that failed (or lost its run) three times is parked in the Needs a person bay: retrying it is what that person is there to decide.
   const failedBay = w.state === "parked" && bayOf(fx.catalog, w) === "person" && w.data.bayCause === "failed";
   // An approved merge that could not happen (the pull request closed, or GitHub still refuses it) waits for a person: Retry merge asks again.
@@ -206,9 +262,15 @@ export async function retry(tx: Tx, actor: Actor, woId: string): Promise<CmdResu
   const gs = (w.data.gateStatus ??= {}) as Record<string, string>;
   for (const k of Object.keys(gs)) if (gs[k] === "failed") delete gs[k];
   w.data.gateChecks = {};
-  note(w, fx, by, `Retried ${stationDef(fx.catalog, sid)?.name ?? sid}.`);
+  const sname = stationDef(fx.catalog, sid)?.name ?? sid;
+  if (checked && raise) {
+    const prior = await resolvedFor(fx, w, sid);
+    w.data.limitRaise = { station: sid, limits: checked, by, at: fx.now.getTime(), ...(raise.reason ? { reason: raise.reason } : {}), ...(stopped?.limit ? { stoppedOn: stopped.limit } : {}) };
+    note(w, fx, by, `Retried ${sname} with a one-off higher limit (${limitsText(checked)}).${raise.reason ? ` ${raise.reason}` : ""}`);
+    ev(fx, w, "wo.limit.raise", { station: sid, limits: checked, oneOff: true, ...(raise.reason ? { reason: raise.reason } : {}), ...(stopped?.limit ? { stoppedOn: stopped.limit } : {}) }, { category: "config", before: prior });
+  } else note(w, fx, by, `Retried ${sname}.`);
   await enterStation(fx, w, sid);
-  ev(fx, w, "wo.retry", { station: sid });
+  ev(fx, w, "wo.retry", { station: sid, ...(checked ? { limits: checked } : {}) });
   await saveWo(fx.tx, fx.orgId, w);
   return done(fx, `${w.id} is running again.`, w.project, { version: w.version });
 }

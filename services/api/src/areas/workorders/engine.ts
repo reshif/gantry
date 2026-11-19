@@ -196,9 +196,13 @@ export async function startAttempt(fx: Fx, w: Wo, stationId: string): Promise<At
   await fx.tx.query(`update attempts set state = 'superseded', ended_at = $4, updated_at = now(), version = version + 1 where org_id = $1 and wo_id = $2 and station = $3 and state in ('queued','running')`, [fx.orgId, w.id, stationId, fx.now]);
   const visit = Number((await fx.tx.query(`select coalesce(max(visit), 0) + 1 as v from attempts where org_id = $1 and wo_id = $2 and station = $3`, [fx.orgId, w.id, stationId])).rows[0].v);
   const id = `ATT-${w.id}-${stationId}-${visit}`;
+  // A one-off limit raise a person approved applies to this attempt only: it moves from the work order onto the attempt, and is gone for the next one.
+  const pending = w.data.limitRaise as { station?: string } | undefined;
+  const raise = pending && (!pending.station || pending.station === stationId) ? pending : null;
+  if (raise) delete w.data.limitRaise;
   const { rows } = await fx.tx.query<{ fencing: string }>(
     `insert into attempts (org_id, id, wo_id, station, visit, state, data) values ($1,$2,$3,$4,$5,'queued',$6::jsonb) returning fencing`,
-    [fx.orgId, id, w.id, stationId, visit, JSON.stringify({ agent: openEntry(w)?.agent ?? stationDef(fx.catalog, stationId)?.agent ?? "" })],
+    [fx.orgId, id, w.id, stationId, visit, JSON.stringify({ agent: openEntry(w)?.agent ?? stationDef(fx.catalog, stationId)?.agent ?? "", ...(raise ? { limitRaise: raise } : {}) })],
   );
   const fencing = Number(rows[0]!.fencing);
   fx.jobs.push(job("attempt.dispatch", { woId: w.id, station: stationId, attemptId: id, fencing }, { dedupeKey: `attempt:${id}` }));
@@ -322,6 +326,7 @@ export async function enterStation(fx: Fx, w: Wo, stationId: string, o: { projec
   delete w.data.bayAt;
   delete w.data.bayCause;
   delete w.data.failPhase;
+  delete w.data.limitStop;
   w.data.blockReason = null;
   w.data.failReason = null;
   if (stationId === "intake") {

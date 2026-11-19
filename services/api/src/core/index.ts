@@ -37,3 +37,4 @@ export { progressEval, gradeEvalAttempt, failEvalAttempt, sweepEvals, cancelEval
 export { evaluateAllTrust } from "../areas/trust/record.js";
 // Learning (wave 4): the findings refresh the worker runs on a schedule (spec 13.4).
 export { refreshFindings as refreshLearningFindings, type RefreshResult as LearningRefreshResult } from "../areas/learning/findings.js";
+export { loadRunLimits, resolveRunLimits, RUN_LIMIT_DEFAULTS, RUN_LIMIT_RANGES, type ResolvedLimits } from "../areas/agents/run-limits.js";

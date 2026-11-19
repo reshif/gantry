@@ -178,7 +178,7 @@ export async function readAgents(db: Queryable, orgId: string, id?: string, now 
     out.push({
       liveSkills: liveIds.map((sid) => ({ id: sid, version: typeof liveVers[sid] === "number" ? skillLabels.get(`${sid}:${liveVers[sid]}`) ?? "" : "" })),
       id: a.id, name: a.name, station: a.station, model: cfg.model, fallbacks: cfg.fallbacks, version: liveV?.v ?? "", status: a.status, autonomy: cfg.autonomy, tools: cfg.tools,
-      skills: skills.filter((s) => s.agent_id === a.id).map((s) => s.skill_id), mcp: cfg.mcp, stations: cfg.stations, projects: cfg.projects, budget: cfg.budget, guardrails: cfg.guardrails,
+      skills: skills.filter((s) => s.agent_id === a.id).map((s) => s.skill_id), mcp: cfg.mcp, stations: cfg.stations, projects: cfg.projects, budget: cfg.budget, guardrails: cfg.guardrails, limits: cfg.limits,
       suite: cfg.suite, instructions: cfg.instructions, overrides: cfg.overrides, versions, spark: ex.spark.get(a.id) ?? [], spend7d: ex.spend.get(a.id) ?? 0, initials: initialsOf(a.name),
       evalScore: liveV?.suiteScore ?? 0, ...(a.data.builtin === true ? { builtin: true } : {}), running: ex.running.get(a.id) ?? 0, rev: a.version, suiteName: suite?.name ?? null, threshold: suite ? (suite.threshold !== null && !Number.isNaN(Number(suite.threshold)) ? Number(suite.threshold) : 0.85) : null,
     });

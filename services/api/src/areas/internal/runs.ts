@@ -25,7 +25,7 @@ async function writeBudgetHalt(tx: Tx, c: RunCtx, runId: string, br: Breach): Pr
   if ((await activeStopsFor(tx, c)).some((s) => s.scopeType === "wo" || s.scopeType === "factory" || s.scopeType === "project")) return null;
   const n = Number((await tx.query<{ n: string }>(`select count(*)::text as n from stops where org_id = $1 and scope_type = 'wo' and wo_id = $2`, [c.orgId, c.woId])).rows[0]!.n) + 1;
   const stopId = `wo:${c.woId}:${n}`;
-  const reason = `Budget reached: the ${br.scope === "wo" ? "work order" : br.scope === "run" ? "run" : br.scope === "plan" ? "approved research plan" : "project"} has spent $${(br.spentMicros / 1e6).toFixed(2)} of $${(br.limitMicros / 1e6).toFixed(2)}.`;
+  const reason = `Budget reached: the ${br.scope === "wo" ? "work order" : br.scope === "run" ? "run" : br.scope === "plan" ? "approved research plan" : "project"} has spent $${(br.spentMicros / 1e6).toFixed(2)} of $${(br.limitMicros / 1e6).toFixed(2)}${br.scope === "run" ? " (the run cost limit)" : ""}.`;
   const ins = await tx.query(
     `insert into stops (org_id, id, scope_type, wo_id, mode, reason, cause, set_by, in_flight) values ($1,$2,'wo',$3,'halt',$4,'budget','system',$5) on conflict do nothing`,
     [c.orgId, stopId, c.woId, reason, `run ${runId}`],

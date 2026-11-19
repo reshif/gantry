@@ -209,9 +209,17 @@ export interface FlowOverrideMark {
   /** For a mode override: the mode before. */
   from?: GateKind;
 }
+/** A safety rail on one agent run: turns, wall-clock seconds and (optionally) dollars. Every field is optional; what is unset is inherited. */
+export interface RunLimits {
+  turns?: number;
+  wallClockSeconds?: number;
+  costUsd?: number;
+}
 export interface StationConfig {
   enabled: boolean;
   wip: number;
+  /** Overrides the agent's run limits for runs at this station in this project, per field. */
+  runLimits?: RunLimits;
   absent?: boolean;
   /** Set while the station is off by a Factory Admin override of a lock it carries. */
   override?: { off?: FlowOverrideMark };
@@ -854,6 +862,8 @@ export interface Agent {
   projects: "all" | Id[];
   budget: number;
   guardrails: { paths: string[]; maxDiff: number };
+  /** Run limits a person set on the working copy (versioned with the agent). Empty: the defaults apply. */
+  limits?: RunLimits;
   suite: Id;
   instructions: string;
   overrides: Record<string, { model?: string; autonomy?: Autonomy; budget?: number }>;

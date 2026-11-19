@@ -2,6 +2,7 @@ import type { Queryable } from "@gantry/db";
 import { REPO_CONTEXT_LAYER_NAME, RepoContext, checkMatches, renderRepoContext } from "@gantry/domain";
 import { compactPrevious, type StationResultRow } from "./previous.js";
 import { agentConfig } from "./metering.js";
+import { loadRunLimits } from "../agents/run-limits.js";
 import { testCommandRules } from "../onboarding/testcmd.js";
 import { dialogueHandoff, latestDocuments } from "../workorders/documents.js";
 import { commentsHandoff } from "../workorders/doccollab.js";
@@ -151,12 +152,11 @@ export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string):
   const mcp = carrier ? [] : await mcpServersInScope(db, c);
   // A run's rails come from the agent version it was pinned to. The agent's working copy (a draft) is only read for a run with no version at all, so an unpromoted edit never widens a live run.
   const draft = Object.keys(agent.body).length ? {} : agent.data;
-  const lim = (agent.body.limits ?? draft.limits ?? {}) as { turns?: unknown; wallClockSeconds?: unknown };
-  const pos = (v: unknown): number | undefined => (typeof v === "number" && Number.isInteger(v) && v > 0 ? v : undefined);
-  const agentBudget = typeof agent.budgetUsd === "number" && agent.budgetUsd > 0 ? agent.budgetUsd : undefined;
+  // Each limit resolves on its own: the attempt's one-off raise, the project's station override, the agent version, then the default. Cost: the agent's per-run budget when nothing sets one.
+  const lim = await loadRunLimits(db, c, agent);
   // An approved research plan's budget caps the run too (the lower of the two wins).
   const planBudget = planOf(c.woData)?.status === "approved" ? (planOf(c.woData)?.budgetUsd ?? undefined) : undefined;
-  const costUsd = agentBudget !== undefined && planBudget ? Math.min(agentBudget, planBudget) : (planBudget ?? agentBudget);
+  const costUsd = lim.costUsd !== undefined && planBudget ? Math.min(lim.costUsd, planBudget) : (planBudget ?? lim.costUsd);
   const input = c.runData.input ?? c.attemptData.input ?? (await handoff(db, c));
   const skills = await skillsFor(db, c);
   const confirmedTests = carrier || !c.repoId ? null : (await db.query<{ t: unknown }>(`select data->'testCommands' as t from repo_config where org_id = $1 and repo_id = $2`, [c.orgId, c.repoId])).rows[0]?.t;
@@ -175,7 +175,7 @@ export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string):
     skills: skills.map((s) => ({ name: s.name, content: s.content })),
     mcpServers: Object.fromEntries(mcp.map((s) => [mcpKey(s, mcp), { type: "http" as const, url: `${edgeUrl.replace(/\/+$/, "")}/mcp/v1/${encodeURIComponent(s.id)}` }])),
     toolAllowList: carrier ? READ_TOOLS : withProjectTests(toolAllowList(agent.body, draft), confirmedTests),
-    limits: { turns: pos(lim.turns) ?? 40, ...(costUsd ? { costUsd } : {}), wallClockSeconds: pos(lim.wallClockSeconds) ?? 3600 },
+    limits: { turns: lim.turns, ...(costUsd ? { costUsd } : {}), wallClockSeconds: lim.wallClockSeconds },
     heartbeatSeconds: HEARTBEAT_SECONDS,
     leaseSeconds: LEASE_SECONDS,
     ...(input !== undefined ? { input } : {}),
