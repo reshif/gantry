@@ -233,7 +233,7 @@ export async function promoteAgent(tx: Tx, a: Actor, id: string, ref: string): P
 }
 
 /** Rollback skips the gate: the old version already passed it. It restores that version's configuration as the working copy. */
-export async function rollbackAgent(tx: Tx, a: Actor, id: string, ref: string | number): Promise<Cmd> {
+export async function rollbackAgent(tx: Tx, a: Actor, id: string, ref: string | number, overrideReason?: string): Promise<Cmd> {
   const row = await lock(tx, a.orgId, id);
   const vers = await versionRows(tx, a.orgId, id);
   const v = find(vers, ref);
@@ -244,6 +244,19 @@ export async function rollbackAgent(tx: Tx, a: Actor, id: string, ref: string | 
   if (v.body.rc === true && !promoted.has(v.version)) throw invalid(`${label} was never on the floor, so there is nothing to roll back to. Promote it instead.`);
   const from = vers.find((x) => x.version === row.live_version);
   const data: Record<string, unknown> = { ...row.data };
+  // Never leave an agent that looks active but cannot run: a version that never passed its suite (the first version of a created agent) is rolled back to only
+  // with a passing run of the suite, or a Factory Admin's reason of at least 5 characters, audited; either way the promotion is recorded, as dispatch reads it.
+  let audit: Record<string, unknown> = {};
+  const record = Array.isArray(row.data.promoted) ? (row.data.promoted as unknown[]) : null;
+  if (record !== null && !record.includes(v.version)) {
+    const el = await eligibility(tx, a.orgId, row, v);
+    const reason = overrideReason?.trim() ?? "";
+    const admin = await actorIsFactoryAdmin(tx, a);
+    if (el.ok) audit = { suiteRun: el.run, suite: el.suite, score: el.score };
+    else if (reason.length >= 5 && admin) audit = { override: true, overrideReason: reason, overrideKind: "eval_gate", suite: el.suite };
+    else throw refuse("denied", `${label} never passed its suite (${el.text}); run ${el.suite ?? "its suite"} first${admin ? ", or as Factory Admin roll back anyway with a reason of at least 5 characters; it is recorded in the audit" : ""}.`, { needs: admin ? `A passing run of ${el.suite ?? "its suite"}, or override_reason` : `A passing run of ${el.suite ?? "its suite"}`, rule: { kind: "gate", id: "EVAL-GATE", name: "Eval promotion gate" }, overrideKind: "eval_gate" });
+    data.promoted = [...record, v.version];
+  }
   for (const k of VERSIONED_KEYS) if (k !== "skills" && k !== "skillVersions" && k in v.body) data[k] = v.body[k];
   await tx.query(`update agents set live_version = $3, data = $4::jsonb, version = version + 1 where org_id = $1 and id = $2`, [a.orgId, id, v.version, json(data)]);
   if (Array.isArray(v.body.skills)) {
@@ -253,7 +266,7 @@ export async function rollbackAgent(tx: Tx, a: Actor, id: string, ref: string | 
   const probation = await startProbation(tx, a.orgId, id, { kind: "rollback", fromVersion: from ? labelOf(from) : null, toVersion: label, by: a.id }, a.now);
   return {
     msg: `${row.name} rolled back to ${label}.${probation.length ? ` Its ${probation.length} trust cell${probation.length === 1 ? "" : "s"} run one level lower for a probation period.` : ""}`, changes: ["agents", "audit", ...(probation.length ? ["trust"] : [])], project: null, extra: { version: label, probation: probation.length },
-    events: [...probation, { type: "agent.rollback", category: cat, subject: subject(id), projectId: null, before: { version: from ? labelOf(from) : null }, after: { version: label, n: v.version } }],
+    events: [...probation, { type: "agent.rollback", category: cat, subject: subject(id), projectId: null, before: { version: from ? labelOf(from) : null }, after: { version: label, n: v.version, ...(Object.keys(audit).length ? { promotion: audit } : {}) } }],
   };
 }
 

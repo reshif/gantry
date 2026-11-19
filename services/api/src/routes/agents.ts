@@ -136,7 +136,7 @@ export const agentRoutes: FastifyPluginAsync = async (app) => {
     const b = RollbackBody.parse(req.body);
     return command(req, { ...spec(), ifMatch: rev(id) }, async (tx, a) => {
       await refuseIfFactoryKilled(tx, a.orgId, "agents");
-      return rollbackAgent(tx, a, id, b.version);
+      return rollbackAgent(tx, a, id, b.version, b.overrideReason);
     });
   });
 
