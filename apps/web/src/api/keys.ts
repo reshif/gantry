@@ -75,6 +75,7 @@ export const qk = {
   me: () => ["me"] as const,
   sessions: () => ["sessions"] as const,
   security: () => ["security"] as const,
+  securityRecovery: () => ["security", "recovery"] as const,
   signins: () => ["signins"] as const,
   home: () => ["home"] as const,
   activity: (project?: string) => ["activity", project ?? null] as const,

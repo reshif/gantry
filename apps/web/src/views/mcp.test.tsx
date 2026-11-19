@@ -355,4 +355,45 @@ describe("MCP servers screen", () => {
     expect(await screen.findByText("No MCP servers yet")).toBeTruthy();
     expect(await byId("mcp-add")).toBeTruthy();
   });
+
+  it("a server whose address changed shows Needs re-approval in the list and on its page, with the way forward, and cannot be switched on", async () => {
+    const NEEDS = { ...DOCS, id: "mcp-new-0002", name: "Wiki two", enabled: false, disabledReason: null, needsReapproval: true, version: 5 };
+    const calls = setup({
+      "GET /api/v1/mcp/servers": () => ({ body: [DOCS, NEEDS] }),
+      "POST /api/v1/mcp/servers/mcp-new-0002/discover": () => ok({ msg: "Wiki two answered with 3 tools.", server: NEEDS }),
+    });
+    mount();
+    const row = await byId("mcp-row-mcp-new-0002");
+    expect(row.textContent).toContain("needs re-approval");
+    expect(document.getElementById("mcp-row-mcp-docs-1a2b")!.textContent).not.toContain("needs re-approval");
+    cleanup();
+    openSrv("mcp-new-0002", "overview");
+    mount();
+    const note = await byId("mcp-reapproval-note");
+    expect(note.textContent).toContain("Needs re-approval");
+    expect(note.textContent).toContain("Discover its tools and approve them before switching it on");
+    expect(document.getElementById("mcp-disabled-note")).toBeNull();
+    fireEvent.click(await byId("mcp-reapproval-discover"));
+    await waitFor(() => expect(calls.some((c) => c.path.endsWith("/mcp-new-0002/discover"))).toBe(true));
+    fireEvent.click(await byId("mcp-dtab-scope"));
+    fireEvent.click(await byId("mcp-sc-edit"));
+    const en = (await byId("mcp-enabled")) as HTMLInputElement;
+    expect(en.checked).toBe(false);
+    expect(en.getAttribute("data-reason")).toMatch(/Needs re-approval.*Discover its tools/);
+    fireEvent.click(en);
+    expect(patches(calls)).toHaveLength(0);
+  });
+
+  it("a failed repo read says so with Try again, instead of an empty repo list", async () => {
+    let fail = true;
+    setup({ "GET /api/v1/projects/payments/repos": () => (fail ? { status: 500, body: { ok: false, msg: "Repo store is down." } } : { body: REPOS }) });
+    openSrv("mcp-docs-1a2b", "overview");
+    mount();
+    const note = await byId("repos-read");
+    expect(note.textContent).toContain("Couldn't load every repo");
+    expect(note.textContent).toContain("Repo store is down.");
+    fail = false;
+    fireEvent.click(await byId("repos-read-retry"));
+    await waitFor(() => expect(document.getElementById("repos-read")).toBeNull());
+  });
 });

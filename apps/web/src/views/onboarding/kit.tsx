@@ -128,7 +128,9 @@ export function useIntegrationsFor(project: string): { sources: SourceInfo[]; de
     dests: list.filter((x) => !!x.type.destination && open(x.inst, project)),
   };
 }
-export const instLabel = (i: IntegrationInstance): string => i.name + (i.status !== "healthy" ? ` (${i.status})` : "");
+/** An integration health word for a person: "unknown" is a connection nobody has tested yet. */
+export const healthWord = (status: string): string => (status === "unknown" ? "not tested yet" : status);
+export const instLabel = (i: IntegrationInstance): string => i.name + (i.status !== "healthy" ? ` (${healthWord(i.status)})` : "");
 export const orgOf = (i: IntegrationInstance | null | undefined): string => {
   const c = i?.config ?? {};
   return String(c.org || c.group || c.workspace || "");

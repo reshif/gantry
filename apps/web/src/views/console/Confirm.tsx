@@ -5,6 +5,7 @@ import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
 import { setProject } from "../../lib/prefs";
 import { useOpenTraveler } from "../../shell/useTraveler";
+import { useOpenRecordRoute } from "../record/nav";
 import { EntityChip } from "./Chips";
 import { ExplainDenial } from "./ExplainDenial";
 import { runProposal, saveProposal } from "./api";
@@ -19,6 +20,7 @@ const pill = (label: string, on: boolean) => <span key={label} className={`step-
 export function ProposalCard({ p, mid, serverId, onChange }: { p: Proposal; mid: string; serverId?: string | undefined; onChange?: (p: Proposal) => void }) {
   const ui = useUI();
   const openTraveler = useOpenTraveler();
+  const openRecord = useOpenRecordRoute();
   const [cur, setCur] = useState<Proposal>(p);
   const [reason, setReason] = useState(String(p.call.body.reason ?? ""));
   const [typed, setTyped] = useState("");
@@ -26,6 +28,8 @@ export function ProposalCard({ p, mid, serverId, onChange }: { p: Proposal; mid:
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [woId, setWoId] = useState("");
+  /** Why the server refused, and what it says would let it through; kept after the card fails so the way forward is shown. */
+  const [fail, setFail] = useState<{ msg: string; needs: string } | null>(null);
   const pending = cur.status === "pending";
   const gate = pending ? cur.check : null;
   const denied = !!gate && !gate.allowed;
@@ -58,14 +62,22 @@ export function ProposalCard({ p, mid, serverId, onChange }: { p: Proposal; mid:
       finish("done", r.msg);
     } else {
       // A reason or confirmation the server wants more of stays on the card so it can be fixed; any other refusal ends it.
+      const needs = !r.ok && typeof r.needs === "string" ? r.needs : "";
+      const status = r.status ?? 0;
+      const transient = status === 0 || status === 409 || status === 429 || status >= 500;
       if (/reason|confirm/i.test(r.msg)) setErr(r.msg);
+      else if (transient) setErr(`${r.msg}${needs ? ` (${needs})` : ""} You can try again.`);
       else {
         ui.toast(r.msg, "error");
+        setFail({ msg: r.msg, needs });
         finish("failed", r.msg);
       }
     }
   };
 
+  const retry = (): void => { setFail(null); setErr(""); setCur({ ...cur, status: "pending" }); };
+  const first = cur.entities[0];
+  const openIt = first?.type === "wo" ? () => openRecord(first.id, first.project ?? null) : first?.type === "project" ? () => { setProject(first.id); navigate("floor"); } : cur.perm.project ? () => { setProject(cur.perm.project ?? ""); navigate("floor"); } : null;
   const steps = cur.steps.filter(Boolean);
   const goVerb = cur.kind === "kill" ? `Kill ${cur.title.replace(/^Kill /, "")}` : cur.kind === "restore" ? "Restore" : "Confirm and run";
   return (
@@ -91,6 +103,15 @@ export function ProposalCard({ p, mid, serverId, onChange }: { p: Proposal; mid:
       ) : null}
       {err ? <div className="form-err" role="alert">{err}</div> : null}
       {cur.result ? <div className={`perm ${cur.status === "done" ? "pos" : "neg"}`}><Icon name={cur.status === "done" ? "check" : "x"} /><span>{cur.result}</span></div> : null}
+      {cur.status === "failed" ? (
+        <>
+          {fail?.needs ? <div className="perm neg" id={`con-cf-needs-${mid}-${cur.id}`}><Icon name="lock" /><span>{fail.needs}</span></div> : null}
+          <div className="ccard-actions">
+            <Btn label="Try again" small kind="primary" icon="refresh" id={`con-cf-retry-${mid}-${cur.id}`} onClick={retry} />
+            {openIt ? <Btn label={first?.type === "wo" ? `Open ${first.id}` : "Open the screen"} small id={`con-cf-open-${mid}-${cur.id}`} onClick={openIt} /> : null}
+          </div>
+        </>
+      ) : null}
       {cur.status === "done" && woId ? (
         <div className="ccard-actions">
           <Btn label={`Open ${woId}`} small id={`con-cf-wo-${mid}-${cur.id}`} onClick={() => openTraveler(woId)} />

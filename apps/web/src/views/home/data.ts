@@ -118,3 +118,9 @@ export function goAttention(a: AttentionItem["act"], openTraveler: (id: string) 
 }
 
 export const STAGE_NAME: Record<string, string> = { connected: "Connected", assessed: "Assessed", pr_opened: "PR opened", pr_checks: "PR checks", pr_merged: "PR merged", verified: "Verified", ready: "Ready", failed: "Verification failed", person: "Needs a person" };
+
+/** A question the server prefixed with whom it was asked of when that person is no longer active ("Asked of Sam Lee (deactivated): ..."): the prefix and the question apart. */
+export function splitAskedOf(q: string | null | undefined): { askedOf: string | null; text: string } {
+  const m = /^(Asked of [^:]+? \([a-z_ -]+\)): ([\s\S]*)$/.exec(q ?? "");
+  return m ? { askedOf: m[1] ?? null, text: m[2] ?? "" } : { askedOf: null, text: q ?? "" };
+}

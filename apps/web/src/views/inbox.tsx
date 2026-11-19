@@ -21,7 +21,7 @@ import { useItems, type Group, type Item } from "./work/items";
 import { useScope } from "./work/scope";
 import { makeStopActions } from "../shell/stopActions";
 import { useOpenTraveler } from "../shell/useTraveler";
-import { goAttention, type HomeFull } from "./home/data";
+import { goAttention, splitAskedOf, type HomeFull } from "./home/data";
 import "../styles/views/inbox.css";
 
 /** One waiting item as a prototype list row: the work order and a tag, the title, a quiet line, the actions on the right. */
@@ -83,13 +83,15 @@ function OnboardingItem({ it }: { it: Extract<Item, { kind: "onboarding" }> }) {
 
 function QuestionItem({ it }: { it: Extract<Item, { kind: "question" }> }) {
   const c = it.c;
+  const asked = splitAskedOf(c.question);
   return (
     <li id={`inb-${it.key}`} className="inb-row">
       <Avatar id={c.from ?? null} />
       <div className="grow">
         <div className="row"><a className="pri mono" href={WO_LINK(c.wo, c.project)}>{c.wo}</a><Chip text="Awaiting answer" cls="info" /></div>
         <div className="pri-cell-title">{c.title}</div>
-        {c.question ? <div className="small muted">{c.question}</div> : null}
+        {asked.askedOf ? <div className="row"><Chip text={asked.askedOf} cls="warn" /></div> : null}
+        {asked.text ? <div className="small muted">{asked.text}</div> : null}
       </div>
       <WoActions wo={c.wo} project={c.project} needs={{ kind: "question", text: "", mine: true }} idPrefix="inb" />
     </li>

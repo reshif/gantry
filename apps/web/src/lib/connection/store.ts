@@ -3,6 +3,7 @@
  *
  *   live          the stream is open and alive (or no stream is wanted, e.g. signed out)
  *   reconnecting  the stream dropped (or went silent and the probe failed); the stream backs off and retries
+ *   paused        the server closed this tab's stream because the person has too many open; polling keeps screens current, `reconnect()` retries
  *   offline       the browser reports no network (online/offline events)
  *
  * Heartbeat watchdog: the server's keep-alive comments are invisible to EventSource, so silence alone proves nothing on a quiet
@@ -12,7 +13,9 @@
  */
 import { useSyncExternalStore } from "react";
 
-export type ConnectionState = "live" | "reconnecting" | "offline";
+export const PAUSED_HINT = "Opened in another tab. This one is paused and refreshes on a timer. Reconnect to go live here.";
+
+export type ConnectionState = "live" | "reconnecting" | "paused" | "offline";
 export interface ConnectionSnapshot {
   state: ConnectionState;
   /** True when a stream is wanted but not delivering, so a view may poll as a fallback. */
@@ -27,12 +30,13 @@ let wanted = false;
 let open = false;
 let online = typeof navigator === "undefined" ? true : navigator.onLine !== false;
 let silent = false;
+let paused = false;
 let lastAlive: number | null = null;
 let restart: (() => void) | null = null;
 
 function compute(): ConnectionSnapshot {
-  const down = wanted && (!online || !open || silent);
-  const state: ConnectionState = !online ? "offline" : down ? "reconnecting" : "live";
+  const down = wanted && (!online || !open || silent || paused);
+  const state: ConnectionState = !online ? "offline" : down ? (paused ? "paused" : "reconnecting") : "live";
   return { state, streamDown: down, lastAlive };
 }
 let snap: ConnectionSnapshot = compute();
@@ -59,6 +63,7 @@ export const connection = {
     if (!on) {
       open = false;
       silent = false;
+      paused = false;
       lastAlive = null;
     }
     publish();
@@ -66,12 +71,26 @@ export const connection = {
   streamOpened(now: number = Date.now()): void {
     open = true;
     silent = false;
+    paused = false;
     lastAlive = now;
     publish();
   },
   streamDropped(): void {
     open = false;
     publish();
+  },
+  /** The server closed this stream because the person has too many open (a "superseded" event, or a 409 on connect). Not live; screens poll. */
+  superseded(): void {
+    open = false;
+    paused = true;
+    publish();
+  },
+  /** The person chose Reconnect on a paused tab: open the stream again. */
+  reconnect(): void {
+    if (!paused) return;
+    paused = false;
+    publish();
+    restart?.();
   },
   /** Any evidence the link works: a change event, a successful probe. */
   alive(now: number = Date.now()): void {
@@ -91,7 +110,7 @@ export const connection = {
   },
   /** Test seam. */
   reset(): void {
-    wanted = open = silent = false;
+    wanted = open = silent = paused = false;
     online = true;
     lastAlive = null;
     restart = null;

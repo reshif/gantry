@@ -1,6 +1,7 @@
 /** The Agent Workspace (services/api routes/workspace.ts). Keys start with `workspace`, which work-order, console and repo changes refresh. */
 import { qk } from "../../api/keys";
 import { useQuery } from "@tanstack/react-query";
+import { pollWhenStreamDown } from "../../lib/connection/store";
 import { api, del, get, patch, post } from "../../api/client";
 import { invalidateSlices } from "../../api/keys";
 
@@ -44,7 +45,7 @@ export interface ChatMeta {
 const enc = encodeURIComponent;
 export const wk = { all: () => ["workspace"] as const, inbox: (all: boolean) => ["workspace", "inbox", all] as const, search: (q: string, kinds: string) => ["workspace", "search", q, kinds] as const, operator: () => ["workspace", "operator"] as const };
 
-export const useInbox = (all = false) => useQuery({ queryKey: wk.inbox(all), queryFn: () => get<{ items: InboxItem[] }>(api(`workspace/inbox${all ? "?all=1" : ""}`)), refetchInterval: 30_000 });
+export const useInbox = (all = false) => useQuery({ queryKey: wk.inbox(all), queryFn: () => get<{ items: InboxItem[] }>(api(`workspace/inbox${all ? "?all=1" : ""}`)), refetchInterval: pollWhenStreamDown(30_000) });
 export const useWsAgents = (wo: string | null) => useQuery({ queryKey: qk.wsAgents(wo ?? ""), queryFn: () => get<{ items: WsAgent[] }>(api(`workspace/agents${wo ? `?wo=${enc(wo)}` : ""}`)), staleTime: 60_000 });
 export const useSearch = (q: string, kinds: string) =>
   useQuery({ queryKey: wk.search(q, kinds), queryFn: () => get<{ items: Hit[] }>(api(`workspace/search?q=${enc(q)}${kinds ? `&kinds=${enc(kinds)}` : ""}`)), enabled: q.trim().length >= 2, staleTime: 10_000 });
@@ -55,7 +56,7 @@ export function operatorShape(b: unknown): OperatorView {
   if (!ok) throw new Error("The server answered with something that is not the operator view.");
   return v as OperatorView;
 }
-export const useOperator = (on: boolean) => useQuery({ queryKey: wk.operator(), queryFn: async () => operatorShape(await get<unknown>(api("workspace/operator"))), enabled: on, refetchInterval: 30_000 });
+export const useOperator = (on: boolean) => useQuery({ queryKey: wk.operator(), queryFn: async () => operatorShape(await get<unknown>(api("workspace/operator"))), enabled: on, refetchInterval: pollWhenStreamDown(30_000) });
 
 const done = <T extends { ok: boolean }>(r: T): T => {
   if (r.ok) invalidateSlices(["workspace", "console"]);

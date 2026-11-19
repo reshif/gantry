@@ -7,7 +7,7 @@ import { useCanSession } from "../api/can";
 import { VIEWS } from "../views";
 import { useRegisterNewWorkOrder } from "../views/work-orders/New";
 import { hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, routeDef } from "../lib/routes";
-import { clearGovernQS } from "../views/govern/kit";
+import { clearGovernQS } from "../views/govern/qs";
 import { formatHash, hashQuery, navigate, replaceHash, useHash } from "../lib/router";
 import { setProject, usePrefs } from "../lib/prefs";
 import { Btn, Empty, Panel, ViewHead } from "../ui/primitives";
@@ -19,10 +19,13 @@ import { isTypingTarget, toggleNavRail, useNavRail } from "./navRail";
 import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { lazyRetry } from "../lib/errors/lazyRetry";
 import { ReadOnlyBanner, StopBanner, ViewAsBanner } from "./StopBanner";
+
 import { TopBar } from "./TopBar";
 import { useRestoreTraveler } from "./useTraveler";
 
 // The palette loads on first use (Ctrl+K), not with the shell.
+// the allow-list recovery prompt is rare: it loads after first paint, not in the entry
+const RecoveryPrompt = lazyRetry(() => import("./RecoveryPrompt").then((m) => ({ default: m.RecoveryPrompt })));
 const PaletteDialog = lazyRetry(() => import("./Palette").then((m) => ({ default: m.PaletteDialog })));
 
 export function Shell({ me }: { me: Me }) {
@@ -150,6 +153,7 @@ export function Shell({ me }: { me: Me }) {
       <StopBanner projectId={scoped ? projectId : null} />
       <ViewAsBanner />
       <ReadOnlyBanner />
+      <Suspense fallback={null}><RecoveryPrompt /></Suspense>
       <main className="content" id="main" tabIndex={-1} ref={main}>
         <AppErrorBoundary level="route" resetKey={`${routeId}/${loc.param ?? ""}`}>
           {noAccess ? (

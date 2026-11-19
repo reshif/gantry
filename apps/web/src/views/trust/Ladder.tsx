@@ -13,6 +13,7 @@ import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
 import { useOutcome, useAllRepos } from "../govern/data";
+import { ReposReadNote } from "../govern/ReposReadNote";
 import { ClassChip } from "../projects/kit";
 import { OutcomeDialog } from "./Tabs";
 import { KV, LevelTag, Rate, Rungs, code, gateForAgent, ladderRows, lv, pct, rerender, trustCellId, trustUi, useTrustUi, type CellOut, type LadderRow, MIN_RUNS } from "./kit";
@@ -342,7 +343,8 @@ function DemoteBtn({ cell, name, cls }: { cell: CellOut; name: string; cls: stri
 export function CellDrawer({ projectId, close }: { projectId: string; close: () => void }) {
   useTrustUi();
   const p = useLadderProps(projectId);
-  const rs = useAllRepos().repos.filter((r) => r.project === projectId);
+  const allRepos = useAllRepos();
+  const rs = allRepos.repos.filter((r) => r.project === projectId);
   if (trustUi.repo && !rs.some((r) => r.id === trustUi.repo)) trustUi.repo = "";
   return (
     <div className="drawer-inner tr-celldrawer" id="tr-cell-drawer">
@@ -353,6 +355,7 @@ export function CellDrawer({ projectId, close }: { projectId: string; close: () 
       <div className="drawer-scroll">
         {p ? (
           <>
+            <ReposReadNote read={allRepos.read} />
             <div className="toolbar tr-toolbar">
               <Field label="Repo" htmlFor="tr-repo"><Select id="tr-repo" value={trustUi.repo} options={[{ value: "", label: "All repos (project cells)" }, ...rs.map((r) => ({ value: r.id, label: r.name }))]} onChange={(v) => { trustUi.repo = v; rerender(); }} /></Field>
               <p className="small muted tr-toolbar-note">{trustUi.repo ? "Showing repo cells where they exist; other cells fall back to the project cell (marked proj)." : "Cells are agent × class on this project. A repo cell overrides the project cell."}</p>

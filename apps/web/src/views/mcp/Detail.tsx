@@ -7,7 +7,7 @@ import { useMcpAccessCheck, type McpAccessDecision } from "../../api/queries";
 import { Btn, Empty, Field, LockNote, Panel, Select, Tabs, ViewHead, type Decision } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
-import { SENS, classesFor, dec, draftOf, projectsIn, stationsFor, type ScopeDraft } from "./kit";
+import { REAPPROVAL_WHY, SENS, classesFor, dec, draftOf, mcpState, projectsIn, stationsFor, type ScopeDraft } from "./kit";
 import { SwitchRow, healthTone, ago, useTab } from "../connect/kit";
 import { hashFor, navigate } from "../../lib/router";
 import { useCrumbTail } from "../../lib/crumb";
@@ -132,7 +132,7 @@ export function Detail({ srv, cat, projects, agents, repos, calls, actorName }: 
     ));
   };
 
-  const st = srv.enabled === false ? "disabled" : srv.health;
+  const st = mcpState(srv);
   const tabs = [{ id: "overview", label: "Overview" }, { id: "tools", label: "Tools", count: srv.tools.length }, { id: "scope", label: "Scope" }, { id: "check", label: "Access check" }, { id: "calls", label: "Recent calls" }];
   const verdict = ran && ran !== "error" ? (ran.allowed ? (ran.gated ? { t: "Allowed, with approval", tone: "warn" } : { t: "Allowed", tone: "ok" }) : { t: "Denied", tone: "bad" }) : null;
 
@@ -148,7 +148,7 @@ export function Detail({ srv, cat, projects, agents, repos, calls, actorName }: 
                   <legend className="field-label">Server settings</legend>
                   <Field label="Sensitivity" htmlFor="mcp-sens"><Select id="mcp-sens" options={SENS} value={srv.sensitivity} disabled={ro} onChange={(x) => void ops.updateMCP(srv.id, { sensitivity: x }, v).then((r) => show(r, `${srv.name} is now ${x}.`))} /></Field>
                   <SwitchRow id="mcp-enabled" label="Enabled" checked={srv.enabled !== false}
-                    decision={ro ? perm : srv.disabledReason && srv.enabled === false ? { allowed: false, reason: "Re-approve the changed definitions to switch it back on." } : null}
+                    decision={ro ? perm : srv.needsReapproval ? { allowed: false, reason: `Needs re-approval. ${REAPPROVAL_WHY}` } : srv.disabledReason && srv.enabled === false ? { allowed: false, reason: "Re-approve the changed definitions to switch it back on." } : null}
                     onChange={(on) => void ops.updateMCP(srv.id, { enabled: on }, v).then((r) => show(r, on ? `${srv.name} enabled.` : `${srv.name} disabled.`))} />
                   <p className="small muted">Enabled in projects: {enabledIn.length ? enabledIn.map((p) => p.key).join(", ") : "none"}. Protocol revision {srv.protocolRevision || "not yet discovered"}, last discovery {srv.discoveredAt ? ago(srv.discoveredAt) : "never"}.</p>
                   <div className="row mcp-danger">
@@ -243,7 +243,14 @@ export function Detail({ srv, cat, projects, agents, repos, calls, actorName }: 
           <Panel title="Server" id="mcp-server">
             <div className="form-grid">
               <LockNote decision={perm} what="MCP server settings" />
-              {srv.enabled === false ? (
+              {srv.needsReapproval ? (
+                <div className="lock-note" role="status" id="mcp-reapproval-note">
+                  <span><strong>Needs re-approval.</strong> {REAPPROVAL_WHY}</span>
+                  <Btn label="Discover its tools" icon="search" id="mcp-reapproval-discover" small guard={perm} onClick={() => void ops.rediscoverMCP(srv.id, v).then((r) => show(r))} />
+                  <Btn label="Review and approve" id="mcp-reapproval-approve" small kind="primary" guard={perm} onClick={approve} />
+                </div>
+              ) : null}
+              {srv.enabled === false && !srv.needsReapproval ? (
                 <div className="lock-note" role="status" id="mcp-disabled-note">
                   <span>Disabled{srv.disabledReason ? `: ${srv.disabledReason}.` : "."} Agents cannot call it.{srv.disabledReason ? " An admin has to re-approve it." : ""}</span>
                   {srv.disabledReason ? <Btn label="Review and re-approve" id="mcp-approve" small kind="primary" guard={perm} onClick={approve} /> : null}

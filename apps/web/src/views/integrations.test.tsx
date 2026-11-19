@@ -219,4 +219,22 @@ describe("Integrations screen", () => {
     fireEvent.click(await byId("int-cat-add-slack"));
     await waitFor(() => expect(document.querySelector("[role=dialog]")).toBeTruthy());
   });
+
+  it("a connection nobody has tested yet says so (Not tested yet), never the raw word unknown or a healthy badge", async () => {
+    setup({ "GET /api/v1/integrations": () => ({ body: [inst("int-slack-9", "Slack (new)", "slack", { status: "unknown" })] }) });
+    mount();
+    const table = await byId("int-table");
+    expect(table.textContent).toContain("Slack (new)");
+    expect(table.textContent).toContain("not tested yet");
+    expect(table.textContent).not.toContain("unknown");
+    expect(table.textContent).not.toContain("healthy");
+  });
+
+  it("a failed repo read shows a note with Try again, so usage counts are not silently short", async () => {
+    setup({ "GET /api/v1/projects/payments/repos": () => ({ status: 500, body: { ok: false, msg: "Repo store is down." } }) });
+    mount();
+    const note = await byId("repos-read");
+    expect(note.textContent).toContain("Repo store is down.");
+    expect(document.getElementById("repos-read-retry")).toBeTruthy();
+  });
 });

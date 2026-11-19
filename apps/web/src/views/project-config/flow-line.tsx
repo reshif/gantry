@@ -36,6 +36,9 @@ type Mode = GateKind | "off";
 const MODES: GateKind[] = ["human", "auto", "mixed"];
 
 interface StOv { enabled?: boolean; wip?: number }
+/** When a reason box opens near the bottom, bring it above the sticky Save bar (once, on mount). */
+const scrollIntoViewOnce = (el: HTMLElement | null): void => { if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" }); };
+
 interface GOv { kind?: GateKind; on?: boolean; reason?: string }
 interface ClsOv { skips?: string[]; enabled?: boolean }
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
@@ -64,7 +67,7 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
   const [hot, setHot] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [conflict, setConflict] = useState(false);
+  const [conflict, setConflict] = useState<{ done: string[]; left: string[] } | null>(null);
   const [reasonErr, setReasonErr] = useState<Record<string, string>>({});
   const roleName = (id: string): string => cat.roles.find((r) => r.id === id)?.name ?? id;
   const personName = (id: string): string => people.find((x) => x.id === id)?.name ?? id;
@@ -119,7 +122,7 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
   const dirty = changes.length > 0;
   useLeaveGuard(dirty);
 
-  const discard = () => { setStOv({}); setGOv({}); setClsOv({}); setSlotsOv(null); setReviewing(false); setConflict(false); };
+  const discard = () => { setStOv({}); setGOv({}); setClsOv({}); setSlotsOv(null); setReviewing(false); setConflict(null); };
 
   const save = async () => {
     if (!dirty || saving) return;
@@ -138,11 +141,14 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
     setSaving(true);
     let ver = p.version;
     let failed = false;
+    /** Changes whose writes all went through: a Flow save is several If-Match writes, so a refusal halfway leaves the earlier ones saved. */
+    const done: string[] = [];
+    const conflicted: { v: boolean } = { v: false };
     const run = async (r: Promise<{ ok: boolean; msg: string; status?: number }>, label: string): Promise<boolean> => {
       const x = await r;
       if (!x.ok) {
         failed = true;
-        if (x.status === 409 || x.status === 412 || x.status === 428) setConflict(true);
+        if (x.status === 409 || x.status === 412 || x.status === 428) conflicted.v = true;
         res(x);
         return false;
       }
@@ -153,22 +159,24 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
     for (const s of f.stations) {
       const o = stOv[s.id];
       const cur = stCur(s);
-      if (o?.wip !== undefined && o.wip !== cur.wip && !(await run(ops.setProject(p.id, `flow.stations.${s.id}.wip`, o.wip, { ifMatch: ver }), `${s.name} WIP limit set to ${o.wip}.`))) break;
-      if (o?.enabled !== undefined && o.enabled !== cur.enabled && !(await run(ops.setProject(p.id, `flow.stations.${s.id}.enabled`, o.enabled, { ifMatch: ver }), `${s.name}${o.enabled ? " turned on." : " turned off."}`))) break;
+      if (o?.wip !== undefined && o.wip !== cur.wip) { if (!(await run(ops.setProject(p.id, `flow.stations.${s.id}.wip`, o.wip, { ifMatch: ver }), `${s.name} WIP limit set to ${o.wip}.`))) break; done.push(`wip-${s.id}`); }
+      if (o?.enabled !== undefined && o.enabled !== cur.enabled) { if (!(await run(ops.setProject(p.id, `flow.stations.${s.id}.enabled`, o.enabled, { ifMatch: ver }), `${s.name}${o.enabled ? " turned on." : " turned off."}`))) break; done.push(`on-${s.id}`); }
     }
     if (!failed) {
       for (const g of gates) {
         const to = gEff(g);
         if (to === gCur(g)) continue;
         const why = needsReason(g) ? (gOv[g.id]?.reason ?? "").trim() : undefined;
-        if (to === "off") { if (!(await run(ops.setProject(p.id, `flow.gates.${g.id}.enabled`, false, { ifMatch: ver }, why), `${g.name} turned off.`))) break; continue; }
+        if (to === "off") { if (!(await run(ops.setProject(p.id, `flow.gates.${g.id}.enabled`, false, { ifMatch: ver }, why), `${g.name} turned off.`))) break; done.push(`g-${g.id}`); continue; }
         if (gCur(g) === "off" && !(await run(ops.setProject(p.id, `flow.gates.${g.id}.enabled`, true, { ifMatch: ver }), `${g.name} turned on.`))) break;
         if (to !== gateMode(g) && !(await run(ops.setGateMode(p.id, g.id, to, { ifMatch: ver }, why), `${g.label} set to ${MODE_TEXT[to].label}.`))) break;
+        done.push(`g-${g.id}`);
       }
     }
-    if (!failed && slots !== p.flow.slots) await run(ops.setProject(p.id, "flow.slots", slots, { ifMatch: ver }), `Coding slots set to ${slots}.`);
-    if (!failed && p.flow.classes.some((c) => clsChanged(c).skips || clsChanged(c).enabled)) await run(ops.setProject(p.id, "flow.classes", classesEff, { ifMatch: ver }), "Class routes saved.");
+    if (!failed && slots !== p.flow.slots && (await run(ops.setProject(p.id, "flow.slots", slots, { ifMatch: ver }), `Coding slots set to ${slots}.`))) done.push("slots");
+    if (!failed && p.flow.classes.some((c) => clsChanged(c).skips || clsChanged(c).enabled) && (await run(ops.setProject(p.id, "flow.classes", classesEff, { ifMatch: ver }), "Class routes saved."))) done.push(...changes.filter((c) => c.key.startsWith("cls-")).map((c) => c.key));
     setSaving(false);
+    if (conflicted.v) setConflict({ done: changes.filter((c) => done.includes(c.key)).map((c) => c.what), left: changes.filter((c) => !done.includes(c.key)).map((c) => c.what) });
     if (!failed) { discard(); }
   };
 
@@ -287,7 +295,7 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
         {lock.overridden ? <div className="small flw-note flw-marker" id={`flw-off-by-${g.id}`}>{`Off by ${lock.overridden.byName || lock.overridden.by} on ${fmt.istDate(lock.overridden.at)}: ${lock.overridden.reason}`}</div> : null}
         {lock.modeOverridden ? <div className="small flw-note flw-marker" id={`flw-mode-by-${g.id}`}>{`Mode set by ${lock.modeOverridden.byName || lock.modeOverridden.by} on ${fmt.istDate(lock.modeOverridden.at)}${lock.modeOverridden.from ? ` (was ${MODE_TEXT[lock.modeOverridden.from].label})` : ""}: ${lock.modeOverridden.reason}`}</div> : null}
         {ovr ? (
-          <div className="flw-ovr" id={`flw-ovr-${g.id}`}>
+          <div className="flw-ovr" id={`flw-ovr-${g.id}`} ref={scrollIntoViewOnce}>
             <OverrideReason id={`flw-reason-${g.id}`} min={minReason} label={`Reason for overriding the lock on ${g.name} (at least ${minReason} characters)`} hint="This overrides a lock. It is audited with your name and shown on the flow until it is turned back on." value={gOv[g.id]?.reason ?? ""} error={reasonErr[g.id]} onChange={(v) => { setGOv((o) => ({ ...o, [g.id]: { ...o[g.id], reason: v } })); setReasonErr((e) => ({ ...e, [g.id]: "" })); }} />
           </div>
         ) : null}
@@ -330,7 +338,7 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
   return (
     <div className="pcf-stack" id="flw">
       <LockNote decision={d} what="Flow settings" />
-      <DraftConflictBanner id="flw-conflict" conflict={conflict ? { keys: [] } as never : null} onKeepMine={() => { setConflict(false); void save(); }} onDiscard={discard} />
+      <DraftConflictBanner id="flw-conflict" conflict={conflict ? { keys: [] } : null} saved={conflict ?? undefined} onKeepMine={() => { setConflict(null); void save(); }} onDiscard={discard} />
       <div className="flw-cols">
         <Panel title="Stations">
           <ul className="flw-list" aria-label="Stations in order">{f.stations.map(stationRow)}</ul>

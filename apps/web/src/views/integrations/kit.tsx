@@ -32,11 +32,11 @@ export const keyOf = (s: string): string => {
   return w.map((x, i) => (i ? x.charAt(0).toUpperCase() + x.slice(1).toLowerCase() : x.toLowerCase())).join("").slice(0, 24);
 };
 
-export const statusOf = (i: IntegrationInstance): "disabled" | "failing" | "offline" | "healthy" => (!i.connected ? "disabled" : i.status === "failing" ? "failing" : i.status === "offline" ? "offline" : "healthy");
+export const statusOf = (i: IntegrationInstance): "disabled" | "failing" | "offline" | "unknown" | "healthy" => (!i.connected ? "disabled" : i.status === "failing" ? "failing" : i.status === "offline" ? "offline" : i.status === "unknown" ? "unknown" : "healthy");
 
-const STATUS_WORD: Record<string, string> = { healthy: "Healthy", failing: "Failing", degraded: "Degraded", offline: "Offline", disabled: "Disabled" };
+const STATUS_WORD: Record<string, string> = { healthy: "Healthy", failing: "Failing", degraded: "Degraded", offline: "Offline", disabled: "Disabled", unknown: "Not tested yet" };
 
-const STATUS_TONE: Record<string, Tone> = { healthy: "done", failing: "block", degraded: "wait", offline: "neutral", disabled: "neutral" };
+const STATUS_TONE: Record<string, Tone> = { healthy: "done", failing: "block", degraded: "wait", offline: "neutral", disabled: "neutral", unknown: "neutral" };
 
 export function Health({ st }: { st: string }) {
   return <Status tone={STATUS_TONE[st] ?? "neutral"}>{STATUS_WORD[st] ?? st}</Status>;
@@ -77,7 +77,7 @@ export function useIntegrationData() {
   const insts = instsQ.data ?? [];
   const projects = useProjects().data ?? [];
   const triggers = useTriggers().data ?? [];
-  const { repos } = useAllRepos();
+  const { repos, read: reposRead } = useAllRepos();
   const live = projects.filter((p) => p.status !== "archived");
   const typeOf = (i: Pick<IntegrationInstance, "type">): TypeRow => types.find((t) => t.id === i.type) ?? ({ id: i.type, name: i.type, category: "custom", icon: "plug", auth: "token", payload: "json", builtIn: false, fields: [], events: [], actions: [] } as TypeRow);
   const pname = (id: string): string => projects.find((p) => p.id === id)?.name ?? id;
@@ -104,7 +104,7 @@ export function useIntegrationData() {
     const rp = typeOf(inst).category === "source" ? repos.filter((r) => (r as unknown as { source?: string }).source === inst.id) : [];
     return { routes, implicit, overrides, triggers: trig, repos: rp };
   };
-  return { types, insts, typesQ, instsQ, projects, live, repos, typeOf, pname, usage, integrationFor };
+  return { types, insts, typesQ, instsQ, projects, live, repos, reposRead, typeOf, pname, usage, integrationFor };
 }
 
 export const usageCount = (u: Usage): number => u.routes.length + u.implicit.length + u.overrides.length + u.triggers.length + u.repos.length;

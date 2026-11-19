@@ -438,6 +438,53 @@ describe("Project config", () => {
     await waitFor(() => expect(calls.find((c) => c.path === "/api/v1/projects/payments/flow/stations/spec")?.body).toEqual({ move: 1 }));
   });
 
+  it("flow tab: a save that is refused halfway says what was saved and what was not, and reloads (S-29)", async () => {
+    let n = 0;
+    const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => (++n === 1 ? ok() : { status: 409, body: { ok: false, msg: "This changed since you loaded it." } }) });
+    tab("flow-advanced");
+    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-st-research"));
+    fireEvent.change(await byId("pcf-wip-spec"), { target: { value: "9" } });
+    fireEvent.click(await byId("flw-save"));
+    const banner = await byId("flw-conflict");
+    await waitFor(() => expect(banner.textContent).toContain("Saved:"));
+    expect(banner.textContent).toMatch(/Saved: .*research/i);
+    expect(banner.textContent).toMatch(/Not saved: .*WIP limit/);
+    expect(banner.textContent).not.toContain("Nothing was saved");
+    expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(2);
+    // the refused write reloaded the project (S-27), so Keep my version carries the version now on the server
+    expect(calls.filter((c) => c.method === "GET" && c.path === "/api/v1/projects").length).toBeGreaterThan(1);
+  });
+
+  it("flow tab: a locked gate mode is offered to an admin (with a reason) and hidden from everyone else", async () => {
+    const modes = async (viewerMayOverride: boolean) => {
+      const locks = { G3G3s: lock({ locked: false, reason: "", viewerMayOverride }) };
+      withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, flowOverride: flowOverride(viewerMayOverride, locks) }, RISK] }) });
+      tab("flow");
+      mount(<ProjectConfigView />);
+      const sel = (await byId("pcf-gmode-G3G3s")) as HTMLSelectElement;
+      const values = Array.from(sel.options).map((o) => o.value);
+      cleanup();
+      return values;
+    };
+    expect(await modes(false)).not.toContain("auto");
+    expect(await modes(true)).toContain("auto");
+  });
+
+  it("flow tab: opening the reason box brings it into view above the sticky Save bar", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    const withLocks = { ...PAYMENTS, flowOverride: flowOverride(true, { G4: lock() }) };
+    withPayments({ "GET /api/v1/projects": () => ({ body: [withLocks, RISK] }) });
+    tab("flow");
+    mount(<ProjectConfigView />);
+    fireEvent.click((await byId("pcf-gate-G4")) as HTMLInputElement);
+    await byId("flw-reason-G4");
+    expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
+    expect(scroll.mock.contexts[0]).toBe(document.getElementById("flw-ovr-G4"));
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
   it("flow tab: a class route tick, a class switched off and Reset routes are part of the draft; Save writes the classes once with If-Match", async () => {
     const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok() });
     tab("flow");

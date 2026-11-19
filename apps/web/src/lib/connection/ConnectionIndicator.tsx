@@ -1,10 +1,12 @@
 import "./connection.css";
-import { useConnection } from "./store";
+import { PAUSED_HINT, connection, useConnection } from "./store";
+import { Btn } from "../../ui/primitives";
 
-const TEXT = { live: "Live", reconnecting: "Reconnecting", offline: "Offline" } as const;
+const TEXT = { live: "Live", reconnecting: "Reconnecting", paused: "Paused", offline: "Offline" } as const;
 const HINT = {
   live: "Live updates are on.",
   reconnecting: "Live updates dropped. Reconnecting; screens refresh on a timer meanwhile.",
+  paused: PAUSED_HINT,
   offline: "No network. Showing the last information we had.",
 } as const;
 
@@ -16,6 +18,7 @@ export function ConnectionIndicator() {
       <span className="conn-dot" aria-hidden="true" />
       <span className="conn-label">{TEXT[state]}</span>
       <span className="conn-sr">{HINT[state]}</span>
+      {state === "paused" ? <Btn small kind="ghost" onClick={() => connection.reconnect()}>Reconnect</Btn> : null}
     </span>
   );
 }

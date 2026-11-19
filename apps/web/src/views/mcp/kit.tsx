@@ -6,6 +6,10 @@ export const SENS = [{ value: "public", label: "Public" }, { value: "internal", 
 export const AUTH_MODES = [{ value: "none", label: "None" }, { value: "bearer", label: "Bearer token" }, { value: "header", label: "API key in a header" }];
 export const TRANSPORTS = [{ value: "http", label: "Streamable HTTP" }, { value: "sse", label: "SSE" }];
 
+/** What the registry shows for a server: switched off, waiting for its tools to be approved again (its address or transport changed), or its health. */
+export const mcpState = (m: Pick<McpServer, "enabled" | "needsReapproval" | "health">): string => (m.needsReapproval ? "needs re-approval" : m.enabled === false ? "disabled" : m.health);
+export const REAPPROVAL_WHY = "Its address or transport changed, so its tools are no longer approved. Discover its tools and approve them before switching it on.";
+
 export const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
 export function Health({ st }: { st: string }) {

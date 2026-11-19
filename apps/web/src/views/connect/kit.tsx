@@ -75,7 +75,7 @@ export function SwitchRow({ id, label, hint, checked, onChange, decision, extra 
 }
 
 /** A chip tone for a health or outcome word, as the prototype's healthTone. */
-export const healthTone = (s: string | null | undefined): string => (s === "healthy" || s === "ok" ? "ok" : s === "degraded" || s === "warning" || s === "pending" || s === "allowed" ? "warn" : s ? (s === "disabled" ? "plain" : "bad") : "plain");
+export const healthTone = (s: string | null | undefined): string => (s === "healthy" || s === "ok" ? "ok" : s === "degraded" || s === "needs re-approval" || s === "warning" || s === "pending" || s === "allowed" ? "warn" : s ? (s === "disabled" ? "plain" : "bad") : "plain");
 
 export interface ListFilter<R> {
   key: string;

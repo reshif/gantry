@@ -40,7 +40,7 @@ export function ConnectedTab({ openInstance, onToggle }: { openInstance: (id: st
                 <div className="row">
                   <h3><button type="button" className="linkish int-name-btn" id={`int-open-${i.id}`} onClick={() => openInstance(i.id)}>{i.name}</button></h3>
                   <span className="spacer" />
-                  <span className={`chip ${tone}`}>{i.connected ? st : "disconnected"}</span>
+                  <span className={`chip ${tone}`}>{i.connected ? (st === "unknown" ? "not tested yet" : st) : "disconnected"}</span>
                 </div>
                 <div className="small muted">{t.name} · {catName(t.category)}</div>
                 <dl className="kv">

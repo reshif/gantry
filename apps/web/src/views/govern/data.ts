@@ -9,27 +9,31 @@ import { policyText, type Catalog, type Policy, type PolicyState, type Repo } fr
 import { api, get, type ApiResult } from "../../api/client";
 import { useAccessMatrix, useMe, usePeople, usePolicies } from "../../api/queries";
 import { qk } from "../../api/keys";
+import { failureOf } from "../../ui/async";
 import { useUI } from "../../ui/overlay-context";
 
 export { useTeams } from "../../api/queries";
 
-/** Every repo in the projects the viewer can see. A project whose repo list cannot be read contributes nothing. */
-export function useAllRepos(): { repos: Repo[]; pending: boolean } {
+/** Why the repo list is incomplete: some project's repo read failed. Never an empty list (F-04). */
+export interface ReposRead { failed: boolean; hidden: boolean; msg: string; retry: () => void }
+
+/** Every repo in the projects the viewer can see. A project whose repo read fails is reported in `read` (with Retry), not folded into "no repos". */
+export function useAllRepos(): { repos: Repo[]; pending: boolean; read: ReposRead } {
   const me = useMe();
   const ids = (me?.projects ?? []).map((p) => p.id);
   const results = useQueries({
     queries: ids.map((id) => ({
       queryKey: qk.repos(id),
-      queryFn: async () => {
-        try {
-          return await get<Repo[]>(api(`projects/${encodeURIComponent(id)}/repos`));
-        } catch {
-          return [] as Repo[];
-        }
-      },
+      queryFn: () => get<Repo[]>(api(`projects/${encodeURIComponent(id)}/repos`)),
     })),
   });
-  return { repos: results.flatMap((r) => r.data ?? []), pending: results.some((r) => r.isPending) };
+  const bad = results.filter((r) => r.isError && r.data === undefined);
+  const f = bad.length ? failureOf(bad[0]?.error) : { hidden: false, msg: "" };
+  return {
+    repos: results.flatMap((r) => r.data ?? []),
+    pending: results.some((r) => r.isPending),
+    read: { failed: bad.length > 0, hidden: f.hidden, msg: f.msg, retry: () => bad.forEach((r) => void r.refetch()) },
+  };
 }
 
 /** What the domain's policy wording needs: roles, actions and project names. */

@@ -16,6 +16,7 @@ import { AddIntegration } from "./integrations/AddDialog";
 import { EditIntegration, InstanceDrawer, RemoveIntegration, ToggleIntegration } from "./integrations/Instance";
 import { CatalogueTab, ConnectedTab, CustomTab } from "./integrations/Tabs";
 import { statusOf, useIntegrationData } from "./integrations/kit";
+import { ReposReadNote } from "./govern/ReposReadNote";
 import { ops } from "../api/ops";
 import "../styles/views/integrations.css";
 
@@ -78,6 +79,7 @@ export default function IntegrationsView() {
   return (
     <div className="view cx int-view">
       <ViewHead title="Integrations" kicker="All lines" sub="Where Gantry reads requests from and writes results to." />
+      <ReposReadNote read={d.reposRead} />
       <StatRow id="int-stats">
         <Stat label="Connected" value={qState(d.instsQ, () => String(all.length - off))} sub={`of ${all.length}`} tone="done" />
         <Stat label="Needs attention" value={qState(d.instsQ, () => String(failing + off + failed))} tone={failing + off + failed ? "wait" : undefined} />

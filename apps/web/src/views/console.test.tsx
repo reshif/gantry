@@ -346,6 +346,31 @@ describe("Console (legacy console.js on the real API)", () => {
       await waitFor(() => expect(document.querySelector(".ccard-confirm.is-failed")).toBeTruthy());
       expect(text()).toContain("Payments Platform is halted already.");
     });
+
+    it("a failed card is not a dead end: it shows the server's needs line and offers Try again, which brings the confirm back (S-18)", async () => {
+      setup({ ...ON, ...tool("propose_halt", proposal()), "POST /api/v1/stops": () => ({ status: 403, body: { ok: false, msg: "Payments Platform is halted already.", needs: "Resume the line first" } }) });
+      mount("/settings");
+      await byId("con-access-link");
+      await ask("/halt payments dup refunds");
+      fireEvent.click(await firstOf("[id^='con-cf-ok-']"));
+      await waitFor(() => expect(document.querySelector(".ccard-confirm.is-failed")).toBeTruthy());
+      expect(document.querySelector("[id^='con-cf-needs-']")!.textContent).toContain("Resume the line first");
+      expect(document.querySelector("[id^='con-cf-ok-']")).toBeNull();
+      fireEvent.click(document.querySelector<HTMLElement>("[id^='con-cf-retry-']")!);
+      await waitFor(() => expect(document.querySelector("[id^='con-cf-ok-']")).toBeTruthy());
+      expect(document.querySelector(".ccard-confirm.is-pending")).toBeTruthy();
+    });
+
+    it("a transient refusal (429) keeps the card pending so the same button retries it", async () => {
+      setup({ ...ON, ...tool("propose_halt", proposal()), "POST /api/v1/stops": () => ({ status: 429, body: { ok: false, msg: "Too many requests." } }) });
+      mount("/settings");
+      await byId("con-access-link");
+      await ask("/halt payments dup refunds");
+      fireEvent.click(await firstOf("[id^='con-cf-ok-']"));
+      await waitFor(() => expect(text()).toContain("Too many requests."));
+      expect(document.querySelector(".ccard-confirm.is-failed")).toBeNull();
+      expect(document.querySelector("[id^='con-cf-ok-']")).toBeTruthy();
+    });
   });
 
   describe("context panel and settings", () => {
