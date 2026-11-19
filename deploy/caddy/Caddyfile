@@ -1,27 +1,51 @@
-# Ingress for the local Gantry stack. The container listens on 8443; compose publishes it as 127.0.0.1:443 only.
-# `tls internal` issues a certificate from Caddy's local CA (root at /data/caddy/pki/authorities/local/root.crt in the
-# caddydata volume; see deploy/README.md for trusting it).
+# Ingress for the Gantry stack. The container listens on 8443 (HTTPS) and 8080 (HTTP, ACME challenges only); compose
+# publishes 8443 as 127.0.0.1:443 locally and as :443 in the production profile.
+#   GANTRY_HOSTNAME  the site's name (default localhost)
+#   GANTRY_TLS       `internal` (default): a certificate from Caddy's local CA (root at
+#                    /data/caddy/pki/authorities/local/root.crt in the caddydata volume; see deploy/README.md);
+#                    an email address: a public certificate from Let's Encrypt (ACME), renewed automatically;
+#                    `/certs/tls.crt /certs/tls.key`: your own certificate, mounted at /certs (deploy/PRODUCTION.md).
 {
 	admin off
+	http_port 8080
+	https_port 8443
 	auto_https disable_redirects
-	default_sni localhost
+	default_sni {$GANTRY_HOSTNAME:localhost}
 	skip_install_trust
 	servers {
 		protocols h1 h2
 	}
 }
 
-https://localhost:8443 {
-	tls internal
+https://{$GANTRY_HOSTNAME:localhost} {
+	tls {$GANTRY_TLS:internal}
 
 	log {
 		output stdout
-		format json
+		# Invite tokens, OIDC codes and id_token_hint travel in query strings, and the CSRF token in a header: none of them belong in a log.
+		# Caddy redacts Authorization and Cookie by default; the rest are replaced here. Names are matched after Caddy decodes the query
+		# (so %63ode is caught) and case-sensitively, which matches the API and Keycloak: both ignore ?Code= and ?INVITE=.
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					replace invite REDACTED
+					replace code REDACTED
+					replace state REDACTED
+					replace session_state REDACTED
+					replace id_token_hint REDACTED
+					replace login_hint REDACTED
+					replace token REDACTED
+				}
+				request>headers>X-Csrf-Token replace REDACTED
+				request>headers>X-Api-Key replace REDACTED
+			}
+		}
 	}
 
 	# Headers every response gets. `?` keeps a header an upstream already set (Keycloak and Mailpit send their own).
 	header {
-		?Strict-Transport-Security "max-age=31536000"
+		?Strict-Transport-Security "max-age=63072000; includeSubDomains"
 		?X-Content-Type-Options "nosniff"
 		?Referrer-Policy "no-referrer"
 		?Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
@@ -38,7 +62,8 @@ https://localhost:8443 {
 	@api path /api/* /auth/* /hooks/*
 	handle @api {
 		header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
-		header Cache-Control "no-store"
+		# The API sends its own Cache-Control (no-store; the event stream sends no-cache): `?` adds one only when it sent none, so the header is never doubled.
+		header ?Cache-Control "no-store"
 		reverse_proxy gantry-api:8000 {
 			flush_interval -1
 			transport http {
@@ -49,14 +74,20 @@ https://localhost:8443 {
 	}
 
 	# Identity provider (Keycloak serves under /idp and sets its own CSP and frame headers).
-	handle /idp/* {
+	# Only the gantry realm (sign-in, tokens, account) and the static resources its pages load are public.
+	# The admin console, the admin REST API and the master realm are never reachable through the ingress:
+	# administrators use the loopback-only port (see deploy/README.md, "Keycloak admin console").
+	@idp path /idp/realms/gantry/* /idp/resources/*
+	handle @idp {
 		reverse_proxy keycloak:8081
 	}
-
-	# Mail catcher UI (development only; MP_WEBROOT=/mail).
-	handle /mail/* {
-		reverse_proxy mailpit:8025
+	handle /idp/* {
+		header Cache-Control "no-store"
+		respond "Not found" 404
 	}
+
+	# Development-only routes (the Mailpit inbox, the /v3 preview). Opt-in: only GANTRY_INGRESS_PROFILE=dev imports them; the default (prod) imports an empty file.
+	import /etc/caddy/profiles/{$GANTRY_INGRESS_PROFILE:prod}.caddy
 
 	# Everything else is the single-page app.
 	handle {
@@ -64,5 +95,26 @@ https://localhost:8443 {
 		header X-Frame-Options "DENY"
 		encode zstd gzip
 		reverse_proxy gantry-web:8080
+	}
+}
+
+# The container's healthcheck: plain HTTP on the container's own loopback, so it works whatever the site's name and
+# certificate are (busybox wget cannot send the site name as SNI to 127.0.0.1).
+http://127.0.0.1:8079 {
+	bind 127.0.0.1
+	respond /healthz "ok" 200
+	respond 404
+}
+
+# Keycloak admin console and admin API, for operators only. Compose publishes this listener as 127.0.0.1:8081, so it is
+# reachable from the host itself (or through an SSH tunnel), never from the network. KC_HOSTNAME_ADMIN points here.
+http://localhost:8081 {
+	header -Server
+	@admin path /idp/admin/* /idp/realms/master/* /idp/resources/* /idp/js/*
+	handle @admin {
+		reverse_proxy keycloak:8081
+	}
+	handle {
+		respond "Not found" 404
 	}
 }

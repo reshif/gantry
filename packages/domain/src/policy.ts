@@ -8,7 +8,7 @@
  *   4. Conditional allow policies (release windows): if any exist for the action, one must match.
  * Gate approvals add approver rules on top: gateDecision() in flow.ts. Times are IST.
  */
-import { CONSOLE_RIGHTS, DEFAULT_CATALOG } from "./catalog.js";
+import { CONSOLE_RIGHTS, DEFAULT_CATALOG, actionScopeOf, roleMayHold } from "./catalog.js";
 import { DAY, DAYS, HOUR, MIN, fmt, hm, ist, istTime, istToday } from "./format.js";
 import type { Action, Catalog, Decision, DecisionRule, Freeze, KillInfo, Matrix, Person, Policy, PolicyWhen, Project, Repo, Role, Team, WorkOrder } from "./types.js";
 
@@ -20,7 +20,7 @@ export interface PolicyState {
   matrix: Matrix;
   policies: Policy[];
   freezes: Freeze[];
-  projects: Array<Pick<Project, "id" | "name" | "status"> & Partial<Pick<Project, "killed" | "halted" | "regulated">>>;
+  projects: Array<Pick<Project, "id" | "name" | "status"> & Partial<Pick<Project, "killed" | "halted" | "regulated" | "oncall">>>;
   repos: Array<Pick<Repo, "id" | "name" | "project"> & Partial<Pick<Repo, "halted">>>;
   /** Factory-level stop. Project, repo and work-order stops are read from their own records. */
   stops?: { factory: KillInfo | null };
@@ -37,8 +37,12 @@ export interface PolicyContext {
   time?: number;
   /** The work order the action targets, for work-order-level stops. */
   wo?: Pick<WorkOrder, "id" | "killed" | "state"> | null;
+  /** A Factory Admin has given a reason for a break-glass override of a freeze or an andon halt (owner decision 2026-11-19). The caller records it in the audit. */
+  override?: boolean;
 }
 
+/** A policy role of "*" means anyone (the UI calls it "Anyone"). */
+export const ANYONE = "*";
 const MATRIX_RULE: DecisionRule = { kind: "matrix", id: "MATRIX", name: "Role matrix" };
 
 export function rolesOf(state: PolicyState): readonly Role[] {
@@ -46,6 +50,11 @@ export function rolesOf(state: PolicyState): readonly Role[] {
 }
 export function actionsOf(state: PolicyState): readonly Action[] {
   return state.catalog?.actions ?? DEFAULT_CATALOG.actions;
+}
+/** Does the matrix let this role do the action? A factory-scope right held by a project-level role is ignored, whatever the stored matrix says. */
+export function roleHolds(state: Pick<PolicyState, "matrix" | "catalog">, role: string, action: string): boolean {
+  /* Factory Admin is universal (owner decision 2026-11-19): every cell of its column is on, whatever the stored matrix says. */
+  return (role === "factory_admin" || !!state.matrix[role]?.[action]) && roleMayHold(state.catalog?.roles ?? DEFAULT_CATALOG.roles, state.catalog?.actions ?? DEFAULT_CATALOG.actions, role, action);
 }
 
 /* ------------------------------------------------------------------ lookups ------------- */
@@ -95,13 +104,13 @@ export function grantSource(state: Pick<PolicyState, "teams">, g: { via?: string
  * Where a person's permission to do `action` comes from: the distinct sources ("direct", team ids) of the grants in scope whose role
  * the matrix lets do it. Empty when no role grants it (an allow by an extend policy has no role source).
  */
-export function permissionSources(state: Pick<PolicyState, "matrix">, person: Person, action: string, projectId: string | null, scoped: boolean): string[] {
-  const grants = person.roles.filter((g) => g.scope === "factory" || (scoped && (!projectId || g.scope === projectId))).filter((g) => state.matrix[g.role]?.[action]);
+export function permissionSources(state: Pick<PolicyState, "matrix" | "catalog">, person: Person, action: string, projectId: string | null, scoped: boolean): string[] {
+  const grants = person.roles.filter((g) => g.scope === "factory" || (scoped && (!projectId || g.scope === projectId))).filter((g) => roleHolds(state, g.role, action));
   return [...new Set(grants.map((g) => g.via ?? "direct"))];
 }
 export function isFactoryAdmin(state: PolicyState, personId: string): boolean {
   const p = findPerson(state, personId);
-  return !!p && p.roles.some((g) => g.role === "factory_admin");
+  return !!p && p.roles.some((g) => g.role === "factory_admin" && g.scope === "factory");
 }
 export function visibleProjects(state: PolicyState, personId: string) {
   const p = findPerson(state, personId);
@@ -161,6 +170,8 @@ export interface StopInfo {
   mode: StopMode;
   reason: string;
   kill?: KillInfo;
+  /** For a halt: why it was raised (`readiness`, `budget`, `manual`). */
+  cause?: string;
 }
 
 const MODE_SEVERITY: Record<StopMode, number> = { halt: 1, kill: 2, archived: 2 };
@@ -197,7 +208,7 @@ export function effectiveStop(state: PolicyState, scope: { project?: string | nu
   const p = findProject(state, scope.project);
   if (p && p.halted) found.push({ level: "project", mode: "halt", reason: p.name + " is halted (andon): " + p.halted.reason });
   const r = findRepo(state, scope.repo);
-  if (r && r.halted) found.push({ level: "repo", mode: "halt", reason: r.name + " is halted (andon): " + r.halted.reason });
+  if (r && r.halted) found.push({ level: "repo", mode: "halt", reason: r.name + " is halted (andon): " + r.halted.reason, ...(r.halted.cause ? { cause: r.halted.cause } : {}) });
   const w = scope.wo;
   if (w && (w.killed || w.state === "killed")) found.push({ level: "workorder", mode: "kill", reason: w.id + " is killed" + (w.killed ? ": " + w.killed.reason + "." : "."), ...(w.killed ? { kill: w.killed } : {}) });
   if (!found.length) return null;
@@ -206,7 +217,7 @@ export function effectiveStop(state: PolicyState, scope: { project?: string | nu
 }
 
 /** Stop controls and reads keep working in a stopped scope (I7). */
-const STOP_EXEMPT = new Set(["project.view", "audit.view", "line.halt", "line.resume", "kill.workorder", "restore.workorder", "kill.project", "restore.project", "kill.factory", "restore.factory"]);
+const STOP_EXEMPT = new Set(["project.view", "audit.view", "line.halt", "line.resume", "halt.factory", "resume.factory", "kill.workorder", "restore.workorder", "kill.project", "restore.project", "kill.factory", "restore.factory"]);
 /** A halt blocks gate progression, merges and moves; a kill or archive blocks all stoppable work. */
 const HALT_BLOCKS = new Set(["gate.approve", "release", "onboarding.merge", "wo.move", "brief.confirm"]);
 const STOPPABLE_GROUPS = new Set(["Work", "Gates", "Onboarding"]);
@@ -216,6 +227,8 @@ export function stopBlocks(state: PolicyState, action: string, stop: StopInfo): 
   if (STOP_EXEMPT.has(action)) return false;
   const act = actionsOf(state).find((a) => a.id === action);
   if (!act || act.scope !== "project" || !STOPPABLE_GROUPS.has(act.group)) return false;
+  // A halt Gantry raised for readiness never blocks the merge of the onboarding PR: that merge is how readiness is regained (onboarding/fence.ts says the same).
+  if (stop.mode === "halt" && stop.cause === "readiness" && action === "onboarding.merge") return false;
   return stop.mode === "halt" ? HALT_BLOCKS.has(action) : true;
 }
 
@@ -229,12 +242,24 @@ function whereOk(q: Policy, projectId: string | null): boolean {
 }
 
 /** Actions a Factory Admin keeps even if the matrix is damaged (I7): stopping and restoring. */
-const ADMIN_ALWAYS = new Set(["line.halt", "line.resume", "kill.workorder", "restore.workorder", "kill.project", "restore.project", "kill.factory", "restore.factory"]);
+const ADMIN_ALWAYS = new Set(["line.halt", "line.resume", "halt.factory", "resume.factory", "kill.workorder", "restore.workorder", "kill.project", "restore.project", "kill.factory", "restore.factory"]);
+
+/** Gate and release actions a Factory Admin may pass during an andon halt with a reason ("Approve anyway"). A kill still blocks them. */
+export const HALT_OVERRIDE_ACTIONS: ReadonlySet<string> = new Set(["gate.approve", "release", "brief.confirm"]);
+
+export interface OverrideMarks { kind: "freeze" | "halt" | null }
 
 export function can(state: PolicyState, personId: string | null | undefined, action: string, ctx: PolicyContext = {}): Decision {
-  const matrix = state.matrix;
+  const marks: OverrideMarks = { kind: null };
+  const d = canCore(state, personId, action, ctx, marks);
+  if (d.allowed && marks.kind) return { ...d, override: true, overrideKind: marks.kind, reason: d.reason + " Factory Admin override of " + (marks.kind === "freeze" ? "the freeze" : "the halt") + "." };
+  return d;
+}
+
+function canCore(state: PolicyState, personId: string | null | undefined, action: string, ctx: PolicyContext, marks: OverrideMarks): Decision {
   const person = findPerson(state, personId);
   const act = actionsOf(state).find((a) => a.id === action);
+  const scope = actionScopeOf(actionsOf(state), action) ?? act?.scope;
   const time = ctx.time ?? Date.now();
   const repo = ctx.repo ? findRepo(state, ctx.repo) : undefined;
   const projectId = ctx.project || repo?.project || null;
@@ -242,25 +267,31 @@ export function can(state: PolicyState, personId: string | null | undefined, act
   if (!person) return { allowed: false, reason: "Not signed in.", rule: MATRIX_RULE, needs: "Sign in" };
   if (person.status !== "active") return { allowed: false, reason: person.name + " has not accepted the invite yet.", rule: MATRIX_RULE, needs: "Accepted invite" };
 
-  const scoped = act?.scope === "project";
+  const scoped = scope === "project";
   /* A factory-scoped action (audit.view, eval.run, people.manage ...) needs a factory-level grant: a role held on one project never reaches beyond it. */
-  const factoryOnly = act?.scope === "factory";
+  const factoryOnly = scope === "factory";
   const grants = person.roles.filter((g) => g.scope === "factory" || (!factoryOnly && (!scoped || !projectId || g.scope === projectId)));
   // Own grants first: when both a direct grant and a team grant allow it, the reason names the direct one.
-  const granting = grants.filter((g) => matrix[g.role]?.[action]).sort((a, b) => Number(!!a.via) - Number(!!b.via));
+  const granting = grants.filter((g) => roleHolds(state, g.role, action)).sort((a, b) => Number(!!a.via) - Number(!!b.via));
   const heldRoles = grants.map((g) => g.role);
   const t = ist(time);
+  const onCall = isOnCall(state, person, projectId);
 
   /* spec 9.7: stop state of the scope refuses work; stop controls themselves are exempt (I7) */
   const stop = effectiveStop(state, { project: projectId, repo: ctx.repo ?? null, wo: ctx.wo ?? null });
   /* an archived project is not a stop: only kill and andon halt refuse work here (archived is handled by submitGuard and moveCheck) */
+  const adminHere = granting.some((g) => g.role === "factory_admin" && g.scope === "factory");
   if (stop && stop.mode !== "archived" && granting.length && stopBlocks(state, action, stop)) {
-    return { allowed: false, reason: stop.reason, rule: { kind: "stop", id: "STOP-" + stop.level.toUpperCase(), name: "Stop state" }, needs: stop.mode === "halt" ? "Resume first" : "Restore first" };
+    /* Owner decision 2026-11-19: a Factory Admin may approve a gate or release during a halt with a reason. The halt stays for everyone else; a kill still blocks. */
+    if (adminHere && stop.mode === "halt" && HALT_OVERRIDE_ACTIONS.has(action)) {
+      if (!ctx.override) return { allowed: false, reason: stop.reason, rule: { kind: "stop", id: "STOP-" + stop.level.toUpperCase(), name: "Stop state" }, needs: "override_reason", override: true, overrideKind: "halt" };
+      marks.kind = "halt";
+    } else return { allowed: false, reason: stop.reason, rule: { kind: "stop", id: "STOP-" + stop.level.toUpperCase(), name: "Stop state" }, needs: stop.mode === "halt" ? "Resume first" : "Restore first" };
   }
 
   if (!granting.length) {
     const ext = state.policies.filter((p) => p.enabled && p.extend && p.effect === "allow" && p.actions.includes(action));
-    const hit = ext.find((q) => q.roles.some((r) => heldRoles.includes(r)) && whereOk(q, projectId) && whenOk(q, t) && (!q.oncallOnly || person.oncall));
+    const hit = ext.find((q) => q.roles.some((r) => r === ANYONE || heldRoles.includes(r)) && whereOk(q, projectId) && whenOk(q, t) && (!q.oncallOnly || onCall));
     if (hit) return { allowed: true, reason: "Allowed by " + hit.id + " '" + hit.name + "'.", rule: { kind: "policy", id: hit.id, name: hit.name }, needs: "" };
     /* I7: a Factory Admin can always halt, kill and restore, even if the matrix is damaged */
     if (ADMIN_ALWAYS.has(action) && person.roles.some((g) => g.role === "factory_admin" && g.scope === "factory")) {
@@ -270,16 +301,16 @@ export function can(state: PolicyState, personId: string | null | undefined, act
     if (CONSOLE_RIGHTS.includes(action) && person.roles.some((g) => g.role === "factory_admin" && g.scope === "factory")) {
       return { allowed: true, reason: "Factory Admin always has every console right.", rule: { kind: "invariant", id: "I-CONSOLE", name: "Factory Admin console rights" }, needs: "" };
     }
-    let rolesWith = rolesOf(state).filter((r) => matrix[r.id]?.[action] && r.id !== "factory_admin").map((r) => r.id);
+    let rolesWith = rolesOf(state).filter((r) => roleHolds(state, r.id, action) && r.id !== "factory_admin").map((r) => r.id);
     if (!rolesWith.length) rolesWith = ["factory_admin"];
     const needs = "Needs " + roleNames(state, rolesWith.slice(0, 2)) + (scoped && project ? " on " + project.name : "");
-    const outOfScope = person.roles.some((g) => matrix[g.role]?.[action]);
+    const outOfScope = person.roles.some((g) => roleHolds(state, g.role, action));
     let reason = outOfScope
       ? factoryOnly
         ? person.name + "'s roles that allow this are held on single projects; '" + (act ? act.name : action) + "' needs a factory-level role."
         : person.name + "'s roles that allow this do not cover " + (project ? project.name : "this scope") + "."
       : "No role held by " + person.name + (scoped && project ? " in " + project.name : "") + " includes '" + (act ? act.name : action) + "'.";
-    if (ext.length && ext.some((q) => q.oncallOnly && q.roles.some((r) => heldRoles.includes(r))) && !person.oncall) reason += " " + (ext[0] as Policy).id + " would allow it while on call.";
+    if (ext.length && ext.some((q) => q.oncallOnly && q.roles.some((r) => heldRoles.includes(r))) && !onCall) reason += " " + (ext[0] as Policy).id + " would allow it while on call.";
     return { allowed: false, reason, rule: MATRIX_RULE, needs };
   }
 
@@ -288,14 +319,19 @@ export function can(state: PolicyState, personId: string | null | undefined, act
   for (const p of denies) {
     if (p.where.freeze && repo) {
       const f = activeFreeze(state, repo.id, time);
-      if (f) {
+      if (f && adminHere) {
+        /* A release freeze stops everyone else; a Factory Admin passes it with a reason, audited (owner decision 2026-11-19). */
+        if (!ctx.override) return { allowed: false, reason: "Freeze " + f.id + " '" + f.name + "' is active on " + repo.name + " until " + fmt.stamp(f.to) + ".", rule: { kind: "policy", id: p.id, name: p.name, freeze: f.id }, needs: "override_reason", override: true, overrideKind: "freeze" };
+        marks.kind = "freeze";
+      } else if (f) {
         return { allowed: false, reason: "Freeze " + f.id + " '" + f.name + "' is active on " + repo.name + " until " + fmt.stamp(f.to) + ".", rule: { kind: "policy", id: p.id, name: p.name, freeze: f.id }, needs: "Wait for the freeze to end" };
       }
     }
   }
   const allows = state.policies.filter((p) => p.enabled && p.effect === "allow" && !p.extend && p.actions.includes(action));
-  if (allows.length) {
-    const applicable = allows.filter((q) => q.roles.some((r) => held.includes(r)) && whereOk(q, projectId));
+  /* Owner decision 2026-11-19: allow policies (windows, on-call) never restrict a Factory Admin, whether or not they name the role. */
+  if (allows.length && !adminHere) {
+    const applicable = allows.filter((q) => q.roles.some((r) => r === ANYONE || held.includes(r)) && whereOk(q, projectId));
     if (!applicable.length) {
       return {
         allowed: false,
@@ -306,8 +342,8 @@ export function can(state: PolicyState, personId: string | null | undefined, act
     }
     let why: { q: Policy; text: string } | null = null;
     for (const q of applicable) {
-      if (whenOk(q, t) && (!q.oncallOnly || person.oncall)) return { allowed: true, reason: "Allowed by " + q.id + " '" + q.name + "'.", rule: { kind: "policy", id: q.id, name: q.name }, needs: "" };
-      if (!why) why = { q, text: q.oncallOnly && !person.oncall ? person.name + " is not on call; " + q.id + " applies only on call." : "Outside the window in " + q.id + ": " + policyText.when(q.when) + "." };
+      if (whenOk(q, t) && (!q.oncallOnly || onCall)) return { allowed: true, reason: "Allowed by " + q.id + " '" + q.name + "'.", rule: { kind: "policy", id: q.id, name: q.name }, needs: "" };
+      if (!why) why = { q, text: q.oncallOnly && !onCall ? person.name + " is not on call; " + q.id + " applies only on call." : "Outside the window in " + q.id + ": " + policyText.when(q.when) + "." };
     }
     const w = why as { q: Policy; text: string };
     return { allowed: false, reason: w.text, rule: { kind: "policy", id: w.q.id, name: w.q.name }, needs: "Allowed " + policyText.when(w.q.when) + (w.q.oncallOnly ? " while on call" : "") };
@@ -315,6 +351,19 @@ export function can(state: PolicyState, personId: string | null | undefined, act
   const g0 = granting[0] as { role: string; scope: string; via?: string };
   const scopeName = g0.scope === "factory" ? "the factory" : findProject(state, g0.scope)?.name ?? g0.scope;
   return { allowed: true, reason: "Role matrix: " + roleName(state, g0.role) + " on " + scopeName + (g0.via ? " (" + grantSource(state, g0) + ")" : "") + " may " + (act ? act.name.toLowerCase() : action) + ".", rule: MATRIX_RULE, needs: "" };
+}
+
+/**
+ * On call for a project (owner decision 7, 2026-11-15): a Factory Admin always counts, on every project, so the factory always
+ * has someone who can act; anyone else counts only on the projects whose admins put them on call. Being on call for one
+ * project never unlocks an on-call rule on another project, and nobody can put themselves on call.
+ */
+export function isOnCall(state: { projects: ReadonlyArray<Pick<Project, "id" | "oncall">> }, person: Pick<Person, "id" | "roles">, projectId: string | null | undefined): boolean {
+  if (person.roles.some((g) => g.role === "factory_admin" && g.scope === "factory")) return true;
+  // A question asked without a project ("may they do this anywhere?") counts any project, as role grants do in can().
+  if (!projectId) return state.projects.some((x) => Array.isArray(x.oncall) && x.oncall.includes(person.id));
+  const p = state.projects.find((x) => x.id === projectId);
+  return !!p && Array.isArray(p.oncall) && p.oncall.includes(person.id);
 }
 
 /** Batch form behind `POST /api/v1/can`. */
@@ -345,12 +394,11 @@ export function policyTrace(state: PolicyState, personId: string, action: string
   const p = findPerson(state, personId);
   const act = actionsOf(state).find((a) => a.id === action);
   if (!p || !act) return ["Unknown person or action."];
-  const m = state.matrix;
   const scoped = act.scope === "project";
   const pid = ctx.project || null;
   const time = ctx.time ?? Date.now();
   const grants = p.roles.filter((g) => g.scope === "factory" || (act.scope !== "factory" && (!scoped || !pid || g.scope === pid)));
-  const granting = grants.filter((g) => m[g.role]?.[act.id]);
+  const granting = grants.filter((g) => roleHolds(state, g.role, act.id));
   const pols = state.policies.filter((q) => q.actions.includes(act.id));
   const repo = ctx.repo ? findRepo(state, ctx.repo) : undefined;
   const frz = repo ? activeFreeze(state, repo.id, time) : null;
@@ -362,7 +410,7 @@ export function policyTrace(state: PolicyState, personId: string, action: string
   out.push("Policies on this action: " + (pols.length ? pols.map((q) => q.id + (q.enabled ? "" : " (off)")).join(", ") : "none, so the matrix decides") + ".");
   out.push("Deciding rule: " + d.rule.id + " " + (d.rule.name || "") + ". " + d.reason);
   if (d.needs && !d.allowed) out.push("To allow it: " + d.needs + ".");
-  const holders = rolesOf(state).filter((r) => m[r.id]?.[act.id]).map((r) => r.name);
+  const holders = rolesOf(state).filter((r) => roleHolds(state, r.id, act.id)).map((r) => r.name);
   if (!d.allowed && holders.length) out.push("Roles that include it: " + holders.join(", ") + ".");
   return out;
 }

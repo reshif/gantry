@@ -62,7 +62,7 @@ d("OIDC sign-in against a local issuer", () => {
     // A named account forces the login form, so another person's SSO session at the provider cannot stand in for it.
     expect(u.searchParams.get("prompt")).toBe("login");
     const plain = new URL(String((await t.app.inject("/auth/login")).headers.location));
-    expect(plain.searchParams.get("prompt")).toBeNull(); // a plain sign-in may reuse the provider's session
+    expect(plain.searchParams.get("prompt")).toBe("login"); // S-130: a plain sign-in never reuses the provider's own session
     const c = r.cookies.find((x) => x.name === "gantry_oidc")!;
     expect(c).toMatchObject({ httpOnly: true, sameSite: "Lax", secure: true });
     expect(c.value).not.toContain(u.searchParams.get("state")!); // sealed, not readable
@@ -120,6 +120,10 @@ d("OIDC sign-in against a local issuer", () => {
     expect(await outcomes()).toEqual({ outcome: "denied", reason: "email_unverified" });
     x = await signInFlow(t, issuer, { sub: "u2" });
     expect(await outcomes()).toEqual({ outcome: "denied", reason: "no_email" });
+    // A provider that omits email_verified does not link or provision by address.
+    x = await signInFlow(t, issuer, { sub: "u4", email: "u4@acme.dev" });
+    expect(x.session).toBeUndefined();
+    expect(await outcomes()).toEqual({ outcome: "denied", reason: "email_unverified" });
 
     await setSecurity(t, { domains: ["acme.dev"] });
     x = await signInFlow(t, issuer, { sub: "u3", email: "u3@evil.example", email_verified: true });
@@ -276,18 +280,60 @@ d("OIDC sign-in against a local issuer", () => {
     expect(plain.r.headers.location).toBe("/");
   });
 
+  it("an invited person is claimed only with the invite link's one-time token, which works once", async () => {
+    const { createHash } = await import("node:crypto");
+    const token = "tok_" + "x".repeat(28);
+    await t.db.admin.query(`insert into people (org_id, id, name, title, email, status) values ($1, 'p-nina', 'Nina Park', 'Invited', 'nina@acme.dev', 'invited')`, [t.orgId]);
+    await t.db.admin.query(`insert into invites (org_id, id, email, token_hash, expires_at) values ($1, 'p-nina', 'nina@acme.dev', $2, now() + interval '1 day')`, [t.orgId, createHash("sha256").update(token).digest("hex")]);
+    const nina = { sub: "kc-nina", email: "nina@acme.dev", email_verified: true, name: "Nina Park" };
+    // the right address alone is refused, and the invitee stays unclaimed
+    const bare = await signInFlow(t, issuer, { ...nina, auth_time: now() });
+    expect(bare.session).toBeUndefined();
+    expect(decodeURIComponent(String(bare.r.headers.location))).toContain("Open the invite link from your email");
+    expect((await t.db.admin.query(`select idp_subject, status from people where id = 'p-nina'`)).rows[0]).toEqual({ idp_subject: null, status: "invited" });
+    // a wrong token is refused too
+    const wrong = await signInFlow(t, issuer, { ...nina, auth_time: now() }, { query: `?invite=${"y".repeat(32)}` });
+    expect(wrong.session).toBeUndefined();
+    // the invite link's token links and activates the person and spends the invite
+    const ok = await signInFlow(t, issuer, { ...nina, auth_time: now() }, { query: `?invite=${token}&login_hint=nina%40acme.dev` });
+    expect(ok.session).toBeTruthy();
+    expect((await t.db.admin.query(`select idp_subject, status from people where id = 'p-nina'`)).rows[0]).toEqual({ idp_subject: "kc-nina", status: "active" });
+    expect((await t.db.admin.query(`select status from invites where id = 'p-nina'`)).rows[0].status).toBe("accepted");
+    // another identity replaying the same link gets nothing
+    const replay = await signInFlow(t, issuer, { sub: "kc-mallory", email: "nina@acme.dev", email_verified: true, auth_time: now() }, { query: `?invite=${token}` });
+    expect(replay.session).toBeUndefined();
+  });
+
+  it("logout also ends the provider session: it returns the end-session URL with the sealed ID token as the hint", async () => {
+    const { r, session } = await signInFlow(t, issuer, { ...asha, auth_time: now() });
+    const idt = r.cookies.find((c) => c.name === "gantry_idt");
+    expect(idt).toMatchObject({ httpOnly: true, path: "/auth" });
+    expect(idt!.value).not.toMatch(/^ey/); // sealed, not the raw JWT
+    const cookie = `__Host-gantry_session=${session!.value}; gantry_idt=${idt!.value}`;
+    const me = (await t.app.inject({ url: "/api/v1/me", headers: { cookie } })).json();
+    const out = (await t.app.inject({ method: "POST", url: "/auth/logout", headers: { cookie, "x-csrf-token": me.csrf } })).json();
+    const u = new URL(out.logoutUrl);
+    expect(`${u.origin}${u.pathname}`).toBe(`${issuer.issuer}/logout`);
+    expect(u.searchParams.get("client_id")).toBe("gantry-web");
+    expect(u.searchParams.get("post_logout_redirect_uri")).toMatch(/\/$/);
+    expect(u.searchParams.get("id_token_hint")).toMatch(/^ey/);
+  });
+
   it("logout needs the CSRF token, revokes the session, clears the cookie and records the event", async () => {
     const { session } = await signInFlow(t, issuer, { ...asha, auth_time: now() });
     const cookie = `__Host-gantry_session=${session!.value}`;
     const me = (await t.app.inject({ url: "/api/v1/me", headers: { cookie } })).json();
+    const signouts = async () => (await t.db.admin.query(`select 1 from events where type = 'auth.signout'`)).rowCount;
+    const before = await signouts();
     const forged = await t.app.inject({ method: "POST", url: "/auth/logout", headers: { cookie } });
     expect(forged.statusCode).toBe(403);
     expect((await t.app.inject({ url: "/api/v1/me", headers: { cookie } })).statusCode).toBe(200); // still signed in
     const out = await t.app.inject({ method: "POST", url: "/auth/logout", headers: { cookie, "x-csrf-token": me.csrf } });
     expect(out.statusCode).toBe(200);
     expect(out.cookies.find((c) => c.name === "__Host-gantry_session")?.value).toBe("");
+    expect(out.cookies.find((c) => c.name === "gantry_idt")?.value).toBe("");
     expect((await t.app.inject({ url: "/api/v1/me", headers: { cookie } })).statusCode).toBe(401);
-    expect((await t.db.admin.query(`select 1 from events where type = 'auth.signout'`)).rowCount).toBe(1);
+    expect(await signouts()).toBe(before! + 1);
     expect((await t.app.inject({ method: "POST", url: "/auth/logout" })).statusCode).toBe(200); // already signed out
   });
 });
@@ -315,9 +361,10 @@ d("an empty org: bootstrap admin", () => {
   });
 
   it("does not make the bootstrap email Factory Admin unless the provider verified it", async () => {
+    // An unverified address does not sign in at all, so it can never claim the bootstrap Factory Admin.
     const unverified = await signInFlow(t, issuer, { sub: "boss-1", email: "boss@corp.example", name: "The Boss", auth_time: now() });
-    const me = (await t.app.inject({ url: "/api/v1/me", headers: { cookie: `__Host-gantry_session=${unverified.session!.value}` } })).json();
-    expect(me.person.roles).toEqual([]);
+    expect(unverified.session).toBeUndefined();
+    expect((await t.db.admin.query(`select 1 from role_assignments where role_id = 'factory_admin' and revoked_at is null`)).rowCount).toBe(0);
   });
 
   it("the first sign-in with the bootstrap email becomes Factory Admin; others get nothing", async () => {
@@ -330,8 +377,9 @@ d("an empty org: bootstrap admin", () => {
     expect(can.json().results.map((r: { allowed: boolean }) => r.allowed)).toEqual([true, true]);
 
     const other = await signInFlow(t, issuer, { sub: "other-1", email: "other@corp.example", email_verified: true, name: "Other", auth_time: now() });
-    const me2 = (await t.app.inject({ url: "/api/v1/me", headers: { cookie: `__Host-gantry_session=${other.session!.value}` } })).json();
-    expect(me2.person.roles).toEqual([]);
+    // S-71: no sign-in domain list here, so a stranger is created as invited (pending approval) and gets no session until an admin approves.
+    expect(other.session).toBeUndefined();
+    expect((await t.db.admin.query(`select status from people where email = 'other@corp.example'`)).rows[0].status).toBe("invited");
     // a second sign-in of the bootstrap email does not grant again once an admin exists
     await t.db.admin.query(`update role_assignments set revoked_at = now()`);
     await t.db.admin.query(`insert into role_assignments (org_id, id, person_id, role_id, scope_type) select org_id, 'ra-x', id, 'factory_admin', 'factory' from people where email = 'other@corp.example'`);

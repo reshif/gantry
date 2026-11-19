@@ -9,6 +9,7 @@ import type { GithubConfig } from "./config.js";
 import { BrokerError } from "./errors.js";
 import { GithubApp, splitRepo, toApiError } from "./github.js";
 import { prFact } from "./publish.js";
+import { redactSecrets } from "./redact.js";
 
 export interface OpDeps { cfg: Pick<GithubConfig, "gateCheckName" | "issueLabel">; app: GithubApp; api: ApiClient; appId: number }
 
@@ -99,13 +100,13 @@ export async function readPrState(d: OpDeps, repo: string, number: number): Prom
       const req = rq(c.octokit);
       const pr = (await req("GET /repos/{owner}/{repo}/pulls/{pull_number}", { owner, repo: name, pull_number: number })).data;
       const head = pr.head.sha as string;
-      const checks = await paged(req, "GET /repos/{owner}/{repo}/commits/{ref}/check-runs", { owner, repo: name, ref: head }, (x) => x.check_runs as Record<string, any>[]);
-      const reviews = await paged(req, "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews", { owner, repo: name, pull_number: number }, (x) => x as Record<string, any>[]);
+      const checks = await paged(req, "GET /repos/{owner}/{repo}/commits/{ref}/check-runs", { owner, repo: name, ref: head }, (x) => x.check_runs as Record<string, any>[]); // eslint-disable-line @typescript-eslint/no-explicit-any
+      const reviews = await paged(req, "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews", { owner, repo: name, pull_number: number }, (x) => x as Record<string, any>[]); // eslint-disable-line @typescript-eslint/no-explicit-any
       const combined = (await req("GET /repos/{owner}/{repo}/commits/{ref}/status", { owner, repo: name, ref: head }).catch(() => null))?.data;
       const status = combined?.state ?? null;
       // Commit statuses (the older CI reporting) count as CI: the sync needs to know whether anything at all reported on this head.
       const statusCount = Number(combined?.total_count ?? (Array.isArray(combined?.statuses) ? combined.statuses.length : 0)) || 0;
-      const latest = new Map<string, Record<string, any>>();
+      const latest = new Map<string, Record<string, any>>(); // eslint-disable-line @typescript-eslint/no-explicit-any
       for (const r of reviews) if (r.state !== "COMMENTED" && r.user?.login) latest.set(r.user.login, r);
       return {
         pullRequest: prFact(pr), checks: checks.map((x) => checkFact(x, head)), reviews: reviews.map((r) => reviewFact(r, number)),
@@ -131,6 +132,39 @@ export async function convertToDraft(d: OpDeps, b: z.infer<typeof DraftBody>): P
       if (pr.state !== "open") throw new BrokerError(409, "not_open", `Pull request #${b.number} is ${pr.merged_at ? "merged" : "closed"}.`);
       await c.write(() => c.octokit.graphql(`mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { id isDraft } } }`, { id: pr.node_id }));
       return { ok: true as const, draft: true as const, alreadyDraft: false };
+    });
+  } catch (e) { throw gh(e); }
+}
+
+// ---------------------------------------------------------------- description
+
+export const DescribeBody = z.object({
+  woId: z.string().min(1).max(200), repo: repoName, number: z.number().int().positive(),
+  title: z.string().min(1).max(250).optional(), body: z.string().min(1).max(60000),
+}).strict();
+
+/**
+ * Writes the Review agent's description (and title) to the work order's own pull request: the same write path as onboarding's PR (the App's one-repository token,
+ * the write limiter), fenced like every work-order write (a stop or a closed work order refuses), only for the work order's branch, secrets redacted, and
+ * skipped when nothing changes. A closed or merged pull request is left alone.
+ */
+export async function describePullRequest(d: OpDeps, b: z.infer<typeof DescribeBody>): Promise<{ ok: true; changed: boolean; redacted: number; number: number }> {
+  const f = await fenced(d, b.woId, "pr", b.repo);
+  const { owner, name } = splitRepo(b.repo);
+  const body = redactSecrets(b.body);
+  const title = b.title ? redactSecrets(b.title) : null;
+  try {
+    return await d.app.withRepo(b.repo, "pull_request", async (c) => {
+      const req = rq(c.octokit);
+      const pr = (await req("GET /repos/{owner}/{repo}/pulls/{pull_number}", { owner, repo: name, pull_number: b.number })).data;
+      if (pr.head?.ref !== f.branch) throw new BrokerError(409, "not_work_order_pr", `Pull request #${b.number} is not ${b.woId}'s (its branch is ${String(pr.head?.ref)}, not ${f.branch}).`);
+      if (pr.state !== "open") throw new BrokerError(409, "not_open", `Pull request #${b.number} is ${pr.merged_at ? "merged" : "closed"}.`);
+      const patch: Record<string, string> = {};
+      if ((pr.body ?? "") !== body.text) patch.body = body.text;
+      if (title && pr.title !== title.text) patch.title = title.text;
+      if (!Object.keys(patch).length) return { ok: true as const, changed: false, redacted: body.redacted + (title?.redacted ?? 0), number: b.number };
+      await c.write(() => req("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", { owner, repo: name, pull_number: b.number, ...patch }));
+      return { ok: true as const, changed: true, redacted: body.redacted + (title?.redacted ?? 0), number: b.number };
     });
   } catch (e) { throw gh(e); }
 }
@@ -259,15 +293,28 @@ export async function reconcileDeliveries(d: OpDeps, limit = 50): Promise<{ chec
 // ---------------------------------------------------------------- polling (spec 11.6)
 
 /** The default branch and its tip commit, or null when it cannot be read (the poll is still useful without it). */
-async function defaultBranchTip(req: ReturnType<typeof rq>, owner: string, name: string): Promise<{ branch: string; sha: string } | null> {
+async function defaultBranchTip(req: ReturnType<typeof rq>, owner: string, name: string): Promise<{ branch: string; sha: string; committedAt?: string } | null> {
   try {
     const repo = (await req("GET /repos/{owner}/{repo}", { owner, repo: name })).data as { default_branch?: unknown };
     const branch = typeof repo.default_branch === "string" && repo.default_branch ? repo.default_branch : null;
     if (!branch) return null;
     const ref = (await req("GET /repos/{owner}/{repo}/git/ref/{ref}", { owner, repo: name, ref: `heads/${branch}` })).data as { object?: { sha?: unknown } };
     const sha = ref.object?.sha;
-    return typeof sha === "string" && /^[0-9a-f]{40}$/.test(sha) ? { branch, sha } : null;
+    if (typeof sha !== "string" || !/^[0-9a-f]{40}$/.test(sha)) return null;
+    // The tip's commit time lets a late push hook be told apart from a newer one (G-X6). Best effort: without it the API clears the stored time and accepts only a clean step.
+    const at = await req("GET /repos/{owner}/{repo}/commits/{ref}", { owner, repo: name, ref: sha }).then((r) => (r.data as { commit?: { committer?: { date?: unknown } } }).commit?.committer?.date).catch(() => undefined);
+    return typeof at === "string" && Number.isFinite(Date.parse(at)) ? { branch, sha, committedAt: new Date(at).toISOString() } : { branch, sha };
   } catch { return null; }
+}
+
+/** The repository's default branch and its head commit now, read through the App (read-only). Refuses when the branch has no commits. */
+export async function readDefaultHead(d: OpDeps, repo: string): Promise<{ branch: string; sha: string; committedAt?: string }> {
+  const { owner, name } = splitRepo(repo);
+  try {
+    const head = await d.app.withRepo(repo, "read_state", async (c) => defaultBranchTip(rq(c.octokit), owner, name));
+    if (!head) throw new BrokerError(409, "no_default_head", `The default branch head of ${repo} could not be read.`);
+    return head;
+  } catch (e) { throw e instanceof BrokerError ? e : gh(e); }
 }
 
 /**

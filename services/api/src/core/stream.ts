@@ -1,22 +1,56 @@
 import type pg from "pg";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { CHANGES_CHANNEL, parseChange, type Change } from "./changes.js";
+import { CHANGES_CHANNEL, ITEM_KEYS, parseChange, type Change } from "./changes.js";
 
 export interface Subscriber {
   personId: string;
   sessionId: string | null;
   /** Project ids the person can see, or "all" (factory-wide roles). Refreshed when people, roles or projects change. */
   visible: Set<string> | "all";
+  /** Generation of the refresh that produced `visible`: an older refresh finishing late never overwrites a newer one. */
+  visGen?: number;
   write(chunk: string): boolean;
-  close(): void;
+  /** `superseded`: the person opened more streams than allowed; the client is told so and must not reconnect. */
+  close(reason?: "superseded"): void;
 }
 
 export interface HubHooks {
   /** Recomputes a subscriber's visible projects. Returns null if the person or session is gone (the stream is closed). */
-  refresh(s: Subscriber): Promise<Set<string> | "all" | null>;
+  refresh(s: Subscriber, batch: Map<string, unknown>): Promise<Set<string> | "all" | null>;
 }
 
-const VISIBILITY_KEYS = new Set(["people", "projects", "matrix", "roles", "session", "sessions", "factory", "*"]);
+export const STREAMS_PER_PERSON = 5;
+export const STREAMS_TOTAL = 2000;
+
+const VISIBILITY_KEYS = new Set(["people", "projects", "matrix", "roles", "teams", "session", "sessions", "factory", "*"]);
+
+/**
+ * Slices only factory-wide readers (Factory Admin, Auditor, Security Reviewer) can read. A factory-wide change (no project)
+ * is sent to everyone else without these names, and not at all if nothing remains: knowing that API keys, security
+ * settings or the ledger just changed is itself information a project-only person should not get.
+ */
+const FACTORY_ONLY_KEYS = new Set(["apiKeys", "apiConfig", "security", "signins", "sessions", "chatLinks", "audit", "policies", "freezes"]);
+
+const PERSONAL_KEYS = new Set(["console", "workspace"]);
+
+/**
+ * The change as one subscriber may see it, or null when there is nothing for them. The same read rules as the item's GET route:
+ * an item with an audience (a private chat) goes only to those people; an item in a project goes to people who see the project;
+ * an item with neither is announced only to factory-wide readers. Factory-wide slices drop the admin-only names for everyone else.
+ */
+export function changeFor(ch: Change, visible: Set<string> | "all", personId?: string): { keys: string[]; project?: string } | null {
+  if (ch.audience && (personId === undefined || !ch.audience.includes(personId))) return null;
+  // An audience-scoped change (a private chat, a personal view) never carries admin-only names (the ledger tick every command adds) to people who are not factory-wide.
+  if (ch.audience && visible !== "all") ch = { ...ch, keys: ch.keys.filter((k) => !FACTORY_ONLY_KEYS.has(k)) };
+  // Chats are read only by their owner, members or project (never by role alone): without a stated audience or project, fail closed.
+  if (!ch.audience && !ch.project && ch.keys.some((k) => PERSONAL_KEYS.has(k))) ch = { ...ch, keys: ch.keys.filter((k) => !PERSONAL_KEYS.has(k)) };
+  if (!ch.keys.length) return null;
+  if (ch.project) return visible === "all" || visible.has(ch.project) ? { keys: ch.keys, project: ch.project } : null;
+  if (visible === "all") return { keys: ch.keys };
+  // No project: for a person who is not factory-wide, an item key (conversation, work order, delivery...) would reveal an item they cannot place.
+  const keys = ch.keys.filter((k) => !FACTORY_ONLY_KEYS.has(k) && !(ITEM_KEYS.has(k) && !ch.audience));
+  return keys.length ? { keys } : null;
+}
 
 /** Fans Postgres LISTEN/NOTIFY messages out to SSE subscribers, filtered per person by visible project. */
 export class Hub {
@@ -25,8 +59,36 @@ export class Hub {
   private closed = false;
   private retry: NodeJS.Timeout | null = null;
   private sweeper: NodeJS.Timeout | null = null;
+  private gen = 0;
 
-  constructor(private readonly pool: pg.Pool, private readonly orgId: string, private readonly hooks: HubHooks, private readonly sweepMs = 60_000) {}
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly orgId: string,
+    private readonly hooks: HubHooks,
+    private readonly sweepMs = 60_000,
+    /** Open streams one person may hold (a further one is refused) and in all. Every stream costs a policy load on each visibility change. */
+    private readonly limits: { perPerson: number; total: number } = { perPerson: STREAMS_PER_PERSON, total: STREAMS_TOTAL },
+  ) {}
+
+  /** One refresh per person and session for a whole fan-out, not one per open stream. */
+  private refresher(): ((s: Subscriber) => Promise<Set<string> | "all" | null>) & { gen: number } {
+    const gen = ++this.gen;
+    const done = new Map<string, Promise<Set<string> | "all" | null>>();
+    const batch = new Map<string, unknown>(); // one policy load per fan-out, shared by every person's refresh
+    return Object.assign((s: Subscriber) => {
+      const k = `${s.personId}\u0000${s.sessionId ?? ""}`;
+      let p = done.get(k);
+      if (!p) done.set(k, (p = this.hooks.refresh(s, batch)));
+      return p;
+    }, { gen });
+  }
+
+  /** Applies a refresh unless a newer one already did (fan-outs run concurrently and may finish out of order). */
+  private apply(s: Subscriber, v: Set<string> | "all", gen: number): void {
+    if ((s.visGen ?? 0) > gen) return;
+    s.visGen = gen;
+    s.visible = v;
+  }
 
   get size(): number {
     return this.subs.size;
@@ -40,11 +102,12 @@ export class Hub {
 
   /** Closes the streams of people whose session or account ended (expiry and idle timeout produce no notification). */
   async sweep(): Promise<void> {
+    const refresh = this.refresher();
     await Promise.all(
       [...this.subs].map(async (s) => {
-        const v = await this.hooks.refresh(s).catch(() => s.visible);
+        const v = await refresh(s).catch(() => s.visible);
         if (v === null) s.close();
-        else s.visible = v;
+        else this.apply(s, v, refresh.gen);
       }),
     );
   }
@@ -81,19 +144,32 @@ export class Hub {
   }
 
   async dispatch(ch: Change): Promise<void> {
-    const refresh = ch.keys.some((k) => VISIBILITY_KEYS.has(k));
-    const msg = `event: change\ndata: ${JSON.stringify({ keys: ch.keys, ...(ch.project ? { project: ch.project } : {}) })}\n\n`;
+    const needsRefresh = ch.keys.some((k) => VISIBILITY_KEYS.has(k));
+    const refresh = this.refresher();
     await Promise.all(
       [...this.subs].map(async (s) => {
-        if (refresh) {
-          const v = await this.hooks.refresh(s).catch(() => s.visible);
+        if (needsRefresh) {
+          // A refresh that fails after a role, matrix or people change must not leave the old (possibly wider) visibility in force: close, the client reconnects and is checked afresh.
+          const v = await refresh(s).catch(() => null);
           if (v === null) return s.close();
-          s.visible = v;
+          this.apply(s, v, refresh.gen);
         }
-        if (ch.project && s.visible !== "all" && !s.visible.has(ch.project)) return;
-        s.write(msg);
+        const out = changeFor(ch, s.visible, s.personId);
+        if (out) s.write(`event: change\ndata: ${JSON.stringify(out)}\n\n`);
       }),
     );
+  }
+
+  /**
+   * False when the hub is full or this person already holds their limit: the caller refuses the NEW stream. Evicting the oldest instead
+   * would make a person with more tabs than the limit trade streams forever, each tab reconnecting and closing another.
+   */
+  hasRoom(personId?: string): boolean {
+    if (this.subs.size >= this.limits.total) return false;
+    if (personId === undefined) return true;
+    let n = 0;
+    for (const x of this.subs) if (x.personId === personId) n++;
+    return n < this.limits.perPerson;
   }
 
   add(s: Subscriber): () => void {
@@ -127,11 +203,14 @@ export function openStream(req: FastifyRequest, reply: FastifyReply, hub: Hub, s
     "cache-control": "no-cache, no-transform",
     connection: "keep-alive",
     "x-accel-buffering": "no",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
     "x-request-id": req.id,
   });
   let done = false;
-  const finish = (): void => {
+  const finish = (reason?: "superseded"): void => {
     if (done) return;
+    if (reason === "superseded" && !res.writableEnded) res.write(`event: superseded\ndata: {}\n\n`);
     done = true;
     clearInterval(timer);
     remove();
@@ -140,7 +219,7 @@ export function openStream(req: FastifyRequest, reply: FastifyReply, hub: Hub, s
   const subscriber: Subscriber = { ...sub, write: (c) => !done && res.write(c), close: finish };
   const remove = hub.add(subscriber);
   const timer = setInterval(() => subscriber.write(`: hb\n\n`), heartbeatMs);
-  req.raw.on("close", finish);
-  res.on("error", finish);
+  req.raw.on("close", () => finish());
+  res.on("error", () => finish());
   res.write(`retry: 3000\n: connected\n\n`);
 }

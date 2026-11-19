@@ -1,8 +1,8 @@
 import { randomBytes, createHash } from "node:crypto";
 import { checkRoleChange, type Person, type RoleGrant } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
-import { conflict, invalid, notFound, Refusal } from "../../core/errors.js";
-import type { CommandResult } from "../../core/command.js";
+import { conflict, invalid, notFound, refuse, Refusal } from "../../core/errors.js";
+import type { CommandResult, EventSpec } from "../../core/command.js";
 import { emailDomainAllowed } from "../../core/security.js";
 import { readPeople, readSecurity, readTeams } from "../../core/read/index.js";
 import { lockOrgConfig, stateIn } from "../access/config.js";
@@ -25,13 +25,49 @@ const versionOf = (p: Person): number => (p as Person & { version?: number }).ve
 
 const factoryRolesOf = (p: Person): string => p.roles.filter((g) => g.scope === "factory" && !g.via).map((g) => g.role).join(",") || "none";
 
+const inviteLink = (publicUrl: string, token: string, email: string): string => `${publicUrl.replace(/\/$/, "")}/auth/login?invite=${token}&login_hint=${encodeURIComponent(email)}`;
+
+/**
+ * Issues a new single-use invite token and a new 14-day expiry for a person who has not signed in (status invited, no linked identity), replacing the old
+ * token, and emails it. The one place an invite is re-issued: re-inviting an address, the resend route and reactivating a person who never signed in.
+ */
+export async function issueInvite(tx: Tx, orgId: string, publicUrl: string, by: string, p: { id: string; name: string; email: string }, why: string): Promise<{ outbox: NonNullable<CommandResult<Record<string, unknown>>["outbox"]>; event: EventSpec; expiresAt: string }> {
+  const token = randomBytes(24).toString("base64url");
+  const hash = createHash("sha256").update(token).digest("hex");
+  const had = (await tx.query(`select 1 from invites where org_id = $1 and id = $2`, [orgId, p.id])).rows.length > 0;
+  if (had) await tx.query(`update invites set token_hash = $3, status = 'pending', expires_at = now() + interval '14 days', accepted_at = null, invited_by = $4, updated_at = now() where org_id = $1 and id = $2`, [orgId, p.id, hash, by]);
+  else await tx.query(`insert into invites (org_id, id, email, invited_by, token_hash, expires_at) values ($1,$2,$3,$4,$5, now() + interval '14 days')`, [orgId, p.id, p.email, by, hash]);
+  const expiresAt = (await tx.query<{ e: Date }>(`select expires_at as e from invites where org_id = $1 and id = $2`, [orgId, p.id])).rows[0]!.e.toISOString();
+  return {
+    outbox: [{ destination: "smtp", payload: { kind: "invite", to: p.email, name: p.name, invitedBy: by, link: inviteLink(publicUrl, token, p.email) } }],
+    event: { type: "people.invite.resend", category: "access", subject: { type: "person", id: p.id }, before: null, after: { email: p.email, expiresAt, reason: why }, projectId: null },
+    expiresAt,
+  };
+}
+
+/** Sends a person's invite again with a new token and expiry (an expired invite is a dead end otherwise). Refused once they have signed in. */
+export async function resendInvite(tx: Tx, orgId: string, publicUrl: string, by: string, id: string): Promise<CommandResult<{ person: Person; version: number; expiresAt: string }>> {
+  await lockOrgConfig(tx, orgId);
+  const p = await personIn(tx, orgId, id);
+  if (p.status !== "invited") throw conflict(`${p.name} is ${p.status === "active" ? "already active" : p.status}; there is no invite to send again.`);
+  const linked = (await tx.query(`select idp_subject is not null as linked from people where org_id = $1 and id = $2`, [orgId, id])).rows[0]?.linked === true;
+  if (linked) throw conflict(`${p.name} has already signed in.`);
+  const inv = await issueInvite(tx, orgId, publicUrl, by, { id, name: p.name, email: p.email }, "invite sent again");
+  const v = (await bump(tx, orgId, id)).rows[0]!.version;
+  const person = await personIn(tx, orgId, id);
+  return { msg: `A new invite was sent to ${p.email}; it is valid for 14 days.`, events: [inv.event], outbox: inv.outbox, extra: { person, version: v, expiresAt: inv.expiresAt }, changes: ["people"], project: null };
+}
+
 /** Invite: a person row in status `invited` (the policy engine grants nothing until they sign in), their teams and roles, an invites row, and an email through the outbox. */
 export async function invitePerson(tx: Tx, orgId: string, publicUrl: string, by: string, body: z.infer<typeof InviteBody>): Promise<CommandResult<{ person: Person; version: number }>> {
   await lockOrgConfig(tx, orgId);
   const st = await stateIn(tx, orgId);
   const security = (await readSecurity(tx, orgId)).value;
   if (!emailDomainAllowed(body.email, security.domains)) throw invalid(`${body.email.split("@")[1]} is not an allowed domain. Add it in Security first.`);
-  if (st.people.some((p) => p.email.toLowerCase() === body.email)) throw conflict(`${body.email} is already in the org.`);
+  const known = st.people.find((p) => p.email.toLowerCase() === body.email);
+  // Inviting an address that is still waiting for its first sign-in sends the invite again (a new token and expiry) instead of dead-ending on an expired one.
+  if (known?.status === "invited") return resendInvite(tx, orgId, publicUrl, by, known.id);
+  if (known) throw conflict(`${body.email} is already in the org.`);
   const teams = new Set((await readTeams(tx, orgId)).map((t) => t.id));
   for (const t of body.teams) if (!teams.has(t)) throw invalid(`There is no team ${t}.`);
   const roles = new Map(st.catalog.roles.map((r) => [r.id, r]));
@@ -44,6 +80,18 @@ export async function invitePerson(tx: Tx, orgId: string, publicUrl: string, by:
     if (g.scope !== "factory" && !projects.has(g.scope)) throw invalid(`There is no project ${g.scope}.`);
     if (!grants.some((x) => x.role === g.role && x.scope === g.scope)) grants.push(g);
   }
+  // Factory-level roles decide who can edit policy and restore, so an invite carrying one is held to the same bar as setFactoryRole:
+  // only a Factory Admin may hand out factory_admin, and every factory-level grant needs a reason that goes into the audit trail.
+  const factoryGrants = grants.filter((g) => g.scope === "factory");
+  const reason = body.reason?.trim() ?? "";
+  if (factoryGrants.length) {
+    const actor = st.people.find((x) => x.id === by);
+    const actorIsAdmin = !!actor?.roles.some((g) => g.role === "factory_admin" && g.scope === "factory");
+    if (factoryGrants.some((g) => g.role === "factory_admin") && !actorIsAdmin) {
+      throw refuse("denied", "Only a Factory Admin can invite someone as Factory Admin.", { needs: "A Factory Admin to send this invite" });
+    }
+    if (reason.length < 10) throw refuse("invalid", "Give a reason of at least 10 characters for the factory-level role in this invite.", { needs: "reason" });
+  }
   const local = body.email.split("@")[0]!.replace(/[^a-z0-9]/g, "");
   const id = `p-${local || "user"}-${randomBytes(2).toString("hex")}`;
   await tx.query(`insert into people (org_id, id, name, title, email, status, data) values ($1,$2,$3,'Invited',$4,'invited',$5::jsonb)`, [orgId, id, body.name, body.email, JSON.stringify({ invitedBy: by, invitedAt: Date.now() })]);
@@ -51,7 +99,8 @@ export async function invitePerson(tx: Tx, orgId: string, publicUrl: string, by:
   for (const g of grants) {
     await tx.query(`insert into role_assignments (org_id, id, person_id, role_id, scope_type, project_id, granted_by) values ($1,$2,$3,$4,$5,$6,$7)`, [orgId, `ra-${randomBytes(6).toString("hex")}`, id, g.role, g.scope === "factory" ? "factory" : "project", g.scope === "factory" ? null : g.scope, by]);
   }
-  // Signing in with this address through the identity provider activates the person (core sign-in); the invite row records the offer.
+  // The emailed link carries a one-time token: only a sign-in that presents it (with a provider-verified matching address)
+  // claims this invited person. Knowing or controlling the address alone is not enough (core/auth/signin.ts).
   const token = randomBytes(24).toString("base64url");
   await tx.query(`insert into invites (org_id, id, email, role_id, project_id, invited_by, token_hash, expires_at) values ($1,$2,$3,$4,$5,$6,$7, now() + interval '14 days')`, [
     orgId, id, body.email, grants[0]?.role ?? null, grants.find((g) => g.scope !== "factory")?.scope ?? null, by, createHash("sha256").update(token).digest("hex"),
@@ -59,8 +108,8 @@ export async function invitePerson(tx: Tx, orgId: string, publicUrl: string, by:
   const person = await personIn(tx, orgId, id);
   return {
     msg: `Invite sent to ${body.email}.`,
-    events: [{ type: "people.invite", category: "access", subject: { type: "person", id }, before: null, after: { name: body.name, email: body.email, teams: body.teams, roles: grants }, projectId: null }],
-    outbox: [{ destination: "smtp", payload: { kind: "invite", to: body.email, name: body.name, invitedBy: by, link: `${publicUrl.replace(/\/$/, "")}/auth/login?login_hint=${encodeURIComponent(body.email)}` } }],
+    events: [{ type: "people.invite", category: "access", subject: { type: "person", id }, before: null, after: { name: body.name, email: body.email, teams: body.teams, roles: grants, ...(factoryGrants.length ? { reason } : {}) }, projectId: null }],
+    outbox: [{ destination: "smtp", payload: { kind: "invite", to: body.email, name: body.name, invitedBy: by, link: `${publicUrl.replace(/\/$/, "")}/auth/login?invite=${token}&login_hint=${encodeURIComponent(body.email)}` } }],
     extra: { person, version: versionOf(person) },
     changes: ["people"],
     project: null,
@@ -72,6 +121,13 @@ export async function acceptInvite(tx: Tx, orgId: string, id: string): Promise<C
   await lockOrgConfig(tx, orgId);
   const p = await personIn(tx, orgId, id);
   if (p.status !== "invited") throw conflict(`${p.name} is already ${p.status === "active" ? "active" : p.status}.`);
+  // 'active' must imply 'linked': without a provider subject, activating would leave an account any identity with this address could claim.
+  const linked = (await tx.query(`select idp_subject is not null as linked from people where org_id = $1 and id = $2`, [orgId, id])).rows[0]?.linked === true;
+  if (!linked) {
+    const inv = (await tx.query<{ expired: boolean }>(`select (status <> 'pending' or expires_at <= now()) as expired from invites where org_id = $1 and id = $2`, [orgId, id])).rows[0];
+    if (inv?.expired) throw conflict(`${p.name}'s invite has expired; ask for a new one. Invite ${p.email} again to send a new link.`);
+    throw conflict(`${p.name} has not signed in yet. They accept by opening the invite link from their email; the invite stays pending until then.`);
+  }
   const title = p.title === "Invited" ? (await stateIn(tx, orgId)).catalog.roles.find((r) => r.id === p.roles[0]?.role)?.name ?? "Member" : p.title;
   await tx.query(`update people set status = 'active', title = $3 where org_id = $1 and id = $2`, [orgId, id, title]);
   await tx.query(`update invites set status = 'accepted', accepted_at = now(), updated_at = now() where org_id = $1 and id = $2 and status = 'pending'`, [orgId, id]);
@@ -86,7 +142,7 @@ export async function acceptInvite(tx: Tx, orgId: string, id: string): Promise<C
 }
 
 /** Grant or revoke one factory-level role. Spec 14.4 invariants apply: the last Factory Admin stays, and nobody removes their own admin role. */
-export async function setFactoryRole(tx: Tx, orgId: string, actorId: string, id: string, roleId: string, add: boolean): Promise<CommandResult<{ version: number }>> {
+export async function setFactoryRole(tx: Tx, orgId: string, actorId: string, id: string, roleId: string, add: boolean, reason: string): Promise<CommandResult<{ version: number }>> {
   await lockOrgConfig(tx, orgId);
   const st = await stateIn(tx, orgId);
   const role = st.catalog.roles.find((r) => r.id === roleId);
@@ -97,6 +153,13 @@ export async function setFactoryRole(tx: Tx, orgId: string, actorId: string, id:
   const has = p.roles.some((g) => g.role === roleId && g.scope === "factory" && !g.via);
   const before = factoryRolesOf(p);
   if (has === add) return { msg: `${p.name} ${add ? "already is" : "is not"} ${role.name}.`, events: [], extra: { version: versionOf(p) }, changes: ["people"], project: null };
+  // Escalation guards: people.manage can be handed to a custom role, so it must not be a path to Factory Admin or to more rights for oneself.
+  // No grant reaches someone who cannot use it (S-48): a project role is refused for a deactivated person, and so is a factory role (it would take effect silently at reactivation).
+  if (add && p.status === "deactivated") throw invalid(`${p.name} is deactivated. Reactivate them first, then grant ${role.name}.`);
+  if (add && actorId === id) throw refuse("denied", `You cannot grant yourself ${role.name}. Ask another administrator.`);
+  const actor = st.people.find((x) => x.id === actorId);
+  if (roleId === "factory_admin" && !actor?.roles.some((g) => g.role === "factory_admin" && g.scope === "factory"))
+    throw refuse("denied", `Only a Factory Admin can ${add ? "grant" : "remove"} Factory Admin.`, { needs: "factory_admin" });
   const nextRoles = add ? [...p.roles, { role: roleId, scope: "factory" }] : p.roles.filter((g) => !(g.role === roleId && g.scope === "factory" && !g.via));
   const checked = checkRoleChange(st.people, { actorId, targetId: id, nextRoles });
   if (!checked.ok) throw new Refusal(checked.error);
@@ -106,18 +169,32 @@ export async function setFactoryRole(tx: Tx, orgId: string, actorId: string, id:
   const after = nextRoles.filter((g) => g.scope === "factory" && !g.via).map((g) => g.role).join(",") || "none";
   return {
     msg: `${add ? "Granted" : "Removed"} ${role.name}${add ? " to " : " from "}${p.name}.`,
-    events: [{ type: add ? "role.grant" : "role.revoke", category: "access", subject: { type: "person", id }, before, after, projectId: null }],
+    events: [{ type: add ? "role.grant" : "role.revoke", category: "access", subject: { type: "person", id }, before: { roles: before }, after: { roles: after, reason }, projectId: null }],
     extra: { version: v },
     changes: ["people", "matrix"],
     project: null,
   };
 }
 
-export async function setTeams(tx: Tx, orgId: string, id: string, teams: string[]): Promise<CommandResult<{ version: number }>> {
+/** Change a person's teams. Members inherit their teams' roles, so nobody may add themselves to a team that holds a role, at any scope, they do not already hold. */
+export async function setTeams(tx: Tx, orgId: string, actorId: string, id: string, teams: string[]): Promise<CommandResult<{ version: number }>> {
   const p = await personIn(tx, orgId, id);
-  const known = new Set((await readTeams(tx, orgId)).map((t) => t.id));
+  const allTeams = await readTeams(tx, orgId);
+  const known = new Set(allTeams.map((t) => t.id));
   for (const t of teams) if (!known.has(t)) throw invalid(`There is no team ${t}.`);
   const next = [...new Set(teams)];
+  if (actorId === id) {
+    const key = (g: { role: string; scope: string }) => `${g.role}@${g.scope}`;
+    const held = new Set<string>(p.roles.map(key));
+    for (const t of p.teams) for (const g of allTeams.find((x) => x.id === t)?.roles ?? []) held.add(key(g));
+    for (const t of next.filter((x) => !p.teams.includes(x))) {
+      const team = allTeams.find((x) => x.id === t);
+      const extra = (team?.roles ?? []).filter((g) => !held.has(key(g)));
+      if (extra.length) {
+        throw refuse("denied", `You cannot add yourself to ${team?.name ?? t}: it grants ${extra.map((g) => `${g.role} (${g.scope})`).join(", ")}, which you do not hold. Ask another person with people access to add you.`, { needs: "Another person to add you to this team" });
+      }
+    }
+  }
   await tx.query(`delete from team_members where org_id = $1 and person_id = $2 and not (team_id = any($3::text[]))`, [orgId, id, next]);
   for (const t of next) await tx.query(`insert into team_members (org_id, team_id, person_id) values ($1,$2,$3) on conflict do nothing`, [orgId, t, id]);
   const v = (await bump(tx, orgId, id)).rows[0]!.version;

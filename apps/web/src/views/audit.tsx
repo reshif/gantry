@@ -1,15 +1,26 @@
-/** Audit (#audit): the append-only ledger of human, agent, API and trigger actions, denied attempts included. Ported from legacy/js/views/audit.js. */
+/**
+ * Audit ledger (#audit): the append-only record of human, agent, API and trigger actions, denied attempts included.
+ * Laid out as the Blueprint draws it: four tiles over the whole ledger, one flush panel with the filter bar (search, Category, Outcome,
+ * Actor in the URL), the sortable table, 15 rows a page, and the entry drawer opened from the action button. "Verify chain" stays (KEEP.md).
+ * Entries are read from the server a page at a time; "Load older entries" asks for the next page.
+ */
+import { FACTORY_READ } from "../lib/routes";
 import { useEffect, useMemo, useState } from "react";
 import { fmt } from "@gantry/domain";
+import { useHash } from "../lib/router";
 import { useAuditVerify, useMe, useProjects } from "../api/queries";
 import { useCan } from "../api/can";
-import { Btn, Empty, Field, Select, ViewHead } from "../ui/primitives";
+import { Btn, Chip, Empty, Panel, Stat, StatRow, ViewHead } from "../ui/primitives";
+import { Async, failureOf } from "../ui/async";
+import { DataTable, type Col } from "../ui/DataTable";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
-import { ActorCell, AuditDrawer, CatChip } from "./audit/Detail";
-import { CAT_ICON, CAT_NAME, NO_FILTERS, PAGE, TOPICS, useAuditFeed, type AuditRow, type Filters } from "./audit/data";
-
-const BASE_CATS = ["auth", "access", "flow", "onboarding", "approvals", "config", "integrations", "api", "agents", "kill"];
+import { navigate } from "../lib/router";
+import { AuditDrawer, useActorName } from "./audit/Detail";
+import { NO_FILTERS, useAuditFeed, useAuditStats, type AuditRow } from "./audit/data";
+import { ListBar, dayMon } from "./govern/listkit";
+import { useQueryParam } from "./floor/urlState";
+import "../styles/views/audit.css";
 
 const useDebounced = <T,>(v: T, ms: number): T => {
   const [x, setX] = useState(v);
@@ -20,141 +31,183 @@ const useDebounced = <T,>(v: T, ms: number): T => {
   return x;
 };
 
+const csvCell = (c: unknown): string => `"${String(c).replace(/"/g, '""')}"`;
+
 export default function AuditView() {
   const ui = useUI();
   const me = useMe();
   const perm = useCan("audit.view");
-  const projects = (useProjects().data ?? []) as Array<{ id: string; name: string }>;
-  const [f, setF] = useState<Filters>(NO_FILTERS);
-  const [typed, setTyped] = useState("");
-  const q = useDebounced(typed, 250);
-  const filters = useMemo(() => ({ ...f, q }), [f, q]);
+  const projectsQ = useProjects();
+  const projects = (projectsQ.data ? projectsQ.data : []) as Array<{ id: string; name: string }>;
+  const name = useActorName();
+  // "#audit/console" opens the ledger on what this person did through the Console (linked from the Console's side panel).
+  const asConsole = useHash().param === "console";
+  const myId = me?.person.id;
+  const [qp, setQ] = useQueryParam("q");
+  const [cp, setC] = useQueryParam("cat");
+  const [op, setO] = useQueryParam("outcome");
+  const [ap, setA] = useQueryParam("actor");
+  const [pp, setP] = useQueryParam("project"); // `#/audit?project=payments`: Project config links here
+  const [via, setVia] = useState("all");
+  useEffect(() => {
+    if (asConsole && myId) {
+      setVia("console");
+      setA(myId);
+    }
+  }, [asConsole, myId, setA]);
+  const q = qp ?? "";
+  const cat = cp ?? "all";
+  const outcome = op ?? "all";
+  const actor = ap ?? "all";
+  const project = pp ?? "all";
+  const typed = useDebounced(q, 250);
+  const filters = useMemo(() => ({ ...NO_FILTERS, q: typed, cat, outcome, actor, via, project }), [typed, cat, outcome, actor, via, project]);
   const feed = useAuditFeed(filters);
+  const stats = useAuditStats();
   const verify = useAuditVerify(false);
+  const [checking, setChecking] = useState(false);
+  const [checked, setChecked] = useState<{ ok: boolean; msg: string; at: number } | null>(null);
+  const [exporting, setExporting] = useState(false);
   const rows: AuditRow[] = feed.data?.pages.flatMap((p) => p.items) ?? [];
   const first = feed.data?.pages[0];
   const sum = first?.summary;
   const total = first?.total ?? 0;
+  const all = sum?.entries ?? total;
   const projectName = (id: string | null): string => (id ? projects.find((p) => p.id === id)?.name ?? id : "factory");
-  const canVerify = !!me?.person.roles.some((g) => g.scope === "factory" && (g.role === "auditor" || g.role === "factory_admin"));
-  const set = (patch: Partial<Filters>) => setF((x) => ({ ...x, ...patch }));
-  const dirty = typed || f.project !== "all" || f.cat !== "all" || f.topic !== "all" || f.actor !== "all" || f.outcome !== "all" || f.via !== "all" || f.changes;
+  const canVerify = !!me?.person.roles.some((g) => g.scope === "factory" && (FACTORY_READ as readonly string[]).includes(g.role));
+  const dirtyExtra = via !== "all" || project !== "all";
   const clear = () => {
-    setTyped("");
-    setF(NO_FILTERS);
+    setQ(null);
+    setC(null);
+    setO(null);
+    setA(null);
+    setP(null);
+    setVia("all");
   };
+  const hidden = !feed.data && feed.isError && failureOf(feed.error).hidden;
 
   const open = (seq: number) => ui.drawer.open(`audit:${seq}`, (close) => <AuditDrawer seq={seq} projectName={projectName} close={close} />);
 
-  const cats = [...BASE_CATS, ...Object.keys(sum?.categories ?? {}).filter((c) => !BASE_CATS.includes(c))];
-  const allCount = Object.values(sum?.categories ?? {}).reduce((a, b) => a + b, 0);
-  const actorOpts = [
-    { value: "all", label: "Anyone" }, { value: "human", label: "People" }, { value: "agent", label: "Agents" }, { value: "system", label: "API keys, triggers, system" },
-    ...(sum?.facets.actors ?? []).map((a) => ({ value: a.id, label: a.name })),
-  ];
   const scoped = !perm.pending && !perm.allowed;
-
   const runVerify = async () => {
+    setChecking(true);
     const r = await verify.refetch();
+    setChecking(false);
     const d = r.data as { ok: boolean; msg?: string } | undefined;
-    if (d) ui.toast(d.msg ?? (d.ok ? "Chain intact." : "The chain is broken."), d.ok ? "ok" : "error");
-    else ui.toast("The chain could not be verified.", "error");
+    const res = d ? { ok: d.ok, msg: d.msg ?? (d.ok ? "Chain intact." : "The chain is broken."), at: Date.now() } : { ok: false, msg: "The chain could not be verified.", at: Date.now() };
+    setChecked(res);
+    ui.toast(res.msg, res.ok ? "ok" : "error");
   };
+
+  /** Every entry the viewer may see, oldest page last: reads all pages, then writes the prototype's eight columns. */
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      let list = rows;
+      let more = feed.hasNextPage;
+      for (let i = 0; more && i < 200; i++) {
+        const r = await feed.fetchNextPage();
+        list = r.data?.pages.flatMap((p) => p.items) ?? list;
+        more = !!r.hasNextPage;
+      }
+      const out = [["id", "at", "actor", "action", "target", "category", "outcome", "via"]].concat(list.map((a) => [String(a.id), new Date(a.at).toISOString(), name(a.actor, a.actorName), a.action, a.target, a.category, a.outcome, a.via]));
+      const csv = out.map((r) => r.map(csvCell).join(",")).join("\n");
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "gantry-audit.csv";
+      document.body.append(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      ui.toast(`Exported ${out.length} rows`, "ok");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const known = stats && stats !== "error" ? stats : undefined;
+  const CAT_ORDER = ["access", "config", "agents", "integrations", "auth", "onboarding", "approvals", "kill", "flow", "api"];
+  const cats = [...(known?.cats ?? Object.keys(sum?.categories ?? {}))].sort((a, b) => { const ia = CAT_ORDER.indexOf(String(a)), ib = CAT_ORDER.indexOf(String(b)); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
+  if (cat !== "all" && !cats.includes(cat)) cats.push(cat);
+  const actorOpts = [{ value: "all", label: "All" }, ...(known?.actors ?? sum?.facets.actors ?? []).map((a) => ({ value: a.id, label: a.name }))];
+  if (actor !== "all" && !actorOpts.some((o) => o.value === actor)) actorOpts.push({ value: actor, label: name(actor) });
+  const outcomes = ["ok", "denied", "error", ...(sum?.facets.outcomes ?? [])].filter((o, i, a) => a.indexOf(o) === i);
+
+  const cols: Col<AuditRow>[] = [
+    { key: "at", label: "When", sort: (e) => e.at, render: (e) => <span className="mono small aud-when" style={{ whiteSpace: "nowrap" }}>{dayMon(e.at)}</span> },
+    { key: "actor", label: "Actor", sort: (e) => name(e.actor, e.actorName).toLowerCase(), render: (e) => name(e.actor, e.actorName) },
+    { key: "action", label: "Action", sort: (e) => e.action, render: (e) => <Btn label={e.action} small kind="ghost" cls="mono" id={`aud-row-${e.seq}`} aria={`Open entry ${e.seq}`} onClick={() => open(e.seq)} /> },
+    { key: "target", label: "Target", render: (e) => <span className="aud-target">{e.target}</span> },
+    { key: "cat", label: "Category", render: (e) => <Chip text={e.category} cls="plain" /> },
+    { key: "o", label: "Outcome", render: (e) => <Chip text={e.outcome} cls={e.outcome === "ok" ? "ok" : "bad"} /> },
+  ];
+
+  const statVal = (f: (s: { entries: number; access: number; agents: number; failures: number }) => number): string => (stats === undefined ? "…" : stats === "error" ? "–" : String(f(stats)));
+  const failures = stats && stats !== "error" ? stats.failures : 0;
+
+  if (hidden) {
+    return (
+      <div className="view view-audit">
+        <ViewHead title="Audit ledger" kicker="All lines" />
+        <Empty id="aud-no-access" icon="lock" title="No access to this sheet" text={<>Your role cannot open Audit ledger.<br />{failureOf(feed.error).msg}<br />Ask a factory admin for the audit.view permission.</>} action={<Btn label="Back to Home" id="aud-home" onClick={() => navigate("home")} />} />
+      </div>
+    );
+  }
 
   return (
     <div className="view view-audit">
       <ViewHead
-        kicker="Govern · Audit" title="Audit"
-        sub="Append-only ledger of every human, agent, API key and trigger action, including denied attempts. Nothing here can be edited or deleted."
-        meta={[["Entries", String(sum?.entries ?? 0)], ["Denied", String(sum?.denied ?? 0)], ["Config changes", String(sum?.changes ?? 0)], ["Head digest", (sum?.head ?? "").slice(0, 8)]]}
-        actions={canVerify ? <Btn label="Verify chain" kind="ghost" icon="shield" id="aud-verify" onClick={() => void runVerify()} /> : undefined}
+        title="Audit ledger"
+        kicker="All lines"
+        sub="An append-only record of every decision and change. Entries cannot be edited."
+        actions={<>
+          <Btn label="Export CSV" icon="dl" id="aud-export" guard={exporting ? { allowed: false, reason: "Exporting now." } : null} onClick={() => void exportCsv()} />
+        </>}
       />
+      <StatRow id="aud-stats">
+        <Stat label="Entries" value={statVal((s) => s.entries)} sub="in ledger" tone="info" />
+        <Stat label="Access changes" value={statVal((s) => s.access)} />
+        <Stat label="Agent changes" value={statVal((s) => s.agents)} />
+        <Stat label="Failures" value={statVal((s) => s.failures)} tone={failures ? "block" : "done"} />
+      </StatRow>
+      {checked ? (
+        <div className={`callout aud-verified ${checked.ok ? "callout-ok" : "callout-block"}`} role="status" id="aud-verified">
+          <Icon name={checked.ok ? "shield" : "alert"} />
+          <div><strong>{checked.ok ? "No break found" : "The chain is broken"}</strong><span>{` ${checked.msg} Checked ${fmt.stamp(checked.at)}.`}</span></div>
+          <Btn label="Dismiss" small id="aud-verified-dismiss" onClick={() => setChecked(null)} />
+        </div>
+      ) : null}
       {scoped ? (
         <div className="lock-note" role="note">
           <Icon name="lock" />
           <span>You see entries for your own projects and your own actions. The full ledger needs the audit.view right (Factory Admin or Auditor).</span>
         </div>
       ) : null}
-      <div className="aud-cats" role="group" aria-label="Category">
-        {[{ id: "all", name: "All", n: allCount }, ...cats.filter((c) => BASE_CATS.includes(c) || (sum?.categories[c] ?? 0) > 0).map((c) => ({ id: c, name: CAT_NAME[c] ?? c, n: sum?.categories[c] ?? 0 }))].map((x) => (
-          <button key={x.id} type="button" id={`aud-cat-${x.id}`} className={`aud-catbtn aud-cat-${x.id}${f.cat === x.id ? " is-on" : ""}`} aria-pressed={f.cat === x.id} onClick={() => set({ cat: x.id })}>
-            {x.id !== "all" ? <Icon name={CAT_ICON[x.id] ?? "dots"} /> : null}
-            <span>{x.name}</span>
-            <span className="mono aud-n">{String(x.n)}</span>
-          </button>
-        ))}
-      </div>
-      <div className="aud-topics" role="group" aria-label="Round-three topic">
-        <span className="kicker">Topic</span>
-        {[{ id: "all", name: "Any", icon: "" }, ...TOPICS].map((t) => (
-          <button key={t.id} type="button" id={`aud-topic-${t.id}`} className={`aud-topic${f.topic === t.id ? " is-on" : ""}`} aria-pressed={f.topic === t.id} onClick={() => set({ topic: t.id })}>
-            {t.icon ? <Icon name={t.icon} /> : null}
-            <span>{t.name}</span>
-            {t.id !== "all" ? <span className="mono aud-n">{String(sum?.topics[t.id] ?? 0)}</span> : null}
-          </button>
-        ))}
-      </div>
-      <div className="toolbar aud-filters">
-        <div className="filters">
-          <Field label="Search" htmlFor="aud-q">
-            <input id="aud-q" className="input" type="search" placeholder="Actor, action, target, value" value={typed} autoComplete="off" onChange={(e) => setTyped(e.target.value)} />
-          </Field>
-          <Field label="Project" htmlFor="aud-project">
-            <Select id="aud-project" value={f.project} onChange={(v) => set({ project: v })} options={[{ value: "all", label: "All projects" }, { value: "factory", label: "Factory-wide only" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]} />
-          </Field>
-          <Field label="Actor" htmlFor="aud-actor"><Select id="aud-actor" value={f.actor} onChange={(v) => set({ actor: v })} options={actorOpts} /></Field>
-          <Field label="Outcome" htmlFor="aud-outcome"><Select id="aud-outcome" value={f.outcome} onChange={(v) => set({ outcome: v })} options={[{ value: "all", label: "Any outcome" }, ...(sum?.facets.outcomes ?? []).map((k) => ({ value: k, label: k }))]} /></Field>
-          <Field label="Via" htmlFor="aud-via"><Select id="aud-via" value={f.via} onChange={(v) => set({ via: v })} options={[{ value: "all", label: "Any channel" }, ...(sum?.facets.channels ?? []).map((k) => ({ value: k, label: k }))]} /></Field>
-          <label className="check aud-chk" htmlFor="aud-changes">
-            <input type="checkbox" id="aud-changes" checked={f.changes} onChange={(e) => set({ changes: e.target.checked })} />
-            Only entries with before/after
-          </label>
-        </div>
-        <div className="aud-count">
-          <span className="mono">{String(total)}</span>{" matching"}
-          {dirty ? <Btn label="Clear filters" small kind="ghost" id="aud-clear" onClick={clear} /> : null}
-        </div>
-      </div>
-      {feed.isError ? (
-        <Empty title="The ledger could not be loaded" text="Reload the page, or try again in a moment." />
-      ) : rows.length ? (
-        <div className="table-scroll ledger" data-keep-scroll="aud-ledger">
-          <table className="table table-compact aud-table">
-            <thead>
-              <tr>{["#", "When (IST)", "Actor", "Category", "Action", "Target", "Project", "Outcome", "Change", "Digest"].map((x) => <th key={x} scope="col">{x}</th>)}</tr>
-            </thead>
-            <tbody>
-              {rows.map((e) => (
-                <tr key={e.seq} className={`row-link aud-row o-row-${e.outcome}`} onClick={() => open(e.seq)}>
-                  <td className="mono muted"><button type="button" className="linkish mono" id={`aud-row-${e.seq}`} aria-label={`Open audit entry ${e.seq}: ${e.action}`}>{String(e.seq)}</button></td>
-                  <td className="mono nowrap">{fmt.iso(e.at)}</td>
-                  <td><ActorCell id={e.actor} name={e.actorName} /></td>
-                  <td><CatChip c={e.category} /></td>
-                  <td className="mono">{e.action}</td>
-                  <td className="cell-title aud-target">{e.target}</td>
-                  <td className="small">{e.project ? projectName(e.project) : <span className="muted">factory</span>}</td>
-                  <td><span className={`outcome o-${e.outcome}`}>{e.outcome}</span></td>
-                  <td>{e.before != null || e.after != null ? <span className="aud-has-diff" title="Has before/after"><Icon name="swap" />diff</span> : null}</td>
-                  <td className="mono muted digest" data-tip={`prev ${e.prev.slice(0, 8)}`}>{e.digest.slice(0, 8)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : feed.isLoading ? (
-        <p className="muted small">Loading the ledger…</p>
-      ) : (
-        <div className="empty" id="aud-empty">
-          <Icon name="ledger" />
-          <div className="empty-title">{dirty ? "No entries match" : "The ledger is empty"}</div>
-          <p>{dirty ? "Clear the filters to see the full ledger." : "Every change, denial and sign-in is written here as it happens."}</p>
-        </div>
-      )}
-      {feed.hasNextPage ? (
-        <div className="more">
-          <Btn label={`Show ${Math.min(PAGE, total - rows.length)} more`} id="aud-more" onClick={() => void feed.fetchNextPage()} />
-        </div>
-      ) : null}
+      <Panel flush id="aud-panel">
+        <ListBar
+          id="aud" label="Ledger filters" q={q} onQ={(v) => setQ(v || null)} shown={total} total={all} noun="entry" onClear={clear}
+          extra={project !== "all" ? <><span className="chip plain" id="aud-via-note" title="Opened from Project config">{projectName(project)}</span><Btn small kind="ghost" id="aud-project-clear" label="All projects" onClick={() => setP(null)} /></> : dirtyExtra ? <span className="chip plain" id="aud-via-note" title="Opened from the Console">{`via ${via}`}</span> : undefined}
+          filters={[
+            { id: "category", label: "Category", value: cat, onChange: (v) => setC(v === "all" ? null : v), options: [{ value: "all", label: "All" }, ...cats] },
+            { id: "outcome", label: "Outcome", value: outcome, onChange: (v) => setO(v === "all" ? null : v), options: [{ value: "all", label: "All" }, ...outcomes] },
+            { id: "actor", label: "Actor", value: actor, onChange: (v) => setA(v === "all" ? null : v), options: actorOpts },
+          ]}
+        />
+        <Async
+          query={feed}
+          what="the audit ledger"
+          id="aud"
+          isEmpty={(d) => !d.pages.some((pg) => pg.items.length)}
+          empty={<Empty id="aud-empty" icon="ledger" title={q || cat !== "all" || outcome !== "all" || actor !== "all" || dirtyExtra ? "Nothing matches these filters" : "Nothing here yet"} text={q || cat !== "all" || outcome !== "all" || actor !== "all" || dirtyExtra ? "Loosen the search or clear the filters." : "Every change, denial and sign-in is written here as it happens."} action={q || cat !== "all" || outcome !== "all" || actor !== "all" || dirtyExtra ? <Btn label="Clear filters" id="aud-empty-clear" onClick={clear} /> : undefined} />}
+        >{() => (
+          <>
+            <DataTable sortHint noSortSelect id="aud-table" caption="Audit ledger" columns={cols} rows={rows} rowKey={(e) => String(e.seq)} sort={{ key: "at", dir: -1 }} pageSize={15} pager />
+            {feed.hasNextPage ? <div className="tfoot"><span className="muted small">{`${rows.length} of ${total} loaded`}</span><Btn label="Load older entries" small id="aud-more" onClick={() => void feed.fetchNextPage()} /></div> : null}
+          </>
+        )}</Async>
+      </Panel>
+      {canVerify ? <div className="footnote" id="aud-verify-row"><Btn small label={checking ? "Verifying..." : "Verify chain"} icon="shield" id="aud-verify" guard={checking ? { allowed: false, reason: "Checking the chain now." } : null} onClick={() => void runVerify()} /></div> : null}
       <p className="footnote">Each entry carries a SHA-256 digest of its fields and the digest before it, written by the database. Any edit or removal breaks every digest after it, and Verify chain finds the first break.</p>
     </div>
   );

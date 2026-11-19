@@ -6,6 +6,8 @@
  */
 import { execute, offered, type ToolCtx } from "./tools.js";
 import { UNTRUSTED_NOTE } from "./mark.js";
+import { randomUUID } from "node:crypto";
+import { buildManifest, encodeManifest, part, type ManifestPart, type PromptManifest } from "../agents/manifest.js";
 
 export interface EdgeTransport {
   baseUrl: string;
@@ -33,6 +35,19 @@ export async function readiness(edgeToken: string, purpose: "console" | "onboard
     return { ready: false, code: b.code ?? "no_model_configured", reason: b.reason ?? "No model is configured.", ...(b.vendor ? { vendor: b.vendor } : {}), ...(b.model ? { model: b.model } : {}) };
   } catch (e) {
     return { ready: false, code: "edge_unreachable", reason: `The edge could not be reached: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+/** The stored trace of a model call (already redacted when it was stored), fetched from the edge. The caller has checked who may read it. */
+export async function fetchTrace(edgeToken: string, ref: string): Promise<{ ok: true; trace: unknown } | { ok: false; status: number }> {
+  const m = /^sha256\/([0-9a-f]{64})$/.exec(ref);
+  if (!m) return { ok: false, status: 400 };
+  try {
+    const res = await f()(`${base()}/service/v1/trace/${m[1]}`, { headers: { authorization: `Bearer ${edgeToken}` }, signal: AbortSignal.timeout(15_000) });
+    if (res.status !== 200) return { ok: false, status: res.status === 404 ? 404 : 503 };
+    return { ok: true, trace: await res.json() };
+  } catch {
+    return { ok: false, status: 503 };
   }
 }
 
@@ -124,10 +139,42 @@ async function stream(res: Response, onText: (d: string) => void): Promise<Strea
   return out;
 }
 
-async function call(edgeToken: string, purpose: "console" | "explain" | "onboarding", body: Record<string, unknown>, signal: AbortSignal, onText: (d: string) => void, pick: ModelPick = {}): Promise<Streamed> {
+/**
+ * Where a conversational call belongs, so its prompt is recorded and only the right people can read it: the edge stores the full request
+ * (redacted) and the API checks the project or work order before showing it. `parts` is the breakdown of the system prompt (layers, skills...)
+ * when the caller composed it from sources; the manifest always also hashes the assembled system text and the tool list.
+ */
+export interface TraceCtx {
+  surface: "console" | "explain" | "onboarding" | "workorder";
+  /** The project the conversation is about. Without a project or work order only the person who asked may read the trace. */
+  project?: string | undefined;
+  woId?: string | undefined;
+  actor?: string | undefined;
+  /** One id for the whole turn (every model call of the tool loop); generated when absent. */
+  turn?: string | undefined;
+  parts?: ManifestPart[] | undefined;
+}
+
+/** The manifest of one conversational turn: the caller's breakdown, the assembled system text, the tool list, and the size of the conversation. */
+export function turnManifest(system: string, tools: unknown[], history: Array<{ text: string }>, question: string, parts: ManifestPart[] = []): PromptManifest {
+  const all = [...parts, part("system", "System prompt as sent", "services/api (assembled for this turn)", null, system), part("tools", "Tool definitions", "services/api session tools", null, JSON.stringify(tools))];
+  return buildManifest("turn", all, { conversation: { messages: history.length + 1, bytes: history.reduce((n, h) => n + Buffer.byteLength(h.text), Buffer.byteLength(question)) } });
+}
+
+async function call(edgeToken: string, purpose: "console" | "explain" | "onboarding", body: Record<string, unknown>, signal: AbortSignal, onText: (d: string) => void, pick: ModelPick = {}, trace?: { ctx: TraceCtx; turn: string; manifest: PromptManifest }): Promise<Streamed> {
+  const th: Record<string, string> = trace
+    ? {
+        "x-gantry-surface": trace.ctx.surface,
+        "x-gantry-turn": trace.turn,
+        "x-gantry-manifest": encodeManifest(trace.manifest),
+        ...(trace.ctx.project ?? pick.project ? { "x-gantry-trace-project": (trace.ctx.project ?? pick.project)! } : {}),
+        ...(trace.ctx.woId ? { "x-gantry-work-order": trace.ctx.woId } : {}),
+        ...(trace.ctx.actor ? { "x-gantry-actor": trace.ctx.actor } : {}),
+      }
+    : {};
   const attempt = (): Promise<Response> => f()(`${base()}/service/v1/messages`, {
     method: "POST",
-    headers: { authorization: `Bearer ${edgeToken}`, "content-type": "application/json", "x-gantry-purpose": purpose, ...(pick.model ? { "x-gantry-model-pick": pick.model } : {}), ...(pick.project ? { "x-gantry-project": pick.project } : {}) },
+    headers: { authorization: `Bearer ${edgeToken}`, "content-type": "application/json", "x-gantry-purpose": purpose, ...th, ...(pick.model ? { "x-gantry-model-pick": pick.model } : {}), ...(pick.project ? { "x-gantry-project": pick.project } : {}) },
     body: JSON.stringify({ ...body, stream: true }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
   });
@@ -151,9 +198,19 @@ async function call(edgeToken: string, purpose: "console" | "explain" | "onboard
   return stream(res, onText);
 }
 
-export const systemPrompt = (o: { person: string; roles: string[]; projects: string[]; current: string | null; /** What this person's console rights let it propose (tool names with plain words), and what it may not. */ may: Array<{ tool: string; does: string }>; mayNot: Array<{ does: string; right: string }>; canUse?: boolean; now: Date }): string =>
+type PromptInput = { person: string; roles: string[]; projects: string[]; current: string | null; /** What this person's console rights let it propose (tool names with plain words), and what it may not. */ may: Array<{ tool: string; does: string }>; mayNot: Array<{ does: string; right: string }>; canUse?: boolean; now: Date };
+
+/** The facts of this conversation: supplied by Gantry, never decided by the agent. */
+export const consoleFacts = (o: PromptInput): string =>
   [
-    "You are the Gantry console, answering people who run a software factory of AI coding agents. Answer questions about projects, work orders, gates, onboarding, permissions, trust, workload, evals and the audit ledger by calling the read tools; do not guess numbers or ids.",
+    "You are the Gantry console, answering people who run a software factory of AI coding agents about projects, work orders, gates, onboarding, permissions, trust, workload, evals and the audit ledger.",
+    `Today is ${o.now.toISOString()}. The person asking is ${o.person} (${o.roles.join(", ") || "no roles"}). Projects they can see: ${o.projects.join(", ") || "none"}.${o.current ? ` Their current project is ${o.current}.` : ""}`,
+  ].join("\n");
+
+/** The fixed rules of the console: read tools for facts, what this person may propose (from their rights), how an unseen thing is treated, the untrusted-data note and the answer cap. */
+export const consoleRails = (o: PromptInput): string =>
+  [
+    "Call the read tools for facts; do not guess numbers or ids.",
     o.may.length
       ? `You may propose these changes for this person by calling the matching tool once (${o.may.map((m) => `${m.tool}: ${m.does}`).join("; ")}): the page shows a confirm card and runs nothing until they click it, so say it is waiting for their confirmation. Never claim an action happened.`
       : "You cannot change anything for this person: their console is read-only. If asked to change something, say so and name the screen where they can do it themselves.",
@@ -163,8 +220,10 @@ export const systemPrompt = (o: { person: string; roles: string[]; projects: str
     "If a tool says something is not visible, say you cannot see it; never reveal projects the tools do not return. Mention work orders by id (WO-1234), projects by name, gates by id. For 'why was this denied', call explain_denial and report the deciding rule and what would change the answer; the trace is authoritative.",
     UNTRUSTED_NOTE,
     "Keep answers under 150 words unless asked for detail. Plain sentences, no headings, no emoji.",
-    `Today is ${o.now.toISOString()}. The person asking is ${o.person} (${o.roles.join(", ") || "no roles"}). Projects they can see: ${o.projects.join(", ") || "none"}.${o.current ? ` Their current project is ${o.current}.` : ""}`,
   ].filter(Boolean).join("\n\n");
+
+/** The console's prompt when no agent is bound to it: Gantry's fixed text alone. With an agent bound, routes/console.ts composes the agent's layers and skills around the same facts and rails. */
+export const systemPrompt = (o: PromptInput): string => [consoleFacts(o), consoleRails(o)].join("\n\n");
 
 export interface RunOptions {
   edgeToken: string;
@@ -183,6 +242,8 @@ export interface RunOptions {
   toolset?: { defs: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>; execute(name: string, input: unknown): Promise<{ text: string; ok: boolean }> };
   maxTokens?: number;
   maxSteps?: number;
+  /** Records the prompt of every call of the turn (trace and manifest). Callers set it; the console, the work-order session and the onboarding session do. */
+  trace?: TraceCtx;
 }
 export interface RunResult { text: string; usage: Usage; model: string | null; stopped: boolean; truncated: boolean }
 
@@ -195,12 +256,13 @@ export async function runConversation(o: RunOptions): Promise<RunResult> {
   const usage: Usage = { inputTokens: 0, outputTokens: 0, calls: 0 };
   let model: string | null = null;
   let text = "";
+  const tr = o.trace ? { ctx: o.trace, turn: o.trace.turn ?? randomUUID(), manifest: turnManifest(o.system, tools, o.history, o.question, o.trace.parts) } : undefined;
   try {
     for (let step = 0; step < (o.maxSteps ?? MAX_STEPS); step++) {
       const r = await call(o.edgeToken, o.purpose ?? "console", { max_tokens: o.maxTokens ?? 1500, system: o.system, messages, tools }, o.signal, (d) => {
         text += d;
         o.onText(d);
-      }, o.pick);
+      }, o.pick, tr);
       usage.inputTokens += r.usage.inputTokens;
       usage.outputTokens += r.usage.outputTokens;
       usage.calls++;
@@ -228,8 +290,8 @@ export async function runConversation(o: RunOptions): Promise<RunResult> {
 }
 
 /** One short, tool-less answer: used to explain a policy decision from its trace. */
-export async function completeOnce(edgeToken: string, purpose: "explain", system: string, user: string, signal: AbortSignal, onText: (d: string) => void = () => undefined): Promise<{ text: string; usage: Usage; model: string | null }> {
-  const r = await call(edgeToken, purpose, { max_tokens: 500, system, messages: [{ role: "user", content: user }] }, signal, onText);
+export async function completeOnce(edgeToken: string, purpose: "explain", system: string, user: string, signal: AbortSignal, onText: (d: string) => void = () => undefined, trace?: TraceCtx): Promise<{ text: string; usage: Usage; model: string | null }> {
+  const r = await call(edgeToken, purpose, { max_tokens: 500, system, messages: [{ role: "user", content: user }] }, signal, onText, {}, trace ? { ctx: trace, turn: trace.turn ?? randomUUID(), manifest: turnManifest(system, [], [], user, trace.parts) } : undefined);
   const text = r.content.filter((b): b is Extract<Block, { type: "text" }> => b.type === "text").map((b) => b.text).join("").trim();
   return { text, usage: r.usage, model: r.model };
 }

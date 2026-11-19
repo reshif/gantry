@@ -1,0 +1,7 @@
+/* System health view styles (#system). Tokens only. */
+.view-system { min-width: 0; }
+.sys-outbox, .sys-jobs { grid-column: 1 / -1; }
+/* The panel body already pads; the blocks inside stack with one gap. */
+@media (max-width: 600px) {
+  /* Tables become one stacked card per row, so nothing is cut off at phone width. */
+}

@@ -1,6 +1,6 @@
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { formatHash, parseHash, useHash, navigate, navigateProject } from "./router";
+import { formatHash, hashQuery, parseHash, useHash, navigate, navigateProject } from "./router";
 import { updatePrefs } from "./prefs";
 import { resolveRoute, canSeeRoute, pickProject, ROUTES } from "./routes";
 import type { Me } from "../api/types";
@@ -12,15 +12,33 @@ const meWith = (roles: Array<{ role: string; scope: string }>, projects = ["paym
 
 describe("hash parsing", () => {
   it("parses ids and params like legacy hashes", () => {
-    expect(parseHash("#home")).toEqual({ id: "home", param: null, project: null });
-    expect(parseHash("#record/WO-1042")).toEqual({ id: "record", param: "WO-1042", project: null });
-    expect(parseHash("#/floor")).toEqual({ id: "floor", param: null, project: null });
-    expect(parseHash("")).toEqual({ id: "", param: null, project: null });
-    expect(parseHash("#record/a%2Fb")).toEqual({ id: "record", param: "a/b", project: null });
+    expect(parseHash("#home")).toEqual({ id: "home", param: null, project: null, q: {} });
+    expect(parseHash("#record/WO-1042")).toEqual({ id: "record", param: "WO-1042", project: null, q: {} });
+    expect(parseHash("#/floor")).toEqual({ id: "floor", param: null, project: null, q: {} });
+    expect(parseHash("")).toEqual({ id: "", param: null, project: null, q: {} });
+    expect(parseHash("#record/a%2Fb")).toEqual({ id: "record", param: "a/b", project: null, q: {} });
+    expect(parseHash("#/evals?tab=suites")).toEqual({ id: "evals", param: "suites", project: null, q: { tab: "suites" } });
+    expect(parseHash("#/trust?tab=rules&x=1")).toEqual({ id: "trust", param: "rules", project: null, q: { tab: "rules", x: "1" } });
+    expect(parseHash("#evals/factory")).toEqual({ id: "evals", param: "factory", project: null, q: {} });
+    expect(parseHash("#/integrations?tab=catalogue")).toEqual({ id: "integrations", param: null, project: null, q: { tab: "catalogue" } });
+    expect(parseHash("#/mcp/mcp-docs?tab=tools")).toEqual({ id: "mcp", param: "mcp-docs", project: null, q: { tab: "tools" } });
+    expect(parseHash("#/security?tab=sessions")).toEqual({ id: "security", param: null, project: null, q: { tab: "sessions" } });
+    expect(ROUTES.find((r) => r.id === "audit")?.title).toBe("Audit ledger");
   });
+  it("ignores a query on the hash: #/p/x/floor?view=board is the floor route", () => {
+    expect(parseHash("#/p/payments/floor?view=board")).toEqual({ id: "floor", param: null, project: "payments", q: { view: "board" } });
+    expect(parseHash("#/floor?density=detail")).toEqual({ id: "floor", param: null, project: null, q: { density: "detail" } });
+    expect(hashQuery("#/floor?density=detail")).toBe("?density=detail");
+    expect(hashQuery("#/floor")).toBe("");
+  });
+  it("reads the hash query (#models?tab=prices) without it leaking into the id or param", () => {
+    expect(parseHash("#/models?tab=prices")).toEqual({ id: "models", param: null, project: null, q: { tab: "prices" } });
+    expect(parseHash("#/agents/ag-build?tab=skills&x=1")).toEqual({ id: "agents", param: "ag-build", project: null, q: { tab: "skills", x: "1" } });
+  });
+
   it("parses and formats project routes", () => {
-    expect(parseHash("#/p/payments/floor")).toEqual({ id: "floor", param: null, project: "payments" });
-    expect(parseHash("#/p/pay%20x/record/WO-1")).toEqual({ id: "record", param: "WO-1", project: "pay x" });
+    expect(parseHash("#/p/payments/floor")).toEqual({ id: "floor", param: null, project: "payments", q: {} });
+    expect(parseHash("#/p/pay%20x/record/WO-1")).toEqual({ id: "record", param: "WO-1", project: "pay x", q: {} });
     expect(formatHash("record", "WO-1", "payments")).toBe("#/p/payments/record/WO-1");
   });
   it("navigate puts the remembered project into project routes only", () => {
@@ -58,10 +76,10 @@ describe("useHash", () => {
 });
 
 describe("route table", () => {
-  it("has the 24 legacy routes in legacy order", () => {
+  it("has the 30 routes in legacy order, with the person and account pages beside People, and Agents at work before them in Overview", () => {
     expect(ROUTES.map((r) => r.id)).toEqual([
-      "home", "projects", "console", "floor", "work-orders", "conversations", "onboarding", "project-config", "record", "agents", "skills", "models",
-      "evals", "trust", "learning", "integrations", "notifications", "mcp", "api", "people", "workload", "access", "security", "audit",
+      "home", "inbox", "projects", "workspace", "console", "floor", "work-orders", "conversations", "onboarding", "project-config", "record", "traveler", "changes", "dossier", "agents", "skills", "models",
+      "evals", "trust", "learning", "integrations", "notifications", "mcp", "api", "people", "person", "account", "workload", "access", "security", "audit", "system", "design-system",
     ]);
   });
   it("applies role rules from me", () => {
@@ -74,6 +92,13 @@ describe("route table", () => {
     expect(canSeeRoute("access", admin)).toBe(true);
     expect(canSeeRoute("trust", meWith([{ role: "approver", scope: "payments" }]))).toBe(true);
     expect(canSeeRoute("home", eng)).toBe(true);
+    // Factory-wide pages follow the server: factory-level roles at factory scope only, never a project admin (display only; the server decides).
+    const pa = meWith([{ role: "project_admin", scope: "payments" }]);
+    for (const id of ["access", "security", "system", "models"]) {
+      expect(canSeeRoute(id, pa), id).toBe(false);
+      expect(canSeeRoute(id, meWith([{ role: "project_admin", scope: "factory" }])), id).toBe(false);
+      for (const role of ["factory_admin", "auditor", "factory_manager", "security_reviewer"]) expect(canSeeRoute(id, meWith([{ role, scope: "factory" }])), `${id} ${role}`).toBe(true);
+    }
   });
   it("hides project routes when no project is visible", () => {
     expect(canSeeRoute("floor", meWith([{ role: "factory_admin", scope: "factory" }], []))).toBe(false);

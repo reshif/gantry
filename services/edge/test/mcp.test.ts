@@ -30,6 +30,7 @@ describe("MCP gateway (spec 6.4, 12.4) against a real MCP server", () => {
   const call = async (tool: string, args: unknown = {}) => (await (await rpc("tools/call", { name: tool, arguments: args })).json()) as { result?: { content: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };
 
   beforeAll(async () => {
+    mcp.hostile = true;
     await Promise.all([api.start(), mcp.start()]);
     gw = buildGateway({ cfg: baseConfig({ apiUrl: api.url }), logger: false });
     await gw.app.listen({ host: "127.0.0.1", port: 0 });
@@ -49,7 +50,8 @@ describe("MCP gateway (spec 6.4, 12.4) against a real MCP server", () => {
         const t = state.tools.get(String(body.tool));
         if (!state.inScope) return [200, { ok: true, allow: false, code: "scope", reason: "MCP server docs is not in scope." }];
         if (!t || !t.allowed) return [200, { ok: true, allow: false, code: "tool", reason: `Tool ${body.tool} is not allowed.` }];
-        if (t.hash && body.definitionHash && t.hash !== body.definitionHash) return [200, { ok: true, allow: false, code: "definition", reason: `The definition of ${body.tool} changed.` }];
+        if (!body.definitionHash) return [200, { ok: true, allow: false, code: "definition", reason: `The live definition of ${body.tool} could not be verified.` }];
+        if (t.hash && t.hash !== body.definitionHash) return [200, { ok: true, allow: false, code: "definition", reason: `The definition of ${body.tool} changed.` }];
         if (t.class === "write" && !state.granted.has(String(body.tool))) return [200, { ok: true, allow: false, code: "preauth", reason: `${body.tool} is a write tool and this attempt has no pre-authorisation for it.` }];
         return [200, { ok: true, allow: true, class: t.class, retry: t.class === "read", callId: ++state.nextCall }];
       }
@@ -73,20 +75,22 @@ describe("MCP gateway (spec 6.4, 12.4) against a real MCP server", () => {
     mcp.requireBearer = SECRET;
     mcp.requireApiKey = null;
     mcp.searchDescription = "Search the docs";
+    mcp.listStatus = null;
+    mcp.omitSearch = false;
     state.transport = "http";
     state.mode = "bearer";
     state.inScope = true;
     state.granted = new Set();
     state.authorizeBodies = [];
     state.results = [];
-    state.tools = new Map([["search", { class: "read", allowed: true }], ["update_page", { class: "write", allowed: true }], ["explode", { class: "read", allowed: true }]]);
+    state.tools = new Map([["search", { class: "read", allowed: true }], ["update_page", { class: "write", allowed: true }], ["explode", { class: "read", allowed: true }], ["leak", { class: "read", allowed: true }], ["huge", { class: "read", allowed: true }]]);
   });
 
   it("speaks MCP to the runner: initialize, tools/list (from the registry, not the server), ping, notifications, and refuses what it does not serve", async () => {
     const init = (await (await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "claude", version: "1" } })).json()) as { result: { protocolVersion: string; capabilities: object } };
     expect(init.result).toMatchObject({ protocolVersion: "2025-06-18", capabilities: { tools: {} } });
     const list = (await (await rpc("tools/list")).json()) as { result: { tools: Array<{ name: string }> } };
-    expect(list.result.tools.map((t) => t.name).sort()).toEqual(["explode", "search", "update_page"]);
+    expect(list.result.tools.map((t) => t.name).sort()).toEqual(["explode", "huge", "leak", "search", "update_page"]);
     expect(mcp.seen).toHaveLength(0); // listing never touches the real server
     expect(((await (await rpc("ping")).json()) as { result: object }).result).toEqual({});
     const note = await fetch(`${base}/mcp/v1/w4-docs`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) });
@@ -99,7 +103,7 @@ describe("MCP gateway (spec 6.4, 12.4) against a real MCP server", () => {
 
   it("a read call goes through with the credential injected, logged with an argument hash, and its outcome reported", async () => {
     const r = await call("search", { query: "refunds" });
-    expect(r.result?.content[0]?.text).toBe("results for refunds");
+    expect(r.result?.content[1]?.text).toBe("results for refunds");
     expect(mcp.calls).toEqual([{ tool: "search", args: { query: "refunds" } }]);
     expect(mcp.seen.every((s) => s.authorization === `Bearer ${SECRET}`)).toBe(true);
     const a = state.authorizeBodies.at(-1)!;
@@ -128,7 +132,7 @@ describe("MCP gateway (spec 6.4, 12.4) against a real MCP server", () => {
   it("works over the older HTTP+SSE transport too", async () => {
     state.transport = "sse";
     const r = await call("search", { query: "sse" });
-    expect(r.result?.content[0]?.text).toBe("results for sse");
+    expect(r.result?.content[1]?.text).toBe("results for sse");
     expect(mcp.seen.some((s) => s.url.startsWith("/messages"))).toBe(true);
   });
 
@@ -139,7 +143,7 @@ describe("MCP gateway (spec 6.4, 12.4) against a real MCP server", () => {
     expect(mcp.calls).toHaveLength(0);
     state.granted.add("update_page");
     const ok = await call("update_page", { id: "p1", body: "x" });
-    expect(ok.result?.content[0]?.text).toBe("updated p1");
+    expect(ok.result?.content[1]?.text).toBe("updated p1");
     expect(mcp.calls).toHaveLength(1);
     expect(state.results.at(-1)).toMatchObject({ outcome: "ok" });
   });
@@ -159,7 +163,7 @@ describe("MCP gateway (spec 6.4, 12.4) against a real MCP server", () => {
     mcp.failNext = { status: 503, count: 2 };
     const before = gw.mcp.retried;
     const r = await call("search", { query: "again" });
-    expect(r.result?.content[0]?.text).toBe("results for again");
+    expect(r.result?.content[1]?.text).toBe("results for again");
     expect(gw.mcp.retried - before).toBe(2);
     expect(state.results.at(-1)).toMatchObject({ outcome: "ok" });
   });
@@ -187,6 +191,47 @@ describe("MCP gateway (spec 6.4, 12.4) against a real MCP server", () => {
     expect(mcp.calls.filter((c) => c.tool === "search")).toHaveLength(1);
   });
 
+  it("fails closed when the live definition cannot be read: the server refuses to list, or lists without the tool", async () => {
+    // tools/list refused: a 4xx is final, nothing is called
+    mcp.listStatus = 400;
+    for (const tool of ["search", "update_page"]) {
+      state.granted.add(tool);
+      const r = await call(tool, { query: "q", id: "p", body: "b" });
+      expect(r.result, tool).toMatchObject({ isError: true });
+      expect(r.result?.content[0]?.text, tool).toMatch(/could not be verified/);
+    }
+    expect(mcp.seen.filter((s) => (s.body as { method?: string } | undefined)?.method === "tools/call")).toHaveLength(0);
+    expect(state.authorizeBodies.every((b) => b.definitionHash === undefined)).toBe(true);
+    // the server's own listing leaves the tool out while it would still answer a call
+    mcp.listStatus = null;
+    mcp.omitSearch = true;
+    const hidden = await call("search", { query: "q" });
+    expect(hidden.result).toMatchObject({ isError: true });
+    expect(hidden.result?.content[0]?.text).toMatch(/could not be verified/);
+    expect(mcp.calls).toHaveLength(0);
+  });
+
+  it("a result is scrubbed of credentials, bounded, and marked as data from outside", async () => {
+    const r = await call("leak");
+    const texts = r.result!.content.map((c) => c.text);
+    expect(texts[0]).toMatch(/Untrusted data returned by MCP server/);
+    expect(texts.join("\n")).not.toContain("sk-ant-a1b2");
+    expect(texts.join("\n")).toContain("[REDACTED:anthropic-key]");
+    const big = await call("huge");
+    expect(big.result).toMatchObject({ isError: true });
+    expect(big.result?.content[0]?.text).toMatch(/larger than/);
+    expect(state.results.at(-1)).toMatchObject({ outcome: "error" });
+  });
+
+  it("a call whose arguments carry a credential is not sent, even with the pre-authorisation", async () => {
+    state.granted.add("update_page");
+    const r = await call("update_page", { id: "p1", body: "here: sk-ant-" + "a1b2c3d4e5f6g7h8i9j0k1l2" });
+    expect(r.result).toMatchObject({ isError: true });
+    expect(r.result?.content[0]?.text).toMatch(/credential/);
+    expect(mcp.calls).toHaveLength(0);
+    expect(state.results.at(-1)).toMatchObject({ outcome: "error" });
+  });
+
   it("an out-of-scope server is refused and the refusal is still logged through the API", async () => {
     state.inScope = false;
     const r = await call("search", { query: "z" });
@@ -209,8 +254,9 @@ describe("MCP gateway (spec 6.4, 12.4) against a real MCP server", () => {
     const r = await call("search", { query: "q" });
     expect(r.result?.isError).toBe(true);
     expect(JSON.stringify(r)).not.toContain(SECRET);
-    // the call was authorised (the failure came while connecting) and the failure is on record
-    expect(state.results.at(-1)).toMatchObject({ outcome: "error" });
+    // the definition could not be read, so the call was refused and never sent
+    expect(r.result?.content[0]?.text).toMatch(/could not be verified/);
+    expect(mcp.calls).toHaveLength(0);
   });
 
   describe("discovery for the API (/mcp-admin/v1/discover)", () => {
@@ -224,7 +270,7 @@ describe("MCP gateway (spec 6.4, 12.4) against a real MCP server", () => {
         expect(j.serverName).toBe("test-docs");
         expect(j.protocolRevision).toMatch(/^20\d\d-\d\d-\d\d$/);
         const by = Object.fromEntries(j.tools.map((t) => [t.name, t]));
-        expect(Object.keys(by).sort()).toEqual(["explode", "search", "update_page"]);
+        expect(Object.keys(by).sort()).toEqual(["explode", "huge", "leak", "search", "update_page"]);
         expect(by.search).toMatchObject({ hint: "read", description: "Search the docs" });
         expect(by.update_page!.hint).toBe("write"); // no readOnlyHint: treated as a write suggestion
         expect(by.search!.hash).toMatch(/^[0-9a-f]{64}$/);

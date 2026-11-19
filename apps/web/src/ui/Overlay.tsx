@@ -3,12 +3,15 @@
  * G.toast, G.dialog, G.drawer, G.popover, G.menu), as React. Same DOM and classes, same focus
  * rules: dialogs trap focus, Escape closes the top layer, focus returns to the opener.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { Btn, Field, guardProps } from "./primitives";
-import { UIContext, type DialogAction, type DialogOpts, type MenuItem, type ToastKind, type UIApi } from "./overlay-context";
+import { UIContext, type DialogAction, type DialogOpts, type MenuItem, type ToastAction, type ToastKind, type UIApi } from "./overlay-context";
 import { tip } from "./Tip";
+import { parseHash } from "../lib/router";
+import { DirtyScope, useLeaveGuard, type DirtyScopeApi } from "../lib/useLeaveGuard";
+import "../lib/data.css";
+import { Modal, useModalLayer, useScrimClose } from "./Modal";
 
 /* ---------- focus trap ---------- */
 
@@ -37,37 +40,19 @@ function trapKeys(getContainer: () => HTMLElement | null, onEsc: () => void) {
   };
 }
 
-/** Remembers the element focused before mount and restores it on unmount. */
-function useRestoreFocus() {
-  useEffect(() => {
-    const prev = document.activeElement as HTMLElement | null;
-    return () => {
-      if (prev && prev.focus && document.body.contains(prev)) prev.focus();
-    };
-  }, []);
-}
-
 /* ---------- Dialog (declarative) ---------- */
 
 export interface DialogProps extends Omit<DialogOpts, "onClose"> {
   onClose: () => void;
 }
 
-/** A modal dialog. Render it while open; call onClose to dismiss. Also used by ui.dialog(). */
-export function Dialog({ title, kicker, sub, wide, cls, body, actions, onClose }: DialogProps) {
-  const panel = useRef<HTMLDivElement>(null);
-  const titleId = useMemo(() => `dlg-title-${Math.random().toString(36).slice(2, 9)}`, []);
-  useRestoreFocus();
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const p = panel.current;
-      if (!p) return;
-      const f = p.querySelector<HTMLElement>("input:not([type=hidden]):not([type=checkbox]),select,textarea") ?? p.querySelector<HTMLElement>(".dlg-foot .btn-primary") ?? p.querySelector<HTMLElement>("button");
-      f?.focus();
-    }, 20);
-    return () => clearTimeout(t);
-  }, []);
-  const list: DialogAction[] = actions ?? [{ label: "Close", kind: "ghost" }];
+/** A modal dialog (see ui/Modal for the layer rules). Render it while open; call onClose to dismiss. Also used by ui.dialog(). */
+export function Dialog({ title, kicker, sub, wide, cls, dirty, body, actions, onClose }: DialogProps) {
+  // Forms inside mark themselves with useLeaveGuard(dirty); the dialog is dirty while any of them is, so every dismissal asks first.
+  const dirtyIds = useRef(new Set<symbol>());
+  const [marked, setMarked] = useState(false);
+  const scope = useMemo<DirtyScopeApi>(() => ({ mark: (id, d) => { if (d) dirtyIds.current.add(id); else dirtyIds.current.delete(id); setMarked(dirtyIds.current.size > 0); } }), []);
+  const list: DialogAction[] = actions ?? [{ label: "Close" }];
   const submitAction = list.find((a) => a.submit);
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -77,31 +62,13 @@ export function Dialog({ title, kicker, sub, wide, cls, body, actions, onClose }
   };
   const content = typeof body === "function" ? body(onClose) : body;
   return (
-    <div className="dlg-wrap">
-      <div className="scrim" onClick={onClose} />
-      <div ref={panel} className={`dlg${wide ? " dlg-wide" : ""}${cls ? ` ${cls}` : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={trapKeys(() => panel.current, onClose)}>
-        <div className="dlg-head">
-          <div>
-            {kicker ? <div className="kicker">{kicker}</div> : null}
-            <h2 id={titleId} className="dlg-title">
-              {title}
-            </h2>
-            {sub ? <p className="dlg-sub">{sub}</p> : null}
-          </div>
-          <button type="button" className="icon-btn" aria-label="Close dialog" onClick={onClose}>
-            <Icon name="x" />
-          </button>
-        </div>
-        <form className="dlg-form" noValidate onSubmit={onSubmit}>
-          <div className="dlg-body">{content}</div>
-          <div className="dlg-foot">
-            {list.map((a, i) => (
-              <Btn key={a.id ?? `${a.label}-${i}`} label={a.label} kind={a.kind ?? "ghost"} type={a.submit ? "submit" : "button"} guard={a.guard} icon={a.icon} id={a.id} onClick={a.submit ? undefined : () => (a.onClick ? a.onClick(onClose) : onClose())} />
-            ))}
-          </div>
-        </form>
-      </div>
-    </div>
+    <Modal title={title} kicker={kicker} sub={sub} wide={wide} cls={cls} dirty={dirty || marked} onClose={onClose} onSubmit={onSubmit}
+      footer={(ask) => list.map((a, i) => (
+        <Btn key={a.id ?? `${a.label}-${i}`} label={a.label} kind={a.kind} type={a.submit ? "submit" : "button"} guard={a.guard} icon={a.icon} id={a.id} onClick={a.submit ? undefined : () => (a.onClick ? a.onClick(ask) : ask())} />
+      ))}
+    >
+      <DirtyScope.Provider value={scope}>{content}</DirtyScope.Provider>
+    </Modal>
   );
 }
 
@@ -109,15 +76,12 @@ export function Dialog({ title, kicker, sub, wide, cls, body, actions, onClose }
 
 function DrawerView({ render, onClose }: { render: (close: () => void) => ReactNode; onClose: () => void }) {
   const panel = useRef<HTMLElement>(null);
-  useRestoreFocus();
-  useEffect(() => {
-    const t = setTimeout(() => panel.current?.querySelector<HTMLElement>(".drawer-close")?.focus(), 20);
-    return () => clearTimeout(t);
-  }, []);
+  useModalLayer({ ref: panel, requestClose: onClose, initialFocus: (p) => p.querySelector<HTMLElement>(".drawer-close") });
+  const scrim = useScrimClose(onClose);
   return (
     <div className="drawer-wrap">
-      <div className="scrim" onClick={onClose} />
-      <aside ref={panel} className="drawer" role="dialog" aria-modal="true" aria-label="Details" onKeyDown={trapKeys(() => panel.current, onClose)}>
+      <div className="scrim" {...scrim} />
+      <aside ref={panel} className="drw drawer" role="dialog" aria-modal="true" aria-label="Details">
         {render(onClose)}
       </aside>
     </div>
@@ -131,12 +95,21 @@ interface PopState {
   render: (close: () => void) => ReactNode;
   onClose?: (() => void) | undefined;
   rect: DOMRect;
+  /** A menu is as wide as its longest entry, right-aligned to an anchor on the right half of the screen (prototype openMenu). */
+  menu?: boolean;
 }
 
 function PopoverView({ state, onClose }: { state: PopState; onClose: () => void }) {
   const pop = useRef<HTMLDivElement>(null);
   const { anchor, rect } = state;
   const w = Math.min(380, window.innerWidth - 16);
+  useLayoutEffect(() => {
+    const el = pop.current;
+    if (!state.menu || !el) return;
+    const mw = el.offsetWidth;
+    const right = rect.left + rect.width / 2 > window.innerWidth / 2;
+    el.style.left = `${Math.max(8, Math.min(right ? rect.right - mw : rect.left, window.innerWidth - mw - 8))}px`;
+  }, [state.menu, rect]);
   useEffect(() => {
     anchor.setAttribute("aria-expanded", "true");
     const t = setTimeout(() => pop.current?.querySelector<HTMLElement>("button,select,input,a")?.focus(), 10);
@@ -145,7 +118,7 @@ function PopoverView({ state, onClose }: { state: PopState; onClose: () => void 
   return (
     <>
       <div className="pop-shield" onClick={onClose} />
-      <div ref={pop} className="pop" role="dialog" aria-label={anchor.getAttribute("aria-label") || "Menu"} style={{ width: w, top: rect.bottom + 6, left: Math.max(8, Math.min(window.innerWidth - w - 8, rect.right - w)) }} onKeyDown={trapKeys(() => pop.current, onClose)}>
+      <div ref={pop} className="pop" role="dialog" aria-label={anchor.getAttribute("aria-label") || "Menu"} style={{ ...(state.menu ? { width: "max-content", minWidth: Math.min(220, w), maxWidth: w } : { width: w }), top: rect.bottom + 6, left: Math.max(8, Math.min(window.innerWidth - w - 8, rect.right - w)) }} onKeyDown={trapKeys(() => pop.current, onClose)}>
         {state.render(onClose)}
       </div>
     </>
@@ -171,14 +144,16 @@ function MenuList({ title, items, close }: { title: string | null; items: MenuIt
       <ul className="menu" role="menu" ref={list} onKeyDown={onKey}>
         {items.map((it, i) => {
           if (it.sep) return <li key={i} className="menu-sep" role="separator" />;
+          if (it.head) return <li key={i} role="presentation"><span className="micro">{it.head}</span></li>;
           const g = guardProps(it.guard);
           return (
             <li key={i} role="none">
               <button
                 type="button"
                 role="menuitem"
-                className={`menu-item${g.locked ? " is-locked" : ""}`}
+                className={`menu-item${g.locked ? " is-locked" : ""}${it.kind === "danger" || it.kind === "andon" ? " menu-item-danger" : ""}`}
                 aria-disabled={g["aria-disabled"]}
+                aria-current={it.sel ? "true" : undefined}
                 data-reason={g["data-reason"]}
                 onClick={(e) => {
                   if (g.locked) {
@@ -191,6 +166,7 @@ function MenuList({ title, items, close }: { title: string | null; items: MenuIt
               >
                 {it.icon ? <Icon name={it.icon} /> : null}
                 <span className="menu-l">{it.label}</span>
+                {it.sel ? <span className="menu-sel"><Icon name="check" /></span> : null}
                 {it.hint ? <span className="menu-h">{g.locked ? "locked" : it.hint}</span> : g.locked ? <span className="menu-h">locked</span> : null}
               </button>
             </li>
@@ -221,6 +197,12 @@ function useSubmit(onClose: () => void) {
   return { err, setErr, run };
 }
 
+/** Marks the enclosing dialog as holding unsaved input while `dirty`. */
+function DirtyMark({ dirty }: { dirty: boolean }) {
+  useLeaveGuard(dirty);
+  return null;
+}
+
 function ReasonView({ o, onClose }: { o: Parameters<UIApi["reasonDialog"]>[0]; onClose: () => void }) {
   const [text, setText] = useState("");
   const { err, setErr, run } = useSubmit(onClose);
@@ -233,6 +215,7 @@ function ReasonView({ o, onClose }: { o: Parameters<UIApi["reasonDialog"]>[0]; o
       onClose={onClose}
       body={
         <div className="form-grid">
+          <DirtyMark dirty={text.trim() !== ""} />
           {o.extra ?? null}
           <Field label={o.label || "Reason"} htmlFor="rsn-text">
             <textarea id="rsn-text" className="input" rows={3} placeholder={o.placeholder || ""} value={text} onChange={(e) => setText(e.target.value)} />
@@ -253,7 +236,7 @@ function ReasonView({ o, onClose }: { o: Parameters<UIApi["reasonDialog"]>[0]; o
           onClick: () => {
             const v = text.trim();
             if (v.length < min) {
-              setErr(`Give a reason of at least ${min} characters.`);
+              setErr(v ? `${(o.label || "Reason").replace(/\s*\((required|optional)\)\s*$/i, "")} needs at least ${min} characters.` : `${(o.label || "Reason").replace(/\s*\((required|optional)\)\s*$/i, "")} is required.`);
               return;
             }
             void run(() => o.onOk(v));
@@ -276,6 +259,7 @@ function TypedView({ o, onClose }: { o: Parameters<UIApi["typedConfirm"]>[0]; on
       onClose={onClose}
       body={
         <div className="form-grid">
+          <DirtyMark dirty={text !== ""} />
           {o.body ?? null}
           <Field label={`Type ${o.phrase} to confirm`} htmlFor="tc-input">
             <input id="tc-input" className="input mono" autoComplete="off" placeholder={o.phrase} value={text} onChange={(e) => setText(e.target.value)} />
@@ -313,6 +297,7 @@ interface ToastItem {
   text: string;
   kind: ToastKind;
   out: boolean;
+  action?: ToastAction | undefined;
 }
 interface StackItem {
   id: number;
@@ -322,7 +307,7 @@ interface StackItem {
 export function OverlayProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [stack, setStack] = useState<StackItem[]>([]);
-  const [drawer, setDrawer] = useState<{ key: string; render: (close: () => void) => ReactNode } | null>(null);
+  const [drawer, setDrawer] = useState<{ key: string; render: (close: () => void) => ReactNode; onClose?: (() => void) | undefined } | null>(null);
   const [pop, setPop] = useState<PopState | null>(null);
   const seq = useRef(1);
   const stackRef = useRef<StackItem[]>([]);
@@ -332,13 +317,24 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
   popRef.current = pop;
   drawerRef.current = drawer;
 
-  const toast = useCallback((text: string, kind: ToastKind = "info") => {
+  const toastTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const timers = toastTimers.current;
+    return () => { for (const t of timers) clearTimeout(t); timers.clear(); };
+  }, []);
+  const toast = useCallback((text: string, kind: ToastKind = "info", action?: ToastAction) => {
     const id = seq.current++;
-    setToasts((l) => [...l, { id, text, kind, out: false }].slice(-3));
-    setTimeout(() => {
+    // the same message twice (a refresh clicked twice) is one toast, with a fresh timer
+    setToasts((l) => [...l.filter((t) => t.text !== text || t.kind !== kind), { id, text, kind, out: false, action }].slice(-3));
+    const timers = toastTimers.current;
+    const later = (fn: () => void, ms: number): void => {
+      const t = setTimeout(() => { timers.delete(t); fn(); }, ms);
+      timers.add(t);
+    };
+    later(() => {
       setToasts((l) => l.map((t) => (t.id === id ? { ...t, out: true } : t)));
-      setTimeout(() => setToasts((l) => l.filter((t) => t.id !== id)), 300);
-    }, 4600);
+      later(() => setToasts((l) => l.filter((t) => t.id !== id)), 300);
+    }, action ? 9_000 : kind === "error" ? 7_000 : 3_800);
   }, []);
 
   const closePopover = useCallback(() => {
@@ -382,7 +378,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
       },
       closeAllDialogs: () => setStack([]),
       drawer: {
-        open: (key, render) => setDrawer({ key, render }),
+        open: (key, render, onClose) => setDrawer({ key, render, onClose }),
         close: () => setDrawer(null),
         isOpen: (key) => !!drawerRef.current && (!key || drawerRef.current.key === key),
       },
@@ -391,7 +387,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
         return closePopover;
       },
       menu: (anchor, title, items) => {
-        setPop({ anchor, render: (close) => <MenuList title={title} items={items} close={close} />, rect: anchor.getBoundingClientRect() });
+        setPop({ anchor, render: (close) => <MenuList title={title} items={items} close={close} />, rect: anchor.getBoundingClientRect(), menu: true });
         return closePopover;
       },
       closePopover,
@@ -434,17 +430,22 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
     };
   }, [toast, closePopover]);
 
-  // legacy: a route change closes the drawer and any popover
+  // A route change closes the drawer, any popover and every open dialog, so nothing stays open over a screen it does not belong to.
+  // Only a change of screen counts (the view and its project): opening or closing a drawer or editing the query of the same screen leaves a dialog open.
+  const pathOf = () => { const l = parseHash(window.location.hash); return `${l.project ?? ""}|${l.id}`; };
+  const lastPath = useRef(pathOf());
   useEffect(() => {
     const onHash = () => {
       setDrawer(null);
       closePopover();
+      const path = pathOf();
+      if (path !== lastPath.current) { lastPath.current = path; setStack([]); }
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, [closePopover]);
 
-  const drawerClose = useCallback(() => setDrawer(null), []);
+  const drawerClose = useCallback(() => { drawerRef.current?.onClose?.(); setDrawer(null); }, []);
 
   return (
     <UIContext.Provider value={api}>
@@ -455,12 +456,25 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
           <Fragment2 key={s.id} item={s} onClose={() => setStack((l) => l.filter((x) => x.id !== s.id))} />
         ))}
       </div>
-      <div id="layer-pop">{pop ? <PopoverView state={pop} onClose={closePopover} /> : null}</div>
-      <div className="toasts" id="toasts" role="status" aria-live="polite">
+      <div id="layer-pop" data-inert-exempt="">{pop ? <PopoverView state={pop} onClose={closePopover} /> : null}</div>
+      <div className="toasts" id="toasts" role="status" aria-live="polite" data-inert-exempt="">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.kind}${t.out ? " out" : ""}`}>
+          <div key={t.id} className={`toast toast-${t.kind} ${t.kind === "error" ? "bad" : t.kind}${t.out ? " out" : ""}`} role={t.kind === "error" ? "alert" : "status"}>
             <Icon name={t.kind === "error" ? "alert" : t.kind === "warn" ? "halt" : "check"} />
             <span>{t.text}</span>
+            {t.action ? (
+              <button
+                type="button"
+                className="btn sm ghost toast-act"
+                id={t.action.id}
+                onClick={() => {
+                  setToasts((l) => l.filter((x) => x.id !== t.id));
+                  t.action!.onClick();
+                }}
+              >
+                {t.action.label}
+              </button>
+            ) : null}
             <button type="button" className="toast-x" aria-label="Dismiss" onClick={() => setToasts((l) => l.filter((x) => x.id !== t.id))}>
               <Icon name="x" />
             </button>

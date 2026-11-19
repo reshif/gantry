@@ -4,8 +4,9 @@ import type pg from "pg";
 import type { Config } from "./config.js";
 import { DEFAULT_SECURITY } from "./read/index.js";
 import { seedDemoAudit } from "../areas/audit/seed.js";
+import { sweepZeroCapHalts } from "../areas/workorders/budget.js";
 import { ensureDefaultModel } from "../areas/models/default.js";
-import { loadStarterKit, upgradeOnboardingAgent } from "../areas/agents/starter-kit.js";
+import { addNewKitCases, loadStarterKit, upgradeOnboardingAgent } from "../areas/agents/starter-kit.js";
 
 export interface BootResult {
   orgId: string;
@@ -38,11 +39,12 @@ export async function bootstrapOrg(pool: pg.Pool, config: Pick<Config, "orgSlug"
     const org = (await tx.query(`select settings from orgs where id = $1 for update`, [id])).rows[0]!;
     const settings = (org.settings ?? {}) as { catalog?: unknown };
     if (!settings.catalog) await tx.query(`update orgs set settings = settings || $2::jsonb where id = $1`, [id, JSON.stringify({ catalog: DEFAULT_CATALOG })]);
-    const roles = await tx.query(`select 1 from roles where org_id = $1 limit 1`, [id]);
-    if (!roles.rowCount) {
-      for (const r of DEFAULT_CATALOG.roles) {
-        await tx.query(`insert into roles (org_id, id, name, level, builtin) values ($1,$2,$3,$4,true) on conflict do nothing`, [id, r.id, r.name, r.level]);
-      }
+    // Built-in roles, including ones added to the catalogue after this org was created (Factory Manager, Security Reviewer): inserted when
+    // missing, never renamed or changed (the catalogue's roles are read from this table).
+    const haveRoles = new Set((await tx.query<{ id: string }>(`select id from roles where org_id = $1`, [id])).rows.map((r) => r.id));
+    const newRoles = DEFAULT_CATALOG.roles.filter((r) => !haveRoles.has(r.id));
+    for (const r of newRoles) {
+      await tx.query(`insert into roles (org_id, id, name, level, builtin) values ($1,$2,$3,$4,true) on conflict do nothing`, [id, r.id, r.name, r.level]);
     }
     // A project needs at least one owning team, so an org with no teams at all gets one to start from (rename or replace it in People & teams).
     const anyTeam = await tx.query(`select 1 from teams where org_id = $1 limit 1`, [id]);
@@ -60,6 +62,8 @@ export async function bootstrapOrg(pool: pg.Pool, config: Pick<Config, "orgSlug"
     const kit = await loadStarterKit(tx, id);
     if (kit.length) log?.info({ agents: kit }, "starter kit loaded");
     if (await upgradeOnboardingAgent(tx, id)) log?.info({ agent: "ag-onboard" }, "onboarding agent upgraded to the authoring instructions (version 2)");
+    const newCases = await addNewKitCases(tx, id);
+    if (newCases) log?.info({ cases: newCases }, "starter kit: new eval cases added to the built-in suites");
     await tx.query(
       `insert into role_matrix_versions (org_id, version, matrix, note, published_at, published_by)
        select $1, 1, $2::jsonb, 'Built-in defaults', now(), 'system' where not exists (select 1 from role_matrix_versions where org_id = $1)`,
@@ -83,6 +87,8 @@ export async function bootstrapOrg(pool: pg.Pool, config: Pick<Config, "orgSlug"
       const next: Record<string, Record<string, boolean>> = {};
       let changed = false;
       const addedIds = new Set<string>();
+      // a built-in role new to this org starts from its defaults (an empty row, so the loop below fills every cell)
+      for (const role of Object.keys(defaults)) if (!(role in cur.matrix) && newRoles.some((r) => r.id === role)) cur.matrix[role] = {};
       for (const [role, cells] of Object.entries(cur.matrix)) {
         next[role] = { ...cells };
         for (const a of DEFAULT_CATALOG.actions) {
@@ -94,10 +100,12 @@ export async function bootstrapOrg(pool: pg.Pool, config: Pick<Config, "orgSlug"
         }
       }
       if (changed) {
-        await tx.query(`insert into role_matrix_versions (org_id, version, matrix, note, published_at, published_by) values ($1,$2,$3::jsonb,'New built-in actions added with their defaults', now(), 'system')`, [id, cur.version + 1, JSON.stringify(next)]);
-        await appendEvent(tx, { orgId: id, type: "matrix.defaults", category: "access", actor: "system", channel: "system", subject: { type: "matrix", id: String(cur.version + 1) }, after: { added: [...addedIds], note: "built-in defaults for new actions; existing cells unchanged" } });
+        await tx.query(`insert into role_matrix_versions (org_id, version, matrix, note, published_at, published_by) values ($1,$2,$3::jsonb,'New built-in actions or roles added with their defaults', now(), 'system')`, [id, cur.version + 1, JSON.stringify(next)]);
+        await appendEvent(tx, { orgId: id, type: "matrix.defaults", category: "access", actor: "system", channel: "system", subject: { type: "matrix", id: String(cur.version + 1) }, after: { added: [...addedIds], roles: newRoles.map((r) => r.id), note: "built-in defaults for new actions and roles; existing cells unchanged" } });
       }
     }
+    const swept = await sweepZeroCapHalts(tx, id);
+    if (swept.length) log?.info({ workOrders: swept }, "budget halts of a $0 monthly budget lifted: $0 now means no cap");
     // A connected vendor with callable enabled models but no routing default (connected before the default was set automatically): set one now.
     const auto = await ensureDefaultModel(tx, id, "startup");
     if (auto) log?.info({ model: auto }, "routing default set");

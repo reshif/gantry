@@ -283,6 +283,19 @@ d("trust evidence, enforcement and automatic demotion (spec 13.1, 13.3)", () => 
       await q(`update trust_cells set level = 'L1' where id = $1`, [CELL]);
       expect(await gate()).toMatchObject({ auto: false, level: 1 });
     });
+    it("never passes plan and security (G3+G3s) either: its lock in the gate rules says a person's approval always stays (statechart gap 9)", async () => {
+      const before = await q(`select id, level from trust_cells`);
+      await q(`update settings set value = jsonb_set(value, '{levelsAboveL1}', 'true') where key = 'trust'`).catch(() => undefined);
+      await w.call(ADMIN, "PUT", "/api/v1/trust/switch", { on: true, reason: "Evidence reviewed, switching on" });
+      await q(`update trust_cells set level = 'L3'`);
+      await q(`update trust_ceilings set enabled = false`);
+      try {
+        expect(await gate({ gateId: "G3G3s" })).toMatchObject({ auto: false, reason: "A person always decides this gate." });
+      } finally {
+        await q(`update trust_ceilings set enabled = true`);
+        for (const r of before) await q(`update trust_cells set level = $2 where id = $1`, [r.id, r.level]);
+      }
+    });
     it("in a real flow, a gate at an unattended level either passes under trust with the grant recorded or waits as a sampled review, and the draw is recorded either way", async () => {
       await q(`update trust_cells set level = 'L2' where id = $1`, [CELL]);
       await q(`update trust_cells set level = 'L2' where id in ('ag-design|feature|payments','ag-plan|feature|payments','ag-review|feature|payments')`);

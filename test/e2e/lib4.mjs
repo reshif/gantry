@@ -1,13 +1,11 @@
 // TEST ONLY: shared helpers for the wave 4 end-to-end scripts (Playwright through https://localhost and Keycloak, API calls as the signed-in person).
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; // the local ingress uses a private CA; this is a test client
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
-const PW = [process.env.PLAYWRIGHT_INDEX, "/opt/node22/lib/node_modules/playwright/index.mjs", "/home/reshif/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs"].find((p) => p && existsSync(p));
-const { chromium } = await import(PW);
+import { DIR, PSQL, loadPlaywright, chromeOptions } from "./paths.mjs";
+const { chromium } = await loadPlaywright();
 
-export const DIR = process.env.E2E_DIR ?? "/tmp/claude-0/w4e2e";
+export { DIR, PSQL };
 export const PROJECT = process.env.E2E_PROJECT ?? "w4e2e";
-export const PSQL = `${DIR}/psql.sh`;
 export const q = (sql) => execFileSync(PSQL, ["-tA", "-F", "|", "-c", sql], { encoding: "utf8" }).trim().split("\n").filter(Boolean).map((l) => l.split("|"));
 export const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, ...opts }).trim();
 export const log = (...a) => console.log(new Date().toISOString().slice(11, 23), ...a);
@@ -19,7 +17,7 @@ export function check(name, ok, detail = "") { results.push({ name, ok: !!ok, de
 export const summary = () => { const f = results.filter((r) => !r.ok); console.log(`\n${results.length - f.length}/${results.length} passed${f.length ? "; FAILED: " + f.map((r) => r.name).join("; ") : ""}`); };
 
 let browser;
-export async function launch() { browser ??= await chromium.launch({ ...(existsSync("/usr/bin/google-chrome") ? { executablePath: "/usr/bin/google-chrome" } : {}), args: ["--no-sandbox"] }); return browser; }
+export async function launch() { browser ??= await chromium.launch(chromeOptions()); return browser; }
 export async function close() { await browser?.close(); browser = undefined; }
 
 /** Signs in through Keycloak as a seeded person and returns { ctx, page, api }. api(method, path, body, headers) calls https://localhost with the session cookie and CSRF token. */

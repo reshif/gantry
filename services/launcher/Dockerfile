@@ -1,31 +1,35 @@
 # gantry-launcher: start-run / stop-run / list-runs over the Docker socket. Build context: repository root.
 #   docker build -f services/launcher/Dockerfile -t gantry-launcher:dev .
 # Behind a TLS-intercepting proxy, add: --secret id=cacert,src=/path/to/ca-bundle.crt (optional; used only for npm ci).
-FROM node:22-alpine AS build
+FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY services/launcher/package.json services/launcher/
 COPY packages/domain/package.json packages/domain/
 RUN --mount=type=secret,id=cacert,required=false \
     if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
-    npm ci -w @gantry/launcher --include-workspace-root --ignore-scripts
+    npm ci -w @gantry/launcher -w @gantry/domain --include-workspace-root --ignore-scripts
+COPY packages/domain/tsconfig.json packages/domain/
+COPY packages/domain/src packages/domain/src
 COPY services/launcher/tsconfig.json services/launcher/
 COPY services/launcher/src services/launcher/src
-RUN npm run build -w @gantry/launcher
+RUN npm run build -w @gantry/domain && npm run build -w @gantry/launcher
 
-FROM node:22-alpine AS deps
+FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY services/launcher/package.json services/launcher/
 COPY packages/domain/package.json packages/domain/
 RUN --mount=type=secret,id=cacert,required=false \
     if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
-    npm ci -w @gantry/launcher --omit=dev --ignore-scripts && npm cache clean --force
+    npm ci -w @gantry/launcher -w @gantry/domain --omit=dev --ignore-scripts && npm cache clean --force
 
-FROM node:22-alpine
+FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
 ENV NODE_ENV=production
 WORKDIR /app/services/launcher
 COPY --from=deps /app/node_modules /app/node_modules
+COPY --from=build /app/packages/domain/dist /app/packages/domain/dist
+COPY packages/domain/package.json /app/packages/domain/package.json
 COPY --from=build /app/services/launcher/dist ./dist
 COPY services/launcher/package.json ./package.json
 # The Docker socket is group-owned by the host's docker group: compose adds that gid with group_add.

@@ -30,6 +30,8 @@ export interface EdgeConfig {
   tunnelCheckMs: number;
   /** Source addresses inside this CIDR are runners and must present their run token to the proxy; everything else is system (worker). */
   runSubnet: string;
+  /** Per-source caps for run networks and the failed-token attempt limit (S-92, S-102). Absent: the defaults in source-guard.ts. */
+  sourceCaps?: { maxConnections: number; requestsPerMinute: number; tokenFailuresPerMinute: number };
   /** Ports the proxy will connect to. */
   allowedPorts: number[];
   /** Refuse upstream addresses that are loopback, link-local or private (SSRF guard). Off only in tests. */
@@ -74,12 +76,19 @@ const Env = z.object({
   EDGE_PROXY_PORT: z.coerce.number().int().default(8444),
   EDGE_VENDOR_CONCURRENCY: z.coerce.number().int().positive().default(16),
   EDGE_RUN_SUBNET: z.string().default("10.213.0.0/16"),
+  EDGE_SOURCE_MAX_CONNECTIONS: z.coerce.number().int().min(1).default(128),
+  EDGE_SOURCE_REQUESTS_PER_MINUTE: z.coerce.number().int().min(1).default(1200),
+  EDGE_TOKEN_FAILURES_PER_MINUTE: z.coerce.number().int().min(1).default(20),
   /** Sandbox and test stacks only: lets the proxy and the MCP gateway reach private addresses (fake Slack and MCP servers in the compose network). Never set in a real install. */
   EDGE_ALLOW_PRIVATE_UPSTREAMS: z.enum(["true", "false"]).default("false"),
 });
 
 export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<EdgeConfig> {
   const e = Env.parse(env);
+  // A subnet that does not parse would make every caller "system" (the no-credentials allow-list): refuse to start instead (S-102).
+  if (!/^(\d{1,3}\.){3}\d{1,3}\/([0-9]|[12][0-9]|3[0-2])$/.test(e.EDGE_RUN_SUBNET) || e.EDGE_RUN_SUBNET.split("/")[0]!.split(".").some((o) => Number(o) > 255)) {
+    throw new Error(`EDGE_RUN_SUBNET "${e.EDGE_RUN_SUBNET}" is not an IPv4 CIDR: it must equal the launcher's RUN_SUBNET_POOL`);
+  }
   const edgeToken = await readSecretFile("edge_token", env);
   const vendorKeys = parseVendorKeys(await readSecretFile("vendor_keys.json", env).catch(() => "{}"));
   const s3 = e.S3_ENDPOINT ? { endpoint: e.S3_ENDPOINT, bucket: e.S3_BUCKET, accessKey: e.S3_ACCESS_KEY, secretKey: await readSecretFile("minio_root_password", env).catch(() => ""), region: e.S3_REGION } : null;
@@ -98,6 +107,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     allowlistTtlMs: 5_000,
     tunnelCheckMs: 3_000,
     runSubnet: e.EDGE_RUN_SUBNET,
+    sourceCaps: { maxConnections: e.EDGE_SOURCE_MAX_CONNECTIONS, requestsPerMinute: e.EDGE_SOURCE_REQUESTS_PER_MINUTE, tokenFailuresPerMinute: e.EDGE_TOKEN_FAILURES_PER_MINUTE },
     allowedPorts: [80, 443],
     blockPrivateAddresses: e.EDGE_ALLOW_PRIVATE_UPSTREAMS !== "true",
     maxBodyBytes: 32 * 1024 * 1024,

@@ -1,5 +1,6 @@
 // TEST ONLY: walks every nav screen through the real browser as a Factory Admin and as an Engineer, screenshots each, and reports console errors,
 // failed API calls (status >= 400 on /api/), and placeholder text. Usage: node walk.mjs [asha arjun ...]
+import { shotPath } from "./paths.mjs";
 import { session, close, log, sleep } from "./lib4.mjs";
 
 const users = process.argv.slice(2).length ? process.argv.slice(2) : ["asha", "tomas"];
@@ -19,7 +20,7 @@ for (const user of users) {
     errors.length = 0; api.length = 0;
     await page.goto(`https://localhost/#${id}`); await sleep(3200);
     const text = await page.evaluate(() => (document.querySelector("main, #main, .main, #view") ?? document.body).innerText);
-    const file = `/tmp/claude-0/w4e2e-screen-${user === "asha" ? "" : "eng-"}${id}.png`;
+    const file = shotPath(`w4e2e-screen-${user === "asha" ? "" : "eng-"}${id}.png`);
     await page.screenshot({ path: file, fullPage: false });
     const ph = PLACEHOLDER.exec(text)?.[0] ?? null;
     const row = { user, id, chars: text.length, placeholder: ph, errors: [...errors], api: [...api], file };
@@ -27,7 +28,7 @@ for (const user of users) {
     console.log(`${row.errors.length || row.api.length || ph || text.length < 40 ? "WARN" : "ok  "} ${user} #${id} chars=${text.length}${ph ? " PLACEHOLDER=" + ph : ""}${row.errors.length ? " errors=" + JSON.stringify(row.errors) : ""}${row.api.length ? " api=" + JSON.stringify(row.api) : ""}`);
   }
   // the work order record screen (reachable from the traveler, not listed in the nav)
-  const rec = await page.evaluate(async () => { const r = await fetch("/api/v1/work-orders?limit=1"); return r.status; }).catch(() => 0);
+  await page.evaluate(async () => { const r = await fetch("/api/v1/work-orders?limit=1"); return r.status; }).catch(() => 0);
   await s.ctx.close();
 }
 await close();

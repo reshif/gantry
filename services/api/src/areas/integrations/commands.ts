@@ -2,12 +2,13 @@
  * Integration commands (spec 8.8, 12.1). Each runs inside `command()`: decision point, event and state in one transaction, a denial audited.
  * Secrets are sealed with the data key and never appear in a row, an event or a response other than as a mask.
  */
+import { egressAdded, urlHosts } from "../internal/egress.js";
 import { randomBytes } from "node:crypto";
 import type { IntegrationType } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
 import type { Actor, CommandResult } from "../../core/command.js";
 import { conflict, invalid, notFound } from "../../core/errors.js";
-import { BUILTIN_IDS, cleanConfig, validateConfig, type ConnectorType } from "./connectors.js";
+import { BUILTIN_IDS, SIGNING_SECRET_MIN, cleanConfig, validateConfig, type ConnectorType } from "./connectors.js";
 import { type TestResult } from "./ops.js";
 import { open, seal, type SecretSet } from "./secrets.js";
 import { instanceFromRow, metaOf, readInstanceRow, readType, slug, typeFromRow, usageOf, type InstanceRow, type Meta } from "./store.js";
@@ -106,7 +107,7 @@ export async function addInstance(tx: Tx, a: Actor, dataKey: Buffer | null, b: z
     [a.orgId, id, t.id, b.name, b.enable === true, json({ ...config, _meta: meta }), sealed.enc, sealed.mask, health],
   );
   const row = (await readInstanceRow(tx, a.orgId, id))!;
-  const events: Cmd["events"] = [{ type: "integration.add", category: eventCat, subject: { type: "integration", id }, projectId: null, after: { name: b.name, type: t.id, config, projects, secretMask: sealed.mask, enabled: row.enabled } }];
+  const events: Cmd["events"] = [{ type: "integration.add", category: eventCat, subject: { type: "integration", id }, projectId: null, after: { name: b.name, type: t.id, config, projects, secretMask: sealed.mask, enabled: row.enabled } }, ...egressAdded([], urlHosts(config), { kind: "integration", id, name: b.name })];
   return { msg: `${b.name} added${row.enabled ? " and switched on" : ". It is switched off until you turn it on"}.`, changes: ["integrationInstances", "home"], project: null, events, extra: { integration: instanceFromRow(row) } };
 }
 
@@ -129,7 +130,7 @@ export async function updateInstance(tx: Tx, a: Actor, dataKey: Buffer | null, i
   const incoming = secretsOf(t, b);
   const config = b.config ? { ...cfg, ...cleanConfig(t, { ...cfg, ...b.config }) } : cfg;
   if (b.config) for (const f of t.fields) if (f.type !== "secret" && f.key in b.config && (b.config[f.key] === "" || b.config[f.key] == null)) delete (config as Record<string, unknown>)[f.key];
-  const bad = validateConfig(t, config, { ...Object.fromEntries(t.fields.filter((f) => f.type === "secret").map((f) => [f.key, "x".repeat(8)])), ...incoming }, { needSecret: false });
+  const bad = validateConfig(t, config, { ...Object.fromEntries(t.fields.filter((f) => f.type === "secret").map((f) => [f.key, "abcdefghijklmnopqrstuvwxyz0123456789".repeat(Math.ceil(SIGNING_SECRET_MIN / 36)).slice(0, Math.max(SIGNING_SECRET_MIN, 36))])), ...incoming }, { needSecret: false });
   if (bad) throw invalid(bad);
   let enc = row.secret_enc;
   let maskText = row.secret_mask ?? "";
@@ -143,17 +144,24 @@ export async function updateInstance(tx: Tx, a: Actor, dataKey: Buffer | null, i
     const missing = t.fields.filter((f) => f.type === "secret" && f.required !== false).filter((f) => !open(dataKey, row.id, enc, f.key)[f.key]);
     if (missing.length) throw invalid(`Add the ${missing[0]!.label.toLowerCase()} before switching it on.`);
   }
-  const nextMeta: Meta = { ...meta, projects, lastSync: a.now.getTime() };
+  // A change of settings or credentials was never tested: health goes back to "unknown" (shown as "Not tested yet") and the old test result is dropped.
+  const settingsChanged = !!b.config || Object.keys(incoming).length > 0;
+  const { lastTest, ...metaRest } = meta;
+  const nextMeta: Meta = { ...(settingsChanged ? metaRest : meta), projects, lastSync: a.now.getTime() };
+  // Switching off reads "offline"; switching on again returns to the last tested result, or "unknown" when it was never tested.
+  const wasTested = !settingsChanged && !!lastTest;
+  const switchedOn = b.connected === true && !row.enabled;
+  const health = settingsChanged ? "unknown" : b.connected === false ? "offline" : switchedOn ? (wasTested ? (lastTest!.ok ? "healthy" : "failing") : "unknown") : row.health === "offline" && enabled ? "unknown" : row.health;
   const name = b.name ?? row.name;
   await tx.query(
     `update integration_instances set name = $3, enabled = $4, config = $5::jsonb, secret_enc = $6, secret_mask = $7, health = $8, version = version + 1, updated_at = now() where org_id = $1 and id = $2`,
-    [a.orgId, row.id, name, enabled, json({ ...config, _meta: nextMeta }), enc, maskText, b.connected === false ? "offline" : b.connected === true ? "unknown" : row.health],
+    [a.orgId, row.id, name, enabled, json({ ...config, _meta: nextMeta }), enc, maskText, health],
   );
   const changed = Object.keys(b).filter((k) => k !== "via");
   const after = { name, config, projects, connected: enabled, ...(Object.keys(incoming).length ? { secretMask: maskText } : {}) };
   return {
     msg: `${name} saved.`, changes: ["integrationInstances", "integrations", "home"], project: null,
-    events: [{ type: "integration.edit", category: eventCat, subject: { type: "integration", id: row.id }, projectId: null, before, after: { ...after, changed } }],
+    events: [{ type: "integration.edit", category: eventCat, subject: { type: "integration", id: row.id }, projectId: null, before, after: { ...after, changed } }, ...egressAdded(urlHosts(cfg), urlHosts(config), { kind: "integration", id: row.id, name })],
     extra: { integration: instanceFromRow((await readInstanceRow(tx, a.orgId, row.id))!) },
   };
 }

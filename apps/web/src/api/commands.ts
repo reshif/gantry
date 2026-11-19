@@ -1,0 +1,48 @@
+/**
+ * The write commands the Projects, Onboarding and Project config screens run. Views take a command from here and run it through
+ * `useCommand` (or the `useRes` toast helper); they do not import `api/ops` themselves.
+ */
+import { ops } from "./ops";
+
+export const commands = {
+  createProject: ops.createProject,
+  setTeams: ops.setTeams,
+  connectRepo: ops.connectRepo,
+  rerunAssessment: ops.rerunAssessment,
+  openOnboardingPR: ops.openOnboardingPR,
+  mergeOnboardingPR: ops.mergeOnboardingPR,
+  withdrawException: ops.withdrawException,
+  saveGuidelines: ops.saveGuidelines,
+  setProject: ops.setProject,
+  setGateMode: ops.setGateMode,
+  kill: ops.kill,
+  confirmProposal: ops.confirmProposal,
+  dismissProposal: ops.dismissProposal,
+  haltProject: ops.haltProject,
+  attachSkill: ops.attachSkill,
+  setSkillProjects: ops.setSkillProjects,
+  editBrief: ops.editBrief,
+  refreshContext: ops.refreshContext,
+  sendBack: ops.sendBack,
+  setFactoryRole: ops.setFactoryRole,
+  setMemberRole: ops.setMemberRole,
+  setProjectOncall: ops.setProjectOncall,
+  handOverOncall: ops.handOverOncall,
+  sendTest: ops.sendTest,
+  addStation: ops.addStation,
+  moveStation: ops.moveStation,
+  removeStation: ops.removeStation,
+  addGate: ops.addGate,
+  addBay: ops.addBay,
+  addClass: ops.addClass,
+  updateClass: ops.updateClass,
+  saveCeiling: ops.saveCeiling,
+  removeCeiling: ops.removeCeiling,
+  setAway: ops.setAway,
+  archiveProject: ops.archiveProject,
+  unarchiveProject: ops.unarchiveProject,
+  acceptInvite: ops.acceptInvite,
+  revokeSession: ops.revokeSession,
+  requestChatLink: ops.requestChatLink,
+  removeChatLink: ops.removeChatLink,
+};

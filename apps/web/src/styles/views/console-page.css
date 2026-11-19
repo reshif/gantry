@@ -1,0 +1,9 @@
+/* Console page (#workspace/new): the Blueprint prototype's layout. The conversation is a titled panel beside what the person can do. */
+
+/* Prototype Console: empty state centred in the conversation, chips above a one-line input with Send beside it. */
+.con-empty { display: grid; justify-items: center; gap: 6px; padding: 72px 16px 0; text-align: center; color: var(--accent); }
+.con-empty h3 { color: var(--ink); font-size: var(--t-md, 15px); }
+.con-empty .icon { width: 36px; height: 36px; }
+.con-more { margin-top: var(--s3); }
+.con-more > summary { cursor: pointer; color: var(--muted); font-size: var(--t-sm); padding: 4px 0 var(--s2); }
+.con-more[open] > :not(summary) { margin-bottom: var(--s3); }

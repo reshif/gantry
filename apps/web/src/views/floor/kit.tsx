@@ -2,9 +2,10 @@
  * Shared pieces of the Floor (legacy floor.js and the work-order token of shared.js): the floor read and its context,
  * work-order token, gate state and the small helpers every view of the floor uses. Same DOM and classes as legacy.
  */
+import { gateLabelOf } from "../../lib/gate-label";
 import { createContext, useContext, useMemo } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { DAY, HOUR, MIN, WO_STATES, bayDef, classesOf, fmt, gateAfter, gateDef, gateForWO, gateKind, type Bay, type Catalog, type EventEntry, type Gate, type Project, type Repo, type StateAt, type WorkOrder } from "@gantry/domain";
+import { DAY, HOUR, MIN, WO_STATES, requiredFor, bayDef, classesOf, fmt, gateAfter, gateDef, gateForWO, gateKind, wipStatus, type Bay, type Catalog, type EventEntry, type Gate, type Project, type Repo, type StateAt, type WorkOrder } from "@gantry/domain";
 import { api, get } from "../../api/client";
 import { useRepos } from "../../api/queries";
 
@@ -138,13 +139,23 @@ export function gateStateOf(ctx: FloorCtxValue, gid: string): { state: GateState
 export function gateHaveNeed(ctx: FloorCtxValue, w: WorkOrder, gid: string): { have: number; need: number } {
   const row = ctx.floor.gates.find((x) => x.wo === w.id && x.gate === gid);
   const rule = ctx.project.approvers[gid];
-  return { have: row?.have ?? w.gates?.[gid]?.approvals.length ?? 0, need: row?.need ?? rule?.required ?? 1 };
+  return { have: row?.have ?? w.gates?.[gid]?.approvals.length ?? 0, need: row?.need ?? requiredFor(rule, w.cls) };
 }
 
 /** The label for the gate column of a card or row. */
+/** "Waiting: Verify is full (3/3)" on a work order that finished its station and waits for the next one, counted from the floor's own work orders. */
+export function wipChip(ctx: FloorCtxValue, w: WorkOrder): string | null {
+  const wait = w.wipWait ?? null;
+  if (!wait) return null;
+  const s = wipStatus(ctx.cat, ctx.project, ctx.wos, wait.station);
+  return `Waiting: ${ctx.cat.stations.find((x) => x.id === wait.station)?.name ?? wait.station} is full (${s.limit ? s.live : wait.live}/${s.limit || wait.limit})`;
+}
+
 export function gateText(ctx: FloorCtxValue, w: WorkOrder): { t: string; c: string } {
   if (w.state === "killed") return { t: "Killed", c: "kill" };
   if (w.bay) return { t: bayName(ctx.cat, w.bay), c: "park" };
+  const wip = wipChip(ctx, w);
+  if (wip) return { t: wip, c: "wait" };
   const g = gateForWO(ctx.cat, ctx.project, w);
   if (w.state === "waiting" && g) {
     const { have, need } = gateHaveNeed(ctx, w, g.id);
@@ -170,8 +181,9 @@ export function WoToken({ w, compact, idPrefix = "tok-", halted, onOpen }: { w: 
   const live = st !== "done" && st !== "killed";
   const time = st === "done" ? "done" : st === "killed" ? "killed" : fmt.dur(Math.max(0, ctx.now - (w.bay ? (w.bayAt ?? e?.startedAt ?? w.createdAt) : (e?.startedAt ?? w.createdAt))));
   const g = gateForWO(ctx.cat, ctx.project, w);
+  const wipNote = wipChip(ctx, w);
   const note =
-    st === "running" ? null : st === "waiting" && g ? `waiting at ${g.name}` : st === "parked" ? bayName(ctx.cat, w.bay ?? "") : st === "killed" ? "Killed" : st === "blocked" ? "Blocked" : st === "failed" ? "Check failed" : st === "done" ? (w.split ? "Split" : "Shipped") : "";
+    st === "running" ? null : wipNote ? wipNote : st === "waiting" && g ? `waiting at ${g.name}` : st === "parked" ? bayName(ctx.cat, w.bay ?? "") : st === "killed" ? "Killed" : st === "blocked" ? "Blocked" : st === "failed" ? "Check failed" : st === "done" ? (w.split ? "Split" : "Shipped") : "";
   const cls = classOf(ctx.cat, ctx.project, w.cls);
   return (
     <button
@@ -242,14 +254,34 @@ export function useProjectRepos(projectId: string | null | undefined): Repo[] {
   }, [q.data, f]);
 }
 
-export function useFloorState(projectId: string | null | undefined, rp: Omit<ReplayCtx, "state"> | null): { value: FloorCtxValue | null; error: boolean } {
+export function useFloorState(projectId: string | null | undefined, rp: Omit<ReplayCtx, "state"> | null): { value: FloorCtxValue | null; error: unknown } {
   const cat = useCatalog();
   const floor = useFloorRead(projectId, rp?.at);
   const repos = useProjectRepos(projectId);
   const f = floor.data;
-  if (!cat || !f) return { value: null, error: floor.isError };
+  if (!cat || !f) return { value: null, error: floor.isError ? floor.error : null };
   const replay: ReplayCtx | null = rp ? { ...rp, state: f.replay ?? { at: rp.at, workOrders: [], halted: null, killed: null, haltedRepos: {} } } : null;
-  return { value: { cat, project: f.project, floor: f, wos: f.workOrders, repos, replay, now: replay ? replay.at : Date.now() }, error: false };
+  return { value: { cat, project: f.project, floor: f, wos: f.workOrders, repos, replay, now: replay ? replay.at : Date.now() }, error: null };
 }
 
 export const useFloorValue = (projectId: string | null | undefined, rp: Omit<ReplayCtx, "state"> | null): FloorCtxValue | null => useFloorState(projectId, rp).value;
+
+/** The gate a work order waits at (the prototype's waitingGate): the gate whose status is waiting, else the gate its station ends in. Null when it waits at none. */
+export function waitingGateId(ctx: FloorCtxValue, w: FWo): string | null {
+  if (w.state !== "waiting" || w.bay) return null;
+  const hit = Object.entries(w.gates ?? {}).find(([, g]) => g.status === "waiting");
+  return hit ? hit[0] : (gateForWO(ctx.cat, ctx.project, w)?.id ?? null);
+}
+
+const WO_TONE: Record<string, string> = { running: "info", waiting: "warn", parked: "plain", blocked: "bad", failed: "bad", done: "ok", killed: "bad" };
+
+/** The prototype's work-order state chip: "At G2" while waiting at a gate, "Parked · bay", else the state word. A plain `.chip` (no `.state` block). */
+export function WoChip({ w }: { w: FWo }) {
+  const ctx = useFloorCtx();
+  const g = waitingGateId(ctx, w);
+  const wip = wipChip(ctx, w);
+  if (wip) return <span className="chip warn">{wip}</span>;
+  if (w.state === "waiting" && g) return <span className="chip warn">{`At ${gateLabelOf(null, g)}`}</span>;
+  if (w.state === "parked") return <span className="chip plain">{`Parked · ${ctx.cat.bays.find((b) => b.id === w.bay)?.name ?? "bay"}`}</span>;
+  return <span className={`chip ${WO_TONE[w.state] ?? "plain"}`}>{w.state}</span>;
+}

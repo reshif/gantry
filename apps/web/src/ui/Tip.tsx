@@ -87,7 +87,13 @@ export function Tip() {
     const onFocusIn = (e: FocusEvent) => {
       const t = closestTip(e.target);
       if (t && t.matches(":focus-visible")) place(t);
-      else hide();
+      else {
+        // not shown (mouse or touch focus), but the node is what the control's aria-describedby points to: keep its text current
+        const text = t?.getAttribute("data-reason");
+        const n = node();
+        if (text && n) n.textContent = text;
+        hide();
+      }
     };
     document.addEventListener("pointerdown", onDown, true);
     document.addEventListener("keydown", onKey);

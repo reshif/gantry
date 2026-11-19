@@ -1,5 +1,6 @@
 /** Onboarding session API (services/api/src/routes/onboarding-session.ts). Query keys start with `repos`, so every change to a repo refreshes the conversation too. */
 import { useQuery } from "@tanstack/react-query";
+import { pollWhenStreamDown } from "../../lib/connection/store";
 import type { Next, SessionCard, StepState } from "@gantry/domain";
 import { api, get, post, streamCommand, type ApiResult } from "../../api/client";
 import { invalidateSlices } from "../../api/keys";
@@ -34,7 +35,7 @@ export interface Session {
 
 const enc = encodeURIComponent;
 export const sessionKey = (repoId: string) => ["repos", "session", repoId] as const;
-export const useSession = (repoId: string) => useQuery({ queryKey: sessionKey(repoId), queryFn: () => get<Session>(api(`repos/${enc(repoId)}/onboarding/session`)), refetchInterval: 15_000 });
+export const useSession = (repoId: string, enabled = true) => useQuery({ queryKey: sessionKey(repoId), queryFn: () => get<Session>(api(`repos/${enc(repoId)}/onboarding/session`)), refetchInterval: pollWhenStreamDown(15_000), enabled });
 
 export type TurnEvent =
   | { event: "text"; data: { delta: string } }

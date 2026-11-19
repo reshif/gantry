@@ -1,42 +1,39 @@
 /* Models view. Tokens only. Builds on round-one .vendor*, .health, .routing*, .rule-card* in views.css. */
-.view-models .vendor-grid { margin-bottom: var(--s4); }
-.view-models .vendor .tb-vendor dd { overflow: hidden; text-overflow: ellipsis; }
-.md-incident { margin-bottom: var(--s4); display: flex; gap: 8px; align-items: flex-start; padding: 8px 12px; }
-.md-budget { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 16px; }
-.md-def { margin-left: 6px; font-size: 10px; }
-.md-off td { color: var(--muted); }
-.md-users { display: flex; flex-wrap: wrap; gap: 3px; }
-.md-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); }
-.view-models .residency { display: flex; gap: 6px; align-items: flex-start; padding: 6px 16px 10px; color: var(--ink-2); }
-.view-models .residency .ic { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--accent); }
-.view-models .nowrap { white-space: nowrap; }
-.rule-top { display: flex; gap: 8px; align-items: center; }
-.md-rule-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; align-items: end; padding: 10px; border: 1px dashed var(--line-strong); background: var(--panel); }
-.md-rule-form > .btn { justify-self: start; }
-.md-preview { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line-strong); border-left: 3px solid var(--ink); background: var(--surface); }
-.md-steps { margin: 0; padding-left: 20px; display: grid; gap: 3px; font-size: var(--t-sm); font-family: var(--f-mono); color: var(--ink-2); }
-.md-result { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 8px; border: 1px solid; font-size: var(--t-md); }
-.md-result.is-ok { color: var(--done); border-color: var(--done); background: var(--done-soft); }
-.md-result.is-block { color: var(--block); border-color: var(--block); background: var(--block-soft); border-style: double; border-width: 3px; }
-.md-result .ic { width: 14px; height: 14px; }
 .md-routing .sub-h { margin-top: 14px; }
-
-@media (max-width: 1100px) {
-  .view-models .vendor-grid, .view-models .routing-grid { grid-template-columns: minmax(0, 1fr); }
-}
-@media (max-width: 560px) {
-  .view-models .tb-vendor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .md-rule-form { grid-template-columns: minmax(0, 1fr); }
-  .md-budget { grid-template-columns: minmax(0, 1fr) auto; }
-  .md-budget > .small.muted { grid-column: 1 / -1; }
-}
-.md-id { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-.md-id .md-rm { margin-left: auto; }
-.view-models .vendor td:first-child { min-width: 150px; }
 
 /* Vendor template picker (spec 10.4 Vendor templates). */
 .vt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: var(--s3, 0.75rem); }
-.vt-card { display: flex; flex-direction: column; gap: 0.25rem; text-align: left; padding: 0.75rem 0.9rem; border: 1px solid var(--line, currentColor); border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.vt-card:hover:not(:disabled), .vt-card:focus-visible { border-color: var(--accent, currentColor); }
+.vt-card { display: flex; flex-direction: column; gap: 0.25rem; text-align: left; padding: 0.75rem 0.9rem; color: inherit; font: inherit; cursor: pointer; }
 .vt-card:disabled { opacity: 0.55; cursor: not-allowed; }
 .vt-name { font-weight: 600; }
+
+/* Models, redesign layout: stats row, tabs, stacked vendor cards, routing as grouped panels. */
+.vendor-facts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: var(--s5, 24px); padding: 14px 16px; align-items: start; }
+.vendor-side { display: grid; gap: 8px; min-width: 0; }
+.vendor-side .residency { padding: 0; }
+.md-stack { display: grid; gap: var(--s4); }
+.md-routing > .lock-note { margin-bottom: var(--s3); }
+@media (max-width: 720px) {
+  .vendor-facts { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+}
+
+/* blueprint: vendor cards in a grid, models as toggle rows */
+
+/* Vendor picker: what each vendor needs, and the local-models hint. */
+.vt-needs-k { text-transform: uppercase; letter-spacing: 0.06em; font-size: var(--t-xs, 11px); margin-right: 4px; }
+.vt-local { margin-top: 2px; color: var(--accent); font-weight: 500; }
+/* Blueprint: plate cards with a hard offset shadow, mono labels. */
+.vt-card { background: var(--surface2); border: 1px solid var(--line2); border-radius: var(--r); box-shadow: 2px 2px 0 var(--plate); min-height: 7rem; }
+.vt-card:hover:not(:disabled), .vt-card:focus-visible { border-color: var(--accent); box-shadow: 4px 4px 0 var(--plate); background: var(--surface); }
+.vt-name { font-family: var(--f-display); }
+.vt-needs-k { font-family: var(--f-mono); }
+.vt-local { border-top: 1px dashed var(--line); padding-top: 4px; font-family: var(--f-mono); font-size: var(--t-xs); }
+
+/* Vendor cards are links: one stretched link per card, the card is the click target. Vendor page: header actions wrap, the table scrolls inside its panel. */
+.view-models .md-vtitle { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.view-models .md-vopen { font-weight: 500; }
+.view-models .md-vopen::after { content: ""; position: absolute; inset: 0; }
+.view-models .md-vopen:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.view-vendor .vhead-actions { flex-wrap: wrap; }
+.view-vendor #vp-stats { margin-bottom: var(--s4); }
+.view-vendor .stat-sub { overflow-wrap: anywhere; }

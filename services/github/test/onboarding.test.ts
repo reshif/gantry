@@ -36,6 +36,14 @@ describe("scanText", () => {
     expect(hits).toEqual([{ path: "a.ts", line: 2, rule: "github-token" }, { path: "a.ts", line: 3, rule: "private-key" }]);
     expect(JSON.stringify(hits)).not.toContain("x7Kq9");
   });
+  it("skips lines over 2000 chars by default but scans them (chunked, seam-safe) for repo context", () => {
+    const tok = fakeToken();
+    for (const pad of [3000, 1490, 1499]) {
+      const line = `${"x ".repeat(pad / 2)}${tok}${" y".repeat(500)}`;
+      expect(scanText("m.md", line)).toEqual([]);
+      expect(scanText("m.md", line, { longLines: true })).toEqual([{ path: "m.md", line: 1, rule: "github-token" }]);
+    }
+  });
   it("does not flag low-entropy or placeholder assignments", () => {
     expect(scanText("c.ts", 'const password = "aaaaaaaaaaaaaaaaaaaaaaaaaaaa"')).toEqual([]);
     expect(scanText("c.ts", 'const apiKey = "your-api-key-goes-here-1234567890"')).toEqual([]);
@@ -73,6 +81,19 @@ describe("POST /v1/onboarding/inspect", () => {
     expect(r.status).toBe(404);
     expect(r.body).toMatchObject({ code: "not_installed" });
     expect(r.body.msg).toContain("not installed on acme/missing");
+  });
+});
+
+describe("POST /v1/onboarding/file", () => {
+  it("reads one file at the given commit with the read-only token, and refuses a path that is not in the tree", async () => {
+    const r = await env.call("POST", "/v1/onboarding/file", { repo: REPO, sha: head, path: "src/index.ts" });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toMatchObject({ path: "src/index.ts", binary: false, content: "export const a = 1;\n" });
+    expect(env.gh.writes()).toEqual([]);
+    const miss = await env.call("POST", "/v1/onboarding/file", { repo: REPO, sha: head, path: "src/none.ts" });
+    expect(miss.status).toBe(404);
+    expect(miss.body).toMatchObject({ code: "no_such_file" });
+    expect((await env.call("POST", "/v1/onboarding/file", { repo: REPO, sha: "main", path: "a" })).status).toBeGreaterThanOrEqual(400);
   });
 });
 

@@ -1,16 +1,30 @@
 import { auditCategoryFor, needsStepUp, type Decision } from "@gantry/domain";
+import { DenialSampler } from "./denial-sampler.js";
 import {
   appendEvent, enqueue, enqueueOutbox, idempotency, withTx,
   type EventCategory, type EventChannel, type EventOutcome, type EventSubject, type Tx,
 } from "@gantry/db";
 import type { FastifyRequest } from "fastify";
 import { publishChange } from "./changes.js";
-import { decideFor, refuseDecision, stepUpSatisfied, type Scope } from "./decide.js";
+import { decide, decideFor, refuseDecision, stepUpSatisfied, type Scope } from "./decide.js";
 import { Refusal, refuse } from "./errors.js";
+import { checkDeclared } from "./write-gate.js";
 import { readApiSettings } from "../areas/apikeys/config.js";
 import { readSecurity } from "./read/index.js";
 import { loadPolicyState } from "./read/state.js";
 import { loadStopSnapshot, refreshStopSnapshot } from "./stop-snapshot.js";
+
+/**
+ * Whether a route may make a network call on the caller's behalf BEFORE its command opens (a connection test, a discovery): the decision point allows the
+ * action AND, for an action that needs a fresh sign-in, the session has one. A false answer means "do not call out": the command that follows then
+ * refuses and audits the refusal with the right reason (denied or step-up).
+ */
+export async function mayCallOut(req: FastifyRequest, action: string): Promise<boolean> {
+  if (!(await decide(req, action, {})).allowed) return false;
+  if (!(req.gx.principal?.kind === "person" && needsStepUp(action))) return true;
+  const sec = await readSecurity(req.server.gantry.pool, req.server.gantry.orgId).then((v) => v.value).catch(() => null);
+  return stepUpSatisfied(req, (sec?.stepUpWindowMinutes ?? 15) * 60);
+}
 
 export interface EventSpec {
   type: string;
@@ -56,12 +70,16 @@ export interface CommandResult<X extends object = Record<string, never>> {
   changes?: string[];
   /** Project the change belongs to (default: the command's scope). Absent = factory-wide. */
   project?: string | null;
+  /** Only these people receive the change (a private item: see Change.audience). */
+  audience?: string[];
 }
 
 export interface CommandSpec {
   /** Catalog action id; checked by the decision point. `null`: the caller changes only their own data (own session, own saved view), which needs no catalogue right. */
   action: string | null;
   scope?: Scope;
+  /** A Factory Admin's reason for a break-glass override of a freeze or halt (at least 5 characters, else it is ignored). The handler records it in the audit. */
+  overrideReason?: string;
   /** Reads the entity's current version in the transaction (null = not found). With an `If-Match` header, a different value is a 409. */
   ifMatch?: (tx: Tx) => Promise<number | null>;
   /** Versioned config endpoints: a request without `If-Match` is a 409 "version required" (so a blind overwrite is impossible). Needs `ifMatch`. */
@@ -101,7 +119,6 @@ export interface Actor {
 const SELF: Decision = { allowed: true, reason: "The caller changes their own data.", rule: { kind: "self", id: "SELF", name: "Own data" }, needs: "" };
 
 const CHANNELS: readonly EventChannel[] = ["web", "console", "slack", "teams", "api", "github", "schedule", "system"];
-const VIA: readonly string[] = ["web", "console", "slack", "teams"];
 
 /** A denial found inside the transaction: the transaction rolls back, the denial is audited in its own, and the caller gets 403 or 409. */
 class Denied extends Error {
@@ -125,14 +142,40 @@ export function parseIfMatch(req: FastifyRequest): number | null {
   return Number(m[1]);
 }
 
-const bodyVia = (body: unknown): string | null => {
-  const v = body && typeof body === "object" ? (body as { via?: unknown }).via : undefined;
-  return typeof v === "string" && VIA.includes(v) ? v : null;
-};
+/** Surfaces a signed-in browser session may name for itself: both are the same session, in the app or its console. */
+const BROWSER_VIA: readonly string[] = ["web", "console"];
+
+/**
+ * The channel an action came through, from the transport and never from what the client claims. A browser session
+ * may say `console` (the app's own console) and nothing else; an API key or a service names no channel; Slack and
+ * Teams are set only by the server's signature-checked chat hooks (`req.gx.channel`).
+ */
+export function trustedVia(req: FastifyRequest): string | null {
+  const t = req.gx?.channel;
+  if (t === "slack" || t === "teams") return t;
+  if (t !== "web" || req.gx.principal?.kind !== "person") return null;
+  const b = req.body;
+  const v = b && typeof b === "object" ? (b as { via?: unknown }).via : undefined;
+  return typeof v === "string" && BROWSER_VIA.includes(v) ? v : null;
+}
+
+/**
+ * Rewrites a request body's `via` to the trusted value before any route reads it, so a vote, a decision or an audit
+ * row can't be stamped "via slack" from a browser. Registered as a preHandler on the whole API.
+ */
+export function pinVia(req: FastifyRequest): void {
+  const b = req.body;
+  if (!b || typeof b !== "object" || Array.isArray(b) || !("via" in b)) return;
+  const v = trustedVia(req);
+  if (v === null) delete (b as { via?: unknown }).via;
+  else (b as { via?: unknown }).via = v;
+}
+
+const bodyVia = (req: FastifyRequest): string | null => trustedVia(req);
 
 function actorFor(req: FastifyRequest, decision: Decision, ifMatch: number | null, key: string | null): Actor {
   const p = req.gx.principal!;
-  const via = bodyVia(req.body);
+  const via = bodyVia(req);
   const channel: EventChannel = p.kind === "apikey" ? "api" : p.kind === "service" ? "system" : ((via as EventChannel | null) ?? "web");
   return {
     orgId: req.gx.orgId,
@@ -172,6 +215,7 @@ export async function command<X extends object = Record<string, never>>(
   // Spec 5.3: creates from API keys and other non-browser callers must carry an Idempotency-Key, so a retried request cannot create twice. Browser sessions send one automatically.
   if (spec.idempotent && !idemHeader && principal.kind === "apikey") throw refuse("invalid", "Creates through the API need an Idempotency-Key header, so a retry cannot create twice.", { needs: "Idempotency-Key" });
   if (idemHeader && (idemHeader.length > 200 || /[\r\n]/.test(idemHeader))) throw refuse("invalid", "Idempotency-Key is too long.");
+  await checkDeclared(req, spec.action);
   const route = `${principal.kind}:${principal.id}:${req.method} ${req.routeOptions?.url ?? req.url}`;
 
   // The public API's idempotency window is a setting (spec 12.5); people get the 24 hours of the column default.
@@ -206,7 +250,7 @@ export async function command<X extends object = Record<string, never>>(
       let decision: Decision =
         spec.service && principal.kind === "service"
           ? { allowed: true, reason: `Authenticated service ${principal.id}.`, rule: { kind: "service", id: principal.id, name: `Service ${principal.id}` }, needs: "" }
-          : spec.action === null ? SELF : decideFor(st, principal, spec.action, spec.scope ?? {});
+          : spec.action === null ? SELF : decideFor(st, principal, spec.action, (spec.overrideReason?.trim().length ?? 0) >= 5 ? { ...(spec.scope ?? {}), override: true } : spec.scope ?? {});
       if (fallback) {
         decision = { ...decision, reason: `${decision.reason} (Decided from the policy snapshot of ${fallback.snapshotAt}: policy data was unreadable.)`, ...(decision.allowed ? { rule: { kind: "invariant", id: "I7-SNAPSHOT", name: "Stop path: last-known-good policy" } } : {}) };
       }
@@ -264,7 +308,7 @@ export async function command<X extends object = Record<string, never>>(
         await idempotency.storeResult(tx, { orgId: g.orgId, scope: route, key: idemHeader }, 200, kept);
       }
       const project = r.project === undefined ? spec.scope?.project ?? undefined : r.project ?? undefined;
-      await publishChange(tx, { org: g.orgId, keys: [...(r.changes ?? (spec.reduced ? ["stops", "factory", "projects", "repos"] : [])), "audit"], ...(project ? { project } : {}) });
+      await publishChange(tx, { org: g.orgId, keys: [...(r.changes ?? (spec.reduced ? ["stops", "factory", "projects", "repos"] : [])), "audit"], ...(project ? { project } : {}), ...(r.audience ? { audience: r.audience } : {}) });
       if (!fallback) loaded = st;
       return { replay: false as const, status: 200, body };
     });
@@ -290,18 +334,25 @@ export function stopCommand<X extends object = Record<string, never>>(
   return command(req, { ...spec, reduced: true }, fn);
 }
 
+/** Denials of signed-in callers: `hook` is the caller, `source` the action, so the per-hook cap is per caller. */
+export const principalDenials = new DenialSampler(5, 20);
+
 /** Records a denial in its own transaction (the command's transaction rolled back). */
 export async function auditDenial(req: FastifyRequest, spec: { action: string | null; scope?: Scope }, d: Decision): Promise<void> {
   const g = req.server.gantry;
   const p = req.gx.principal;
   if (!p) return;
-  const via = bodyVia(req.body);
+  // The ledger is append-only, so a signed-in caller cannot be allowed one permanent row per refused request: per person, 5 rows a minute
+  // for each action and 20 across actions; the rest are counted and the next row carries the count. The 403 itself never changes.
+  const sample = principalDenials.sample(p.kind === "apikey" ? `apikey:${p.id}` : p.id, spec.action ?? "self");
+  if (!sample.audit) return;
+  const via = bodyVia(req);
   const channel: EventChannel = p.kind === "apikey" ? "api" : p.kind === "service" ? "system" : ((via as EventChannel | null) ?? "web");
   await withTx(g.pool, (tx) =>
     appendEvent(tx, {
       orgId: g.orgId, type: `${spec.action ?? "self"}.denied`, category: auditCategoryFor(spec.action ?? "self") as EventCategory, actor: p.kind === "apikey" ? `apikey:${p.id}` : p.id,
       onBehalfOf: via && via !== "web" && p.kind === "person" ? p.id : null, channel, subject: { type: "action", id: spec.action ?? "self" }, projectId: spec.scope?.project ?? null, woId: spec.scope?.wo ?? null,
-      outcome: "denied", rule: d.rule.id, after: { reason: d.reason, rule: d.rule, ...(d.needs ? { needs: d.needs } : {}) }, commandId: req.gx.requestId, sessionId: p.kind === "person" ? p.sessionId : null,
+      outcome: "denied", rule: d.rule.id, after: { reason: d.reason, rule: d.rule, ...(d.needs ? { needs: d.needs } : {}), ...(sample.suppressed ? { suppressedSinceLastRow: sample.suppressed } : {}) }, commandId: req.gx.requestId, sessionId: p.kind === "person" ? p.sessionId : null,
       sourceIp: req.gx.ip || null, requestId: req.gx.requestId,
     }),
   );

@@ -1,0 +1,180 @@
+# Production profile for Gantry: merged over compose.yml (deploy/PRODUCTION.md).
+#   docker compose -f deploy/compose.yml -f deploy/compose.prod.yml --env-file deploy/prod.env up -d
+#
+# What it changes:
+#   - no development services or switches: Mailpit is removed, the demo sign-in cards and the demo seed are forced off
+#   - the site is served on GANTRY_HOSTNAME with real TLS (Let's Encrypt or your own certificate) on :443
+#   - Keycloak runs an optimized production build on Postgres (its own role and database), read-only root, strict hostname,
+#     and a realm without demo accounts (keycloak/realm-gantry.prod.json)
+#   - mail goes to your relay (GANTRY_SMTP_*)
+#   - daily backups with a weekly restore drill always run (gantry-backup)
+#   - every container has memory and process limits
+#
+# Required: GANTRY_HOSTNAME, GANTRY_TLS, GANTRY_SMTP_HOST, GANTRY_SMTP_FROM_ADDRESS. For the first install also GANTRY_BOOTSTRAP_ADMIN_USERNAME.
+# Release images: GANTRY_IMAGE_PREFIX=ghcr.io/<owner>/ and GANTRY_VERSION=<x.y.z> (signed; verify with deploy/verify-images.sh).
+
+x-limits: &limits
+  pids_limit: 512
+
+services:
+  mailpit: !reset null
+
+  ingress:
+    <<: *limits
+    mem_limit: 256m
+    ports: !override
+      - "${GANTRY_BIND:-0.0.0.0}:${GANTRY_HTTPS_PORT:-443}:8443"
+      # ACME HTTP-01 challenges (Let's Encrypt). Nothing else is served over plain HTTP.
+      - "${GANTRY_BIND:-0.0.0.0}:${GANTRY_HTTP_PORT:-80}:8080"
+      # Keycloak admin console: host loopback only, reach it with an SSH tunnel.
+      - "127.0.0.1:${GANTRY_KC_ADMIN_PORT:-8081}:8081"
+    environment:
+      GANTRY_INGRESS_PROFILE: prod
+      GANTRY_HOSTNAME: ${GANTRY_HOSTNAME:?set GANTRY_HOSTNAME to the site name, for example gantry.example.com}
+      GANTRY_TLS: ${GANTRY_TLS:?set GANTRY_TLS to an email for Lets Encrypt or to /certs/tls.crt /certs/tls.key}
+    volumes:
+      # Your own certificate and key when GANTRY_TLS names files under /certs (deploy/tls/README.md).
+      - ${GANTRY_TLS_DIR:-./tls}:/certs:ro
+    depends_on: !override
+      volume-init: { condition: service_completed_successfully }
+      gantry-web: { condition: service_healthy }
+      gantry-api: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+
+  gantry-web:
+    <<: *limits
+    mem_limit: 128m
+
+  gantry-api:
+    <<: *limits
+    mem_limit: 1g
+    environment:
+      GANTRY_DEV_ADMIN_MFA_OPTIONAL: "false"
+      GANTRY_DEV_SEED: "false"
+      # First install: set the username (and write deploy/secrets/bootstrap_admin_password). Once a Factory Admin exists, both are ignored.
+      GANTRY_BOOTSTRAP_ADMIN_USERNAME: ${GANTRY_BOOTSTRAP_ADMIN_USERNAME:-}
+      # Deprecated alternative to the username.
+      GANTRY_BOOTSTRAP_ADMIN_EMAIL: ${GANTRY_BOOTSTRAP_ADMIN_EMAIL:-}
+      SMTP_HOST: ${GANTRY_SMTP_HOST:?set GANTRY_SMTP_HOST to your mail relay}
+      SMTP_PORT: ${GANTRY_SMTP_PORT:-587}
+
+  gantry-worker:
+    <<: *limits
+    mem_limit: 1g
+    environment:
+      SMTP_HOST: ${GANTRY_SMTP_HOST:?set GANTRY_SMTP_HOST to your mail relay}
+      SMTP_PORT: ${GANTRY_SMTP_PORT:-587}
+      SMTP_FROM: Gantry <${GANTRY_SMTP_FROM_ADDRESS:?set GANTRY_SMTP_FROM_ADDRESS}>
+      SMTP_SECURE: ${GANTRY_SMTP_SSL:-false}
+      SMTP_USER: ${GANTRY_SMTP_USER:-}
+    secrets: [db_password, data_key, github_token, launcher_token, minio_root_password, smtp_password]
+
+  gantry-migrate:
+    mem_limit: 256m
+
+  gantry-sockproxy:
+    <<: *limits
+    mem_limit: 128m
+
+  gantry-sockproxy-ws:
+    <<: *limits
+    mem_limit: 128m
+
+  gantry-launcher:
+    <<: *limits
+    mem_limit: 256m
+
+  gantry-edge:
+    <<: *limits
+    mem_limit: 512m
+
+  gantry-github:
+    <<: *limits
+    mem_limit: 512m
+
+  postgres:
+    <<: *limits
+    mem_limit: ${GANTRY_POSTGRES_MEMORY:-2g}
+    shm_size: 256m
+
+  minio:
+    <<: *limits
+    mem_limit: ${GANTRY_MINIO_MEMORY:-1g}
+
+  # Creates Keycloak's own role and database on the Postgres server and keeps its password in step with the secret.
+  keycloak-db-init:
+    image: postgres:17.12-alpine@sha256:d3244e8ce3f165ee3c93d9c4a4b1d0fe48b3a89e2287b717fdcbbde92d405065
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    user: "70:70"
+    entrypoint: ["/bin/sh", "/init/db-init.sh"]
+    environment:
+      PGHOST: postgres
+    secrets: [db_owner_password, keycloak_db_password]
+    volumes:
+      - ./keycloak/db-init.sh:/init/db-init.sh:ro
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [control]
+
+  keycloak:
+    <<: *limits
+    mem_limit: ${GANTRY_KEYCLOAK_MEMORY:-1536m}
+    build: { context: .., dockerfile: deploy/keycloak/Dockerfile }
+    image: ${GANTRY_IMAGE_PREFIX:-}gantry-keycloak:${GANTRY_VERSION:-dev}
+    read_only: true
+    user: "10001:0"
+    entrypoint: !override
+      - /bin/bash
+      - -c
+      - |
+        export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(cat /run/secrets/keycloak_admin_password)"
+        export GANTRY_OIDC_CLIENT_SECRET="$$(cat /run/secrets/oidc_client_secret)"
+        export GANTRY_ADMIN_CLIENT_SECRET="$$(cat /run/secrets/idp_admin_client_secret)"
+        export KC_DB_PASSWORD="$$(cat /run/secrets/keycloak_db_password)"
+        export GANTRY_SMTP_PASSWORD="$$(cat /run/secrets/smtp_password)"
+        exec /opt/keycloak/bin/kc.sh "$$@"
+      - kc
+    command: !override ["start", "--optimized", "--import-realm"]
+    environment:
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_HOSTNAME: https://${GANTRY_HOSTNAME:?set GANTRY_HOSTNAME}/idp
+      KC_HOSTNAME_STRICT: "true"
+      # Read by the realm import (realm-gantry.prod.json).
+      GANTRY_PUBLIC_URL: https://${GANTRY_HOSTNAME:?set GANTRY_HOSTNAME}
+      GANTRY_SMTP_HOST: ${GANTRY_SMTP_HOST:?set GANTRY_SMTP_HOST}
+      GANTRY_SMTP_PORT: ${GANTRY_SMTP_PORT:-587}
+      GANTRY_SMTP_FROM_ADDRESS: ${GANTRY_SMTP_FROM_ADDRESS:?set GANTRY_SMTP_FROM_ADDRESS}
+      GANTRY_SMTP_STARTTLS: ${GANTRY_SMTP_STARTTLS:-true}
+      GANTRY_SMTP_SSL: ${GANTRY_SMTP_SSL:-false}
+      GANTRY_SMTP_AUTH: ${GANTRY_SMTP_AUTH:-false}
+      GANTRY_SMTP_USER: ${GANTRY_SMTP_USER:-}
+      JAVA_OPTS_KC_HEAP: -XX:MaxRAMPercentage=70
+    secrets: [keycloak_admin_password, oidc_client_secret, idp_admin_client_secret, keycloak_db_password, smtp_password]
+    volumes: !override
+      - ./keycloak/realm-gantry.prod.json:/opt/keycloak/data/import/realm-gantry.json:ro
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=0
+      - /opt/keycloak/data:rw,nosuid,nodev,size=64m,uid=10001,gid=0
+    depends_on:
+      keycloak-db-init: { condition: service_completed_successfully }
+
+  gantry-backup:
+    <<: *limits
+    mem_limit: 512m
+    profiles: !reset []
+
+  # Optional monitoring (--profile monitoring; deploy/PRODUCTION.md, "Monitoring and alerts"): resource limits only.
+  prometheus:
+    <<: *limits
+    mem_limit: 768m
+
+  alertmanager:
+    <<: *limits
+    mem_limit: 128m

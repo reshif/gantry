@@ -1,13 +1,37 @@
-/** Findings tab: repeated signals grouped by kind, agent and project, each with its evidence and the proposals drafted from it. */
-import { fmt, type LearningFinding, type LearningProposal } from "@gantry/domain";
+/**
+ * Findings tab: the prototype's "Patterns noticed" table (finding, signal, count, evidence, status) with search, Signal and Status filters.
+ * A finding's own page (every evidence record, the proposals drafted from it, Draft proposal and Refresh findings, the real commands) opens from its row.
+ */
+import type { LearningFinding, LearningProposal } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
-import { Btn } from "../../ui/primitives";
-import { Icon } from "../../ui/Icon";
+import { Btn, Chip, Panel } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { dec } from "../mcp/kit";
+import { DataView } from "../dataview";
 import { DraftDialog } from "./Draft";
-import { ChipList, SIGNALS, STATUS, useLn } from "./kit";
+import { STATUS, WoLink, useLn } from "./kit";
+
+function FindingPage({ f, proposals, proposalsOn, onFocusProposal, onDrafted, close }: { f: LearningFinding; proposals: LearningProposal[]; proposalsOn: boolean; onFocusProposal: (id: string) => void; onDrafted: (id: string) => void; close: () => void }) {
+  const ui = useUI();
+  const { projName, agName } = useLn();
+  const perm = dec(useCan("learning.apply"));
+  const props = proposals.filter((lp) => lp.finding === f.id);
+  return (
+    <div className="form-grid ln-finding-page">
+      <p className="small muted">{`${f.agent ? agName(f.agent) : "–"}${f.project ? ` · ${projName(f.project)}` : ""} · ${f.signal} · ${f.count} signal${f.count === 1 ? "" : "s"} · ${f.status}`}</p>
+      <div><h3 className="sub-h">Evidence</h3><div className="row">{f.evidence.map((id) => <WoLink key={id} id={id} project={f.project} />)}</div></div>
+      <div>
+        <h3 className="sub-h">Proposals from this finding</h3>
+        {props.length ? <ul className="plain-list small">{props.map((lp) => <li key={lp.id}><button type="button" className="linkish" id={`ln-f-p-${lp.id}`} onClick={() => { close(); onFocusProposal(lp.id); }}>{`${lp.id} (${(STATUS[lp.status] ?? lp.status).toLowerCase()})`}</button>{` ${lp.title}`}</li>)}</ul> : <p className="small muted">None yet.</p>}
+      </div>
+      <div className="dlg-actions-inline">
+        <Btn label="Refresh findings" kind="ghost" icon="refresh" id="ln-refresh" guard={perm} onClick={() => { void ops.refreshFindings().then((r) => ui.toast(r.msg, r.ok ? "ok" : "error")); }} />
+        <Btn label="Draft proposal" kind="primary" icon="plus" id={`ln-draft-${f.id}`} guard={perm} disabledReason={proposalsOn ? null : "Learning proposals are switched off. Turn them on first."} onClick={() => { close(); ui.open((c2) => <DraftDialog f={f} close={c2} onDrafted={onDrafted} />); }} />
+      </div>
+    </div>
+  );
+}
 
 export function FindingsTab({ findings, proposals, hi, onFocusProposal, onDrafted, proposalsOn }: {
   findings: LearningFinding[];
@@ -18,57 +42,25 @@ export function FindingsTab({ findings, proposals, hi, onFocusProposal, onDrafte
   proposalsOn: boolean;
 }) {
   const ui = useUI();
-  const perm = dec(useCan("learning.apply"));
-  const list = findings.slice().sort((a, b) => (a.status === "open" ? 0 : 1) - (b.status === "open" ? 0 : 1) || b.lastAt - a.lastAt);
-  const refresh = async () => { const r = await ops.refreshFindings(); ui.toast(r.msg, r.ok ? "ok" : "error"); };
-  return (
-    <div className="ln-findings">
-      <div className="toolbar">
-        <span className="small muted">Findings group repeated signals by agent and project. Refreshing recounts evidence from live work orders.</span>
-        <Btn label="Refresh findings" small icon="refresh" id="ln-refresh" guard={perm} onClick={() => void refresh()} />
-      </div>
-      {list.length ? (
-        <ul className="ln-list">{list.map((f) => <FindingCard key={f.id} f={f} props={proposals.filter((lp) => lp.finding === f.id)} hi={hi === f.id} onFocusProposal={onFocusProposal} onDrafted={onDrafted} proposalsOn={proposalsOn} />)}</ul>
-      ) : (
-        <div className="empty empty-state" id="ln-f-empty">
-          <div className="empty-icon" aria-hidden="true"><Icon name="learn" /></div>
-          <div className="empty-title">No findings</div>
-          <p>Findings appear when the same kind of signal repeats.</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function FindingCard({ f, props, hi, onFocusProposal, onDrafted, proposalsOn }: { f: LearningFinding; props: LearningProposal[]; hi: boolean; onFocusProposal: (id: string) => void; onDrafted: (id: string) => void; proposalsOn: boolean }) {
-  const ui = useUI();
   const { projName, agName } = useLn();
-  const perm = dec(useCan("learning.apply", f.project ? { project: f.project } : {}));
-  const sg = SIGNALS[f.signal] ?? [f.signal, "alert"];
-  const thin = f.count < 3;
+  const signals = [...new Set(findings.map((f) => f.signal))];
+  const statuses = [...new Set(findings.map((f) => f.status))];
+  const open = (f: LearningFinding): void => { ui.dialog({ title: f.title, kicker: `Learning · ${f.id}`, wide: true, body: (close) => <FindingPage f={f} proposals={proposals} proposalsOn={proposalsOn} onFocusProposal={onFocusProposal} onDrafted={onDrafted} close={close} />, actions: [{ label: "Close" }] }); };
   return (
-    <li className={`panel ln-card ln-finding is-${f.status}${hi ? " is-hi" : ""}`} id={`ln-f-${f.id}`}>
-      <div className="ln-card-top">
-        <span className="mono strong">{f.id}</span>
-        <span className={`chip ln-sig ln-sig-${f.signal}`}><Icon name={sg[1]} />{sg[0]}</span>
-        <h3 className="ln-title">{f.title}</h3>
-        <span className={`chip${f.status === "open" ? " chip-warn" : ""}`}>{f.status === "open" ? "Open" : "Addressed"}</span>
-      </div>
-      <dl className="ln-kv ln-kv-row">
-        <div><dt>Agent</dt><dd>{f.agent ? agName(f.agent) : "–"}</dd></div>
-        <div><dt>Project</dt><dd>{projName(f.project)}</dd></div>
-        <div><dt>Signals</dt><dd className="mono">{String(f.count)}{thin ? <span className="small muted"> · small sample</span> : null}</dd></div>
-        <div><dt>Seen</dt><dd className="small">{fmt.istDate(f.firstAt) + (f.lastAt !== f.firstAt ? ` to ${fmt.istDate(f.lastAt)}` : "")}</dd></div>
-      </dl>
-      <div><div className="kicker">Evidence: work order records</div><ChipList ids={f.evidence} max={10} project={f.project} /></div>
-      <div className="ln-card-foot">
-        <span className="small">
-          {props.length ? <span>Proposals: {props.map((lp) => <button key={lp.id} type="button" className="linkish ln-plink" id={`ln-f-p-${lp.id}`} onClick={() => onFocusProposal(lp.id)}>{`${lp.id} (${(STATUS[lp.status] ?? lp.status).toLowerCase()})`}</button>)}</span> : <span className="muted">No proposal yet.</span>}
-        </span>
-        <span className="ln-acts">
-          <Btn label="Draft proposal" small icon="plus" id={`ln-draft-${f.id}`} guard={perm} disabledReason={proposalsOn ? null : "Learning proposals are switched off. Turn them on first."} onClick={() => ui.open((close) => <DraftDialog f={f} close={close} onDrafted={onDrafted} />)} />
-        </span>
-      </div>
-    </li>
+    <Panel title="Patterns noticed" flush>
+      <DataView id="ln-find" noun="finding" rows={findings} rowKey={(f) => f.id} rowId={(f) => `ln-f-${f.id}`} pageSize={12} text={(f) => `${f.title} ${f.signal} ${f.id}`} onRow={open}
+        filters={[
+          { k: "signal", label: "Signal", opts: signals.map((s) => [s, s]), fn: (f, v) => f.signal === v },
+          { k: "status", label: "Status", opts: statuses.map((s) => [s, s]), fn: (f, v) => f.status === v },
+        ]}
+        empty={{ title: "No findings", text: "Findings appear when the same kind of signal repeats." }}
+        columns={[
+          { key: "t", label: "Finding", sort: (f) => f.title.toLowerCase(), render: (f) => <div className={hi === f.id ? "is-hi" : undefined}><span>{f.title}</span><span className="sub">{`${f.agent ? agName(f.agent) : "–"}${f.project ? ` · ${projName(f.project)}` : ""}`}</span></div> },
+          { key: "s", label: "Signal", render: (f) => <Chip text={f.signal} cls="plain" /> },
+          { key: "c", label: "Count", align: "end", sort: (f) => f.count, render: (f) => <span className="num">{f.count}</span> },
+          { key: "e", label: "Evidence", render: (f) => <div className="row">{f.evidence.slice(0, 3).map((id) => <WoLink key={id} id={id} project={f.project} />)}</div> },
+          { key: "st", label: "Status", render: (f) => <Chip text={f.status} cls={f.status === "open" ? "warn" : "ok"} /> },
+        ]} />
+    </Panel>
   );
 }

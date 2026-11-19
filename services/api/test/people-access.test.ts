@@ -1,5 +1,6 @@
 import { verifyChain } from "@gantry/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { principalDenials } from "../src/core/command.js";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 import { withVersion } from "./versions.js";
 
@@ -23,7 +24,7 @@ d("people and access", () => {
     return { status: r.statusCode, body: r.json() as Record<string, any>, headers: r.headers };
   };
   const ev = async (type: string) => (await t.db.admin.query(`select * from events where type = $1 order by seq`, [type])).rows;
-  const person = async (id: string) => (await call(admin, "GET", "/api/v1/people")).body as unknown as Array<Record<string, any>>;
+  const person = async (_id: string) => (await call(admin, "GET", "/api/v1/people")).body as unknown as Array<Record<string, any>>;
   const find = async (id: string) => (await person(id)).find((p) => p.id === id)!;
   const stepUpAge = 3600;
 
@@ -89,8 +90,8 @@ d("people and access", () => {
 
   describe("remaining denial and stale cases", () => {
     it("DELETE factory role: denied, stale, then removed", async () => {
-      expect((await call(engineer, "DELETE", "/api/v1/people/p-sam/factory-roles/auditor")).status).toBe(403);
-      expect((await call(admin, "DELETE", "/api/v1/people/p-sam/factory-roles/auditor", undefined, { "if-match": "999" })).status).toBe(409);
+      expect((await call(engineer, "DELETE", "/api/v1/people/p-sam/factory-roles/auditor", { reason: "test grant" })).status).toBe(403);
+      expect((await call(admin, "DELETE", "/api/v1/people/p-sam/factory-roles/auditor", { reason: "test grant" }, { "if-match": "999" })).status).toBe(409);
     });
     it("policy toggle is stale against an old version", async () => {
       expect((await call(admin, "PATCH", "/api/v1/policies/POL-101", { enabled: true }, { "if-match": "999" })).status).toBe(409);
@@ -137,7 +138,7 @@ d("people and access", () => {
   describe("invites", () => {
     let inviteId = "";
     it("invites a person: row, teams, roles, invite row, outbox email, audit, one transaction", async () => {
-      const r = await call(admin, "POST", "/api/v1/invites", { name: "Nina Park", email: "Nina.Park@acme.dev", teams: ["platform"], roles: [{ role: "factory_admin", scope: "factory" }, { role: "engineer", scope: "payments" }] }, { "idempotency-key": "inv-1" });
+      const r = await call(admin, "POST", "/api/v1/invites", { name: "Nina Park", email: "Nina.Park@acme.dev", teams: ["platform"], roles: [{ role: "factory_admin", scope: "factory" }, { role: "engineer", scope: "payments" }], reason: "Joins as the second administrator" }, { "idempotency-key": "inv-1" });
       expect(r.status).toBe(200);
       expect(r.body).toMatchObject({ ok: true, msg: "Invite sent to nina.park@acme.dev.", person: { name: "Nina Park", email: "nina.park@acme.dev", status: "invited", teams: ["platform"] } });
       inviteId = r.body.person.id;
@@ -153,7 +154,7 @@ d("people and access", () => {
       expect((await verifyChain(t.db.app, t.orgId)).ok).toBe(true);
     });
     it("is idempotent on the key and conflicts on a changed body", async () => {
-      const again = await call(admin, "POST", "/api/v1/invites", { name: "Nina Park", email: "Nina.Park@acme.dev", teams: ["platform"], roles: [{ role: "factory_admin", scope: "factory" }, { role: "engineer", scope: "payments" }] }, { "idempotency-key": "inv-1" });
+      const again = await call(admin, "POST", "/api/v1/invites", { name: "Nina Park", email: "Nina.Park@acme.dev", teams: ["platform"], roles: [{ role: "factory_admin", scope: "factory" }, { role: "engineer", scope: "payments" }], reason: "Joins as the second administrator" }, { "idempotency-key": "inv-1" });
       expect(again.status).toBe(200);
       expect(again.body.person.id).toBe(inviteId);
       expect((await t.db.admin.query(`select count(*)::int as n from people where email = 'nina.park@acme.dev'`)).rows[0].n).toBe(1);
@@ -164,6 +165,22 @@ d("people and access", () => {
       const sim = await call(admin, "POST", "/api/v1/access/simulate", { person: inviteId, action: "people.manage" });
       expect(sim.body.decision.allowed).toBe(false);
       expect(sim.body.decision.reason).toContain("not accepted the invite");
+    });
+    it("factory-level roles in an invite need a Factory Admin for factory_admin, a reason, a fresh sign-in, and are audited", async () => {
+      const inv = (roles: unknown[], extra: Record<string, unknown> = {}, who = admin, o: { authAgeSec?: number } = {}) => call(who, "POST", "/api/v1/invites", { name: "Esc Test", email: `esc${Math.random().toString(36).slice(2, 8)}@acme.dev`, roles, ...extra }, {}, o);
+      const fa = [{ role: "factory_admin", scope: "factory" }];
+      const noReason = await inv(fa);
+      expect(noReason.status).toBe(422);
+      expect(noReason.body.needs).toBe("reason");
+      expect((await inv([{ role: "auditor", scope: "factory" }], { reason: "short" })).status).toBe(422);
+      const stale = await inv(fa, { reason: "Second administrator for cover" }, admin, { authAgeSec: stepUpAge });
+      expect(stale.status).toBe(403);
+      expect(stale.body.needs).toBe("step_up");
+      expect((await inv(fa, { reason: "Second administrator for cover" }, engineer)).status).toBe(403);
+      const ok = await inv([{ role: "auditor", scope: "factory" }], { reason: "Quarterly audit support" });
+      expect(ok.status).toBe(200);
+      const evs = await ev("people.invite");
+      expect(evs.some((e: any) => JSON.stringify(e.after).includes("Quarterly audit support"))).toBe(true);
     });
     it("refuses duplicates, bad domains, unknown teams, roles and scope mismatches", async () => {
       expect((await call(admin, "POST", "/api/v1/invites", { name: "Dup", email: "ASHA@acme.dev" })).status).toBe(409);
@@ -193,6 +210,12 @@ d("people and access", () => {
     it("accept: denied, stale, then active", async () => {
       expect((await call(engineer, "POST", `/api/v1/invites/${inviteId}/accept`)).status).toBe(403);
       expect((await call(admin, "POST", `/api/v1/invites/${inviteId}/accept`, undefined, { "if-match": "999" })).status).toBe(409);
+      // Regression: an administrator cannot activate a person nobody has linked (it would leave the account open to address-only claiming).
+      const unlinked = await call(admin, "POST", `/api/v1/invites/${inviteId}/accept`);
+      expect(unlinked.status).toBe(409);
+      expect((await find(inviteId)).status).toBe("invited");
+      expect((await t.db.admin.query(`select status from invites where id = $1`, [inviteId])).rows[0].status).toBe("pending");
+      await t.db.admin.query(`update people set idp_subject = 'kc-invitee' where id = $1`, [inviteId]);
       const v = (await find(inviteId)).version;
       const ok = await call(admin, "POST", `/api/v1/invites/${inviteId}/accept`, undefined, { "if-match": String(v) });
       expect(ok.status).toBe(200);
@@ -210,46 +233,50 @@ d("people and access", () => {
   describe("factory roles", () => {
     it("grants and revokes with audit; stale and denied are refused", async () => {
       const v = (await find(admin2)).version;
-      expect((await call(engineer, "PUT", `/api/v1/people/p-sam/factory-roles/auditor`)).status).toBe(403);
-      expect((await call(admin, "PUT", `/api/v1/people/p-tomas/factory-roles/auditor`, undefined, { "if-match": "999" })).status).toBe(409);
-      const g = await call(admin, "PUT", `/api/v1/people/p-tomas/factory-roles/auditor`);
+      expect((await call(engineer, "PUT", `/api/v1/people/p-sam/factory-roles/auditor`, { reason: "test grant" })).status).toBe(403);
+      expect((await call(admin, "PUT", `/api/v1/people/p-tomas/factory-roles/auditor`, { reason: "test grant" }, { "if-match": "999" })).status).toBe(409);
+      const g = await call(admin, "PUT", `/api/v1/people/p-tomas/factory-roles/auditor`, { reason: "test grant" });
       expect(g.status).toBe(200);
       expect((await find("p-tomas")).roles).toContainEqual({ role: "auditor", scope: "factory" });
       const [e] = await ev("role.grant");
-      expect(e).toMatchObject({ actor: admin, before: "none", after: "auditor" });
-      const rv = await call(admin, "DELETE", `/api/v1/people/p-tomas/factory-roles/auditor`);
+      expect(e).toMatchObject({ actor: admin, before: { roles: "none" }, after: { roles: "auditor", reason: "test grant" } });
+      const rv = await call(admin, "DELETE", `/api/v1/people/p-tomas/factory-roles/auditor`, { reason: "test grant" });
       expect(rv.status).toBe(200);
       expect((await find("p-tomas")).roles.some((r: any) => r.scope === "factory")).toBe(false);
       expect((await ev("role.revoke")).length).toBe(1);
       expect(v).toBeGreaterThan(0);
     });
+    it("needs a reason, recorded on the ledger (a factory grant reaches every project)", async () => {
+      for (const body of [undefined, {}, { reason: "  " }]) expect((await call(admin, "PUT", `/api/v1/people/p-tomas/factory-roles/auditor`, body)).status).toBe(422);
+      expect((await find("p-tomas")).roles.some((r: any) => r.scope === "factory")).toBe(false);
+    });
     it("needs a fresh sign-in (step-up)", async () => {
-      const r = await call(admin, "PUT", `/api/v1/people/p-tomas/factory-roles/auditor`, undefined, {}, { authAgeSec: stepUpAge });
+      const r = await call(admin, "PUT", `/api/v1/people/p-tomas/factory-roles/auditor`, { reason: "test grant" }, {}, { authAgeSec: stepUpAge });
       expect(r.status).toBe(403);
       expect(r.body.needs).toBe("step_up");
     });
     it("refuses non-factory roles and unknown people", async () => {
-      expect((await call(admin, "PUT", `/api/v1/people/p-tomas/factory-roles/engineer`)).status).toBe(422);
-      expect((await call(admin, "PUT", `/api/v1/people/nobody/factory-roles/auditor`)).status).toBe(404);
+      expect((await call(admin, "PUT", `/api/v1/people/p-tomas/factory-roles/engineer`, { reason: "test grant" })).status).toBe(422);
+      expect((await call(admin, "PUT", `/api/v1/people/nobody/factory-roles/auditor`, { reason: "test grant" })).status).toBe(404);
     });
     it("never lets people remove their own admin role, nor the last admin (spec 14.4)", async () => {
-      const own = await call(admin, "DELETE", `/api/v1/people/${admin}/factory-roles/factory_admin`);
+      const own = await call(admin, "DELETE", `/api/v1/people/${admin}/factory-roles/factory_admin`, { reason: "test grant" });
       expect(own.status).toBe(403);
       expect(own.body.rule.id).toBe("INV-14.4-SELF");
       // Make asha the only active admin by revoking the others, then try to remove her via herself's peer: nobody else is left to ask.
       for (const id of [admin2, "p-nina-park-gone"]) void id;
       const people = (await person(admin)).filter((p) => p.status === "active" && p.roles.some((r: any) => r.role === "factory_admin"));
       for (const p of people.filter((x) => x.id !== admin)) {
-        expect((await call(admin, "DELETE", `/api/v1/people/${p.id}/factory-roles/factory_admin`)).status).toBe(200);
+        expect((await call(admin, "DELETE", `/api/v1/people/${p.id}/factory-roles/factory_admin`, { reason: "test grant" })).status).toBe(200);
       }
       // admin2 no longer an admin, so the only admin is asha; omar (no rights now) cannot do it, and asha cannot remove herself.
-      const last = await call(admin, "DELETE", `/api/v1/people/${admin}/factory-roles/factory_admin`);
+      const last = await call(admin, "DELETE", `/api/v1/people/${admin}/factory-roles/factory_admin`, { reason: "test grant" });
       expect(last.status).toBe(403);
       // restore a second admin for the remaining tests
-      expect((await call(admin, "PUT", `/api/v1/people/${admin2}/factory-roles/factory_admin`)).status).toBe(200);
-      const second = await call(admin2, "DELETE", `/api/v1/people/${admin}/factory-roles/factory_admin`);
+      expect((await call(admin, "PUT", `/api/v1/people/${admin2}/factory-roles/factory_admin`, { reason: "test grant" })).status).toBe(200);
+      const second = await call(admin2, "DELETE", `/api/v1/people/${admin}/factory-roles/factory_admin`, { reason: "test grant" });
       expect(second.status).toBe(200);
-      expect((await call(admin2, "PUT", `/api/v1/people/${admin}/factory-roles/factory_admin`)).status).toBe(200);
+      expect((await call(admin2, "PUT", `/api/v1/people/${admin}/factory-roles/factory_admin`, { reason: "test grant" })).status).toBe(200);
     });
     it("last admin: removing the only other admin is allowed, removing the only admin is not", async () => {
       // Sole-admin case via an invited admin who is not active: they do not count.
@@ -271,25 +298,61 @@ d("people and access", () => {
       expect((await call(admin, "PUT", "/api/v1/people/p-sam/teams", { teams: ["security"] })).status).toBe(200);
       expect((await find("p-sam")).teams).toEqual(["security"]);
     });
-    it("on-call: managers set anyone's; people set their own; strangers are denied", async () => {
-      expect((await call(engineer, "PUT", "/api/v1/people/p-sam/oncall", { on: true })).status).toBe(403);
-      expect((await call(admin, "PUT", "/api/v1/people/p-sam/oncall", { on: true }, { "if-match": "999" })).status).toBe(409);
-      expect((await call(admin, "PUT", "/api/v1/people/p-sam/oncall", { on: true })).status).toBe(200);
-      expect((await find("p-sam")).oncall).toBe(true);
-      const own = await call(engineer, "PUT", `/api/v1/people/${engineer}/oncall`, { on: true });
-      expect(own.status).toBe(200);
-      expect((await find(engineer)).oncall).toBe(true);
-      expect((await call(engineer, "PUT", `/api/v1/people/${engineer}/oncall`, { on: false })).status).toBe(200);
-      expect((await call(admin, "PUT", "/api/v1/people/p-sam/oncall", { on: false })).status).toBe(200);
-      expect((await ev("people.oncall")).length).toBe(4);
+    it("refuses adding yourself to a team with a factory role you lack; others need a fresh sign-in", async () => {
+      { const r0 = await call(admin, "POST", "/api/v1/teams/data/roles", { role: "auditor", scope: "factory", reason: "test grant" }); expect(r0.status, JSON.stringify(r0.body)).toBe(200); }
+      const me = (await find(admin)).teams as string[];
+      const self = await call(admin, "PUT", `/api/v1/people/${admin}/teams`, { teams: [...me, "data"] });
+      expect(self.status).toBe(403);
+      expect(self.body.msg).toMatch(/cannot add yourself/i);
+      expect(self.body.needs).toBeTruthy();
+      expect((await find(admin)).teams).not.toContain("data");
+      const stale = await call(admin, "PUT", "/api/v1/people/p-sam/teams", { teams: ["data"] }, {}, { authAgeSec: stepUpAge });
+      expect(stale.status).toBe(403);
+      expect(stale.body.needs).toBe("step_up");
+      expect((await call(admin, "PUT", "/api/v1/people/p-sam/teams", { teams: ["data"] })).status).toBe(200);
+      expect((await call(admin, "PUT", "/api/v1/people/p-sam/teams", { teams: ["security"] })).status).toBe(200);
     });
-    it("on-call changes what the engine decides (POL-103 follows the flag)", async () => {
-      const before = await call(admin, "POST", "/api/v1/access/simulate", { person: "p-lena", action: "kill.project", project: "identity" });
-      await call(admin, "PUT", "/api/v1/people/p-lena/oncall", { on: false });
-      const after = await call(admin, "POST", "/api/v1/access/simulate", { person: "p-lena", action: "kill.project", project: "identity" });
-      expect(after.body.trace.join(" ")).toContain("Policies on this action");
-      expect(typeof before.body.decision.allowed).toBe("boolean");
-      await call(admin, "PUT", "/api/v1/people/p-lena/oncall", { on: true });
+    it("refuses adding yourself to a team that holds a project role you lack", async () => {
+      expect((await call(admin, "POST", "/api/v1/teams/data/roles", { role: "approver", scope: "payments" })).status).toBe(200);
+      const me = (await find(admin)).teams as string[];
+      const self = await call(admin, "PUT", `/api/v1/people/${admin}/teams`, { teams: [...me, "data"] });
+      expect(self.status).toBe(403);
+      expect(self.body.msg).toMatch(/approver \(payments\)/);
+      expect(self.body.needs).toBeTruthy();
+      expect((await call(admin, "PUT", "/api/v1/people/p-sam/teams", { teams: ["data"] })).status).toBe(200);
+      expect((await call(admin, "PUT", "/api/v1/people/p-sam/teams", { teams: ["security"] })).status).toBe(200);
+    });
+    it("on call is per project: project admins set it, nobody switches themselves on, and only the person on call hands over", async () => {
+      // the old self-toggle is retired
+      const own = await call(engineer, "PUT", `/api/v1/people/${engineer}/oncall`, { on: true });
+      expect(own.status).toBe(410);
+      expect(own.body.msg).toContain("per project");
+      // an engineer can't put anyone on call; a project admin can, but only people with a role on the project
+      expect((await call(engineer, "PUT", "/api/v1/projects/payments/oncall", { people: [engineer] })).status).toBe(403);
+      expect((await call(admin, "PUT", "/api/v1/projects/payments/oncall", { people: ["p-nobody"] })).status).toBe(422);
+      const set = await call(admin, "PUT", "/api/v1/projects/payments/oncall", { people: [engineer, admin] });
+      expect(set.status).toBe(200);
+      expect(set.body.oncall).toEqual([engineer]); // a Factory Admin is always on call and never listed
+      expect((await find(engineer)).oncall).toBe(true);
+      // the person on call hands over to someone with a role on payments
+      const hand = await call(engineer, "POST", "/api/v1/projects/payments/oncall/handover", { to: "p-meera" });
+      expect(hand.status).toBe(200);
+      expect(hand.body.oncall).toEqual(["p-meera"]);
+      expect((await call(engineer, "POST", "/api/v1/projects/payments/oncall/handover", { to: engineer })).status).toBe(409); // no longer on call
+      const [e] = await ev("project.oncall");
+      expect(e).toMatchObject({ project_id: "payments", after: [engineer] });
+      const [h] = await ev("project.oncall_handover");
+      expect(h).toMatchObject({ actor: engineer, before: [engineer], after: ["p-meera"] });
+      expect((await call(admin, "PUT", "/api/v1/projects/payments/oncall", { people: [] })).status).toBe(200);
+    });
+    it("on call changes what the engine decides, per project (POL-103 follows Identity's list)", async () => {
+      const sim = async () => (await call(admin, "POST", "/api/v1/access/simulate", { person: "p-lena", action: "kill.project", project: "identity" })).body;
+      const before = (await call(admin, "GET", "/api/v1/projects/identity")).body.oncall as string[];
+      expect(before).toContain("p-lena");
+      await call(admin, "PUT", "/api/v1/projects/identity/oncall", { people: before.filter((x) => x !== "p-lena") });
+      expect((await sim()).trace.join(" ")).toContain("Policies on this action");
+      await call(admin, "PUT", "/api/v1/projects/identity/oncall", { people: before });
+      expect(typeof (await sim()).decision.allowed).toBe("boolean");
     });
     it("away: delegate rules, project permission, self, stale", async () => {
       const away = { to: Date.now() + 48 * hour, delegate: "p-meera" };
@@ -304,6 +367,18 @@ d("people and access", () => {
       expect((await find("p-priya")).away).toBeNull();
       const [e] = await ev("approvers.delegate");
       expect(e.category).toBe("approvals");
+    });
+    it("away is global, so a project right covers only people whose every role is on projects the caller administers", async () => {
+      const away = { to: Date.now() + 24 * hour, delegate: "p-priya" };
+      // Daniel is Project Admin on Payments and Storefront. Priya also leads Risk, Meera also reviews Partner API; Asha holds factory roles.
+      expect((await call("p-daniel", "PUT", "/api/v1/people/p-priya/away", { project: "payments", away })).status).toBe(403);
+      expect((await call("p-daniel", "PUT", "/api/v1/people/p-asha/away", { project: "payments", away })).status).toBe(403);
+      expect((await call("p-daniel", "PUT", "/api/v1/people/p-meera/away", { project: "payments", away })).status).toBe(403);
+      expect((await find("p-priya")).away).toBeNull();
+      // Tomás is an engineer on Payments only: within Daniel's reach.
+      const ok = await call("p-daniel", "PUT", "/api/v1/people/p-tomas/away", { project: "payments", away });
+      expect(ok.status).toBe(200);
+      expect((await call("p-tomas", "PUT", "/api/v1/people/p-tomas/away", { away: null })).status).toBe(200);
     });
   });
 
@@ -538,8 +613,9 @@ d("people and access", () => {
 
   describe("invariants the server enforces (spec 14.4)", () => {
     it("audits a refusal raised by an invariant, not only decision-point denials", async () => {
+      principalDenials.reset(); // refusals are audited at a bounded rate per person; this test counts rows, so start a fresh window
       const before = (await ev("people.manage.denied")).length;
-      const own = await call(admin, "DELETE", `/api/v1/people/${admin}/factory-roles/factory_admin`);
+      const own = await call(admin, "DELETE", `/api/v1/people/${admin}/factory-roles/factory_admin`, { reason: "test grant" });
       expect(own.status).toBe(403);
       const after = await ev("people.manage.denied");
       expect(after.length).toBe(before + 1);
@@ -570,11 +646,26 @@ d("people and access", () => {
     it("access administration keeps working under a factory kill (exempt, spec 9.7); and the audit chain still verifies", async () => {
       await t.db.admin.query(`insert into stops (org_id, id, scope_type, mode, reason, set_by) values ($1, 'factory:factory:99', 'factory', 'kill', 'Test stop', $2)`, [t.orgId, admin]);
       // Administration is exempt from stops (domain stopBlocks: only project Work, Gates and Onboarding actions refuse), so a kill never locks people out of fixing access.
-      const r = await call(admin, "PUT", "/api/v1/people/p-sam/oncall", { on: true });
+      const r = await call(admin, "PUT", "/api/v1/people/p-sam/teams", { teams: ["data", "security"] });
       expect(r.status).toBe(200);
       await t.db.admin.query(`update stops set lifted_at = now(), lifted_by = 'p-asha' where id = 'factory:factory:99'`);
-      expect((await call(admin, "PUT", "/api/v1/people/p-sam/oncall", { on: false })).status).toBe(200);
+      expect((await call(admin, "PUT", "/api/v1/people/p-sam/teams", { teams: ["security"] })).status).toBe(200);
       expect((await verifyChain(t.db.app, t.orgId)).ok).toBe(true);
+    });
+  });
+  describe("invite escalation by a non-admin", () => {
+    it("a non-admin with people.manage cannot invite a Factory Admin; non-factory invites carry no reason in the audit", async () => {
+      const role = await call(admin, "POST", "/api/v1/roles", { name: "People Keeper", level: "factory", base: "factory_admin" });
+      expect(role.status).toBe(200);
+      expect((await call(admin, "PUT", `/api/v1/people/p-sam/factory-roles/${role.body.role?.id ?? role.body.id}`, { reason: "test grant" })).status).toBe(200);
+      const body = (roles: unknown[], extra: Record<string, unknown> = {}) => ({ name: "Keeper Test", email: `k${Math.random().toString(36).slice(2, 8)}@acme.dev`, roles, ...extra });
+      const r = await call("p-sam", "POST", "/api/v1/invites", body([{ role: "factory_admin", scope: "factory" }], { reason: "Needs full administration" }));
+      expect(r.status).toBe(403);
+      expect(r.body.msg).toMatch(/Only a Factory Admin/);
+      const plain = await call(admin, "POST", "/api/v1/invites", body([{ role: "engineer", scope: "payments" }]));
+      expect(plain.status).toBe(200);
+      const last = (await ev("people.invite")).find((e: any) => e.subject?.id === plain.body.person.id);
+      expect(last.after.reason).toBeUndefined();
     });
   });
 });

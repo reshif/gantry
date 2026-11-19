@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import { setCsrfToken } from "../api/client";
 import { OverlayProvider } from "../ui/Overlay";
 import EvalsView, { regressionsOf } from "./evals";
 import { evalsUi } from "./evals/kit";
+import { resetDataViews } from "./dataview";
 
 type Handler = (url: string, init?: RequestInit) => { status?: number; body: unknown };
 interface Call { method: string; path: string; body: any; headers: Record<string, string>; query: URLSearchParams }
@@ -85,18 +86,24 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
   return calls;
 }
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
+let QC: QueryClient;
 function mount() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
+  QC = qc;
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider><EvalsView /></OverlayProvider></QueryClientProvider>);
 }
 const writes = (calls: Call[], method: string) => calls.filter((c) => c.method === method && c.path !== "/api/v1/can");
+const openCard = async (agent: string) => { await byId("ev-scorecards"); window.location.hash = `evals?tab=cards&agent=${agent}`; await new Promise((r) => setTimeout(r, 60)); await byId("ev-scorecard"); };
+const rowBtn = async (rowId: string) => fireEvent.click((await byId(rowId)).querySelector("button.row-link")!);
 const reasonOf = (e: HTMLElement) => e.getAttribute("data-reason") ?? "";
 
 beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
-  Object.assign(evalsUi, { tab: "agents", agent: null, suite: null, run: null, a: null, b: null, runVersion: null, runModel: null, repeats: 1 });
+  window.location.hash = "";
+  resetDataViews();
+  Object.assign(evalsUi, { tab: "cards", detail: false, agent: null, suite: null, run: null, a: null, b: null, runVersion: null, runModel: null, repeats: 1 });
 });
 afterEach(() => {
   cleanup();
@@ -104,30 +111,58 @@ afterEach(() => {
 });
 
 describe("Evals screen: scorecards", () => {
-  it("lists agents with their eval score, marks one below its gate, and shows the live scorecard with its count", async () => {
+  it("lists the agents flat, each a link to its page, and opens the full scorecard with its count in a drawer", async () => {
     setup();
     mount();
     const row = await byId("ev-ag-ag-review");
-    expect(row.textContent).toContain("▼ 70%");
-    expect((await byId("ev-ag-ag-build")).textContent).toContain("90%");
+    expect(row.textContent).toContain("Reviewer");
+    expect(row.querySelector("a.pri")!.getAttribute("href")).toBe("#agents/ag-review");
+    expect(document.getElementById("ev-scorecards")!.textContent).toContain("2 agents");
+    expect(document.getElementById("ev-scorecards")!.textContent).toContain("8-week trend");
+    expect(document.getElementById("ev-scorecards-table")!.textContent).not.toContain("Suite ");
+    await openCard("ag-build");
+    expect(await waitFor(() => { const e = document.querySelector(".ev-tiles"); if (!e) throw new Error("none"); return e; })).toBeTruthy();
     expect(document.querySelector(".ev-tiles")!.textContent).toContain("Task success90%");
     expect((await byId("ev-n")).textContent).toContain("Based on 12 finished attempts on 12 work orders and 12 gate decisions");
-    fireEvent.click(row);
+    fireEvent.click(document.getElementById("ev-sc-close")!);
+    await openCard("ag-review");
     await waitFor(() => expect(document.getElementById("ev-n")!.textContent).toContain("Insufficient data: 2 finished attempts"));
-    expect(document.querySelector(".ev-tiles")!.textContent).toContain("Task success90%");
+  });
+  it("opens the agent page when a row is clicked, and searches and clears", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("ev-ag-ag-review"));
+    expect(window.location.hash).toBe("#agents/ag-review");
+    fireEvent.change(document.getElementById("ev-scorecards-q")!, { target: { value: "build" } });
+    await waitFor(() => expect(document.getElementById("ev-scorecards")!.textContent).toContain("1 agent of 2"));
+    fireEvent.click(document.getElementById("ev-scorecards-clear")!);
+    await waitFor(() => expect(document.getElementById("ev-scorecards")!.textContent).toContain("2 agents"));
+  });
+  it("keeps the tab in the URL (cards, suites, factory) and falls back to cards", async () => {
+    setup();
+    window.location.hash = "#evals/bogus";
+    mount();
+    expect((await byId("ev-tab-cards")).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(await byId("ev-tab-suites"));
+    expect(window.location.hash).toBe("#/evals?tab=suites");
+    await byId("ev-su-SUITE-BUILD");
+    fireEvent.click(await byId("ev-tab-factory"));
+    expect(window.location.hash).toBe("#/evals?tab=factory");
   });
   it("shows the headline numbers: suites, runs, regressions, eligible candidates", async () => {
     setup();
     mount();
     await byId("ev-ag-ag-build");
-    const head = document.querySelector(".titleblock")!.textContent!;
-    expect(head).toContain("Suites2");
-    expect(head).toContain("Runs2");
-    expect(head).toContain("Candidates eligible1");
+    const head = document.getElementById("ev-stats")!.textContent!;
+    expect(head).toContain("Suites22 runs");
+    expect(head).toContain("Task success90%");
+    expect(head).toContain("First pass80%");
+    expect(head).toContain("Rework rate10%");
   });
   it("blocks promotion with the reason until the suite passed, and promotes an eligible candidate with the agent's version", async () => {
     const calls = setup({ "POST /api/v1/agents/ag-build/versions/2.8.0-rc1/promote": () => ({ body: { ok: true, msg: "Builder 2.8.0-rc1 is on the floor." } }) });
     mount();
+    await openCard("ag-build");
     const blocked = await byId("ev-promote-ag-build-270rc1");
     expect(blocked.getAttribute("aria-disabled")).toBe("true");
     expect(reasonOf(blocked)).toContain("Blocked: 60% vs 85%");
@@ -141,6 +176,7 @@ describe("Evals screen: scorecards", () => {
   it("lists trust demotions and learning findings for the agent, with links to Trust and Learning", async () => {
     setup();
     mount();
+    await openCard("ag-build");
     expect((await byId("ev-tl-dem-0")).textContent).toContain("Builder · bug · Payments");
     expect(document.body.textContent).toContain("Post-release incident on WO-1");
     fireEvent.click(document.getElementById("ev-tl-dem-0")!);
@@ -169,16 +205,57 @@ describe("Evals screen: regressions", () => {
   });
 });
 
+describe("Evals screen: prototype tables", () => {
+  it("shows the sort hint on sortable headers, and a bare chevron row with no Scorecard button", async () => {
+    setup();
+    mount();
+    const t = await byId("ev-scorecards-table");
+    const heads = Array.from(t.querySelectorAll("th")).map((th) => th.textContent);
+    expect(heads.filter((h) => h?.includes("↕")).length).toBe(5);
+    expect(t.textContent).not.toContain("Scorecard");
+    expect(t.querySelector("td button:not(.row-link)")).toBeNull();
+    fireEvent.click(await byId("ev-tab-suites"));
+    const su = await byId("ev-suites-table");
+    expect(su.textContent).not.toContain("Details");
+    expect(su.querySelector(".strong")).toBeNull();
+    expect(Array.from(su.querySelectorAll("th")).filter((th) => th.textContent?.includes("↕")).map((th) => th.textContent)).toEqual(["Suite↕", "Last score↕"]);
+  });
+  it("opens #/evals?tab=suites on the Suites tab", async () => {
+    setup();
+    window.location.hash = "#/evals?tab=suites";
+    mount();
+    expect((await byId("ev-tab-suites")).getAttribute("aria-selected")).toBe("true");
+  });
+  it("tells the score when a run started from the page finishes, and lists it first in Recent runs", async () => {
+    const runs = [...RUNS_BUILD];
+    setup({
+      "GET /api/v1/evals/runs": () => ({ body: runs }),
+      "POST /api/v1/suites/SUITE-BUILD/runs": () => { runs.push(run("RUN-3", "SUITE-BUILD", "ag-build", "2.7.0-rc1", "claude-opus-5-5", 0.9, ["BLD-01", "BLD-02"].map((c) => res(c, true)), { status: "queued", at: NOW + 1000 })); return { body: { ok: true, msg: "RUN-3 started.", run: "RUN-3", total: 2 } }; },
+    });
+    mount();
+    fireEvent.click(await byId("ev-tab-suites"));
+    fireEvent.click(await byId("ev-run-SUITE-BUILD"));
+    await waitFor(() => expect(runs.some((r) => r.id === "RUN-3")).toBe(true));
+    runs[runs.length - 1] = { ...runs[runs.length - 1]!, status: "completed" } as never;
+    await byId("ev-run-SUITE-BUILD");
+    await act(async () => { await QC.invalidateQueries(); });
+    await waitFor(() => expect(document.body.textContent).toContain("Builder golden set scored 90%"));
+    const first = document.querySelector("#ev-runs-table tbody tr")!;
+    expect(first.textContent).toContain("RUN-3");
+  });
+});
+
 describe("Evals screen: suites and runs", () => {
-  const openSuites = async () => { fireEvent.click(await byId("ev-tab-suites")); await byId("ev-run-btn"); };
+  const openSuites = async () => { fireEvent.click(await byId("ev-tab-suites")); await rowBtn("ev-su-SUITE-BUILD"); await byId("ev-run-btn"); };
   it("lists suites with the last score and its task count, and shows the run's task count and range", async () => {
     setup();
     mount();
-    await openSuites();
+    fireEvent.click(await byId("ev-tab-suites"));
     const row = await byId("ev-su-SUITE-BUILD");
-    expect(row.textContent).toContain("▼ 50%");
-    expect(row.textContent).toContain("n=6");
-    expect(row.textContent).toContain("6");
+    expect(row.textContent).toContain("Builder golden set");
+    expect(row.textContent).toContain("6 cases · threshold 85%");
+    expect(row.textContent).toContain("50%");
+    await rowBtn("ev-su-SUITE-BUILD");
     fireEvent.click(await byId("ev-run-RUN-1"));
     expect((await byId("ev-range")).textContent).toContain("5 of 6 tasks passed");
     expect(document.getElementById("ev-range")!.textContent).toContain("95% range 53% to 93%");
@@ -187,6 +264,27 @@ describe("Evals screen: suites and runs", () => {
     await waitFor(() => expect(document.getElementById("ev-range")!.textContent).toContain("each run 2 times"));
     expect(document.querySelector(".ev-run-detail")!.textContent).toContain("2/2");
     expect(document.querySelector(".ev-run-detail")!.textContent).toContain("Advisory: Is it polite?");
+  });
+  it("lists the recent runs (run, suite, agent version, when, score, pass) and runs a suite from its row with the defaults", async () => {
+    const calls = setup({ "POST /api/v1/suites/SUITE-BUILD/runs": () => ({ body: { ok: true, msg: "RUN-3 started: 6 cases.", run: "RUN-3", total: 6 } }) });
+    mount();
+    fireEvent.click(await byId("ev-tab-suites"));
+    const runs = await byId("ev-runs");
+    expect(runs.closest(".panel")!.textContent).toContain("Recent runs");
+    expect(runs.textContent).toContain("Agent version");
+    expect(runs.textContent).toContain("RUN-2");
+    expect(runs.textContent).toContain("Builder v2.7.0-rc1");
+    expect(runs.textContent).toContain("3/6");
+    fireEvent.click(await byId("ev-run-SUITE-BUILD"));
+    await waitFor(() => expect(writes(calls, "POST")).toHaveLength(1));
+    expect(writes(calls, "POST")[0]!.body).toEqual({ agent: "ag-build", version: "2.7.0-rc1", model: "claude-opus-5-5" });
+  });
+  it("locks Run suite on the row for someone without eval.run", async () => {
+    setup({}, ["eval.run"]);
+    mount();
+    fireEvent.click(await byId("ev-tab-suites"));
+    await waitFor(() => expect(document.getElementById("ev-run-SUITE-BUILD")!.getAttribute("aria-disabled")).toBe("true"));
+    expect(reasonOf(document.getElementById("ev-run-SUITE-BUILD")!)).toContain("No role holds eval.run");
   });
   it("starts a real run with the version, model and repeats picked, as a keyed create, and nothing is simulated", async () => {
     const calls = setup({ "POST /api/v1/suites/SUITE-BUILD/runs": () => ({ body: { ok: true, msg: "RUN-3 started: 6 cases.", run: "RUN-3", total: 12 } }) });
@@ -269,23 +367,26 @@ describe("Evals screen: suites and runs", () => {
 });
 
 describe("Evals screen: factory-wide", () => {
-  it("shows the matrix, the project heat grid, per-class figures with counts, onboarding with counts and the skill coverage", async () => {
+  it("shows only the prototype's four factory panels (trend, gate rejections, heat map, confusion), none of the extra sections", async () => {
     setup();
     mount();
     fireEvent.click(await byId("ev-tab-factory"));
-    const mx = await byId("ev-mx-ag-build");
-    expect(mx.textContent).toContain("90%");
-    expect(document.getElementById("ev-mx-ag-review")!.textContent).toContain("n=2");
-    const heat = document.querySelector(".ev-heat")!;
-    expect(heat.textContent).toContain("▼ 60%");
-    expect(heat.querySelector(".is-none")).not.toBeNull();
-    expect(document.querySelector(".ev-pc")!.textContent).toContain("n=8");
-    expect(document.querySelector(".ev-pc")!.textContent).toContain("insufficient data");
-    expect(document.querySelector(".ev-onb")!.textContent).toContain("2 of 3 repos reached Ready");
-    expect(document.querySelector(".ev-onb")!.textContent).toContain("No CI");
-    expect(document.getElementById("ev-sk-sk-a")!.closest("tr")!.textContent).toContain("75%");
-    expect(document.body.textContent).toContain("No classified requests yet");
-    fireEvent.click(mx);
-    await byId("ev-n");
+    await byId("ev-heat");
+    const heat = document.getElementById("ev-heat")!;
+    expect(heat.textContent).toContain("payments");
+    expect(heat.textContent).toContain("60");
+    expect(heat.textContent).toContain("—");
+    for (const t of ["Task success, 8 weeks", "Gate rejection reasons", "Agent × project heat map", "Classifier confusion"]) expect(document.body.textContent).toContain(t);
+    for (const t of ["More factory detail", "Agents × metrics", "Per-class performance", "Per-skill eval coverage", "Human override rate"]) expect(document.body.textContent).not.toContain(t);
+    expect(window.location.hash).toBe("#/evals?tab=factory");
+  });
+});
+
+describe("Evals screen: a read the person may not make", () => {
+  it("says Not visible to you, not an empty list, when the primary read is refused", async () => {
+    setup({ "GET /api/v1/suites": () => ({ status: 403, body: { ok: false, msg: "Your roles do not include eval.view." } }) });
+    mount();
+    await waitFor(() => expect(document.getElementById("evals-hidden")?.textContent).toContain("Not visible to you"));
+    expect(document.getElementById("evals-hidden")?.textContent).toContain("eval.view");
   });
 });

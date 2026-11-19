@@ -3,8 +3,10 @@
  *   GET /api/v1/people, GET /api/v1/people/{id}/effective-permissions
  *   GET/POST /api/v1/teams, PATCH/DELETE /api/v1/teams/{id}
  *   GET/POST /api/v1/teams/{id}/roles, DELETE /api/v1/teams/{id}/roles/{grant}      (team role grants; members inherit them)
- *   POST /api/v1/invites, POST /api/v1/invites/{id}/accept       (the invite id is the invited person's id)
+ *   POST /api/v1/invites, POST /api/v1/invites/{id}/resend, POST /api/v1/invites/{id}/accept       (the invite id is the invited person's id)
  *   PUT/DELETE /api/v1/people/{id}/factory-roles/{role}
+ *   POST /api/v1/people/{id}/deactivate, POST /api/v1/people/{id}/reactivate   (offboarding)
+ *   POST /api/v1/people/{id}/mfa-reset   (reset a person's authenticator and send a one-time enrolment link; people.manage with step-up and a reason)
  *   PUT /api/v1/people/{id}/teams, PUT /api/v1/people/{id}/oncall, PUT /api/v1/people/{id}/away
  *
  * Every state-changing handler goes through command() (docs/BUILD.md, spec 15.4). Project role grants
@@ -14,9 +16,12 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { command, decide, policyState, refuse, readPeople, readTeams } from "../core/index.js";
 import { effectivePermissions } from "../areas/access/simulate.js";
-import { AwayBody, CreateTeamBody, InviteBody, OncallBody, TeamGrantBody, TeamsBody, UpdateTeamBody } from "../areas/people/schemas.js";
-import { acceptInvite, invitePerson, personVersion, setAway, setFactoryRole, setOncall, setTeams } from "../areas/people/people.js";
+import { deactivatePerson, reactivatePerson } from "../areas/people/offboard.js";
+import { AwayBody, CreateTeamBody, DeactivateBody, ReactivateBody, FactoryRoleBody, InviteBody, RevokeBody, TeamGrantBody, TeamsBody, UpdateTeamBody } from "../areas/people/schemas.js";
+import { inviteEnrolment, resetMfa, type PersonRow } from "../areas/people/mfa.js";
+import { acceptInvite, invitePerson, resendInvite, personVersion, setAway, setFactoryRole, setTeams } from "../areas/people/people.js";
 import { createTeam, deleteTeam, grantTeamRole, revokeTeamRole, updateTeam } from "../areas/people/teams.js";
+import { directoryPeople, directoryScope, directoryTeams } from "../core/directory.js";
 
 const Id = z.object({ id: z.string().min(1).max(100) });
 const IdGrant = z.object({ id: z.string().min(1).max(100), grant: z.string().min(1).max(100) });
@@ -40,12 +45,16 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/api/v1/people", async (req) => {
     requirePerson(req);
-    return readPeople(g.pool, req.gx.orgId);
+    const mine = await directoryScope(req);
+    const people = await readPeople(g.pool, req.gx.orgId);
+    return mine ? directoryPeople(people, mine, await readTeams(g.pool, req.gx.orgId)) : people;
   });
 
   app.get("/api/v1/teams", async (req) => {
     requirePerson(req);
-    return readTeams(g.pool, req.gx.orgId);
+    const mine = await directoryScope(req);
+    const teams = await readTeams(g.pool, req.gx.orgId);
+    return mine ? directoryTeams(teams, mine) : teams;
   });
 
   app.post("/api/v1/teams", async (req) => {
@@ -81,7 +90,8 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
 
   app.delete("/api/v1/teams/:id/roles/:grant", async (req) => {
     const { id, grant } = IdGrant.parse(req.params);
-    return command(req, { action: "people.manage", stepUp: true }, (tx, a) => revokeTeamRole(tx, a.orgId, id, grant));
+    const reason = RevokeBody.parse(req.body ?? null)?.reason;
+    return command(req, { action: "people.manage", stepUp: true }, (tx, a) => revokeTeamRole(tx, a.orgId, id, grant, reason));
   });
 
   app.get("/api/v1/people/:id/effective-permissions", async (req) => {
@@ -93,9 +103,23 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
     return effectivePermissions(st, viewer, id, at ?? Date.now());
   });
 
+  /** The invite goes out through Gantry; the first authenticator only through the provider's one-time link (S-122): send it with the invite. Never fails the invite. */
+  const withEnrolment = async <T extends object>(out: T): Promise<T & { enrolment?: { sent: boolean; reason?: string } }> => {
+    const person = (out as { person?: { id: string } }).person;
+    const row = person ? (await g.pool.query<PersonRow>(`select id, name, email, status, idp_subject from people where org_id = $1 and id = $2`, [g.orgId, person.id])).rows[0] : undefined;
+    return row ? { ...out, enrolment: await inviteEnrolment(g, row) } : out;
+  };
+
   app.post("/api/v1/invites", async (req) => {
     const body = InviteBody.parse(req.body);
-    return command(req, { action: "people.manage", idempotent: true }, (tx, a) => invitePerson(tx, a.orgId, g.config.publicUrl, a.id, body));
+    const out = await command(req, { action: "people.manage", idempotent: true }, (tx, a) => invitePerson(tx, a.orgId, g.config.publicUrl, a.id, body));
+    return withEnrolment(out);
+  });
+
+  app.post("/api/v1/invites/:id/resend", async (req) => {
+    const { id } = Id.parse(req.params);
+    const out = await command(req, { action: "people.manage", idempotent: true }, (tx, a) => resendInvite(tx, a.orgId, g.config.publicUrl, a.id, id));
+    return withEnrolment(out);
   });
 
   app.post("/api/v1/invites/:id/accept", async (req) => {
@@ -103,35 +127,66 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
     return command(req, { action: "people.manage", ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => acceptInvite(tx, a.orgId, id));
   });
 
-  // Role grants decide who can restore and who can edit policy, so they need a fresh sign-in (spec 14.4).
+  // Role grants decide who can restore and who can edit policy, so they need a fresh sign-in (spec 14.4) and a reason for the ledger.
   for (const [method, add] of [["PUT", true], ["DELETE", false]] as const) {
     app.route({
       method,
       url: "/api/v1/people/:id/factory-roles/:role",
       handler: async (req) => {
         const { id, role } = IdRole.parse(req.params);
-        return command(req, { action: "people.manage", stepUp: true, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => setFactoryRole(tx, a.orgId, a.id, id, role, add));
+        const { reason } = FactoryRoleBody.parse(req.body ?? {});
+        return command(req, { action: "people.manage", stepUp: true, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => setFactoryRole(tx, a.orgId, a.id, id, role, add, reason));
       },
     });
   }
 
+  // Offboarding removes access, so it needs a fresh sign-in, the person's current version and a reason for the audit trail.
+  app.post("/api/v1/people/:id/deactivate", async (req) => {
+    const { id } = Id.parse(req.params);
+    const body = DeactivateBody.parse(req.body ?? {});
+    return command(req, { action: "people.manage", stepUp: true, ifMatchRequired: true, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => deactivatePerson(tx, a, id, body));
+  });
+
+  app.post("/api/v1/people/:id/reactivate", async (req) => {
+    const { id } = Id.parse(req.params);
+    const body = ReactivateBody.parse(req.body ?? {});
+    return command(req, { action: "people.manage", stepUp: true, ifMatchRequired: true, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => reactivatePerson(tx, a, id, body, g.config.publicUrl));
+  });
+
+  // An authenticator reset (S-124): another administrator, a fresh two-factor sign-in, a reason; it ends the person's sessions and emails a one-time link.
+  app.post("/api/v1/people/:id/mfa-reset", async (req) => {
+    const { id } = Id.parse(req.params);
+    const { reason } = z.object({ reason: z.string().trim().min(5).max(500) }).parse(req.body ?? {});
+    return command(req, { action: "people.manage", stepUp: true }, (tx, a) => resetMfa(tx, g, a.id, id, reason));
+  });
+
   app.put("/api/v1/people/:id/teams", async (req) => {
     const { id } = Id.parse(req.params);
     const body = TeamsBody.parse(req.body);
-    return command(req, { action: "people.manage", ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => setTeams(tx, a.orgId, id, body.teams));
+    return command(req, { action: "people.manage", ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => setTeams(tx, a.orgId, a.id, id, body.teams));
   });
 
-  app.put("/api/v1/people/:id/oncall", async (req) => {
-    const { id } = Id.parse(req.params);
-    const body = OncallBody.parse(req.body);
-    const action = await selfOrAction(req, id, "people.manage");
-    return command(req, { action, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => setOncall(tx, a.orgId, id, body.on));
-  });
+  // On call is per project now (owner decision 7): a project's admins set it, and nobody can switch themselves on.
+  app.put("/api/v1/people/:id/oncall", async (_req, reply) =>
+    reply.code(410).send({ ok: false, msg: "On call is set per project now. A project admin chooses who is on call in Project config; the person on call can hand over there.", rule: { kind: "invariant", id: "ONCALL-PER-PROJECT", name: "On call per project" }, needs: "Project admin" }));
 
   app.put("/api/v1/people/:id/away", async (req) => {
     const { id } = Id.parse(req.params);
     const body = AwayBody.parse(req.body);
-    const project = body.project ?? null;
+    let project = body.project ?? null;
+    // Away is global: the delegate stands in on every project the person approves for. A project-scoped right (approvers.edit on the
+    // body's project) is therefore enough only when it covers every project the person holds a role on; a factory role needs people.manage.
+    if (project && !isSelf(req, id)) {
+      const target = (await readPeople(g.pool, req.gx.orgId)).find((x) => x.id === id);
+      const scopes = new Set((target?.roles ?? []).map((r) => r.scope));
+      if (!target || !scopes.has(project) || scopes.has("factory")) project = null;
+      else {
+        for (const other of scopes) {
+          if (other === project) continue;
+          if (!(await decide(req, "approvers.edit", { project: other })).allowed) project = null;
+        }
+      }
+    }
     const action = await selfOrAction(req, id, project ? "approvers.edit" : "people.manage", { project });
     return command(req, { action, scope: project ? { project } : {}, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => setAway(tx, a.orgId, id, body, a.now.getTime()));
   });

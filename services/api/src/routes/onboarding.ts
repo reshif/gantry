@@ -13,7 +13,7 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { fenceOnboarding } from "../areas/onboarding/fence.js";
 import { OrgBody, ProjectBody, readOrgGuidelines, readProjectGuidelines, saveOrgGuidelines, saveProjectGuidelines } from "../areas/onboarding/guidelines.js";
-import { configureRepo, connectRepo, markException, mergeOnboardingPr, openOnboardingPr, rerunAssessment, requestChanges, verifyNow } from "../areas/onboarding/commands.js";
+import { configureRepo, connectRepo, markException, withdrawException, mergeOnboardingPr, openOnboardingPr, rerunAssessment, requestChanges, verifyNow } from "../areas/onboarding/commands.js";
 import { ChangesBody, ConfigBody, ConnectBody, EmptyBody, ExceptionBody } from "../areas/onboarding/schemas.js";
 import { readRepoRow } from "../areas/onboarding/state.js";
 import { command, decide, policyState, readRepos, refuse, refuseDecision, type CommandResult } from "../core/index.js";
@@ -102,7 +102,7 @@ export const onboardingRoutes: FastifyPluginAsync = async (app) => {
     };
 
   app.patch("/api/v1/repos/:id/config", async (req) => {
-    const { id } = Id.parse(req.params);
+    Id.parse(req.params);
     const body = ConfigBody.parse(req.body);
     return onRepo("onboarding.manage", (tx, a, repoId) => configureRepo(tx, a, repoId, body), { versionRequired: true })(req);
   });
@@ -118,6 +118,11 @@ export const onboardingRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/v1/repos/:id/onboarding/exception", async (req) => {
     const b = ExceptionBody.parse(req.body);
     return onRepo("onboarding.exception", (tx, a, repoId) => markException(tx, a, repoId, b.reason))(req);
+  });
+
+  app.post("/api/v1/repos/:id/onboarding/exception/withdraw", async (req) => {
+    const b = ExceptionBody.parse(req.body);
+    return onRepo("onboarding.exception", (tx, a, repoId) => withdrawException(tx, a, repoId, b.reason))(req);
   });
 
   /* ------------------------------------------------------------------ guidelines */

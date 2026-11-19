@@ -4,15 +4,22 @@ import { createClaudeAdapter } from "./adapters/claude.js";
 import { stubAdapter } from "./adapters/stub.js";
 import { EdgeClient, type Checkpoint, type RunResult } from "./edge.js";
 import { readEnv, type RunEnv } from "./env.js";
+import { takeToken } from "./token.js";
+import { readLog, resetLog, STATION_DIR } from "./station-tools.js";
 import type { RunSpec } from "./spec.js";
+import { watchWorkspace, workspaceMessage } from "./workspace-cap.js";
 
 export interface WrapperDeps {
   env: RunEnv;
   edge: EdgeClient;
   adapters?: Record<RunSpec["adapter"], Adapter>;
   log?: (msg: string) => void;
+  /** Where the station tools keep this run's documents, questions and assumptions. */
+  stationDir?: string;
   /** Signals to listen for. Defaults to the process; tests pass their own. */
   onSignal?: (handler: (reason: string) => void) => () => void;
+  /** Overrides for the workspace-size check (tests): how often, and how usage is measured. */
+  workspaceCheck?: { intervalMs?: number; measure?: (dir: string) => Promise<number> };
 }
 
 /** Exit codes: 0 result delivered (any status), 70 spec unavailable/invalid, 71 refused by the edge, 72 result undeliverable. */
@@ -68,6 +75,12 @@ export async function runWrapper(deps: WrapperDeps): Promise<number> {
   const hb = setInterval(() => void beat(), spec.heartbeatSeconds * 1000);
   const wall = setTimeout(() => abort("wall_clock"), spec.limits.wallClockSeconds * 1000);
   phase = "working";
+  // S-90: the run's workspace is capped; over it, the run is stopped with a clear failure.
+  let overCap: { used: number } | undefined;
+  let unmeasurable = false;
+  const unwatch = env.workspaceMaxBytes
+    ? watchWorkspace({ dir: env.workspace, maxBytes: env.workspaceMaxBytes, ...deps.workspaceCheck, onOver: (used) => { overCap = { used }; log(workspaceMessage(env.workspaceMaxBytes!, used)); abort("workspace_full"); }, onUnmeasurable: (n) => { unmeasurable = true; log(`workspace size could not be measured ${n} times in a row; stopping the run`); abort("workspace_full"); } })
+    : () => undefined;
 
   const checkpoint = async (cp: Checkpoint) => {
     const r = await edge.checkpoint(cp);
@@ -80,18 +93,29 @@ export async function runWrapper(deps: WrapperDeps): Promise<number> {
     }
   };
 
+  const stationDir = deps.stationDir ?? STATION_DIR;
+  await resetLog(stationDir);
   let outcome: AdapterOutcome;
   try {
-    outcome = await adapter.run({ spec, env, signal: ac.signal, setTurn: (t) => (turn = t), checkpoint });
+    outcome = await adapter.run({ spec, env, signal: ac.signal, setTurn: (t) => (turn = t), checkpoint, stationDir });
   } catch (e) {
     outcome = { status: "failed", usage: [], error: { code: "adapter_crash", msg: e instanceof Error ? e.message : String(e) } };
   }
   phase = "finishing";
   clearTimeout(wall);
+  unwatch();
 
   if (outcome.status === "interrupted" && ac.signal.reason === "wall_clock") {
     outcome = { ...outcome, status: "failed", error: { code: "wall_clock", msg: `wall-clock limit ${spec.limits.wallClockSeconds}s reached` } };
   }
+
+  if (unmeasurable) {
+    outcome = { ...outcome, status: "failed", error: { code: "workspace_unmeasurable", msg: "The workspace size could not be measured three times in a row, so the run was stopped (a cap that cannot be checked is not assumed to hold)." } };
+  } else if (overCap && env.workspaceMaxBytes) {
+    outcome = { ...outcome, status: "failed", error: { code: "workspace_over_limit", msg: workspaceMessage(env.workspaceMaxBytes, overCap.used) } };
+  }
+
+  if (!refused && !ac.signal.aborted) outcome = await handOver(outcome, stationDir, spec.station, checkpoint, turn, log);
 
   let code: number = EXIT.delivered;
   if (refused) {
@@ -112,12 +136,44 @@ export async function runWrapper(deps: WrapperDeps): Promise<number> {
   return code;
 }
 
+/**
+ * What the station tools recorded goes with the result: each document as an artefact checkpoint (the edge scans and stores it, the API versions it),
+ * the questions and assumptions in `output.dialogue`. A blocking question turns the run into `needs_person` (the agent was told to stop and hand over),
+ * even when it ended without its result JSON. A failed run hands over nothing.
+ */
+export async function handOver(o: AdapterOutcome, dir: string, station: string, checkpoint: (cp: Checkpoint) => Promise<void>, turn: number, log: (m: string) => void): Promise<AdapterOutcome> {
+  const rec = await readLog(dir);
+  const blocking = rec.questions.some((q) => q.blocking) || !!rec.plan || !!rec.scouts?.length;
+  const waiting = blocking && (o.status === "succeeded" || (o.status === "failed" && o.error?.code === "no_structured_output"));
+  if (o.status !== "succeeded" && !waiting) return o;
+  const names = Object.keys(rec.documents);
+  for (const name of names) await checkpoint({ turn, kind: "artefact", name, contentType: "text/markdown; charset=utf-8", content: rec.documents[name]! });
+  if (names.length) log(`handed over ${names.length} document(s)`);
+  else if (o.status === "succeeded") log(`${station}: the agent wrote no document; the API will record its result as the station document`);
+  const base = o.output && typeof o.output === "object" && !Array.isArray(o.output) ? (o.output as Record<string, unknown>) : {};
+  const output: Record<string, unknown> = { ...base, documents: names, dialogue: { questions: rec.questions, assumptions: rec.assumptions, objections: rec.objections ?? [] }, ...(rec.plan ? { researchPlan: rec.plan } : {}), ...(rec.scouts?.length ? { scouts: rec.scouts } : {}) };
+  if (waiting) {
+    const n = rec.questions.filter((q) => q.blocking).length;
+    if (rec.scouts?.length && !n && !rec.plan) output.summary = typeof output.summary === "string" && output.summary ? output.summary : `${station}: waiting for ${rec.scouts.length} scouts.`;
+    else if (typeof output.summary !== "string" || !output.summary) output.summary = rec.plan && !n ? `${station}: waiting for the research plan to be approved.` : `${station}: waiting for ${n === 1 ? "an answer" : `${n} answers`}${rec.plan ? " and the research plan" : ""} before going on.`;
+    return { status: "needs_person", output, usage: o.usage };
+  }
+  return { ...o, output };
+}
+
 async function main(): Promise<number> {
-  const env = readEnv();
+  // First thing, before anything else starts: read the token file and unlink it. After this the token is only in this process's memory.
+  const tok = await takeToken();
+  if (!tok.ok) {
+    console.error(`[wrapper] ${tok.error}`);
+    return 2;
+  }
+  const env = readEnv(tok.value);
   if (!env.ok) {
     console.error(`[wrapper] bad environment: ${env.error}`);
     return 2;
   }
+  // The wrapper keeps the token in memory only (RunEnv): not in its environment, not in a file, not in argv.
   return runWrapper({ env: env.value, edge: new EdgeClient(env.value) });
 }
 

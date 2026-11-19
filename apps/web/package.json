@@ -6,22 +6,27 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p e2e/tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --passWithNoTests && node --test \"../../scripts/test/*.test.mjs\"",
+    "e2e": "playwright test",
+    "e2e:update": "playwright test visual --update-snapshots",
+    "e2e:known": "E2E_UPDATE_KNOWN=1 playwright test a11y overflow"
   },
   "dependencies": {
     "@gantry/domain": "*",
+    "@tanstack/react-query": "^5.90.5",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "react-router": "^7.9.4",
-    "@tanstack/react-query": "^5.90.5"
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.55.0",
+    "@testing-library/react": "^16.3.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.1.0",
-    "vite": "^7.1.12",
     "jsdom": "^27.0.1",
-    "@testing-library/react": "^16.3.0"
+    "vite": "^7.1.12"
   }
 }

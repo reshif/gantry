@@ -1,10 +1,11 @@
-/** Skill commands (spec 8.7). Every save is a new immutable version, picked up by an agent's next dispatch; scoping to projects creates none. */
+/** Skill commands (spec 8.7). Every save is a new immutable version. It reaches no run by itself: each agent whose floor version has the skill attached gets a candidate version pinned to it, which goes live through the eval gate. Scoping to projects creates none. */
 import { randomBytes } from "node:crypto";
 import type { Tx } from "@gantry/db";
 import type { z } from "zod";
 import type { Actor, CommandResult } from "../../core/command.js";
 import { conflict, invalid, notFound } from "../../core/errors.js";
 import { sha256, slug } from "../agents/config.js";
+import { cutSkillCandidates } from "../agents/skill-candidates.js";
 import type { CreateSkillBody, SkillPatch } from "./schemas.js";
 import { readSkills, skillLabel, skillRows, skillVersionRows } from "./store.js";
 
@@ -53,9 +54,13 @@ export async function saveSkill(tx: Tx, a: Actor, id: string, patch: z.infer<typ
   const body = { label, ...next };
   await tx.query(`insert into skill_versions (org_id, skill_id, version, body, content_hash, note, published_at, published_by) values ($1,$2,$3,$4::jsonb,$5,$6,now(),$7)`, [a.orgId, id, n, json(body), sha256(next.body), note || `Edited ${Object.keys(after).join(", ")}`, a.id]);
   await tx.query(`update skills set name = $3, description = $4, live_version = $5, data = $6::jsonb, version = version + 1 where org_id = $1 and id = $2`, [a.orgId, id, next.name, next.desc, n, json({ ...row.data, when: next.when, resources: next.resources })]);
+  // What an agent is told is its skill's name and body; the description, when-to-use and resource names are not sent to the model. Only a change to what is sent needs the gate.
+  const sent = "body" in after || "name" in after;
+  const cut = sent ? await cutSkillCandidates(tx, a, { id, name: next.name, version: n, label }, note || `Edited ${Object.keys(after).join(", ")}`) : { made: [], events: [] };
+  const tail = cut.made.length ? ` ${cut.made.length === 1 ? `${cut.made[0]!.name} ${cut.made[0]!.version} is a candidate` : `${cut.made.length} agents have a candidate`} and goes live only after its eval suite passes and a person promotes it.` : "";
   return {
-    msg: `${next.name} saved as v${label}.`, changes: ["skills", "agents", "audit"], project: null, extra: { version: label, n },
-    events: [{ type: "skill.edit", category: cat, subject: subject(id), projectId: null, before: { ...before, version: cur.version }, after: { ...after, version: label, ...(note ? { note } : {}) } }],
+    msg: `${next.name} saved as v${label}.${tail}`, changes: ["skills", "agents", "audit"], project: null, extra: { version: label, n, candidates: cut.made },
+    events: [{ type: "skill.edit", category: cat, subject: subject(id), projectId: null, before: { ...before, version: cur.version }, after: { ...after, version: label, ...(note ? { note } : {}) } }, ...cut.events],
   };
 }
 

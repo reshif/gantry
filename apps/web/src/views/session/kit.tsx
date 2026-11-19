@@ -2,9 +2,17 @@
  * Shared pieces of the agent sessions (the onboarding session per repository, the work-order session per work order): the question card with clickable suggested answers,
  * a progress line, and the streaming state of one live agent turn. The sessions differ in their rows, cards and commands; how a turn streams and how a question looks do not.
  */
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Btn } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
+
+/** Keeps a conversation thread scrolled to its newest message. Only the thread scrolls (never the page or an ancestor), so the banner and composer around it stay put. */
+export function useThreadEnd<T extends HTMLElement>(...deps: unknown[]) {
+  const thread = useRef<T>(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { const t = thread.current; if (t) t.scrollTop = t.scrollHeight; }, deps);
+  return thread;
+}
 
 export function QuestionCard({ question, options, answered, answer, last }: { question: string; options: string[]; answered?: string | undefined; answer: (t: string) => void; last: boolean }) {
   return (

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AUTONOMY_LEVELS, TOOL_KEYS } from "./config.js";
+import { limitInRange, limitRangeText, type LimitField } from "./run-limits.js";
 
 const id = z.string().trim().min(1).max(100);
 const ids = z.array(id).max(200);
@@ -8,6 +9,10 @@ export const Via = z.string().max(20).optional();
 const Tools = z.object(Object.fromEntries(TOOL_KEYS.map((k) => [k, z.boolean()])) as Record<(typeof TOOL_KEYS)[number], z.ZodBoolean>).partial().strict();
 const Autonomy = z.enum(AUTONOMY_LEVELS);
 const Override = z.object({ model: z.string().trim().min(1).max(100).optional(), autonomy: Autonomy.optional(), budget: z.number().min(0).max(100000).optional() }).strict();
+
+/** Run limits as a person saves them: the whole set at once (a field left out is unset and inherits the default). Ranges: turns 1..500, time 60..14400 s, cost 0.01..100000. */
+const limitField = (k: LimitField) => z.number().refine((v) => limitInRange(k, v), limitRangeText(k));
+export const RunLimitsBody = z.object({ turns: limitField("turns").optional(), wallClockSeconds: limitField("wallClockSeconds").optional(), costUsd: limitField("costUsd").optional() }).strict();
 
 export const AgentPatch = z
   .object({
@@ -24,13 +29,14 @@ export const AgentPatch = z
     guardrails: z.object({ paths: z.array(z.string().trim().min(1).max(300)).max(200), maxDiff: z.number().int().min(0).max(1_000_000) }).strict(),
     instructions: z.string().max(20000),
     overrides: z.record(id, Override),
+    limits: RunLimitsBody,
     suite: id,
     status: z.enum(["active", "paused"]),
   })
   .partial()
   .strict();
 
-export const SaveBody = z.object({ patch: AgentPatch, note: z.string().trim().max(300).optional(), via: Via });
+export const SaveBody = z.object({ patch: AgentPatch, note: z.string().trim().max(300).optional(), overrideReason: z.string().trim().max(300).optional(), via: Via });
 
 export const CreateBody = z.object({
   name: z.string().trim().min(1, "Give the agent a name.").max(80),
@@ -54,7 +60,7 @@ export const NewVersionBody = z.object({
   note: z.string().trim().max(300).optional(),
   via: Via,
 });
-export const RollbackBody = z.object({ version: z.union([z.string().min(1).max(60), z.number().int().positive()]), via: Via });
+export const RollbackBody = z.object({ version: z.union([z.string().min(1).max(60), z.number().int().positive()]), overrideReason: z.string().trim().max(300).optional(), via: Via });
 export const IdParam = z.object({ id: id });
 export const VersionParam = z.object({ id: id, v: z.string().min(1).max(60) });
 export const SkillParam = z.object({ id: id, skill: id });

@@ -1,38 +1,39 @@
 /**
- * Conversations (#conversations): the LIST of work-order sessions for the current project (who is waiting on whom, the latest message, the station) and, with a work order
- * in the route (`#/p/<project>/conversations/<WO>`), that work order's agent conversation (views/conversations/Session.tsx). The list has no forms: every row opens a session.
+ * Conversations (#conversations): two panes that fit the window. Left, the work orders that have a conversation, grouped Needs you / Active / Done with their own
+ * scroll; right, the picked one at `#/p/<project>/conversations/<WO>` (the first that needs you, or the first, when none is named): a header, the chat with its
+ * own scroll and the composer pinned under it, and the work order's side threads as a second tab. Search, filter, tab, side thread and whether line events show
+ * are in the URL (`?q=&f=&tab=side&thread=&events=hide`). Under 768 px the list and the conversation are separate views with a back button.
  * Older links that ask for a conversation through the `openConversation` preference land on the session too.
  */
-import { useEffect, useMemo, useState } from "react";
-import { fmt } from "@gantry/domain";
-import { useCan } from "../api/can";
+import { useEffect, useMemo } from "react";
 import { useMe, useProject } from "../api/queries";
+import { hashFor, hashPath, navigate, replaceHash, useHash } from "../lib/router";
 import { pickProject } from "../lib/routes";
-import { navigate, useHash } from "../lib/router";
+import { drawingNo } from "../lib/sheets";
 import { updatePrefs, usePrefs } from "../lib/prefs";
-import { Btn, Tabs, ViewHead } from "../ui/primitives";
-import { ClassChip, EmptyState, classOf, useCatalog } from "./projects/kit";
-import { WoSessionPage } from "./conversations/Session";
-import { useWoSessions, type WoSessionRow } from "./conversations/session-api";
-import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
-import { useProjectRepos } from "./floor/kit";
+import { Btn, Empty } from "../ui/primitives";
+import { Async } from "../ui/async";
+import { ConvPane } from "./conversations/ConvPane";
+import { ThreadList } from "./conversations/ThreadList";
+import type { ThreadFilter } from "./conversations/chat";
+import { useWoSessions } from "./conversations/session-api";
+import "../styles/views/conversations.css";
+import "../styles/views/conv-chat.css";
+import "../styles/views/wosession.css";
 
-type Tab = "waiting" | "open" | "closed";
-
-const WAIT: Record<WoSessionRow["waitingOn"], string> = { you: "Waiting on you", approver: "Waiting on an approver", agent: "Agent working", nobody: "Closed" };
+const KEEP = ["q", "f", "events"] as const;
+const withQuery = (path: string, q: Record<string, string>): string => {
+  const s = new URLSearchParams(Object.entries(q).filter(([, v]) => v)).toString();
+  return s ? `${path}?${s}` : path;
+};
 
 export default function ConversationsView() {
   const hash = useHash();
   const me = useMe();
   const prefs = usePrefs();
-  const cat = useCatalog();
   const projectId = me ? pickProject(me, prefs.project) : null;
   const project = useProject(projectId).data ?? null;
-  const submit = useCan("wo.submit", projectId ? { project: projectId } : {});
-  const repos = useProjectRepos(projectId);
-  const newWoDialog = useNewWorkOrder();
   const q = useWoSessions(projectId ?? undefined);
-  const [tab, setTab] = useState<Tab | null>(null);
   // A deep link from an older screen (the work orders table, the bell, the record) asks for one conversation: land on its session.
   const pending = prefs.openConversation;
   useEffect(() => {
@@ -40,54 +41,45 @@ export default function ConversationsView() {
     updatePrefs({ openConversation: null });
     navigate("conversations", pending);
   }, [pending]);
-  const items = useMemo(() => q.data?.items ?? [], [q.data]);
-  const groups = useMemo(() => {
-    const byLatest = (a: WoSessionRow, b: WoSessionRow) => (b.latest?.at ?? b.createdAt) - (a.latest?.at ?? a.createdAt);
-    return {
-      waiting: items.filter((w) => !w.closed && w.waitingOn === "you").sort(byLatest),
-      open: items.filter((w) => !w.closed).sort(byLatest),
-      closed: items.filter((w) => w.closed).sort(byLatest),
-    };
-  }, [items]);
-  if (hash.param) return <div className="view conv-view"><WoSessionPage woId={hash.param} back={() => navigate("conversations", null)} /></div>;
-  if (!me || !cat) return <div className="view conv-view" />;
-  if (!projectId || !project) return <div className="view"><EmptyState title="No project" text="You do not have a project to show." /></div>;
-  const cur: Tab = tab ?? (groups.waiting.length ? "waiting" : "open");
-  const list = groups[cur];
-  const block = projectSubmitBlock(me, project, repos);
-  const unread = items.filter((w) => w.unread).length;
+  const threads = useMemo(() => (q.data?.items ?? []).filter((w) => !!w.latest || w.started), [q.data]);
+  if (!me) return <div className="view conv-view" />;
+  const query = hash.q;
+  const search = query.q ?? "";
+  const filter = (["needs", "active", "done"].includes(query.f ?? "") ? query.f : "all") as ThreadFilter;
+  // the URL is the state: change a piece and keep the rest (replace, so filtering does not fill the back button)
+  const here = (patch: Record<string, string | null>): string => {
+    const next: Record<string, string> = { ...query };
+    for (const [k, v] of Object.entries(patch)) { if (v) next[k] = v; else delete next[k]; }
+    return withQuery(hashPath(window.location.hash), next);
+  };
+  const keep = (): Record<string, string> => Object.fromEntries(KEEP.filter((k) => query[k]).map((k) => [k, query[k]!]));
+  const open = (id: string, pid?: string | null) => withQuery(hashFor("conversations", id, pid ?? projectId), keep());
+  const needs = threads.find((w) => w.waitingOn === "you");
+  const sel = threads.find((w) => w.id === hash.param) ?? (hash.param ? null : needs ?? threads[0] ?? null);
+  const picked = hash.param ?? sel?.id ?? null;
+  const pane = { tab: query.tab === "side" ? ("side" as const) : ("chat" as const), thread: query.thread ?? null, events: query.events !== "hide" };
   return (
-    <div className="view conv-view">
-      <ViewHead
-        kicker={`Project · ${project.name}`}
-        title="Conversations"
-        sub="One conversation per work order, for its whole life, with the agent at its current station. Open one to talk to the agent, review its proposals and see what happened."
-        meta={[["Waiting on me", String(groups.waiting.length)], ["Open", String(groups.open.length)], ["Unread", String(unread)]]}
-        actions={<Btn label="New work order" kind="primary" icon="plus" id="conv-new" guard={submit.pending ? null : submit} disabledReason={submit.allowed ? block : null} onClick={() => newWoDialog({ project: project.id })} />}
-      />
-      <Tabs idPrefix="conv-tab" items={[{ id: "waiting", label: "Waiting on me", count: groups.waiting.length }, { id: "open", label: "Open", count: groups.open.length }, { id: "closed", label: "Closed", count: groups.closed.length }]} active={cur} onChange={(t) => setTab(t as Tab)} />
-      {list.length ? (
-        <ul className="wos-list-rows" aria-label="Work-order conversations" data-keep-scroll="conv-list">
-          {list.map((w) => (
-            <li key={w.id}>
-              <button type="button" className={`wos-row${w.unread ? " is-unread" : ""}${w.waitingOn === "you" ? " is-mine" : ""}`} id={`conv-item-${w.id}`} onClick={() => navigate("conversations", w.id)}>
-                <span className="wos-row-top">
-                  <span className="mono strong">{w.id}</span>
-                  <ClassChip cls={classOf(cat, project, w.cls)} small />
-                  <span className="chip">{w.bay ? `Bay · ${w.bay}` : w.stationName}</span>
-                  <span className={`chip wos-wait is-${w.waitingOn}`}>{w.waitingOn === "agent" && w.agentName ? `${w.agentName} working` : WAIT[w.waitingOn]}</span>
-                  {w.unread ? <span className="wos-unread" role="img" aria-label="Unread" /> : null}
-                  <span className="mono muted small wos-row-t">{fmt.ago(w.latest?.at ?? w.createdAt, Date.now())}</span>
-                </span>
-                <span className="wos-row-title">{w.title}</span>
-                <span className="wos-row-last small muted">{w.latest ? `${w.latest.role === "user" ? "You or a teammate" : w.latest.role === "assistant" ? (w.agentName ?? "Agent") : "Gantry"}: ${w.latest.text.replace(/\s+/g, " ").slice(0, 140)}` : w.started ? "" : "The conversation has not started yet."}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <EmptyState id="conv-empty" icon="chat" title={cur === "waiting" ? "Nothing waits on you" : cur === "open" ? "No open conversations" : "Nothing closed yet"} text={cur === "waiting" ? "When an agent asks you something or proposes a brief, the conversation shows here." : "Submit a work order to start a conversation with its Intake agent."} />
-      )}
+    <div className="view conv-view" data-open={hash.param ? "chat" : "list"}>
+      <header className="cv-top">
+        <span className="cv-sheet mono" title="Drawing number">{drawingNo("conversations")}</span>
+        <h1 className="cv-h1" title="The dialogue between people and the agents at each station.">Conversations</h1>
+        {project?.key ? <span className="mono muted small">{project.key}</span> : null}
+        <span className="grow" />
+        <Btn small icon="chat" label="All agent chats" id="conv-all" onClick={() => navigate("workspace", "inbox")} />
+      </header>
+      <div className="cv-grid">
+        <section className="panel cv-listpane" id="conv-threads" aria-label="Threads">
+          <Async query={q} what="conversations" id="conv-list">{() => (
+            <ThreadList rows={threads} picked={picked} q={search} filter={filter} setQ={(v) => replaceHash(here({ q: v || null }))} setFilter={(f) => replaceHash(here({ f: f === "all" ? null : f }))} href={open} />
+          )}</Async>
+        </section>
+        {picked ? (
+          <ConvPane woId={picked} row={sel} state={pane}
+            setState={(p) => replaceHash(here(p))}
+            back={() => { window.location.hash = withQuery(hashFor("conversations", null), keep()); }}
+            openRecord={() => navigate("record", picked, sel?.project ?? projectId)} />
+        ) : <section className="panel cv-pane" id="conv-detail"><Empty title="No conversations" text="" /></section>}
+      </div>
     </div>
   );
 }

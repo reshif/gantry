@@ -1,180 +1,238 @@
 /**
- * Agents (spec 8.7, 10.2, 13.2). Port of legacy/js/views/agents.js against /api/v1/agents: roster, deep configuration, layered instructions with the effective preview,
- * ordered skills, model chain, autonomy, tools, MCP, staffing, budget, guardrails, per-project overrides, versions with eval-gated promotion and rollback, trust, history, create flow.
- * Edits stay in a draft (kept across tabs and screens) until Save; saving writes one audited change. A version is a snapshot of the saved configuration and is immutable.
- * Not ported, on purpose: nothing from the legacy screen is simulation; "Run suite" opens Evals, which owns suite runs.
+ * Agents (spec 8.7, 10.2, 13.2) against /api/v1/agents. Two pages: the roster (`#agents`) and one agent (`#agents/<id>`) with its layered instructions, ordered skills,
+ * model, autonomy, tools, skills and MCP, per-project overrides and versions with rollback. The model, autonomy and tool controls write at once (one audited change, toasted);
+ * instructions are saved as a new version. A version is a snapshot of the saved configuration and is immutable.
  */
-import { useEffect } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { fmt, type Project } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, usePolicies, useProjects } from "../api/queries";
+import { createThread, useInbox } from "./workspace/api";
 import { ops } from "../api/ops";
+import { hashFor, navigate, useHash } from "../lib/router";
 import { updatePrefs, usePrefs } from "../lib/prefs";
-import { Avatar, Btn, Chip, Empty, LockNote, Panel, Tabs, ViewHead, type Decision } from "../ui/primitives";
-import { Icon } from "../ui/Icon";
+import { useRouteTab } from "../lib/routeQuery";
+import { useCrumbTail } from "../lib/crumb";
+import { Async, useCommand } from "../ui/async";
+import { Avatar, Btn, Chip, Empty, Field, FilterBar, LockNote, Panel, SearchBox, Select, Stat, StatRow, Tabs, ViewHead, type Decision } from "../ui/primitives";
+import { DataTable, type SortCol } from "../ui/SortTable";
 import { Spark } from "../ui/charts";
 import { useUI } from "../ui/overlay-context";
+import { Dialog } from "../ui/Overlay";
 import { useOutcome } from "./govern/data";
-import { EDIT_KEYS, EntityHistory, clone, pick, rerender, same, ui, useAgentsUi, useStations, autonomyCheck, type AgentRow, type Draft } from "./agents/kit";
+import { nextVersion, ui, useAgentsUi, useStations, type AgentRow } from "./agents/kit";
 import { ConfigTab, OverridesTab, type TabProps } from "./agents/Config";
 import { InstructionsTab } from "./agents/Instructions";
 import { SkillsTab } from "./agents/SkillsMcp";
 import { VersionsTab } from "./agents/Versions";
-import { TrustTab } from "./agents/Trust";
-import { CreateAgent } from "./agents/Create";
+import "../styles/views/agents.css";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
+/** The roster's search and filters live outside the component so they survive opening an agent and coming back. */
+const roster = { q: "", station: "", status: "", autonomy: "" };
+const rosterListeners = new Set<() => void>();
+let rosterSnap = { ...roster };
+const setRoster = (p: Partial<typeof roster>): void => { Object.assign(roster, p); rosterSnap = { ...roster }; rosterListeners.forEach((l) => l()); };
+const useRosterState = () => useSyncExternalStore((l) => (rosterListeners.add(l), () => rosterListeners.delete(l)), () => rosterSnap);
+/** Test hook: back to an unfiltered roster. */
+export const resetRoster = (): void => setRoster({ q: "", station: "", status: "", autonomy: "" });
+
+/** The roster: a filter bar and one flush table. A row opens that agent's own page. */
 function Roster({ agents }: { agents: AgentRow[] }) {
   const st = useStations();
-  const select = (id: string) => {
-    ui.sel = id;
-    ui.draft = null;
-    rerender();
-    setTimeout(() => { const d = document.getElementById("agent-detail"); if (d && d.getBoundingClientRect().top > window.innerHeight * 0.6) d.scrollIntoView?.({ block: "start", behavior: "smooth" }); }, 40);
-  };
+  const { q, station, status, autonomy } = useRosterState();
+  const autonomies = [...new Set(agents.map((a) => a.autonomy))];
+  const open = (a: AgentRow): void => navigate("agents", a.id);
+  const term = q.trim().toLowerCase();
+  const rows = agents.filter((a) => (!station || a.station === station) && (!status || a.status === status) && (!autonomy || a.autonomy === autonomy)
+    && (!term || `${a.name} ${a.station ?? ""} ${a.model}`.toLowerCase().includes(term)));
+  const active = !!(q || station || status || autonomy);
+  const clear = (): void => resetRoster();
+  const cols: SortCol<AgentRow>[] = [
+    { key: "name", label: "Agent", sort: (a) => a.name.toLowerCase(), render: (a) => (
+      <span className="ag-who">
+        <Avatar id={a.id} size="sm" />
+        <span className="ag-who-t">
+          <a className="pri ag-name" href={hashFor("agents", a.id)} onClick={(e) => { e.preventDefault(); open(a); }}>{a.name}</a>
+          <span className="sub">{st.find(a.station)?.name ?? "Roaming"}</span>
+        </span>
+      </span>
+    ) },
+    { key: "model", label: "Model", sort: true, render: (a) => <span className="mono small">{a.model}</span> },
+    { key: "autonomy", label: "Autonomy", sort: true, render: (a) => <Chip text={a.autonomy} cls={a.autonomy === "auto" ? "info" : a.autonomy === "gate" ? "warn" : "plain"} /> },
+    { key: "version", label: "Version", render: (a) => <span className="mono">v{a.version}</span> },
+    { key: "evalScore", label: "Eval", sort: true, align: "end", render: (a) => <span className="num">{fmt.pct(a.evalScore)}</span> },
+    { key: "spark", label: "7-day", hideSmall: true, render: (a) => <Spark line values={a.spark} w={70} label={`7-day success, latest ${fmt.pct(a.spark[a.spark.length - 1] ?? 0)}`} /> },
+    { key: "spend7d", label: "Spend", sort: true, align: "end", render: (a) => <span className="num">{fmt.money0(a.spend7d)}</span> },
+    { key: "status", label: "Status", render: (a) => <Chip text={a.status} cls={a.status === "active" ? "ok" : "warn"} /> },
+  ];
   return (
-    <div className="table-scroll" data-keep-scroll="agents-roster">
-      <table className="table ag-roster">
-        <thead><tr>{["Agent", "Status", "Station", "Model chain", "Version", "Eval", "7-day success", "Spend 7d"].map((x, i) => <th key={x} scope="col" className={i >= 5 ? "num" : ""}>{x}</th>)}</tr></thead>
-        <tbody>
-          {agents.map((a) => {
-            const below = a.threshold != null && a.evalScore < a.threshold;
-            const rc = a.versions.filter((v) => v.rc).length;
-            const station = st.find(a.station);
-            return (
-              <tr key={a.id} className={`row-link${ui.sel === a.id ? " is-selected" : ""}`} tabIndex={0} id={`ag-row-${a.id}`} aria-current={ui.sel === a.id ? "true" : undefined}
-                onClick={() => select(a.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(a.id); } }}>
-                <td><span className="who"><Avatar id={a.id} size="sm" /><strong>{a.name}</strong>{a.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</span></td>
-                <td><span className={`dot-status s-${a.status}`}>{a.status === "paused" ? "Paused" : "Active"}</span></td>
-                <td className="nowrap">
-                  <span className="mono muted">{station ? `${station.no} ` : ""}</span>{station ? station.name : "Off-belt"}
-                  {a.stations.length > 1 ? <span className="muted small">{` +${a.stations.length - 1}`}</span> : null}
-                </td>
-                <td><span className="mono small">{a.model}</span>{a.fallbacks.length ? <span className="muted small">{` +${a.fallbacks.length} fallback${a.fallbacks.length > 1 ? "s" : ""}`}</span> : null}</td>
-                <td><span className="mono">{a.version}</span>{rc ? <span className="chip ag-rc">{`${rc} candidate`}</span> : null}</td>
-                <td className={`num mono${below ? " neg" : ""}`}>{below ? <Icon name="alert" className="ag-below" /> : null}{fmt.pct(a.evalScore)}</td>
-                <td className="num"><Spark values={a.spark} min={0.5} max={1} label={`7-day success, latest ${fmt.pct(a.spark[a.spark.length - 1] ?? 0)}`} /></td>
-                <td className="num mono">{fmt.money0(a.spend7d)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <Panel flush cls="ag-roster-panel">
+      <FilterBar label="Filter agents" count={rows.length === agents.length ? `${rows.length} agent${rows.length === 1 ? "" : "s"}` : `${rows.length} agent${rows.length === 1 ? "" : "s"} of ${agents.length}`} actions={active ? <Btn label="Clear" small kind="ghost" id="ag-clear" onClick={clear} /> : undefined}>
+        <SearchBox id="ag-search" value={q} onChange={(v) => setRoster({ q: v })} placeholder="Search…" label="Search agents" />
+        <Field label="Station" htmlFor="ag-f-station"><Select id="ag-f-station" value={station} onChange={(v) => setRoster({ station: v })} options={[{ value: "", label: "All" }, ...st.all.map((s) => ({ value: s.id, label: s.name }))]} /></Field>
+        <Field label="Autonomy" htmlFor="ag-f-autonomy"><Select id="ag-f-autonomy" value={autonomy} onChange={(v) => setRoster({ autonomy: v })} options={[{ value: "", label: "All" }, ...autonomies.map((x) => ({ value: x, label: x }))]} /></Field>
+        <Field label="Status" htmlFor="ag-f-status"><Select id="ag-f-status" value={status} onChange={(v) => setRoster({ status: v })} options={[{ value: "", label: "All" }, { value: "active", label: "active" }, { value: "paused", label: "paused" }]} /></Field>
+      </FilterBar>
+      <DataTable id="ag-roster" caption="Agents" columns={cols} rows={rows} rowKey={(a) => a.id} rowId={(a) => `ag-row-${a.id}`} onRow={open} pageSize={12} pager sortSelect={false}
+        empty={agents.length ? { title: "Nothing matches these filters", text: "Loosen the search or clear the filters.", action: <Btn label="Clear filters" id="ag-clear-empty" onClick={clear} /> } : { title: "Nothing here yet", text: "Items will appear here when they exist." }} />
+    </Panel>
   );
 }
 
-function Detail({ a, agents, projects }: { a: AgentRow; agents: AgentRow[]; projects: Project[] }) {
+/** Talk: a side thread with this agent about one work order; the agent answers in its own voice and cannot change the work order. */
+function TalkDialog({ a, close }: { a: AgentRow; close: () => void }) {
+  const inbox = useInbox(false);
+  const wos = (inbox.data?.items ?? []).filter((w) => w.kind === "primary" && !w.archived);
+  const [wo, setWo] = useState("");
+  const [err, setErr] = useState("");
+  const pick = wo || wos[0]?.key || "";
+  const start = async (): Promise<void> => {
+    const item = wos.find((w) => w.key === pick);
+    if (!item?.scope.id) { setErr("Pick a work order to talk about."); return; }
+    const r = await createThread({ scope: { kind: "work_order", id: item.scope.id }, agent: a.id, visibility: "private" });
+    if (!r.ok) { setErr(r.msg); return; }
+    close();
+    navigate("workspace", r.id);
+  };
+  return (
+    <Dialog title={`Talk to ${a.name}`} kicker="Agents" onClose={close}
+      sub="A side thread about one work order. The agent reads its documents, questions and sources and answers in its own voice."
+      actions={[{ label: "Cancel" }, { label: "Start", kind: "primary", submit: true, id: "ag-talk-ok", onClick: () => void start() }]}
+      body={(
+        <div className="form-grid">
+          <Field label="About work order" htmlFor="ag-talk-wo" hint={wos.length ? undefined : "No work order has a thread yet."}>
+            <Select id="ag-talk-wo" value={pick} onChange={setWo} options={wos.map((w) => ({ value: w.key, label: `${w.scope.id} · ${w.title.slice(0, 60)}` }))} />
+          </Field>
+          <div className="form-err" role="alert">{err}</div>
+        </div>
+      )} />
+  );
+}
+
+function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
+  const ui_ = useUI();
   const out = useOutcome();
   const policies = usePolicies().data ?? [];
   const st = useStations();
   const perm = dec(useCan("agent.edit"));
   const ro = !perm.allowed;
-  const saved = pick(a);
-  if (!ui.draft || ui.draftFor !== a.id) { ui.draft = clone(saved); ui.draftFor = a.id; }
-  const d = ui.draft as Draft;
-  const dirty = !same(d, saved);
-  const autoChk = autonomyCheck(policies, projects, { station: a.station, projects: d.projects }, d.autonomy);
-  const edit = (fn: () => void): void => { fn(); rerender(); };
-  const save = () => {
-    if (!d.name.trim()) { out({ ok: false, msg: "The agent needs a name.", status: 422 }); return; }
-    if (!d.stations.length) { out({ ok: false, msg: "Pick at least one station the agent may staff.", status: 422 }); return; }
-    const patch: Record<string, unknown> = {};
-    const changed: string[] = [];
-    for (const k of EDIT_KEYS) if (!same(d[k], a[k])) { patch[k] = clone(d[k]); changed.push(k); }
-    if (!changed.length) return;
-    if (typeof patch.name === "string") patch.name = patch.name.trim();
-    void ops.saveAgent(a.id, patch, changed.join(", "), { ifMatch: a.rev }).then((r) => { out(r); if (r.ok) { ui.draft = null; rerender(); } });
+  const write = useCommand((patch: Record<string, unknown>, note: string) => ops.saveAgent(a.id, patch, note, { ifMatch: a.rev }), { ok: false });
+  /** One change, written at once; the toast says what changed. */
+  const apply = (patch: Record<string, unknown>, msg: string): void => {
+    void write.run(patch, Object.keys(patch).join(", ")).then((r) => { if (r?.ok) ui_.toast(msg, "ok"); });
   };
-  const saveGuard: Decision | null = !perm.allowed ? perm : !autoChk.allowed ? { allowed: false, needs: "", reason: autoChk.reason ?? "" } : !dirty ? { allowed: false, needs: "", reason: "No changes to save." } : null;
-  const toggleStatus = () => {
-    const resume = a.status === "paused";
-    void ops.saveAgent(a.id, { status: resume ? "active" : "paused" }, resume ? "resumed" : "paused", { ifMatch: a.rev }).then((r) => out(r, resume ? `${a.name} is active.` : `${a.name} is paused. Its stations queue work until it resumes.`));
+  /** "Save as new version": the edited text is saved, then a version snapshots it; it goes live after its suite passes. */
+  const saveAsVersion = (text: string): void => {
+    if (text.trim().length < 20) { ui_.toast("Instructions need at least 20 characters", "error"); return; }
+    void (async () => {
+      if (text !== a.instructions) {
+        const r = await ops.saveAgent(a.id, { instructions: text }, "instructions", { ifMatch: a.rev });
+        if (!r.ok) { out(r); return; }
+      }
+      const label = nextVersion(a);
+      const r2 = await ops.newAgentVersion(a.id, label, "Edited in web");
+      if (r2.ok) ui_.toast(`Saved v${label}`, "ok"); else out(r2);
+    })();
   };
-  const running = a.running ?? 0;
+  /** Run limits: written to the working copy, then a version snapshots them; it goes live after its suite passes. An unchanged set only cuts the version. */
+  const saveLimits = async (limits: { turns?: number; wallClockSeconds?: number; costUsd?: number }): Promise<void> => {
+    if (JSON.stringify(limits) !== JSON.stringify(a.limits ?? {})) {
+      const r = await ops.saveAgent(a.id, { limits }, "run limits", { ifMatch: a.rev });
+      if (!r.ok) { out(r); return; }
+    }
+    const label = nextVersion(a);
+    const r2 = await ops.newAgentVersion(a.id, label, "Run limits changed in web");
+    if (r2.ok) ui_.toast(`Saved v${label}`, "ok"); else out(r2);
+  };
+  const paused = a.status === "paused";
+  const [tab, setTab] = useRouteTab(["config", "instr", "skills", "proj", "versions"], "config");
   const tabs = [
-    { id: "config", label: "Configuration" }, { id: "instructions", label: "Instructions" }, { id: "skills", label: "Skills and MCP", count: d.skills.length },
-    { id: "overrides", label: "Per-project", count: Object.keys(d.overrides ?? {}).length }, { id: "versions", label: "Versions", count: a.versions.length }, { id: "trust", label: "Trust" }, { id: "history", label: "History" },
+    { id: "config", label: "Configuration" }, { id: "instr", label: "Instructions" }, { id: "skills", label: "Skills and MCP", count: a.skills.length + a.mcp.length },
+    { id: "proj", label: "Per-project", count: Object.keys(a.overrides ?? {}).length || undefined }, { id: "versions", label: "Versions", count: a.versions.length },
   ];
-  const tp: TabProps = { a, d, ro, perm, projects, policies, edit };
-  const body = ui.tab === "instructions" ? <InstructionsTab {...tp} />
-    : ui.tab === "skills" ? <SkillsTab {...tp} />
-    : ui.tab === "overrides" ? <OverridesTab {...tp} />
-    : ui.tab === "versions" ? <VersionsTab a={a} dirty={dirty} perm={perm} />
-    : ui.tab === "trust" ? <TrustTab a={a} projects={projects} />
-    : ui.tab === "history" ? <div className="ag-hist"><EntityHistory type="agent" id={a.id} limit={40} /></div>
+  const tp: TabProps = { a, ro, perm, projects, policies, apply, saveAsVersion, saveLimits };
+  const body = tab === "instr" ? <InstructionsTab key={`${a.id}-${a.rev}`} {...tp} />
+    : tab === "skills" ? <SkillsTab {...tp} />
+    : tab === "proj" ? <OverridesTab {...tp} />
+    : tab === "versions" ? <VersionsTab a={a} perm={perm} />
     : <ConfigTab {...tp} />;
-  const showSave = ["config", "instructions", "skills", "overrides"].includes(ui.tab);
-  void agents;
+  const stn = st.find(a.station);
   return (
-    <section className="agent-detail panel" id="agent-detail" aria-label={`${a.name} configuration`}>
-      <div className="ad-head">
-        <Avatar id={a.id} size="lg" />
-        <div className="ad-main">
-          <div className="kicker">{`Agent · ${st.label(a.station, projects)}${a.builtin ? " · built-in" : ""}`}</div>
-          <h2 className="ad-title">{a.name}</h2>
-          <div className="ad-meta mono">{`${a.version} · ${a.model} · ${running} work order${running === 1 ? "" : "s"} now · ${a.suite ? `${a.suite} ${fmt.pct(a.evalScore)}` : ""}`}</div>
-        </div>
-        <div className="ad-tools">
-          <span className={`dot-status s-${a.status}`}>{a.status === "paused" ? "Paused" : "Active"}</span>
-          <Btn label={a.status === "paused" ? "Resume agent" : "Pause agent"} small icon={a.status === "paused" ? "play" : "pause"} id="ag-pause" guard={perm} onClick={toggleStatus} />
-        </div>
-      </div>
+    <section className="agent-detail" id="agent-detail" aria-label={`${a.name} configuration`}>
+      <ViewHead
+        crumbs={[{ label: "Agents", href: hashFor("agents"), onClick: () => navigate("agents") }, { label: a.name }]}
+        title={a.name}
+        sub={stn?.purpose ?? "Roaming agent"}
+        actions={<><Btn label="Talk" icon="chat" id="ag-talk" onClick={() => ui_.open((close) => <TalkDialog a={a} close={close} />)} /><Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} disabledReason={write.wait("Saving…")} onClick={() => apply({ status: paused ? "active" : "paused" }, `${a.name} ${paused ? "active" : "paused"}`)} /></>}
+      />
+      <StatRow id="ag-detail-stats">
+        <Stat label="Eval score" value={fmt.pct(a.evalScore)} sub={`suite ${a.suite}`} tone={a.evalScore > 0.9 ? "done" : "wait"} />
+        <Stat label="Version" value={`v${a.version}`} sub={`${a.versions.length} releases`} />
+        <Stat label="Spend, 7d" value={fmt.money0(a.spend7d)} />
+        <Stat label="Autonomy" value={a.autonomy} sub="gate mode" />
+      </StatRow>
       <LockNote decision={perm} what="Agent configuration" />
-      <Tabs idPrefix="ag-tab" items={tabs} active={ui.tab} onChange={(t) => { ui.tab = t; rerender(); }} />
-      {body}
-      {showSave ? (
-        <div className={`savebar${dirty ? " is-dirty" : ""}`} id="ag-savebar">
-          <span className="muted small savebar-text">Edits stay in a draft while you switch tabs or screens. Saving writes one audited change.</span>
-          <Btn label="Discard" id="ag-discard" guard={!perm.allowed ? perm : null} onClick={() => { ui.draft = null; rerender(); }} />
-          <Btn label="Save agent" kind="primary" id="ag-save" guard={saveGuard} onClick={save} />
-        </div>
-      ) : null}
+      <Tabs idPrefix="ag-tab" items={tabs} active={tab} onChange={setTab} />
+      <div className="stack ag-body">{body}</div>
     </section>
   );
 }
 
 export default function AgentsView() {
   useAgentsUi();
-  const ui_ = useUI();
   const prefs = usePrefs();
+  const route = useHash();
   const q = useAgents();
-  const agents = (q.data ?? []) as unknown as AgentRow[];
+  const agents = useMemo(() => (q.data ?? []) as unknown as AgentRow[], [q.data]);
   const projects = (useProjects().data ?? []) as Project[];
-  const policies = usePolicies().data ?? [];
-  const perm = dec(useCan("agent.edit"));
+  const wanted = route.id === "agents" ? route.param : null;
+  useCrumbTail(wanted ? agents.find((a) => a.id === wanted)?.name : null);
 
-  // Another screen asked for an agent (prefs.agent): select it once.
+  // Another screen asked for an agent (prefs.agent): open its page once.
   useEffect(() => {
     if (prefs.agent && agents.some((a) => a.id === prefs.agent)) {
-      if (ui.sel !== prefs.agent) { ui.sel = prefs.agent; ui.draft = null; rerender(); }
+      const id = prefs.agent;
       updatePrefs({ agent: null });
+      navigate("agents", id);
     }
   }, [prefs.agent, agents]);
 
-  if (q.isLoading) return <div className="view view-agents"><ViewHead kicker="Agents · Sheet 13" title="Agents" /><Empty title="Loading agents" text="" /></div>;
-  if (q.isError || !agents.length) {
+  const sub = "The workers on the line: who they are, what they may touch, and how they have performed.";
+
+  if (q.data === undefined) {
     return (
       <div className="view view-agents">
-        <ViewHead kicker="Agents · Sheet 13" title="Agents" sub="Who staffs each station, on which model, with which instructions, skills and permissions."
-          actions={<Btn label="Create agent" kind="primary" icon="plus" id="agent-create" guard={perm} onClick={() => ui_.open((close) => <CreateAgent agents={agents} projects={projects} policies={policies} perm={perm} close={close} />)} />} />
-        <Empty title={q.isError ? "Agents could not be loaded" : "No agents yet"} text={q.isError ? "Try again in a moment." : "Create the first agent."} />
+        <ViewHead title="Agents" kicker="All lines" sub={sub} />
+        <Async query={q} what="agents" id="agents">{() => null}</Async>
       </div>
     );
   }
-  if (!ui.sel || !agents.some((a) => a.id === ui.sel)) ui.sel = agents[0]!.id;
-  const current = agents.find((a) => a.id === ui.sel) ?? agents[0]!;
+  if (wanted) {
+    const current = agents.find((a) => a.id === wanted);
+    if (!current) {
+      return (
+        <div className="view view-agents">
+          <ViewHead title="Agent" kicker="All lines" />
+          <Panel><Empty title="Nothing to show" text="That agent does not exist." action={<Btn label="Work orders" id="ag-back" onClick={() => navigate("work-orders")} />} /></Panel>
+        </div>
+      );
+    }
+    ui.sel = current.id;
+    return <div className="view view-agents"><Detail a={current} projects={projects} /></div>;
+  }
   const active = agents.filter((a) => a.status === "active").length;
-  const cands = agents.reduce((n, a) => n + a.versions.filter((v) => v.rc).length, 0);
-  const below = agents.filter((a) => a.threshold != null && a.evalScore < a.threshold).length;
   return (
     <div className="view view-agents">
-      <ViewHead kicker="Agents · Sheet 13" title="Agents" sub="Who staffs each station, on which model, with which instructions, skills and permissions."
-        meta={[["Agents", String(agents.length)], ["Active", `${active} / ${agents.length}`], ["Candidates", String(cands)], ["Below threshold", String(below)], ["Spend 7d", fmt.money0(agents.reduce((t, a) => t + a.spend7d, 0))]]}
-        actions={<Btn label="Create agent" kind="primary" icon="plus" id="agent-create" guard={perm} onClick={() => ui_.open((close) => <CreateAgent agents={agents} projects={projects} policies={policies} perm={perm} close={close} />)} />} />
-      <Panel title="Roster" flush tools={<span className="muted small">Select a row to configure</span>}><Roster agents={agents} /></Panel>
-      <Detail a={current} agents={agents} projects={projects} />
+      <ViewHead title="Agents" kicker="All lines" sub={sub} actions={<><Btn label="Evals" onClick={() => navigate("evals")} /><Btn label="Trust ladder" onClick={() => navigate("trust")} /></>} />
+      <StatRow id="ag-stats">
+        <Stat label="Agents" value={String(agents.length)} sub={`${active} active`} tone="info" />
+        <Stat label="On autopilot" value={String(agents.filter((a) => a.autonomy === "auto").length)} sub="no gate" />
+        <Stat label="Need approval" value={String(agents.filter((a) => a.autonomy === "gate").length)} sub="human gate" tone="wait" />
+        <Stat label="Spend, 7 days" value={fmt.money0(agents.reduce((t, a) => t + a.spend7d, 0))} />
+      </StatRow>
+      <Roster agents={agents} />
     </div>
   );
 }

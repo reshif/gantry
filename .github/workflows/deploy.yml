@@ -1,0 +1,326 @@
+# Gantry release pipeline after CI: a commit that passed CI on main is rehearsed on staging with its exact signed digests, waits
+# for a person, and is then deployed to the production host. Design and the model that checks it:
+# gantry-designs/v3-readiness/CICD.md and statechart/cicd (CiCd.tla).
+#
+#   plan      GitHub-hosted. Finds the release manifest CI signed for this commit, verifies it, and stops if a newer commit is on main.
+#   staging   GitHub-hosted. Starts the whole stack from those digests and runs deploy/smoke.sh. Secrets: none. Cancelled by a newer commit.
+#   gate      GitHub-hosted. The Environment `production` has required reviewers: a person reads the summary and approves THIS digest set.
+#             A newer commit cancels a gate that is still waiting (nothing has started, so cancelling is safe).
+#   deploy    The production host's own runner. Backup, migrate, start, health gate, and a rollback or a page when it is unhealthy.
+#             Never cancelled once started; a second deploy queues behind it (and the host script refuses to run two anyway).
+#   notify    Opens an issue (and calls the pager webhook, if one is set) when production was rolled back or needs a person.
+#
+# This workflow only ever runs for a push to main of this repository (workflow_run filtered below) or a person's manual dispatch.
+# It never checks out or runs code from a pull request and never runs for a fork, so a fork cannot reach a secret or the host.
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit to deploy (40 hex characters). It must be on main and have a signed release manifest from CI."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan the release
+    # Off until a self-hosted production runner exists (repository variable GANTRY_CD_ENABLED=true turns it on).
+    if: >-
+      vars.GANTRY_CD_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.plan.outputs.sha }}
+      run_id: ${{ steps.plan.outputs.run_id }}
+      superseded: ${{ steps.plan.outputs.superseded }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EVENT_NAME: ${{ github.event_name }}
+      RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      INPUT_SHA: ${{ inputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.4
+      - id: plan
+        run: |
+          sha="${RUN_SHA}"; run_id="${RUN_ID}"
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            sha="${INPUT_SHA}"
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be 40 lowercase hex characters"; exit 1; }
+            run_id="$(gh run list --workflow ci.yml --branch main --commit "$sha" --status success --event push --json databaseId --jq '.[0].databaseId')"
+            [ -n "$run_id" ] || { echo "::error::no successful CI run on main for $sha"; exit 1; }
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::bad sha"; exit 1; }
+          git merge-base --is-ancestor "$sha" origin/main || { echo "::error::$sha is not on main"; exit 1; }
+          superseded=false
+          # A push that is no longer the newest commit on main is superseded by the pipeline of the newer one.
+          if [ "$EVENT_NAME" = workflow_run ] && [ "$sha" != "$(git rev-parse origin/main)" ]; then superseded=true; fi
+          # The manifest must verify before any later job uses a byte of it (identity: ci.yml on main of this repository).
+          gh run download "$run_id" --name "release-$sha" --dir manifest
+          cosign verify-blob --bundle manifest/release.json.bundle \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com manifest/release.json >/dev/null
+          node deploy/release/release-manifest.mjs validate manifest/release.json --sha "$sha"
+          { echo "sha=$sha"; echo "run_id=$run_id"; echo "superseded=$superseded"; } >>"$GITHUB_OUTPUT"
+          if [ "$superseded" = true ]; then echo "::notice title=Superseded::$sha is not the newest commit on main; the newer commit's run takes over."; fi
+
+  staging:
+    name: Staging rehearsal (exact digests)
+    needs: plan
+    if: needs.plan.outputs.superseded != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: staging
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    concurrency:
+      group: gantry-staging
+      cancel-in-progress: true
+    env:
+      SHA: ${{ needs.plan.outputs.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.4
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify the release and pull its digests
+        env:
+          RUN_ID: ${{ needs.plan.outputs.run_id }}
+          GANTRY_REPOSITORY: ${{ github.repository }}
+          GANTRY_STATE_DIR: ${{ runner.temp }}/gantry-release
+        run: |
+          gh run download "$RUN_ID" --name "release-$SHA" --dir manifest
+          deploy/release/gantry-release.sh stage manifest/release.json manifest/release.json.bundle
+      - name: Bring the whole stack up from those digests
+        run: |
+          deploy/secrets/generate.sh >/dev/null
+          DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          export DOCKER_GID
+          # The release's local tags (rel-<sha12>) are what compose starts: the images are the verified digests, not a rebuild.
+          export GANTRY_IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/" GANTRY_VERSION="rel-${SHA:0:12}"
+          docker compose -f deploy/compose.yml up -d --no-build
+      - name: Smoke and isolation checks (deploy/smoke.sh)
+        run: |
+          DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          export DOCKER_GID
+          SMOKE_NO_UP=1 deploy/smoke.sh
+      - name: Backup and restore drill on the staged stack
+        run: |
+          DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          export DOCKER_GID
+          export GANTRY_IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/" GANTRY_VERSION="rel-${SHA:0:12}"
+          docker compose -f deploy/compose.yml --profile backup run --rm gantry-backup now
+          docker compose -f deploy/compose.yml --profile backup run --rm gantry-backup drill
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -f deploy/compose.yml logs --no-color --tail=300 > compose.log
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: staging-logs-${{ needs.plan.outputs.sha }}
+          path: compose.log
+          retention-days: 7
+      - name: Tear down
+        if: always()
+        run: docker compose -f deploy/compose.yml --profile backup down -v --remove-orphans
+
+  gate:
+    name: Awaiting approval to promote to production
+    needs: [plan, staging]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Required reviewers are set on this Environment (CICD.md). Nothing below runs until a person approves.
+    environment:
+      name: production
+    permissions:
+      contents: read
+      actions: read
+    concurrency:
+      group: gantry-prod-gate
+      cancel-in-progress: true
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ needs.plan.outputs.sha }}
+      RUN_ID: ${{ needs.plan.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - name: What you approved
+        run: |
+          gh run download "$RUN_ID" --name "release-$SHA" --dir manifest
+          {
+            echo "### Approved for production: \`${SHA:0:12}\`"
+            echo
+            echo "Staging passed on these exact digests."
+            echo
+            echo "| image | digest |"; echo "| --- | --- |"
+            jq -r '.images | to_entries[] | "| gantry-\(.key) | `\(.value.digest)` |"' manifest/release.json
+            echo
+            echo "Schema level: $(jq -r .migrations.latest manifest/release.json); highest contract migration: $(jq -r .migrations.lastContract manifest/release.json) (0 = none)."
+            if [ "$(jq -r .migrations.lastContract manifest/release.json)" != 0 ]; then echo; echo "**This release carries a contract migration: after it runs, an automatic rollback past it is not possible; the backup set is the way back.**"; fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy to production
+    needs: [plan, gate]
+    # The production host's own runner (outbound connection only): a dedicated runner group that only this workflow may use.
+    runs-on: [self-hosted, linux, gantry-prod]
+    timeout-minutes: 60
+    environment:
+      name: production-deploy
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    concurrency:
+      group: gantry-prod-deploy
+      cancel-in-progress: false
+    outputs:
+      verdict: ${{ steps.verdict.outputs.verdict }}
+    env:
+      SHA: ${{ needs.plan.outputs.sha }}
+      RUN_ID: ${{ needs.plan.outputs.run_id }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.4
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Require the host configuration (fail closed)
+        env:
+          GANTRY_HOME: ${{ vars.GANTRY_HOME }}
+          GANTRY_STATE_DIR: ${{ vars.GANTRY_STATE_DIR }}
+        run: |
+          [ -n "$GANTRY_HOME" ] || { echo "::error::the variable GANTRY_HOME is not set on the production-deploy Environment"; exit 1; }
+          [ -n "$GANTRY_STATE_DIR" ] || { echo "::error::the variable GANTRY_STATE_DIR is not set on the production-deploy Environment"; exit 1; }
+          [ -f "$GANTRY_HOME/deploy/prod.env" ] || { echo "::error::$GANTRY_HOME is not the Gantry install (no deploy/prod.env)"; exit 1; }
+      - name: Deploy (verify, back up, migrate, start, health gate, roll back)
+        id: deploy
+        env:
+          GANTRY_REPOSITORY: ${{ github.repository }}
+          GANTRY_REPO_DIR: ${{ vars.GANTRY_HOME }}
+          GANTRY_SOURCE_DIR: ${{ github.workspace }}
+          GANTRY_STATE_DIR: ${{ vars.GANTRY_STATE_DIR }}
+        run: |
+          gh run download "$RUN_ID" --name "release-$SHA" --dir manifest
+          set +e
+          deploy/release/gantry-release.sh deploy manifest/release.json manifest/release.json.bundle
+          rc=$?
+          echo "rc=$rc" >>"$GITHUB_OUTPUT"
+          exit "$rc"
+      # What production runs now, for the daily rescan (rescan.yml): the manifest of the last deploy that ended healthy.
+      - name: Record the live release
+        if: steps.deploy.outputs.rc == '0'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: live-release
+          path: manifest/release.json
+          retention-days: 90
+      - name: Verdict
+        id: verdict
+        if: always()
+        env:
+          RC: ${{ steps.deploy.outputs.rc }}
+        run: |
+          case "${RC:-}" in
+            0)  v=healthy ;;
+            10) v=rolled-back ;;
+            20) v=needs-a-person ;;
+            30) v=refused ;;
+            75) v=busy ;;
+            *)  v=failed ;;
+          esac
+          echo "verdict=$v" >>"$GITHUB_OUTPUT"
+          echo "### Production deploy of \`${SHA:0:12}\`: $v" >>"$GITHUB_STEP_SUMMARY"
+
+  notify:
+    name: Tell a person
+    needs: [plan, deploy]
+    if: always() && needs.deploy.result != 'skipped' && needs.deploy.outputs.verdict != 'healthy'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: production-deploy
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # This job has no checkout: without a repository `gh issue create` cannot work.
+      GH_REPO: ${{ github.repository }}
+      SHA: ${{ needs.plan.outputs.sha }}
+      VERDICT: ${{ needs.deploy.outputs.verdict }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      PAGER_WEBHOOK_URL: ${{ secrets.PAGER_WEBHOOK_URL }}
+    # An empty verdict means the deploy job never got to say (cancelled, runner lost): that is the worst case, so it pages too.
+    steps:
+      - name: Call the pager (if one is configured)
+        if: always() && env.PAGER_WEBHOOK_URL != '' && (needs.deploy.outputs.verdict == 'needs-a-person' || needs.deploy.outputs.verdict == 'failed' || needs.deploy.outputs.verdict == '')
+        run: |
+          curl -fsS --max-time 20 -X POST -H 'content-type: application/json' \
+            --data "$(jq -n --arg t "Gantry production needs a person: ${SHA:0:12}" --arg u "$RUN_URL" '{text: $t, url: $u}')" "$PAGER_WEBHOOK_URL" >/dev/null
+      - name: Open an issue
+        if: always()
+        run: |
+          case "$VERDICT" in
+            rolled-back)    title="Production was rolled back: ${SHA:0:12} was unhealthy"; body="The release failed its health gate and the previous release is serving again. Nothing else is needed unless you want to fix forward." ;;
+            needs-a-person) title="PRODUCTION NEEDS A PERSON: ${SHA:0:12} is unhealthy and cannot be rolled back automatically"; body="The release failed its health gate and the schema no longer allows the previous image (a contract migration), or there is no previous release. The new release is still running. A backup set was taken before the migration: see the run log for its name." ;;
+            refused)        title="Production deploy refused: ${SHA:0:12}"; body="The host refused this release before changing anything (superseded, a precondition, or a signature check). See the run log." ;;
+            busy)           title="Production deploy skipped: another deploy was running"; body="The host's lock was held. Nothing changed." ;;
+            *)              title="Production deploy failed: ${SHA:0:12}"; body="The deploy ended without a verdict. Check the host before anything else." ;;
+          esac
+          gh issue create --title "$title" --body "$body"$'\n\n'"Run: $RUN_URL"

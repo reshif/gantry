@@ -4,6 +4,8 @@
  */
 import { createHash } from "node:crypto";
 import type { Queryable } from "@gantry/db";
+import type { RunLimits } from "@gantry/domain";
+import { readRunLimits } from "./run-limits.js";
 
 export const sha256 = (s: string): string => createHash("sha256").update(s).digest("hex");
 
@@ -30,10 +32,14 @@ export interface AgentCfg {
   suite: string;
   instructions: string;
   overrides: Record<string, Override>;
+  /** Run limits a person set (safety rails). Empty means the defaults. */
+  limits: RunLimits;
 }
 
-/** The keys a version snapshots (with `skills`, held in agent_skills). Staffing (stations, projects), the suite and the name are operational, not versioned. */
-export const VERSIONED_KEYS = ["model", "fallbacks", "autonomy", "tools", "skills", "mcp", "guardrails", "budget", "instructions", "overrides"] as const;
+/**
+ * The keys a version snapshots. `skills` are the ordered skill ids and `skillVersions` the version of each one the agent was tested with: a skill edit never changes what a
+ * version runs, it makes a new candidate version. Staffing (stations, projects), the suite and the name are operational, not versioned. */
+export const VERSIONED_KEYS = ["model", "fallbacks", "autonomy", "tools", "skills", "skillVersions", "mcp", "guardrails", "budget", "instructions", "overrides", "limits"] as const;
 export type VersionedKey = (typeof VERSIONED_KEYS)[number];
 
 export const DEFAULT_TOOLS: Record<ToolKey, boolean> = { readRepo: true, writeBranch: false, runTests: false, openPR: false, merge: false, postSlack: true, sendEmail: false, readSecrets: false };
@@ -59,17 +65,19 @@ export function cfgOf(data: Record<string, unknown>, modelFallback = ""): AgentC
     suite: typeof data.suite === "string" ? data.suite : "",
     instructions: typeof data.instructions === "string" ? data.instructions : "",
     overrides: Object.fromEntries(Object.entries(obj(data.overrides)).map(([k, v]) => [k, obj(v) as Override])),
+    limits: readRunLimits(data.limits),
   };
 }
 
-/** What a version stores: the versioned keys with the ordered skill ids. */
-export function snapshotOf(c: AgentCfg, skills: string[]): Record<VersionedKey, unknown> {
-  return { model: c.model, fallbacks: c.fallbacks, autonomy: c.autonomy, tools: c.tools, skills, mcp: c.mcp, guardrails: c.guardrails, budget: c.budget, instructions: c.instructions, overrides: c.overrides };
+/** What a version stores: the versioned keys with the ordered skill ids and the version each skill is pinned at. */
+export function snapshotOf(c: AgentCfg, skills: string[], skillVersions: Record<string, number> = {}): Record<VersionedKey, unknown> {
+  return { model: c.model, fallbacks: c.fallbacks, autonomy: c.autonomy, tools: c.tools, skills, skillVersions, mcp: c.mcp, guardrails: c.guardrails, budget: c.budget, instructions: c.instructions, overrides: c.overrides, limits: c.limits };
 }
 
 /** Which versioned keys differ between two snapshots (a version body may hold fewer keys, as a seeded one does). */
 export function diffKeys(a: Record<string, unknown>, b: Record<string, unknown>): string[] {
-  return VERSIONED_KEYS.filter((k) => k in a && k in b && JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+  // A version cut before limits existed has none: that is the same as an empty set.
+  return VERSIONED_KEYS.filter((k) => (k === "limits" ? "limits" in a || "limits" in b : k in a && k in b) && JSON.stringify(a[k] ?? (k === "limits" ? {} : undefined)) !== JSON.stringify(b[k] ?? (k === "limits" ? {} : undefined)));
 }
 
 export const initialsOf = (name: string): string => name.split(/\s+/).map((w) => (/[A-Za-z0-9]/.exec(w) ?? [""])[0]).join("").slice(0, 2).toUpperCase() || "AG";

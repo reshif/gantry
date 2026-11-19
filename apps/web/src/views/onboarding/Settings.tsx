@@ -9,7 +9,7 @@ import { Btn, Field, LockNote, Select, Toggle } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { useTeams } from "../projects/kit";
-import { defaultTemplate, draftFrom, instLabel, patchFrom, useIntegrationsFor, type Draft, type RepoV, type SourceInfo } from "./kit";
+import { defaultTemplate, draftFrom, healthWord, instLabel, patchFrom, useIntegrationsFor, type Draft, type RepoV, type SourceInfo } from "./kit";
 
 type Set = (p: Partial<Draft>) => void;
 
@@ -30,7 +30,7 @@ function Text({ id, value, onChange, mono, rows, placeholder }: { id: string; va
 export function SecSource({ d, set, sources, project }: { d: Draft; set: Set; sources: SourceInfo[]; project: Project; wizard?: boolean; onPick?: (id: string) => void }) {
   return (
     <div className="radio-cards onb-src">
-      {[{ id: "", name: "GitHub App", sub: "gantry-github · the repositories the App is installed on", disabled: null as string | null }, ...sources.map((s) => ({ id: s.inst.id, name: s.inst.name, sub: `${s.type.name ?? s.inst.type} · ${s.inst.config.host || s.inst.config.site || s.inst.config.url || s.inst.config.org || ""}${s.inst.status !== "healthy" ? ` · ${s.inst.status}` : ""}`, disabled: s.inst.type !== "github" ? `${s.type.name ?? s.inst.type} sources cannot be onboarded yet. Only GitHub can.` : s.inst.status === "offline" ? `${s.inst.name} is offline. Fix it under Integrations.` : null }))].map((s) => (
+      {[{ id: "", name: "GitHub App", sub: "gantry-github · the repositories the App is installed on", disabled: null as string | null }, ...sources.map((s) => ({ id: s.inst.id, name: s.inst.name, sub: `${s.type.name ?? s.inst.type} · ${s.inst.config.host || s.inst.config.site || s.inst.config.url || s.inst.config.org || ""}${s.inst.status !== "healthy" ? ` · ${healthWord(s.inst.status)}` : ""}`, disabled: s.inst.type !== "github" ? `${s.type.name ?? s.inst.type} sources cannot be onboarded yet. Only GitHub can.` : s.inst.status === "offline" ? `${s.inst.name} is offline. Fix it under Integrations.` : null }))].map((s) => (
         <label key={s.id || "app"} className="radio-card" htmlFor={`onb-w-src-${s.id || "app"}`} title={s.disabled ?? undefined}>
           <input type="radio" name="onb-w-src" id={`onb-w-src-${s.id || "app"}`} value={s.id} checked={d.source === s.id} disabled={!!s.disabled} onChange={() => set({ source: s.id })} />
           <span className="rc-t">{s.name}</span>
@@ -170,7 +170,7 @@ export function SettingsDialog({ repo, project, close }: { repo: RepoV; project:
   };
   return (
     <Dialog
-      title={`Settings for ${repo.name}`} kicker="Onboarding · repo settings" wide onClose={close}
+      title={`Settings for ${repo.name}`} wide onClose={close}
       body={
         <div className="onb-settings">
           <LockNote decision={dec} what="Repo settings" />

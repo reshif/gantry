@@ -2,7 +2,6 @@
 .conv-layout { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(280px, 360px); gap: 0; border: 1px solid var(--line-strong); background: var(--surface); min-height: 560px; }
 .conv-inbox { border-right: 1px solid var(--line-strong); display: flex; flex-direction: column; min-width: 0; background: var(--panel); }
 .conv-inbox .tabs { padding: 0 6px; background: var(--surface); }
-.conv-inbox .tab { padding: 8px 8px; }
 .conv-list { list-style: none; overflow-y: auto; max-height: 72vh; }
 .conv-item { display: grid; gap: 3px; width: 100%; text-align: left; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--ink); border-left: 3px solid transparent; }
 .conv-item:hover { background: var(--surface); }
@@ -63,7 +62,6 @@
 /* brief */
 .conv-brief { border-left: 1px solid var(--line-strong); padding: var(--s3) var(--s4); overflow-y: auto; max-height: 86vh; min-width: 0; background-color: var(--surface);
   background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 16px 16px; }
-.brief { display: grid; gap: var(--s2); }
 .brief-top { display: grid; gap: 6px; padding-bottom: var(--s2); border-bottom: 2px solid var(--ink); }
 .brief-sec { background: var(--surface); border: 1px solid var(--line); padding: 7px 10px; transition: border-color 0.4s, box-shadow 0.4s; }
 .brief-sec.is-new { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
@@ -83,7 +81,6 @@
 .brief-dec { padding-left: 18px; display: grid; gap: 4px; font-size: var(--t-md); }
 .brief-dec li { display: grid; }
 .brief-kids { display: grid; gap: 4px; }
-.brief .int-route .int-rs-n { font-size: 12px; }
 
 @media (prefers-reduced-motion: reduce) { .brief-sec { transition: none; } }
 @media (max-width: 1280px) {
@@ -95,8 +92,6 @@
   .conv-layout { grid-template-columns: minmax(0, 1fr); min-height: 0; }
   .conv-inbox { grid-row: auto; border-right: 0; }
   .conv-brief { grid-column: 1; }
-  .conv-layout.show-thread .conv-inbox { display: none; }
-  .conv-layout:not(.show-thread) .conv-main, .conv-layout:not(.show-thread) .conv-brief { display: none; }
   .conv-back { display: inline-flex; }
   .conv-list { max-height: none; }
   .conv-msg { max-width: 100%; }
@@ -106,7 +101,6 @@
 }
 .conv-inbox .tabs { overflow: hidden; }
 .conv-inbox .tab { padding: 8px 6px; font-size: var(--t-md); flex: 1 1 auto; justify-content: center; }
-.conv-view > * { min-width: 0; }
 
 /* round three: record link per inbox row, follow-up question drafting */
 .conv-li { position: relative; }

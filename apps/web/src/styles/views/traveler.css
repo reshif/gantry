@@ -1,7 +1,7 @@
 /* Traveler drawer and work-order dialogs. Builds on the round-one .trv timeline in views.css. Tokens only. */
 .trv-drawer .drawer-head { align-items: flex-start; }
 .trv-headmain { min-width: 0; }
-.trv-drawer .tb-drawer { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.trv-drawer .tb-drawer { grid-template-columns: minmax(96px, 130px) minmax(0, 1fr); }
 .trv-drawer.is-killed .drawer-head { border-bottom-color: var(--kill); background: repeating-linear-gradient(-45deg, var(--kill-soft) 0 8px, transparent 8px 16px); }
 .trv-drawer.is-killed .big-id, .trv-drawer.is-killed .drawer-title { text-decoration: line-through; text-decoration-thickness: 2px; text-decoration-color: var(--kill); }
 
@@ -45,12 +45,11 @@
 .trv-conv { display: grid; gap: 10px; }
 
 /* new work order dialog */
-.nwo-repo { min-width: 0; }
 .nwo-preview { padding: 8px 10px; border: 1px dashed var(--line-strong); background: var(--panel); display: grid; gap: 4px; }
 .nwo-cls-preview { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 
 @media (max-width: 560px) {
-  .trv-drawer .tb-drawer { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
   .trv-2col { grid-template-columns: minmax(0, 1fr); }
   .trv::before { left: 61px; }
   .trv-row { grid-template-columns: 52px 1fr; gap: 20px; }
@@ -70,7 +69,7 @@
 .trv-scrub { display: grid; gap: 6px; padding: 8px 10px 10px; margin-bottom: 10px; border: 1px solid var(--line-strong); background: var(--panel); }
 .trv-scrub.is-on { border: 2px solid var(--accent); background: var(--surface); }
 .trv-sc-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; }
-.trv-sc-t { display: inline-flex; align-items: center; gap: 6px; font-family: var(--f-display); font-weight: 700; font-size: 15px; text-transform: uppercase; letter-spacing: 0.06em; }
+.trv-sc-t { display: inline-flex; align-items: center; gap: 6px; font-family: var(--f-display); font-weight: 700; font-size: 15px; letter-spacing: 0.06em; }
 .trv-scrub.is-on .trv-sc-t { color: var(--accent); }
 .trv-sc-t .ic { width: 15px; height: 15px; }
 .trv-sc-btns { display: inline-flex; flex-wrap: wrap; gap: 4px; }

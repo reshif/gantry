@@ -1,0 +1,12 @@
+# Development ingress routes. Imported only when GANTRY_INGRESS_PROFILE=dev is set explicitly; the default and prod never import them.
+# Mail catcher UI (MP_WEBROOT=/mail): every invite and notification email sent by the stack lands here.
+handle /mail/* {
+	reverse_proxy mailpit:8025
+}
+
+# Second design preview (Blueprint) side by side with the main web front end, same origin so sign-in and writes work.
+# Served only when a container with the network alias gantry-web-v3 runs (see deploy/README.md); otherwise /v3 answers 502.
+redir /v3 /v3/
+handle_path /v3/* {
+	reverse_proxy gantry-web-v3:8080
+}

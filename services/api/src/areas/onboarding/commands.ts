@@ -119,17 +119,20 @@ export async function configureRepo(tx: Tx, a: Actor, repoId: string, b: ConfigB
   }
   if (b.config) {
     const c = b.config;
-    const cur = { defaultBranch: repo.default_branch ?? "main", branchPrefix: repo.branch_prefix ?? "gantry/", merge: repo.merge_strategy ?? "squash", tagging: "", requiredChecks: repo.required_checks ?? [], protectedPaths: repo.protected_paths ?? [] };
+    const cur = { defaultBranch: repo.default_branch ?? "main", branchPrefix: repo.branch_prefix ?? "gantry/", merge: repo.merge_strategy ?? "squash", tagging: "", requiredChecks: repo.required_checks ?? [], protectedPaths: repo.protected_paths ?? [], ...(c.testCommands !== undefined ? { testCommands: (await tx.query<{ t: unknown }>(`select data->'testCommands' as t from repo_config where org_id = $1 and repo_id = $2`, [a.orgId, repo.id])).rows[0]?.t ?? [] } : {}) };
     before.config = cur; after.config = { ...cur, ...c };
     const upd = await tx.query(
       `update repo_config set default_branch = coalesce($3, default_branch), branch_prefix = coalesce($4, branch_prefix), merge_strategy = coalesce($5, merge_strategy), tagging = coalesce($6, tagging),
-              required_checks = coalesce($7, required_checks), protected_paths = coalesce($8, protected_paths), version = version + 1, updated_at = now() where org_id = $1 and repo_id = $2`,
-      [a.orgId, repo.id, c.defaultBranch ?? null, c.branchPrefix ?? null, c.merge ?? null, c.tagging ?? null, c.requiredChecks ?? null, c.protectedPaths ?? null],
+              required_checks = coalesce($7, required_checks), protected_paths = coalesce($8, protected_paths),
+              data = case when $9::jsonb is null then data else data || $9::jsonb end, version = version + 1, updated_at = now() where org_id = $1 and repo_id = $2`,
+      [a.orgId, repo.id, c.defaultBranch ?? null, c.branchPrefix ?? null, c.merge ?? null, c.tagging ?? null, c.requiredChecks ?? null, c.protectedPaths ?? null,
+        c.testCommands === undefined ? null : JSON.stringify({ testCommands: c.testCommands, testCommandsConfirmedBy: a.personId ?? a.id, testCommandsConfirmedAt: a.now.toISOString() })],
     );
     if (!upd.rowCount) {
       await tx.query(
-        `insert into repo_config (org_id, repo_id, default_branch, branch_prefix, merge_strategy, tagging, required_checks, protected_paths) values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [a.orgId, repo.id, c.defaultBranch ?? "main", c.branchPrefix ?? "gantry/", c.merge ?? "squash", c.tagging ?? "semver-patch", c.requiredChecks ?? [], c.protectedPaths ?? []],
+        `insert into repo_config (org_id, repo_id, default_branch, branch_prefix, merge_strategy, tagging, required_checks, protected_paths, data) values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`,
+        [a.orgId, repo.id, c.defaultBranch ?? "main", c.branchPrefix ?? "gantry/", c.merge ?? "squash", c.tagging ?? "semver-patch", c.requiredChecks ?? [], c.protectedPaths ?? [],
+          JSON.stringify(c.testCommands === undefined ? {} : { testCommands: c.testCommands, testCommandsConfirmedBy: a.personId ?? a.id, testCommandsConfirmedAt: a.now.toISOString() })],
       );
     }
   }
@@ -146,16 +149,17 @@ export async function configureRepo(tx: Tx, a: Actor, repoId: string, b: ConfigB
 export async function rerunAssessment(tx: Tx, a: Actor, repoId: string): Promise<Out> {
   const { repo, doc } = await openRepo(tx, a, repoId);
   guard(doc);
-  if (doc.stage === "ready") throw conflict("Already ready; re-assessing would restart onboarding.");
+  // A repo ready by exception can be re-assessed: the run reports, the repo stays Ready with its exception until a person withdraws it.
+  if (doc.stage === "ready" && !doc.exception) throw conflict("Already ready; re-assessing would restart onboarding.");
   const g = await guidelinesFor(tx, a.orgId, repo.project_id);
   const prev = doc.runId;
-  if (prev) await finishRun(tx, a.orgId, prev, "cancelled", { blocker: null });
+  if (prev && !doc.exception) await finishRun(tx, a.orgId, prev, "cancelled", { blocker: null });
   const runId = await startRun(tx, a.orgId, repo.id, a.id, { guidelines: { org: g.org.version, project: g.project?.version ?? 0 } });
   doc.runId = runId;
-  if (doc.pr && doc.pr.state !== "open") doc.pr = null;
+  if (doc.pr && doc.pr.state !== "open" && !doc.exception) doc.pr = null;
   // An open onboarding PR keeps its place in the lifecycle: a re-assessment never takes a repo back to an earlier stage.
   const keep = doc.pr?.state === "open" && (doc.stage === "pr_opened" || doc.stage === "pr_checks");
-  if (!keep) doc.stage = "connected";
+  if (!keep && !doc.exception) doc.stage = "connected";
   doc.busy = "assessing";
   delete doc.blocker;
   stamp(doc, a.personId ?? a.id, keep ? `Asked for a new assessment; PR #${doc.pr!.number} stays open at '${doc.stage}'.` : "Asked for a new assessment.", a.now);
@@ -247,11 +251,29 @@ export async function markException(tx: Tx, a: Actor, repoId: string, reason: st
   return { msg: `${repo.name} marked ready by exception.`, events, jobs, changes: ["repos", "projects", "stops", "audit"], project: repo.project_id };
 }
 
+/** Takes an exception back: the gaps it accepted count again, so the repo is no longer Ready. It goes to Needs a person, from where it is re-assessed and verified like any other. */
+export async function withdrawException(tx: Tx, a: Actor, repoId: string, reason: string): Promise<Out> {
+  const { repo, doc } = await openRepo(tx, a, repoId);
+  if (!doc.exception) throw conflict("This repo is not ready by exception.");
+  guard(doc);
+  const was = doc.exception;
+  doc.exception = null;
+  doc.stage = "person";
+  delete doc.readyAt;
+  doc.blocker = `The exception was withdrawn: ${reason} Re-assess and verify to make ${repo.name} Ready again.`;
+  stamp(doc, a.personId ?? a.id, `Withdrew the exception (${was.reason}): ${reason}`, a.now);
+  await saveDoc(tx, a.orgId, repo, doc);
+  return {
+    msg: `Exception withdrawn. ${repo.name} needs a person: re-assess and verify.`,
+    events: [ev("onboarding.exception.withdrawn", repo, { before: { stage: "ready", exception: { by: was.by, at: was.at, reason: was.reason } }, after: { stage: "person", reason } })],
+    changes: ["repos", "projects", "audit"], project: repo.project_id,
+  };
+}
+
 export async function verifyNow(tx: Tx, a: Actor, repoId: string): Promise<Out> {
   const { repo, doc } = await openRepo(tx, a, repoId);
   guard(doc);
   if (!repo.github_full_name) throw conflict(`${repo.name} has no GitHub identity, so there is nothing to verify.`);
-  if (doc.exception) throw conflict("This repo is ready by exception; its gaps were accepted by a person.");
   // Verification follows the merge of the onboarding PR, or an assessment that left nothing for a PR to add; a Ready repo can be re-checked.
   const afterMerge = doc.pr?.state === "merged" || (doc.findings.length > 0 && !fixableGaps(doc.findings).length);
   if (doc.stage === "connected") throw conflict("Assessment has not finished yet.");

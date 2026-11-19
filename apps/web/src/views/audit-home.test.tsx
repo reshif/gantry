@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CATALOG } from "@gantry/domain";
@@ -65,6 +65,7 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
+  window.history.replaceState(null, "", "/");
 });
 afterEach(() => {
   cleanup();
@@ -74,66 +75,102 @@ afterEach(() => {
 describe("Audit", () => {
   const page = (items: unknown[], next: string | null = null, total = items.length) => ({ items, next, total, summary: SUMMARY });
 
-  it("lists the ledger with counts, outcome chips and digests, and asks the server for filters", async () => {
+  it("opens on one project when the address carries ?project= (Project config's Full history), names it, and All projects drops it", async () => {
+    window.history.replaceState(null, "", "/?project=payments");
+    const calls = setup(ASHA, { "GET /api/v1/audit": () => ({ body: page([row(1, { project: "payments" })]) }), "GET /api/v1/projects": () => ({ body: [{ id: "payments", name: "Payments Platform" }] }) });
+    mount(<AuditView />);
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/audit" && c.query.get("project") === "payments")).toBe(true));
+    expect((await screen.findByText("Payments Platform", { selector: "#aud-via-note" })).textContent).toBe("Payments Platform");
+    fireEvent.click(await screen.findByRole("button", { name: "All projects" }));
+    await waitFor(() => expect(window.location.search).not.toMatch(/project=/));
+  });
+
+  it("shows the locked sheet with a way home when the ledger read is refused, and no entry counts of 0", async () => {
+    setup(SAM, { "GET /api/v1/audit": () => ({ status: 403, body: { ok: false, msg: "Needs audit.view." } }) });
+    mount(<AuditView />);
+    const lock = await screen.findByText("No access to this sheet");
+    expect(lock).toBeTruthy();
+    // T-51: the server's reason sits on its own line, not run into the sentence
+    const para = document.getElementById("aud-no-access")!.querySelector("p")!;
+    expect(para.querySelectorAll("br").length).toBe(2);
+    expect(para.innerHTML).toContain("Needs audit.view.<br>");
+    fireEvent.click(await screen.findByText("Back to Home"));
+    expect(window.location.hash).toBe("#home");
+    expect(document.getElementById("aud-empty")).toBeNull();
+  });
+
+  it("has the four prototype tiles, no tabs, one flush panel, Export CSV beside Verify chain, and filters in the URL", async () => {
     const calls = setup(SAM, {
       "GET /api/v1/audit": () => ({ body: page([row(3, { outcome: "denied", action: "policy.edit.denied", target: "action policy.edit" }), row(2, { before: "a", after: "b", category: "config", action: "station.add" }), row(1)]) }),
     });
     mount(<AuditView />);
     expect(await screen.findByText("policy.edit.denied")).toBeTruthy();
-    expect(screen.getByText("Head digest").nextElementSibling?.textContent).toBe("cccccccc");
-    expect(screen.getByText("Denied").nextElementSibling?.textContent).toBe("1");
-    expect(document.querySelectorAll("tr.aud-row")).toHaveLength(3);
-    expect(document.querySelector(".o-row-denied .outcome")?.textContent).toBe("denied");
-    expect(document.querySelectorAll(".aud-has-diff")).toHaveLength(1);
-    expect(document.getElementById("aud-cat-access")?.textContent).toContain("2");
-    // Clicking a category narrows server-side.
-    fireEvent.click(document.getElementById("aud-cat-config")!);
-    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/audit" && c.query.get("category") === "config")).toBe(true));
-    // Auditors get the verify button; the note about a limited view is absent.
+    const stat = (label: string) => Array.from(document.querySelectorAll("#aud-stats .stat-tile")).find((t) => t.querySelector(".stat-lbl")?.textContent === label)?.querySelector(".stat-val")?.textContent;
+    await waitFor(() => expect(stat("Entries")).toBe("3"));
+    expect(Array.from(document.querySelectorAll("#aud-stats .stat-lbl")).map((x) => x.textContent)).toEqual(["Entries", "Access changes", "Agent changes", "Failures"]);
+    expect(stat("Access changes")).toBe("2");
+    expect(document.querySelectorAll("[role=tab]")).toHaveLength(0);
+    expect(document.getElementById("aud-export")).toBeTruthy();
     expect(document.getElementById("aud-verify")).toBeTruthy();
+    expect(document.getElementById("aud-export")!.parentElement!.contains(document.getElementById("aud-verify"))).toBe(false);
+    expect(document.getElementById("aud-verify")!.closest("#aud-verify-row")).toBeTruthy();
+    expect(Array.from(document.querySelectorAll("#aud-table th")).map((t) => t.textContent?.replace(/[↑↓↕]/g, ""))).toEqual(["When", "Actor", "Action", "Target", "Category", "Outcome"]);
+    expect(document.querySelectorAll("#aud-table tbody tr")).toHaveLength(3);
+    // T-47: a time never wraps onto two lines ("14 Nov / 13:34"): the cell and its column are held to one line by the stylesheet
+    expect(document.querySelector("#aud-table td .aud-when")).toBeTruthy();
+    expect(document.querySelector("#aud-table .chip.bad")?.textContent).toBe("denied");
+    expect(document.getElementById("aud-count") ?? document.querySelector(".filterbar-count")?.textContent).toBeTruthy();
+    expect(document.querySelector(".filterbar-count")?.textContent).toBe("3 entries");
+    fireEvent.change(document.getElementById("aud-f-category")!, { target: { value: "config" } });
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/audit" && c.query.get("category") === "config")).toBe(true));
+    expect(window.location.hash).toContain("cat=config");
     expect(document.querySelector(".lock-note")).toBeNull();
   });
 
-  it("debounces the search into the q filter and shows a clear button", async () => {
-    const calls = setup(SAM, { "GET /api/v1/audit": () => ({ body: page([row(1)]) }) });
+  it("opens the entry drawer from the action button only, not from the row", async () => {
+    setup(SAM, {
+      "GET /api/v1/audit": () => ({ body: page([row(2, { before: "old", after: "new", category: "config", action: "project.config", target: "Payments" })]) }),
+      "GET /api/v1/audit/2": () => ({ body: { ...row(2, { before: "old", after: "new", category: "config", action: "project.config", target: "Payments" }), rule: null, onBehalfOf: null, topic: null, workOrder: null, session: null, request: { id: null, command: null, idempotencyKey: null }, sourceIp: null, diff: null, history: [] } }),
+    });
+    mount(<AuditView />);
+    await screen.findByText("project.config");
+    fireEvent.click(document.querySelector("#aud-table tbody tr")!);
+    expect(document.querySelector("#layer-drawer aside")).toBeNull();
+    fireEvent.click(document.getElementById("aud-row-2")!);
+    const drawer = await waitFor(() => { const d = document.querySelector("#layer-drawer aside"); if (!d || !d.textContent?.includes("Digest")) throw new Error("not yet"); return d as HTMLElement; });
+    expect(drawer.querySelector(".micro")?.textContent).toBe("LEDGER ENTRY #2");
+    expect(drawer.querySelector("h2")?.textContent).toBe("project.config");
+    expect(Array.from(drawer.querySelectorAll("dl.kv")[0]!.querySelectorAll("dt")).map((x) => x.textContent)).toEqual(["Target", "Category", "Where", "Via", "Outcome", "Entity"]);
+    expect(drawer.querySelector(".diff .d")?.textContent).toBe("\u2212 old");
+    expect(drawer.querySelector(".diff .a")?.textContent).toBe("+ new");
+    expect(drawer.querySelector("footer")).toBeNull();
+  });
+
+  it("debounces the search into the q filter, counts N of M, and Clear resets it", async () => {
+    const calls = setup(SAM, { "GET /api/v1/audit": () => ({ body: page([row(1)], null, 1) }) });
     mount(<AuditView />);
     await screen.findByText("role.add");
+    expect(document.getElementById("aud-clear")).toBeNull();
     fireEvent.change(document.getElementById("aud-q")!, { target: { value: "slack" } });
     await waitFor(() => expect(calls.some((c) => c.query.get("q") === "slack")).toBe(true));
     expect(document.getElementById("aud-clear")).toBeTruthy();
+    fireEvent.click(document.getElementById("aud-clear")!);
+    expect((document.getElementById("aud-q") as HTMLInputElement).value).toBe("");
   });
 
-  it("pages with the cursor", async () => {
+  it("pages 15 rows at a time with Prev and Next, and loads older entries with the cursor", async () => {
     const calls = setup(SAM, {
-      "GET /api/v1/audit": (url) => ({ body: new URL(url, "http://x").searchParams.get("cursor") ? page([row(1)], null, 2) : page([row(2)], "2", 2) }),
+      "GET /api/v1/audit": (url) => ({ body: new URL(url, "http://x").searchParams.get("cursor") ? page([row(1)], null, 17) : page(Array.from({ length: 16 }, (_, i) => row(100 - i)), "85", 17) }),
     });
     mount(<AuditView />);
-    await screen.findByText("Compliance Officer");
+    await screen.findAllByText("role.add");
+    expect(document.querySelectorAll("#aud-table tbody tr")).toHaveLength(15);
+    expect(document.querySelector(".dtable-pager")?.textContent).toContain("1\u201315 of 16");
+    fireEvent.click(document.getElementById("aud-table-next")!);
+    expect(document.querySelectorAll("#aud-table tbody tr")).toHaveLength(1);
     fireEvent.click(document.getElementById("aud-more")!);
-    await waitFor(() => expect(document.querySelectorAll("tr.aud-row")).toHaveLength(2));
-    expect(calls.filter((c) => c.path === "/api/v1/audit").pop()?.query.get("cursor")).toBe("2");
-    expect(document.getElementById("aud-more")).toBeNull();
-  });
-
-  it("opens the detail drawer with the field diff, chain digests and history", async () => {
-    setup(SAM, {
-      "GET /api/v1/audit": () => ({ body: page([row(2, { before: '{"a":1}', after: '{"a":2}', category: "config", action: "project.config" })]) }),
-      "GET /api/v1/audit/2": () => ({
-        body: {
-          ...row(2, { before: '{"a":1}', after: '{"a":2}', category: "config", action: "project.config" }), rule: "MATRIX", onBehalfOf: null, topic: null, workOrder: null, session: { id: "sess-1", method: "sso", ip: "1.2.3.4", userAgent: "x", startedAt: 1 },
-          request: { id: "req-9", command: "req-9", idempotencyKey: null }, sourceIp: "203.0.113.5", diff: [{ field: "a", before: 1, after: 2, changed: true }], history: [row(1, { action: "role.edit" })],
-        },
-      }),
-    });
-    mount(<AuditView />);
-    fireEvent.click(await screen.findByLabelText("Open audit entry 2: project.config"));
-    const drawer = await waitFor(() => { const d = document.querySelector(".aud-drawer"); if (!d || !d.textContent?.includes("Chain")) throw new Error("not yet"); return d as HTMLElement; });
-    expect(within(drawer).getByText("1 of 1 fields changed")).toBeTruthy();
-    expect(within(drawer).getByText("203.0.113.5")).toBeTruthy();
-    expect(within(drawer).getByText("req-9")).toBeTruthy();
-    expect(drawer.querySelector(".digest")?.textContent).toBe("2".padStart(64, "a"));
-    expect(within(drawer).getByText("role.edit")).toBeTruthy();
-    expect(within(drawer).getByText("Open Access")).toBeTruthy();
+    await waitFor(() => expect(document.querySelector(".dtable-pager")?.textContent).toContain("of 17"));
+    expect(calls.filter((c) => c.path === "/api/v1/audit" && c.query.get("limit") === "60").pop()?.query.get("cursor")).toBe("85");
   });
 
   it("tells a person without audit.view that they see their own projects only, and hides verify", async () => {
@@ -150,8 +187,22 @@ describe("Audit", () => {
       "GET /api/v1/audit/verify": () => ({ body: { ok: true, checked: 12, msg: "Chain intact: 12 entries verified." } }),
     });
     mount(<AuditView />);
-    expect(await screen.findByText("The ledger is empty")).toBeTruthy();
+    expect(await screen.findByText("Nothing here yet")).toBeTruthy();
     fireEvent.click(document.getElementById("aud-verify")!);
     expect(await screen.findByText("Chain intact: 12 entries verified.")).toBeTruthy();
+  });
+
+  it("writes the ledger time in UTC and opens the drawer without crashing when the detail has no time", async () => {
+    const at = Date.UTC(2025, 10, 14, 13, 34);
+    setup(SAM, {
+      "GET /api/v1/audit": () => ({ body: page([row(2, { at, action: "project.config" })]) }),
+      "GET /api/v1/audit/2": () => ({ body: { id: 2, seq: 2, actor: "p-asha", actorName: "Asha Raman", action: "project.config", outcome: "ok", category: "config", via: "web", project: null, entity: null } }),
+    });
+    mount(<AuditView />);
+    await screen.findByText("project.config");
+    expect(document.querySelector("#aud-table tbody tr td .mono")?.textContent).toBe("14 Nov 13:34");
+    fireEvent.click(document.getElementById("aud-row-2")!);
+    await waitFor(() => { if (!document.querySelector("#layer-drawer aside")?.textContent?.includes("Digest")) throw new Error("not yet"); });
+    expect(document.body.textContent).not.toContain("Gantry hit a problem");
   });
 });

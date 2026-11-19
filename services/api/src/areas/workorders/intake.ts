@@ -4,10 +4,10 @@ import type { Tx } from "@gantry/db";
 import type { Actor } from "../../core/command.js";
 import { conflict, invalid, refuse } from "../../core/errors.js";
 import { loadFlowState } from "../../core/read/state.js";
-import { appendMessage, closeConversation, replaceConversation, saveConversation } from "./conversation.js";
+import { closeConversation, replaceConversation, saveConversation } from "./conversation.js";
 import { createWorkOrder, newWoId } from "./create.js";
 import {
-  bayOf, cancelAttempts, closeEntry, closeOpenInstances, dispatchQueued, enterBay, enterStation, ev, leaveBay, loadOne, note, openInstanceOf, projectOf, releaseSlot, stationIdOf, type Fx,
+  bayOf, cancelAttempts, closeEntry, closeOpenQuestions, advance, closeOpenInstances, dispatchQueued, enterBay, enterStation, wipHoldCheck, ev, leaveBay, loadOne, note, openInstanceOf, projectOf, releaseSlot, stationIdOf, type Fx,
 } from "./engine.js";
 import { begin, done, flowFor, makeFx, person, type CmdResult } from "./ctx.js";
 import { saveWo, type Wo } from "./model.js";
@@ -53,6 +53,61 @@ export async function submitWO(tx: Tx, actor: Actor, projectId: string, b: Submi
   return done(fx, `${id} submitted to ${project.name} as ${classOf(fx.catalog, project, c.classification.cls).name}.`, projectId, { id, wo, classification: c.classification, route: c.route, gates: c.gates, version: c.wo.version });
 }
 
+/** What a person changed in the brief by hand. Kept on the work order and laid over any brief Gantry recomputes from the scripted answers, so a later answer never wipes it. */
+export interface BriefEdits { scopeIn?: string[]; scopeOut?: string[]; children?: string[]; by?: string; at?: number }
+
+/** Lays a person's edits over a brief. Children only apply to an epic. */
+export function withBriefEdits<B extends { scopeIn: string[]; scopeOut: string[]; children: string[] }>(brief: B, edits: BriefEdits | undefined, cls: string): B {
+  if (!edits) return brief;
+  return { ...brief, ...(edits.scopeIn ? { scopeIn: edits.scopeIn } : {}), ...(edits.scopeOut ? { scopeOut: edits.scopeOut } : {}), ...(edits.children && cls === "epic" ? { children: edits.children } : {}) };
+}
+const editsOf = (w: Wo): BriefEdits | undefined => (w.data.briefEdits && typeof w.data.briefEdits === "object" ? (w.data.briefEdits as BriefEdits) : undefined);
+
+export interface BriefEditInput { scopeIn?: string[]; scopeOut?: string[]; children?: string[]; reason?: string }
+
+const clipList = (v: string[], n = 300): string[] => v.map((x) => x.trim().slice(0, n)).filter(Boolean).slice(0, 12);
+
+/** A person edits the brief's scope, and the child work orders of an epic, before confirming it. Only while the brief is open at Intake. The change is audited (before and after) and an agent's pending brief proposal is refused on approval because the brief moved (its fingerprint no longer matches). */
+export async function editBrief(tx: Tx, actor: Actor, woId: string, b: BriefEditInput): Promise<CmdResult> {
+  const { fx, w } = await begin(tx, actor, woId, "wo.answer");
+  const by = person(actor, "Brief edits are");
+  const { wo } = await flowFor(fx, w);
+  const open = !bayOf(fx.catalog, w) && stationIdOf(fx.catalog, w) === "intake" && !!wo.gates.G0G1 && wo.gates.G0G1.status !== "passed";
+  // An epic the plan left unsplit waits in Needs a person: a person's children there are the split.
+  const unsplit = bayOf(fx.catalog, w) === "person" && w.cls === "epic" && w.data.bayFrom === "plan" && !w.data.split;
+  if (unsplit && b.children?.length) {
+    const kids = clipList(b.children);
+    if (/\b(api[_-]?key|password|secret|token)\s*[:=]\s*\S{8,}/i.test(JSON.stringify(kids))) throw invalid("The brief appears to contain a credential. Never put secrets in a brief.");
+    const by0 = person(actor, "Brief edits are");
+    const before0 = { children: wo.brief.children };
+    w.data.briefEdits = { ...(editsOf(w) ?? {}), children: kids, by: by0, at: fx.now.getTime() };
+    w.data.brief = { ...wo.brief, children: kids };
+    note(w, fx, by0, `Added the epic's child work orders (${kids.length}).${b.reason ? ` ${b.reason}` : ""}`);
+    ev(fx, w, "wo.brief.edit", { text: "children", fields: ["children"], reason: b.reason ?? null, edited: { children: kids } }, { before: before0 });
+    await leaveBay(fx, w);
+    for (const k of ["bayReason", "bayFrom", "bayAt", "bayCause"]) delete w.data[k];
+    w.position = "plan";
+    w.state = "running";
+    await advance(fx, w, by0);
+    await saveWo(fx.tx, fx.orgId, w);
+    return done(fx, "Children added; the epic is split.", w.project, { brief: w.data.brief, version: w.version });
+  }
+  if (!open) throw conflict("The brief can only be edited at Intake, before it is confirmed.");
+  if (b.scopeIn === undefined && b.scopeOut === undefined && b.children === undefined) throw invalid("Nothing to change: send scopeIn, scopeOut or children.");
+  if (b.children !== undefined && w.cls !== "epic") throw invalid("Only an epic has child work orders.");
+  const next = { ...(b.scopeIn !== undefined ? { scopeIn: clipList(b.scopeIn) } : {}), ...(b.scopeOut !== undefined ? { scopeOut: clipList(b.scopeOut) } : {}), ...(b.children !== undefined ? { children: clipList(b.children) } : {}) };
+  if (next.scopeIn && !next.scopeIn.length) throw invalid("Say what is in scope.");
+  if (/\b(api[_-]?key|password|secret|token)\s*[:=]\s*\S{8,}/i.test(JSON.stringify(next))) throw invalid("The brief appears to contain a credential. Never put secrets in a brief.");
+  const before = { scopeIn: wo.brief.scopeIn, scopeOut: wo.brief.scopeOut, children: wo.brief.children };
+  const edits: BriefEdits = { ...(editsOf(w) ?? {}), ...next, by, at: fx.now.getTime() };
+  w.data.briefEdits = edits;
+  w.data.brief = withBriefEdits(wo.brief, edits, w.cls);
+  note(w, fx, by, `Edited the brief (${Object.keys(next).join(", ")}).${b.reason ? ` ${b.reason}` : ""}`);
+  ev(fx, w, "wo.brief.edit", { text: Object.keys(next).join(", "), fields: Object.keys(next), reason: b.reason ?? null, edited: next }, { before });
+  await saveWo(fx.tx, fx.orgId, w);
+  return done(fx, "Brief updated. A brief an agent proposed earlier must be proposed again.", w.project, { brief: w.data.brief, version: w.version });
+}
+
 export interface MessageInput {
   text: string;
   kind?: "answer" | "question";
@@ -83,17 +138,19 @@ export async function postMessage(tx: Tx, actor: Actor, woId: string, b: Message
   }
   const prev = wo.conv.messages.length;
   const r = answerConversation(fx.catalog, project, wo, text, by, fx.now.getTime());
-  w.data.brief = r.brief;
+  w.data.brief = withBriefEdits(r.brief, editsOf(w), w.cls);
   const returned = "returned" in r.outcome && r.outcome.returned;
   await saveConversation(fx, w.id, r.conv, prev, returned ? "open" : undefined);
   if (returned && w.position === "person") {
     const back = String(w.data.bayFrom ?? stationIdOf(fx.catalog, w));
-    await leaveBay(fx, w);
     note(w, fx, by, `Answered; returned to ${stationDef(fx.catalog, back)?.name ?? back}.`);
     await resumeAt(fx, w, back);
   } else note(w, fx, by, "Answered an intake question.");
   ev(fx, w, "wo.answer", { text: text.slice(0, 200) });
+  // The brief gate switched off by an admin override: a finished conversation is the brief, and the work order moves on with nobody confirming.
+  const passed = r.conv.done && !returned ? await (await import("./gates.js")).passBriefIfGateOff(fx, w) : false;
   await saveWo(fx.tx, fx.orgId, w);
+  if (passed) return done(fx, "Brief complete. The brief gate is off, so the work order moved on without a confirmation.", w.project, { version: w.version, conv: { done: true, qi: r.conv.qi }, passed: true });
   return done(fx, returned ? `Answer sent; ${w.id} is back on the belt.` : r.conv.done ? "Brief is ready to confirm." : "Answer recorded.", w.project, { version: w.version, conv: { done: r.conv.done, qi: r.conv.qi } });
 }
 
@@ -103,7 +160,21 @@ export async function parkInto(fx: Fx, w: Wo, bay: string, reason: string): Prom
   if (bayOf(fx.catalog, w)) await leaveBay(fx, w);
   w.data.bayFrom = from;
   w.data.bayReason = reason;
+  delete w.data.bayCause;
+  delete w.data.wipWait;
   w.data.bayAt = fx.now.getTime();
+  // S-60: a person's decline, park or hold is a later word than the approval: the pending merge is dropped and its queued job cancelled, so nothing merges from a bay.
+  const merging = w.data.merging as { prNumber?: number } | undefined;
+  if (merging) {
+    delete w.data.merging;
+    w.data.blockReason = null;
+    await fx.tx.query(
+      `update jobs set status = 'done', result = $3::jsonb, completed_at = now(), updated_at = now()
+        where org_id = $1 and kind = 'merge.request' and status = 'queued' and payload->>'woId' = $2`,
+      [fx.orgId, w.id, JSON.stringify({ cancelled: `the work order was moved to ${bay}` })],
+    );
+    ev(fx, w, "wo.merge.cancelled", { text: `Merge of #${merging.prNumber ?? "?"} cancelled: moved to ${bay} (${reason}).`, bay }, { category: "flow" });
+  }
   w.position = bay;
   w.state = "parked";
   closeEntry(w, fx, "parked", reason);
@@ -114,19 +185,26 @@ export async function parkInto(fx: Fx, w: Wo, bay: string, reason: string): Prom
 }
 
 /** Back to a station from a bay: a work order that was waiting at a gate goes back to waiting, anything else restarts the station with a new attempt. */
-export async function resumeAt(fx: Fx, w: Wo, stationId: string): Promise<void> {
+export async function resumeAt(fx: Fx, w: Wo, stationId: string): Promise<boolean> {
+  // Back from a bay into a station that is full: the order waits in its bay until a place frees (the one check every way back goes through).
+  if (bayOf(fx.catalog, w)) {
+    if (await wipHoldCheck(fx, w, stationId, "unpark", { by: fx.actor })) return false;
+    await leaveBay(fx, w);
+  }
   const open = await fx.tx.query<{ gate_id: string }>(`select gate_id from gate_instances where org_id = $1 and wo_id = $2 and status = 'open'`, [fx.orgId, w.id]);
   delete w.data.bayReason;
   delete w.data.bayFrom;
   delete w.data.bayAt;
+  delete w.data.bayCause;
   if (open.rowCount && stationId !== "build") {
     w.position = stationId;
     w.state = "waiting";
     ev(fx, w, "wo.bay", { bay: null, from: null, station: stationId, text: "Back on the belt" });
-    return;
+    return true;
   }
-  await enterStation(fx, w, stationId);
+  if (!(await enterStation(fx, w, stationId))) return false;
   ev(fx, w, "wo.bay", { bay: null, from: null, station: stationId, text: "Back on the belt" });
+  return true;
 }
 
 /** Class override at Intake, with an audited reason. The conversation restarts under the new class and answers to questions that still apply are replayed. */
@@ -141,7 +219,10 @@ export async function reclassify(tx: Tx, actor: Actor, woId: string, cls: string
   const { wo } = await flowFor(fx, w);
   const before = w.cls;
   w.cls = cls;
-  w.priority = classOf(fx.catalog, project, cls).priority;
+  // S-61: a priority somebody asked for stays; only the old class's own default follows the class.
+  const oldDefault = classOf(fx.catalog, project, before).priority;
+  const priorityBefore = w.priority;
+  if (w.priority === oldDefault) w.priority = classOf(fx.catalog, project, cls).priority;
   w.data.clsOverridden = { by, at: fx.now.getTime(), from: before, reason: reason.trim() };
   const created = wo.createdAt;
   const fresh = startConversation(fx.catalog, project, { cls, title: w.title, description: String(w.data.description ?? ""), repo: w.repo ?? "", createdAt: created, clsConfidence: Number(w.data.clsConfidence) || 0, clsRationale: String(w.data.clsRationale ?? "") }, wo.conv.awaiting);
@@ -155,13 +236,13 @@ export async function reclassify(tx: Tx, actor: Actor, woId: string, cls: string
       brief = r.brief;
     }
   }
-  w.data.brief = brief;
+  w.data.brief = withBriefEdits(brief, editsOf(w), cls);
   await replaceConversation(fx, w.id, conv);
   note(w, fx, by, `Class overridden: ${before} → ${cls} (${reason.trim()}).`);
   ev(fx, w, "wo.classify", { text: reason.trim(), from: before, to: cls }, { before: { cls: before } });
   await saveWo(fx.tx, fx.orgId, w);
   const r = route(fx.catalog, project, cls);
-  return done(fx, `${w.id} is now ${classOf(fx.catalog, project, cls).name}. Route: ${r.map((s) => stationDef(fx.catalog, s)?.name ?? s).join(" → ")}.`, w.project, { route: r, gates: routeGates(fx.catalog, project, cls), version: w.version });
+  return done(fx, `${w.id} is now ${classOf(fx.catalog, project, cls).name}${w.priority !== priorityBefore ? ` (priority ${priorityBefore} → ${w.priority})` : `, priority ${w.priority} kept`}. Route: ${r.map((s) => stationDef(fx.catalog, s)?.name ?? s).join(" → ")}.`, w.project, { route: r, gates: routeGates(fx.catalog, project, cls), version: w.version });
 }
 
 /** Decline the request: it moves to the Declined bay with the reason. */
@@ -179,9 +260,14 @@ export async function declineInner(fx: Fx, actor: Actor, w: Wo, reason: string, 
   await closeOpenInstances(fx, w.id, "send_back");
   await parkInto(fx, w, "declined", reason.trim());
   await closeConversation(fx, w.id);
+  await closeOpenQuestions(fx, w.id, `The work order was declined: ${reason.trim()}`);
   note(w, fx, by, `Declined: ${reason.trim()}`);
   ev(fx, w, "wo.decline", { text: reason.trim(), station: sid, ...(o.fromGate ? { instance: o.fromGate.id } : {}) });
   await saveWo(fx.tx, fx.orgId, w);
+  if (w.parentId) {
+    const { completeParentIfDone } = await import("./engine.js");
+    await completeParentIfDone(fx, w.parentId, by);
+  }
   await dispatchQueued(fx, w.project);
   return done(fx, `${w.id} moved to Declined.`, w.project, { version: w.version });
 }
@@ -222,7 +308,7 @@ export async function addFollowup(tx: Tx, actor: Actor, woId: string, b: Followu
     conv.questions.splice(at, 0, nq);
   }
   const { buildBrief } = await import("@gantry/domain");
-  w.data.brief = buildBrief(fx.catalog, project, { cls: w.cls, title: w.title, conv });
+  w.data.brief = withBriefEdits(buildBrief(fx.catalog, project, { cls: w.cls, title: w.title, conv }), editsOf(w), w.cls);
   await saveConversation(fx, w.id, conv, wo.conv.messages.length, "open");
   note(w, fx, by, "Follow-up question added to the intake conversation.");
   ev(fx, w, "wo.followup", { text: text.slice(0, 200) });

@@ -3,7 +3,6 @@ import { TEST_URL } from "./db.js";
 import { startWorld, type World } from "./world.js";
 
 const d = TEST_URL ? describe : describe.skip;
-const SHA = "a".repeat(40);
 
 /** What the edge's /result intake stores: a station_results row and the run.result job. */
 async function deliverResult(w: World, a: { attemptId: string; fencing: number; runId: string }, woId: string, station: string, status: "succeeded" | "failed" | "interrupted", output: object = {}, error?: object) {
@@ -22,6 +21,8 @@ d("run.result, publish and teardown", () => {
     const a = await w.workOrderAt("WO-9101", { station: "research", repo: null });
     await w.drain();
     expect(w.launcher.runs.has(a.runId)).toBe(true);
+    // The research station wrote its note (G1f judges that document, not the agent's claim).
+    await w.q(`insert into artefacts (org_id, id, wo_id, attempt_id, kind, name, content_hash, media_type, size_bytes, station, doc, version, author_kind, body) values ($1,'art-9101',$2,$3,'document','research.md',$4,'text/markdown',1,'research','research.md',1,'agent','note')`, [w.orgId, "WO-9101", a.attemptId, "0".repeat(64)]);
     await deliverResult(w, a, "WO-9101", "research", "succeeded", { findings: [] });
     await w.drain();
     expect((await w.q(`select state, outcome from attempts where id = $1`, [a.attemptId]))[0].state).toBe("succeeded");
@@ -42,6 +43,8 @@ d("run.result, publish and teardown", () => {
     await w.drain();
     const pub = w.broker.calls.find((c) => c.op === "publish")!;
     expect(pub.body).toMatchObject({ attemptId: a.attemptId, fencing: a.fencing, repo: "acme/payments-api", volume: `ws-${a.runId}`, branch: "gantry/WO-9102" });
+    // The workspace was seeded with history, so the publisher is told the seed commit as its base.
+    expect(pub.body!.base).toBe("1".repeat(40));
     // Publish happens while the workspace still exists, then the launcher removes the volume.
     const stop = w.launcher.calls.filter((c) => c.op === "stop").pop()!;
     expect(pub.at).toBeLessThanOrEqual(stop.at);
@@ -49,6 +52,36 @@ d("run.result, publish and teardown", () => {
     expect(wo.data.outputs.build._labels.systemObserved).toContain("headSha");
     expect((await w.q(`select count(*)::int as n from events where type = 'run.published'`))[0].n).toBe(1);
     expect((await w.q(`select state from attempts where id = $1`, [a.attemptId]))[0].state).toBe("succeeded");
+  });
+
+  it("a Build that published no commit does not pass: it asks a person, with the fact and the agent's own notes", async () => {
+    const a = await w.workOrderAt("WO-9106", { station: "build", github: true });
+    await w.q(`insert into repo_config (org_id, repo_id, data) values ($1,'payments-api','{"baseSha":"${"1".repeat(40)}"}') on conflict (org_id, repo_id) do update set data = excluded.data`, [w.orgId]);
+    await w.drain();
+    w.broker.publishResponse = { ok: true, branch: "gantry/WO-9106", headSha: null, noop: true, alreadyPublished: false, commits: [], pullRequest: null };
+    await deliverResult(w, a, "WO-9106", "build", "succeeded", { commits: [], notes: ["git commit was denied; the edit is in the working tree only."] });
+    await w.drain();
+    expect((await w.q(`select state, outcome from attempts where id = $1`, [a.attemptId]))[0]).toMatchObject({ state: "cancelled", outcome: "needs_person" });
+    const wo = (await w.q(`select position, state, data from work_orders where id = 'WO-9106'`))[0];
+    expect(wo.position).toBe("person");
+    expect(wo.data.bayReason).toMatch(/waiting for an answer at/i);
+    const q = (await w.q(`select * from wo_questions where wo_id = 'WO-9106'`))[0];
+    expect(JSON.stringify(q)).toMatch(/no commit/);
+    expect(JSON.stringify(q)).toContain("git commit was denied");
+  });
+
+  it("passes the agent's forbidden paths to the broker, and a guardrail breach fails the station without applying it", async () => {
+    const agent = (await w.q(`select id from agents order by id limit 1`))[0].id;
+    const a = await w.workOrderAt("WO-9105", { station: "build", github: true, agent });
+    await w.q(`insert into repo_config (org_id, repo_id, data) values ($1,'payments-api','{"baseSha":"${"1".repeat(40)}"}') on conflict (org_id, repo_id) do update set data = excluded.data`, [w.orgId]);
+    await w.q(`update agents set data = jsonb_set(data, '{guardrails}', '{"paths":["infra/**",".github/workflows/**"],"maxDiff":0}'::jsonb) where id = $1`, [agent]);
+    await w.drain();
+    w.broker.publishResponse = { status: 422, body: { ok: false, code: "guardrail_breach", msg: "infra/main.tf is on the agent's forbidden paths" } };
+    await deliverResult(w, a, "WO-9105", "build", "succeeded", { commits: ["x"] });
+    await w.drain();
+    const pub = w.broker.calls.find((c) => c.op === "publish")!;
+    expect(pub.body?.denyPaths).toEqual(["infra/**", ".github/workflows/**"]);
+    expect((await w.q(`select state from attempts where id = $1`, [a.attemptId]))[0].state).toBe("failed");
   });
 
   it("a workspace the broker refuses (non-linear history) fails the station instead of losing the work", async () => {

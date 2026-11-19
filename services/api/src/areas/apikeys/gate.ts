@@ -6,6 +6,8 @@
 import { appendEvent, withTx } from "@gantry/db";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { sha256Hex } from "../../core/crypto.js";
+import { decideFor, policyState } from "../../core/decide.js";
+import { canonicalPath } from "../../core/paths.js";
 
 /**
  * A route is reachable with an API key only if it declares so in its route options (`config: { apiKey: "<scope>", apiKeyProject: "<param>" }`): the scope the key must carry
@@ -17,7 +19,7 @@ export interface ApiKeyRouteConfig { apiKey?: string; apiKeyProject?: string }
 /** Which key a request belongs to, for the log: set for a valid key and, when the key is known but revoked or expired, for the 401 it gets. */
 const keyOfRequest = new WeakMap<FastifyRequest, { id: string; project: string | null }>();
 
-const pathOf = (req: FastifyRequest): string => (req.url.split("?")[0] ?? "").slice(0, 300);
+const pathOf = (req: FastifyRequest): string => (canonicalPath(req.url) ?? req.url.split("?")[0] ?? "").slice(0, 300);
 
 /** A key that fails to authenticate may still be one we know (revoked, expired): the log records the refusal against it. */
 export async function noteRejectedKey(req: FastifyRequest, secret: string): Promise<void> {
@@ -46,6 +48,18 @@ export async function gateApiKey(req: FastifyRequest, reply: FastifyReply): Prom
   const p = req.gx.principal;
   if (p?.kind !== "apikey") return;
   keyOfRequest.set(req, { id: p.id, project: p.projectId });
+  // S-51: a key is never wider than its maker. It acts only while the person who made it is active and still holds the right to make keys there.
+  const mk = (await g.pool.query<{ created_by: string | null; keep_live: boolean }>(`select created_by, keep_live from api_keys where org_id = $1 and id = $2`, [g.orgId, p.id])).rows[0];
+  const maker = mk?.keep_live ? null : mk?.created_by;
+  if (maker) {
+    const st = await policyState(req);
+    const person = st.people.find((x) => x.id === maker);
+    const holds = !!person && person.status === "active" && decideFor(st, { kind: "person", id: maker } as never, "api.keys", { project: p.projectId }).allowed;
+    if (!holds) {
+      await deny(req, reply, 403, "The key's owner no longer has access. Ask someone who can manage keys to revoke it and make a new one.", { kind: "apikey", id: p.id, name: `API key ${p.name}` }, "api.key.maker-gone", { maker });
+      return;
+    }
+  }
   const decl = (req.routeOptions?.config ?? {}) as ApiKeyRouteConfig;
   if (!decl.apiKey) {
     await deny(req, reply, 403, "API keys can use the public API only: submit, read and answer work orders, and fire triggers.", { kind: "apikey", id: p.id, name: `API key ${p.name}` }, "api.route.denied");

@@ -49,6 +49,30 @@ d("the work-order session", () => {
   };
 
   describe("with the Intake Clerk", () => {
+    it("never shows or feeds the model Gantry's scripted questions; an epic's children are the agent's proposal, applied on approval, and nobody is awaited after the confirm (G-01)", async () => {
+      const r = await w.submit(tomas, { title: "Three Nautobot report jobs for the network team", requestedCls: "epic" });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      const id = r.body.id as string;
+      let s = (await call(tomas, "GET", url(id))).body;
+      expect(s.agent.mode).toBe("agent");
+      expect(s.messages.some((m: any) => m.data?.scripted || /Intake Clerk|What is in scope/.test(m.text))).toBe(false);
+      edge.script = [{ blocks: [{ type: "tool_use", id: "t1", name: "propose_brief", input: { ...BRIEF, children: ["Interfaces report: interfaces by location", "Cables report: cable inventory"] } }] }, { blocks: [{ type: "text", text: "I drafted the brief with a proposed split; it waits for your approval." }] }];
+      expect((await call(tomas, "POST", url(id, "/messages"), { text: "Please draft the brief." })).status).toBe(200);
+      const sent = JSON.stringify(edge.calls[0]!.body.messages);
+      expect(sent).not.toMatch(/What is in scope|Scripted intake/);
+      expect(sent).toContain("Please draft the brief.");
+      s = (await call(tomas, "GET", url(id))).body;
+      const msg = s.messages.at(-1);
+      const card = msg.data.cards.find((c: any) => c.kind === "proposal");
+      expect(card.changes.find((c: any) => c.field === "children").added).toEqual(["Interfaces report: interfaces by location", "Cables report: cable inventory"]);
+      expect((await w.get(id)).brief.children).toEqual([]);
+      const ok = await call(tomas, "POST", url(id, `/proposals/${msg.id}/${card.id}`), { decision: "approve" });
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      const wo = await w.get(id);
+      expect(wo.brief.children).toEqual(["Interfaces report: interfaces by location", "Cables report: cable inventory"]);
+      expect(wo.conv.awaiting).toBe("nobody");
+    });
+
     it("reads the work order and the repo, asks in natural language with suggestions, drafts the brief as a proposal with its diff; Approve confirms the brief through the ordinary command and passes G0+G1", async () => {
       const id = await submit();
       edge.script = [
@@ -234,6 +258,8 @@ d("the work-order session", () => {
       edge.respond = (body) => (String(body.system).includes(`about ${id}`) && !JSON.stringify(body.messages).includes("tool_result")
         ? { blocks: [{ type: "tool_use", id: "t1", name: "propose_brief", input: BRIEF }] }
         : { blocks: [{ type: "text", text: "I read your request and drafted the brief." }] });
+      // The agent classifies a new request first; the session opens once that is settled.
+      await q(`update work_orders set data = jsonb_set(data, '{classifyPending}', '"done"') where org_id = $1 and data->>'classifyPending' in ('pending','running')`, [t.orgId]);
       while ((await q(`select 1 from workorder_messages where wo_id = $1`, [id])).length === 0) { if (!(await woSessionJobs.open())) break; }
       for (let i = 0; i < 6 && (await q(`select 1 from workorder_messages where wo_id = $1 and role = 'assistant'`, [id])).length === 0; i++) await woSessionJobs.followUps();
       expect(await woSessionJobs.followUps()).toBe(0);
@@ -242,6 +268,30 @@ d("the work-order session", () => {
       expect(s.messages.at(-1).data.cards.some((c: any) => c.kind === "proposal")).toBe(true);
       // The follow-up never confirms anything.
       expect((await w.get(id)).gates.G0G1.status).toBe("waiting");
+    });
+  });
+
+  describe("no brief on a guess (G7)", () => {
+    it("refuses propose_brief while a blocking question is unanswered, and allows it once the person answers", async () => {
+      const id = await submit();
+      const brief = { goal: "Accept an Idempotency-Key header on refund requests.", scopeIn: ["Refund endpoint"], ac: ["A repeated key returns the first response"] };
+      edge.script = [
+        { blocks: [{ type: "tool_use", id: "t1", name: "ask_user", input: { question: "How long should a key be remembered?", options: ["24 hours"], blocking: true } }, { type: "tool_use", id: "t2", name: "propose_brief", input: brief }] },
+        { blocks: [{ type: "text", text: "I need that answer first." }] },
+      ];
+      await call(tomas, "POST", url(id, "/messages"), { kind: "open" });
+      let s = (await call(tomas, "GET", url(id))).body;
+      let last = s.messages.at(-1);
+      expect(last.data.cards.map((c: any) => c.kind)).toEqual(["question"]);
+      expect(last.data.cards[0].blocking).toBe(true);
+      const sent = edge.calls.at(-1)!.body as { messages: Array<{ content: unknown }> };
+      const refusal = (sent.messages.at(-1)!.content as any[]).find((b: any) => b.type === "tool_result" && b.tool_use_id === "t2");
+      expect(String(JSON.stringify(refusal))).toMatch(/blocking question is still unanswered/);
+      edge.script = [{ blocks: [{ type: "tool_use", id: "t3", name: "propose_brief", input: brief }] }, { blocks: [{ type: "text", text: "Proposed." }] }];
+      await call(tomas, "POST", url(id, "/messages"), { text: "24 hours." });
+      s = (await call(tomas, "GET", url(id))).body;
+      last = s.messages.at(-1);
+      expect(last.data.cards.some((c: any) => c.kind === "proposal")).toBe(true);
     });
   });
 
@@ -261,7 +311,7 @@ d("the work-order session", () => {
   });
 
   describe("who may approve a gate", () => {
-    it("explains the rule, the progress and the eligible people, warns when the gate cannot pass, and a rule that fewer people can satisfy than it requires saves with a warning", async () => {
+    it("explains the rule, the progress and the eligible people, warns when the gate cannot pass, and Factory Admins count toward a rule the role holders alone could not satisfy", async () => {
       const id = await submit();
       await w.answerAll(id);
       expect((await w.confirm(id)).status).toBe(200);
@@ -273,8 +323,9 @@ d("the work-order session", () => {
       expect(r.body.progress).toMatchObject({ have: 0 });
       expect(r.body.eligible.length).toBeGreaterThan(0);
       expect(r.body.eligible.every((e: any) => typeof e.why === "string" && e.name)).toBe(true);
-      expect(r.body.overrides.map((o: any) => o.id)).toContain(asha);
-      expect(r.body.viewerCanOverride).toBe(true);
+      expect(r.body.eligible.map((e: any) => e.id)).toContain(asha); // a Factory Admin is a normal approver (owner decision 2026-11-19)
+      expect(r.body.overrides.map((o: any) => o.id)).not.toContain(asha);
+      expect(r.body.viewerCanOverride).toBe(false);
       expect(r.body.can.editRule).toBe(true);
       expect((await call(lena, "GET", `/api/v1/work-orders/${id}/gates/${gate}/approvers`)).status).toBe(404);
       // A rule the people holding its roles cannot satisfy once the author is excluded: saves (non-blocking), and says so.
@@ -282,10 +333,10 @@ d("the work-order session", () => {
       const rule = { ...proj.approvers[gate], roles: ["engineer"], people: [], required: 1, sod: true, conditions: [] };
       const put = await w.call(asha, "PUT", `/api/v1/projects/payments/approvers/${gate}`, { value: rule });
       expect(put.status, JSON.stringify(put.body)).toBe(200);
-      expect(put.body.warning).toMatch(/separation of duties on, and exactly 1 person/);
+      expect(put.body.warning ?? null).toBeNull(); // Factory Admins count, so the gate is reachable even with one Engineer
       const after = await call(asha, "GET", `/api/v1/work-orders/${id}/gates/${gate}/approvers`);
-      expect(after.body.satisfiable).toBe(false);
-      expect(after.body.warning).toMatch(/can't pass as configured/);
+      expect(after.body.satisfiable).toBe(true);
+      expect(after.body.warning ?? null).toBeNull();
       expect(after.body.rule.text).toMatch(/Needs 1 approval from Engineer · the author can.t approve/);
     });
   });

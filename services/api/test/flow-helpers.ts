@@ -53,9 +53,38 @@ export function world(getT: () => TestApp) {
       [t.orgId, id, o.project ?? "payments", o.repo ?? "payments-api", `Work ${id}`, o.cls ?? "feature", o.priority ?? "P2", o.position ?? "plan", o.state ?? "waiting", o.requestedBy ?? "p-tomas", JSON.stringify({ history: [], log: [], ...(o.data ?? {}) })],
     );
   };
+  /** A research station that succeeds has written its note (the stations always do); G1f judges that document, so the helper records one. */
+  const noteResearch = async (att: { id: string }) => {
+    const a = (await q<{ wo_id: string; station: string }>(`select wo_id, station from attempts where id = $1`, [att.id]))[0];
+    if (!a || a.station !== "research") return;
+    if ((await q(`select 1 from artefacts where wo_id = $1 and station = 'research' and doc is not null`, [a.wo_id])).length) return;
+    await q(`insert into artefacts (org_id, id, wo_id, attempt_id, kind, name, content_hash, media_type, size_bytes, station, doc, version, author_kind, body) values ($1,$2,$3,$4,'document','research.md','0000000000000000000000000000000000000000000000000000000000000000','text/markdown',1,'research','research.md',1,'agent','note')`, [getT().orgId, `art-test-${att.id}`, a.wo_id, att.id]);
+  };
+  /** CI arrives for a work order waiting at the automatic G4: its pull request head gets every required check green, and the gate reads them (as the GitHub facts would trigger). */
+  const ciArrives = async (woId: string) => {
+    const open = (await q<{ id: string }>(`select id from gate_instances where wo_id = $1 and status = 'open' and gate_id = 'G4' and not exists (select 1 from gate_votes v where v.gate_instance_id = gate_instances.id)`, [woId]))[0];
+    if (!open || (await q(`select 1 from pull_requests where id = $1`, [`pr-t-${woId}`])).length) return false;
+    const t = getT();
+    const repo = (await q<{ repo_id: string }>(`select repo_id from work_orders where id = $1`, [woId]))[0]!.repo_id;
+    const required = (await q<{ required_checks: string[] }>(`select required_checks from repo_config where repo_id = $1`, [repo]))[0]?.required_checks ?? [];
+    const sha = "c".repeat(40);
+    await q(`insert into pull_requests (org_id, id, repo_id, wo_id, number, title, head_sha) values ($1,$2,$3,$4,$5,'t',$6) on conflict do nothing`, [t.orgId, `pr-t-${woId}`, repo, woId, 5000 + Math.floor(Math.random() * 90000), sha]);
+    for (const name of required.length ? required : ["ci/test"]) await q(`insert into checks (org_id, id, repo_id, pr_id, head_sha, name, status, conclusion) values ($1,$2,$3,$4,$5,$6,'completed','success') on conflict do nothing`, [t.orgId, `ck-t-${woId}-${name}`, repo, `pr-t-${woId}`, sha, name]);
+    const { recheckAutoGate } = await import("../src/areas/workorders/station.js");
+    const reopened = (await tx((x) => recheckAutoGate(x, t.orgId, woId, sha))).reopened;
+    // The evidence did its job (the gate recorded it); the stand-in pull request goes, so a later merge step behaves as it does for a work order with no repository.
+    await q(`delete from checks where pr_id = $1`, [`pr-t-${woId}`]);
+    await q(`update pull_requests set wo_id = null where id = $1`, [`pr-t-${woId}`]);
+    return reopened;
+  };
   const apply = async (att: { id: string; fencing: string }, result: Record<string, unknown> = { status: "succeeded", summary: "done" }) =>
-    w_tx((tx) => import("../src/areas/workorders/station.js").then((m) => m.applyStationResult(tx, att.id, Number(att.fencing), result as never)));
+    (await noteResearch(att), w_tx((tx) => import("../src/areas/workorders/station.js").then((m) => m.applyStationResult(tx, att.id, Number(att.fencing), result as never))));
   const w_tx = tx;
+  /** The exact open opening of a gate (`WO-1:G2:3`): an approve or reject names it (A8). */
+  const gateUrl = async (id: string, gate: string, verb: "approve" | "reject" = "approve") => {
+    const inst = (await q<{ id: string }>(`select id from gate_instances where wo_id = $1 and gate_id = $2 and status = 'open'`, [id, gate]))[0];
+    return `/api/v1/gate-instances/${encodeURIComponent(inst?.id ?? `${id}:${gate}`)}/${verb}`;
+  };
   const APPROVERS = ["p-priya", "p-meera", "p-grace", "p-kenji", "p-daniel", "p-asha", "p-omar"];
   /** Drive a work order (results for running stations, approvals for gates) until `until` holds. */
   const walk = async (id: string, until: (wo: any) => boolean, max = 60) => {
@@ -68,10 +97,11 @@ export function world(getT: () => TestApp) {
         if (!rr.applied) throw new Error(JSON.stringify(rr));
         continue;
       }
+      if (wo.state === "waiting" && (await ciArrives(id))) continue;
       if (wo.state === "waiting" && wo.allowed.approve) {
         let passed = false;
         for (const who of APPROVERS) {
-          const r = await call(who, "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:${wo.allowed.approve.gate}`)}/approve`, {});
+          const r = await call(who, "POST", await gateUrl(id, wo.allowed.approve.gate), {});
           if (r.status === 200 && r.body.passed) {
             passed = true;
             break;
@@ -96,5 +126,5 @@ export function world(getT: () => TestApp) {
     await walk(id, (wo) => st[wo.station]?.id === sid && wo.state === "running" && !wo.bay);
     return id;
   };
-  return { apply, walk, atStation, APPROVERS, call, q, events, ifm, submit, get, answerAll, confirm, sys, tx, fxIn, liveAttempt, insertWo };
+  return { gateUrl, apply, ciArrives, walk, atStation, APPROVERS, call, q, events, ifm, submit, get, answerAll, confirm, sys, tx, fxIn, liveAttempt, insertWo };
 }

@@ -300,6 +300,16 @@ export const ROLES: readonly Role[] = [
     level: "factory"
   },
   {
+    id: "factory_manager",
+    name: "Factory Manager",
+    level: "factory"
+  },
+  {
+    id: "security_reviewer",
+    name: "Security Reviewer",
+    level: "factory"
+  },
+  {
     id: "project_admin",
     name: "Project Admin",
     level: "project"
@@ -506,6 +516,18 @@ export const ACTIONS: readonly Action[] = [
     id: "restore.project",
     name: "Restore a killed project",
     scope: "project",
+    group: "Stops"
+  },
+  {
+    id: "halt.factory",
+    name: "Halt the whole factory",
+    scope: "factory",
+    group: "Stops"
+  },
+  {
+    id: "resume.factory",
+    name: "Resume the whole factory",
+    scope: "factory",
     group: "Stops"
   },
   {
@@ -971,6 +993,10 @@ export const NOTIFY_EVENTS: ReadonlyArray<{ id: string; name: string }> = [
   {
     id: "delivery.failed",
     name: "Notification delivery failed"
+  },
+  {
+    id: "mention",
+    name: "Someone mentioned a person in a conversation"
   }
 ];
 
@@ -1569,6 +1595,7 @@ export const RISK_TAG_RULES: readonly RiskTagRule[] = [
   { tag: "ci", label: "CI and workflow files", test: /(^|\/)(\.github\/workflows\/|\.gitlab-ci\.ya?ml$|Jenkinsfile$|\.circleci\/|azure-pipelines\.ya?ml$)/i },
   { tag: "dependencies", label: "Dependency manifests and lockfiles", test: /(^|\/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|go\.(mod|sum)|Cargo\.(toml|lock)|requirements[^/]*\.txt|poetry\.lock|Pipfile(\.lock)?|pom\.xml|build\.gradle(\.kts)?|Gemfile(\.lock)?|composer\.(json|lock))$/i },
   { tag: "codeowners", label: "Code-owner files", test: /(^|\/)CODEOWNERS$/ },
+  { tag: "repo-conventions", label: "Repository conventions (AGENTS.md, CLAUDE.md, CONTRIBUTING.md, .claude, PR template)", test: /(^|\/)((AGENTS|CLAUDE)\.md$|\.claude\/|pull_request_template(\.md$|\/)|CONTRIBUTING(\.md)?$)/i },
   { tag: "auth-crypto", label: "Auth and crypto paths", test: /(^|\/)(auth|authn|authz|crypto|security|secrets?|tls|keys?)(\/|[._-])|\.pem$|\.key$/i },
   { tag: "gantry-config", label: "Gantry config", test: /(^|\/)(\.gantry\/|factory\.ya?ml$)/ },
   { tag: "migration", label: "Migrations", test: /(^|\/)(migrations?|db\/migrate)\/|\.sql$/i },
@@ -1587,6 +1614,33 @@ export const DEFAULT_CATALOG: Catalog = {
 /** Read rights beyond project.view: who may see people, policy, agents, models, integrations (spec 14.3, default deny). */
 export const READ_ACTIONS = ["people.view", "policy.view", "agents.view", "models.view", "integrations.view"] as const;
 
+/** Project rights a Factory Manager does not get by default: the ones that administer access rather than operate the line. */
+const FACTORY_MANAGER_EXCLUDED: ReadonlySet<string> = new Set(["project.members", "approvers.edit", "trust.grant", "api.keys"]);
+
+/**
+ * Factory-scope rights belong to factory-level roles only (owner decision 2026-11-17). The scope of a built-in action is fixed by this
+ * catalogue, whatever an org's stored copy says (a stale copy once carried the Read rights as project scope); a custom action keeps its own.
+ */
+export function actionScopeOf(actions: readonly Action[], id: string): Action["scope"] | undefined {
+  return ACTIONS.find((a) => a.id === id)?.scope ?? actions.find((a) => a.id === id)?.scope;
+}
+
+/** May this role hold this right at all? A project-level role can never hold a factory-scope right: matrix cell, grant and resolution all ignore it. */
+export function roleMayHold(roles: readonly Role[], actions: readonly Action[], roleId: string, actionId: string): boolean {
+  const level = (roles.find((r) => r.id === roleId) ?? ROLES.find((r) => r.id === roleId))?.level;
+  return !(level === "project" && actionScopeOf(actions, actionId) === "factory");
+}
+
+/** The matrix with every factory-scope right removed from project-level roles: what resolution acts on, whatever is stored. */
+export function effectiveMatrix(matrix: Matrix, roles: readonly Role[], actions: readonly Action[]): Matrix {
+  const out: Matrix = {};
+  for (const [role, cells] of Object.entries(matrix)) {
+    out[role] = {};
+    for (const [a, v] of Object.entries(cells)) out[role]![a] = v && roleMayHold(roles, actions, role, a);
+  }
+  return out;
+}
+
 /** The default role-by-action matrix (legacy `matrix()`), built over the given actions. */
 export function defaultMatrix(actions: readonly Action[] = ACTIONS): Matrix {
   const only = (list: string[]): Record<string, boolean> => {
@@ -1596,11 +1650,21 @@ export function defaultMatrix(actions: readonly Action[] = ACTIONS): Matrix {
   };
   // Console propose rights are never a default of anyone but Factory Admin: a Factory Admin grants them to the roles and teams they choose.
   const projectActions = actions.filter((a) => a.scope === "project" && !a.id.startsWith("console.")).map((a) => a.id);
-  return {
+  return effectiveMatrix({
     factory_admin: only(actions.map((a) => a.id)),
     // Default deny (spec 14.3): reading anything beyond a project one holds is itself a right. The "Read" actions are factory-scoped (they need
     // a factory-level role such as Auditor or a custom one); a person with no grants reads nothing but their own profile.
     auditor: only(["project.view", "audit.view", ...READ_ACTIONS, CONSOLE_USE]),
+    // Owner decision 6 (2026-11-15): two factory-level templates for real jobs, so nobody is over-granted Factory Admin or Project Admin.
+    // Factory Manager reads everything and operates every project, but administers no access: no roles, members, approver rules, trust
+    // grants, API keys, security or policy, and no factory kill/restore (those stay with Factory Admin).
+    factory_manager: only([
+      ...projectActions.filter((a) => !FACTORY_MANAGER_EXCLUDED.has(a)),
+      ...READ_ACTIONS, "audit.view", "halt.factory", "resume.factory", "project.create", "template.edit", "eval.run", CONSOLE_USE,
+    ]),
+    // Security Reviewer reads everything (including the security settings and the ledger) and can stop or sign off risky work: answer,
+    // approve the gates whose rules name them, send back, halt a line, kill a work order. Nothing that changes configuration.
+    security_reviewer: only(["project.view", "audit.view", ...READ_ACTIONS, "wo.answer", "gate.approve", "wo.sendback", "line.halt", "kill.workorder", CONSOLE_USE]),
     // Console (spec 12.6): everyone who can see a project may ASK the console (read-only: its read tools still filter by their own rights);
     // only Factory Admin may have it propose changes, until a Factory Admin grants a console.propose.* right to a role or team.
     project_admin: only(projectActions.concat(["eval.run", "audit.view"]).concat([CONSOLE_USE])),
@@ -1610,7 +1674,7 @@ export function defaultMatrix(actions: readonly Action[] = ACTIONS): Matrix {
     approver: only(["project.view", "wo.answer", "gate.approve", CONSOLE_USE]),
     release_manager: only(["project.view", "wo.answer", "gate.approve", "release", "line.halt", "line.resume", "onboarding.merge", "outcome.record", CONSOLE_USE]),
     viewer: only(["project.view", CONSOLE_USE]),
-  };
+  }, ROLES, actions);
 }
 
 /** Station/gate/bay/class/role/action lookups over a catalogue. */

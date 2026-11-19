@@ -6,7 +6,7 @@ import { useMemo, type ReactNode } from "react";
 import { INTEGRATION_CATEGORIES, NOTIFY_EVENTS, type IntegrationField, type IntegrationInstance, type IntegrationType, type Project, type Repo, type Trigger } from "@gantry/domain";
 import { useDeliveries, useIntegrationTypes, useIntegrations, useProjects, useTriggers } from "../../api/queries";
 import { Icon } from "../../ui/Icon";
-import { Select } from "../../ui/primitives";
+import { Select, Status, type Tone } from "../../ui/primitives";
 import { useAllRepos } from "../govern/data";
 
 export const AUTHS = [
@@ -32,16 +32,14 @@ export const keyOf = (s: string): string => {
   return w.map((x, i) => (i ? x.charAt(0).toUpperCase() + x.slice(1).toLowerCase() : x.toLowerCase())).join("").slice(0, 24);
 };
 
-export const statusOf = (i: IntegrationInstance): "disabled" | "failing" | "offline" | "healthy" => (!i.connected ? "disabled" : i.status === "failing" ? "failing" : i.status === "offline" ? "offline" : "healthy");
+export const statusOf = (i: IntegrationInstance): "disabled" | "failing" | "offline" | "unknown" | "healthy" => (!i.connected ? "disabled" : i.status === "failing" ? "failing" : i.status === "offline" ? "offline" : i.status === "unknown" ? "unknown" : "healthy");
+
+const STATUS_WORD: Record<string, string> = { healthy: "Healthy", failing: "Failing", degraded: "Degraded", offline: "Offline", disabled: "Disabled", unknown: "Not tested yet" };
+
+const STATUS_TONE: Record<string, Tone> = { healthy: "done", failing: "block", degraded: "wait", offline: "neutral", disabled: "neutral", unknown: "neutral" };
 
 export function Health({ st }: { st: string }) {
-  const cls = st === "healthy" ? "healthy" : st === "failing" ? "failing" : st === "degraded" ? "degraded" : "offline";
-  return (
-    <span className={`health h-${cls}`}>
-      <span className="health-shape" aria-hidden="true" />
-      {st}
-    </span>
-  );
+  return <Status tone={STATUS_TONE[st] ?? "neutral"}>{STATUS_WORD[st] ?? st}</Status>;
 }
 
 export const Mark = ({ icon, small }: { icon?: string; small?: boolean }) => (
@@ -73,11 +71,13 @@ export interface Usage {
 
 /** Everything the data screens already read: a connection's type, who may use it, and what depends on it. */
 export function useIntegrationData() {
-  const types = (useIntegrationTypes().data ?? []) as TypeRow[];
-  const insts = useIntegrations().data ?? [];
+  const typesQ = useIntegrationTypes();
+  const instsQ = useIntegrations();
+  const types = (typesQ.data ?? []) as TypeRow[];
+  const insts = instsQ.data ?? [];
   const projects = useProjects().data ?? [];
   const triggers = useTriggers().data ?? [];
-  const { repos } = useAllRepos();
+  const { repos, read: reposRead } = useAllRepos();
   const live = projects.filter((p) => p.status !== "archived");
   const typeOf = (i: Pick<IntegrationInstance, "type">): TypeRow => types.find((t) => t.id === i.type) ?? ({ id: i.type, name: i.type, category: "custom", icon: "plug", auth: "token", payload: "json", builtIn: false, fields: [], events: [], actions: [] } as TypeRow);
   const pname = (id: string): string => projects.find((p) => p.id === id)?.name ?? id;
@@ -104,7 +104,7 @@ export function useIntegrationData() {
     const rp = typeOf(inst).category === "source" ? repos.filter((r) => (r as unknown as { source?: string }).source === inst.id) : [];
     return { routes, implicit, overrides, triggers: trig, repos: rp };
   };
-  return { types, insts, projects, live, repos, typeOf, pname, usage, integrationFor };
+  return { types, insts, typesQ, instsQ, projects, live, repos, reposRead, typeOf, pname, usage, integrationFor };
 }
 
 export const usageCount = (u: Usage): number => u.routes.length + u.implicit.length + u.overrides.length + u.triggers.length + u.repos.length;

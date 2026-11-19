@@ -1,0 +1,5 @@
+{
+  "note": "Gzip bytes of what index.html loads eagerly. May only go down: node scripts/bundle-budget.mjs --update",
+  "entryJsGzip": 131317,
+  "entryCssGzip": 33220
+}

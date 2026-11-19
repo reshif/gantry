@@ -8,7 +8,7 @@ import { Field, LockNote } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
 import { dec } from "../mcp/kit";
-import { ChangeView, KINDS, sigName } from "./kit";
+import { ChangeView, KINDS, PlainDiff, sigName } from "./kit";
 
 export function AcceptDialog({ lp, close }: { lp: LearningProposal; close: () => void }) {
   const ui = useUI();
@@ -23,16 +23,15 @@ export function AcceptDialog({ lp, close }: { lp: LearningProposal; close: () =>
     close();
   };
   return (
-    <Dialog title={`Accept ${lp.id}`} kicker={`Learning · ${KINDS[lp.kind]?.name ?? lp.kind}`} wide onClose={close}
-      sub="Applies the change now through the normal operation, with its own permission check and audit entry, then marks the finding addressed. It can be rolled back."
-      actions={[{ label: "Cancel" }, { label: "Accept and apply", kind: "primary", submit: true, id: "ln-acc-ok", guard: perm, onClick: () => void submit() }]}
+    <Dialog title={`Adopt: ${lp.title}`} kicker={`Learning · ${KINDS[lp.kind]?.name ?? lp.kind}`} wide onClose={close}
+      sub={`This updates ${lp.kind === "skill" ? ((lp.change as { skill?: string }).skill ?? "the skill") : "the factory"} as a new version and runs the eval suite.`}
+      actions={[{ label: "Cancel" }, { label: "Adopt change", kind: "primary", submit: true, id: "ln-acc-ok", guard: perm, onClick: () => void submit() }]}
       body={(
         <div className="form-grid">
           <LockNote decision={perm} what="Applying learning proposals" />
-          <div className="ln-change"><ChangeView lp={lp} /></div>
-          <p className="small"><strong>Expected: </strong>{lp.expected}</p>
+          {lp.kind === "skill" && (lp.change as { before?: string }).before != null ? <PlainDiff lp={lp} /> : <ChangeView lp={lp} />}
           {lp.metric && lp.windowDays ? <p className="small"><strong>Verified when: </strong>{`at most ${lp.metric.target} ${sigName(lp.metric.signal)} signal${lp.metric.target === 1 ? "" : "s"} in the ${lp.windowDays} days after this is applied.`}</p> : null}
-          <Field label="Note" htmlFor="ln-acc-note"><input id="ln-acc-note" className="input" placeholder="Optional note for the audit entry" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+          <Field label="Note (optional)" htmlFor="ln-acc-note"><input id="ln-acc-note" className="input" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
           <div className="form-err" role="alert">{err}</div>
         </div>
       )} />

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { upstreamFetch, type UpstreamInit } from "./upstream-guard.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { ApiClient, authorizeCall, type Alternate, type Route } from "./api.js";
@@ -9,7 +10,10 @@ import { NoObjectStore, TraceIncrements, type ObjectStore } from "./trace.js";
 import { SseUsage, usageFromJson, type Usage } from "./usage.js";
 import { VendorKeys } from "./vendor-keys.js";
 import { registerMcpRoutes, type McpMetrics } from "./mcp/routes.js";
+import { DEFAULT_SOURCE_CAPS, SourceGuard } from "./source-guard.js";
 import { registerServiceRoutes, type ServiceMetrics } from "./service-gateway.js";
+import { registerResearchRoutes, type ResearchDeps } from "./research.js";
+import { stepsOf } from "./steps.js";
 
 export interface GatewayDeps {
   cfg: EdgeConfig;
@@ -18,7 +22,11 @@ export interface GatewayDeps {
   keys?: VendorKeys;
   limiter?: VendorLimiter;
   fetchImpl?: typeof fetch;
+  /** Tests: the research fetcher's outbound fetch (production uses undici with a public-only dispatcher). */
+  researchFetch?: ResearchDeps["fetchImpl"];
   logger?: boolean | { level: string };
+  /** One guard shared with the forward proxy (main.ts); built from the config when absent. */
+  guard?: SourceGuard;
 }
 
 export interface GatewayMetrics {
@@ -72,6 +80,7 @@ const bearerOf = (req: FastifyRequest): string | null => {
 };
 
 export interface Gateway {
+  guard: SourceGuard;
   app: FastifyInstance;
   metrics: GatewayMetrics;
   keys: VendorKeys;
@@ -79,6 +88,8 @@ export interface Gateway {
   mcp: McpMetrics;
   /** Model calls that belong to no run (the console), spec 12.6. */
   service: ServiceMetrics;
+  /** Governed web research: pages fetched and refused. */
+  research: { fetched: number; refused: number };
   api: ApiClient;
   store: ObjectStore;
   /** Resolves when every model call's post-response work (trace, usage report) has finished. Used on shutdown and in tests. */
@@ -88,7 +99,7 @@ export interface Gateway {
 /** The :8443 listener: model gateway (spec 5.3, 10.4) and the runner's control calls (spec 4.2, 4.3). */
 export function buildGateway(deps: GatewayDeps): Gateway {
   const { cfg } = deps;
-  const f = deps.fetchImpl ?? fetch;
+  const f = (deps.fetchImpl ?? upstreamFetch(cfg.blockPrivateAddresses)) as (url: string | URL, init?: UpstreamInit) => Promise<Response>;
   const api = deps.api ?? new ApiClient(cfg);
   const store = deps.store ?? new NoObjectStore();
   const keys = deps.keys ?? new VendorKeys(cfg.vendorKeys, api);
@@ -99,6 +110,24 @@ export function buildGateway(deps: GatewayDeps): Gateway {
     logger: deps.logger ?? { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.authorization", "req.headers['x-api-key']", "req.headers['proxy-authorization']"] },
     bodyLimit: cfg.maxBodyBytes,
     trustProxy: false,
+  });
+  // S-92 / S-102: per-source caps. A run cannot hold the shared edge's sockets or flood it; failed edge-token compares are limited per source.
+  const guard = deps.guard ?? new SourceGuard(cfg.sourceCaps ?? DEFAULT_SOURCE_CAPS, cfg.runSubnet, { warn: (o, m) => app.log.warn(o, m) });
+  guard.attach(app.server, "model");
+  const TOKEN_ROUTE = /^\/(service\/v1|mcp-admin\/v1)\//;
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.url === "/healthz") return;
+    const ip = req.socket.remoteAddress;
+    if (TOKEN_ROUTE.test(req.url) && guard.tokenBlocked(ip)) return reply.code(429).header("retry-after", "60").send({ ok: false, msg: "Too many failed attempts from this address; try again later." });
+    if (!guard.request(ip, req.url.startsWith("/run/v1/spec") ? "spec" : "general")) return reply.code(429).header("retry-after", "5").header("content-type", "application/json").send({ type: "error", error: { type: "rate_limit_error", message: "This run is making too many requests; slow down." } });
+  });
+  app.addHook("onResponse", async (req, reply) => {
+    if (reply.statusCode === 401 && TOKEN_ROUTE.test(req.url)) guard.tokenFailed(req.socket.remoteAddress);
+    if (reply.statusCode === 200 && req.url.startsWith("/run/v1/spec")) {
+      const tok = bearerOf(req);
+      const id = tok ? runIdOfToken(tok) : null;
+      if (id) guard.runStarted(req.socket.remoteAddress, id);
+    }
   });
   // Bodies stay raw: the model request is forwarded byte for byte, run calls are parsed by their handlers.
   app.removeAllContentTypeParsers();
@@ -149,7 +178,7 @@ export function buildGateway(deps: GatewayDeps): Gateway {
     const alternates: Alternate[] = primary.alternates ?? [];
     // A model the vendor knows under another id (the same model on Bedrock, say) is called with that id.
     const bodyFor = (rt: { upstreamModel?: string }): Uint8Array<ArrayBuffer> => (rt.upstreamModel && body.model !== rt.upstreamModel ? new Uint8Array(Buffer.from(JSON.stringify({ ...body, model: rt.upstreamModel }))) : new Uint8Array(raw));
-    const callTo = (rt: Route | Alternate, key: string | null, signal: AbortSignal): { url: string; init: RequestInit } => {
+    const callTo = (rt: Route | Alternate, key: string | null, signal: AbortSignal): { url: string; init: UpstreamInit } => {
       const url = upstreamUrl(rt.baseUrl, countOnly ? "/v1/messages/count_tokens" : "/v1/messages");
       const headers: Record<string, string> = { "content-type": "application/json", "accept-encoding": "identity", "anthropic-version": String(req.headers["anthropic-version"] ?? "2023-06-01") };
       if (key) {
@@ -158,7 +187,7 @@ export function buildGateway(deps: GatewayDeps): Gateway {
       }
       if (typeof req.headers["anthropic-beta"] === "string") headers["anthropic-beta"] = req.headers["anthropic-beta"];
       if (typeof req.headers.accept === "string") headers.accept = req.headers.accept;
-      return { url, init: { method: "POST", headers, body: bodyFor(rt), signal } };
+      return { url, init: { method: "POST", headers, body: bodyFor(rt), signal, lan: primary.lan } };
     };
 
     const key = await keys.get(route.vendor);
@@ -339,6 +368,7 @@ export function buildGateway(deps: GatewayDeps): Gateway {
   // MCP gateway (spec 6.4, 12.4): services/edge/src/mcp. The runner sees one endpoint per allowed server; the edge holds the credentials.
   const mcp = registerMcpRoutes(app, {
     cfg, api,
+    knownKeys: () => keys.knownKeys(),
     runAuth: (req) => {
       const token = bearerOf(req);
       const runId = token ? runIdOfToken(token) : null;
@@ -390,6 +420,7 @@ export function buildGateway(deps: GatewayDeps): Gateway {
     return relay(reply, await api.call("POST", `/internal/v1/runs/${encodeURIComponent(a.runId)}/heartbeat`, { ...strip(b, "token"), token: a.token }));
   });
 
+  const DOC_MAX_BYTES = 512 * 1024;
   const Checkpoint = z.looseObject({ turn: z.number().int().nonnegative(), kind: z.enum(["transcript", "artefact"]), name: z.string().min(1).max(300), contentType: z.string().min(1).max(200), content: z.string() });
   app.post("/run/v1/checkpoint", async (req, reply) => {
     const a = runAuth(req);
@@ -416,6 +447,11 @@ export function buildGateway(deps: GatewayDeps): Gateway {
       contentType: p.data.contentType,
       contentHash: ref.slice("sha256/".length),
       size: bytes.length,
+      // A station document (markdown) is also kept with its artefact row, so people can read and compare it (the API cannot reach object storage).
+      // It is the scanned text: secrets were already redacted above.
+      ...(p.data.kind === "artefact" && /^text\/markdown\b/i.test(p.data.contentType) && bytes.length <= DOC_MAX_BYTES ? { content: scanned.text } : {}),
+      // A transcript's tool calls, as names and short targets, for the run timeline (src/steps.ts).
+      ...(p.data.kind === "transcript" ? { steps: stepsOf(p.data.content, p.data.turn, keys.knownKeys()) } : {}),
     });
     return relay(reply, r);
   });
@@ -431,8 +467,11 @@ export function buildGateway(deps: GatewayDeps): Gateway {
     return relay(reply, await api.call("POST", `/internal/v1/runs/${encodeURIComponent(a.runId)}/result`, { ...(s.value as Record<string, unknown>), token: a.token }));
   });
 
-  // Model calls for the console and "explain why not" (spec 12.6): the API calls with the edge token, the key stays here.
-  const service = registerServiceRoutes({ app, cfg, api, keys, limiter, fetchImpl: f, track });
+  // Governed web research (agent workspace, Phase 2): src/research.ts.
+  const research = registerResearchRoutes(app, { api, store, knownKeys: () => keys.knownKeys(), runAuth, jsonBody, ...(deps.researchFetch ? { fetchImpl: deps.researchFetch } : {}) });
 
-  return { app, metrics, mcp, service, keys, limiter, api, store, drain: async () => void (await Promise.allSettled([...pending])) };
+  // Model calls for the console and "explain why not" (spec 12.6): the API calls with the edge token, the key stays here.
+  const service = registerServiceRoutes({ app, cfg, api, keys, limiter, fetchImpl: f as typeof fetch, track, store, maxTraceBytes: cfg.maxTraceBytes });
+
+  return { guard, app, metrics, mcp, service, research, keys, limiter, api, store, drain: async () => void (await Promise.allSettled([...pending])) };
 }

@@ -1,0 +1,16 @@
+
+.ws-chat { display: flex; flex-direction: column; gap: var(--s2); height: 100%; min-height: 0; }
+.ws-chat .console-grid.is-embedded { grid-template-columns: minmax(0, 1fr) 300px; height: auto; flex: 1; min-height: 0; }
+.con-mode-pick { margin-left: auto; }
+.composer-ro { display: flex; align-items: center; gap: 8px; margin: 0; padding: 12px 14px; color: var(--ink-2); background: var(--sunk); border-top: 1px solid var(--line); }
+.composer-ro .ic { display: inline-flex; flex: none; }
+.composer-ro svg { width: 14px; height: 14px; }
+tr.is-over td { color: var(--fail); }
+@media (max-width: 1100px) {
+  .ws-chat .console-grid.is-embedded { grid-template-columns: minmax(0, 1fr); }
+  .ws-chat .console-grid.is-embedded .ctx { display: none; } }
+.osx-composer:has(.wos-mention-menu) { position: relative; }
+.wos-mention-menu { margin: 0; padding: 4px 0; z-index: 5; }
+.wos-mention-menu li { grid-template-columns: 180px 1fr; }
+.wos-mention-menu li:hover { background: var(--accent-soft); }
+.wos-mention-note { flex-basis: 100%; order: 3; margin: -2px 0 0; }

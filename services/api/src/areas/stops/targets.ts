@@ -72,6 +72,11 @@ export async function resolveTarget(db: Queryable, orgId: string, scopeIn: strin
   return { scope, target: w.id, project: w.project_id, repo: w.repo_id, wo: w.id, name: w.id, regulated: false };
 }
 
-/** The catalogue action a stop command needs: halt and resume use the andon rights, kill and restore the per-scope ones. */
+/**
+ * The catalogue action a stop command needs. Halt and resume of a project, repo or work order use the andon rights (project-scoped);
+ * the whole factory needs its own factory-scoped rights, because a project-scoped right asked with no project counts a grant held on
+ * any project, which would let an engineer on one project stop every line. Kill and restore use the per-scope rights.
+ */
 export const stopAction = (verb: "halt" | "resume" | "kill" | "restore", scope: ScopeType): string =>
-  verb === "halt" ? "line.halt" : verb === "resume" ? "line.resume" : `${verb}.${scope === "wo" ? "workorder" : scope === "repo" ? "project" : scope}`;
+  (verb === "halt" || verb === "resume") && scope === "factory" ? `${verb}.factory`
+  : verb === "halt" ? "line.halt" : verb === "resume" ? "line.resume" : `${verb}.${scope === "wo" ? "workorder" : scope === "repo" ? "project" : scope}`;

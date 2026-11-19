@@ -1,0 +1,23 @@
+{
+  "project": "payments",
+  "projectRoutes": [
+    "floor",
+    "work-orders",
+    "conversations",
+    "onboarding",
+    "project-config",
+    "record",
+    "traveler",
+    "dossier",
+    "changes"
+  ],
+  "rename": {},
+  "overrides": {
+    "people/p-meera": "#/person/p-meera",
+    "access_tab_roles": "?acc.tab=roles#/access",
+    "access_tab_policies": "?acc.tab=policies#/access",
+    "access_tab_freezes": "?acc.tab=freezes#/access",
+    "access_tab_check": "?acc.tab=check#/access",
+    "people_tab_teams": "?ppl.tab=teams#/people"
+  }
+}

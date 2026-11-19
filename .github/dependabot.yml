@@ -1,0 +1,32 @@
+# Dependency and image updates. Each proposal is a pull request that must pass CI like any other change.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 10
+    groups:
+      dev-tools:
+        dependency-type: development
+  - package-ecosystem: npm
+    directory: /runner/wrapper
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
+    directories:
+      - /services/api
+      - /services/worker
+      - /services/launcher
+      - /services/edge
+      - /services/github
+      - /packages/db
+      - /apps/web
+      - /runner
+      - /deploy/keycloak
+      - /deploy/backup
+    schedule: { interval: weekly }
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule: { interval: weekly }

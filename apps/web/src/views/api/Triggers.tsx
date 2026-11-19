@@ -10,7 +10,7 @@ import { classesOf, fmt, type Trigger, type TriggerProposal, type TriggerRun } f
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useProjects, useRepos, useTriggerProposals } from "../../api/queries";
-import { Btn, Empty, Field, LockNote, Panel, Select, Toggle, type Decision } from "../../ui/primitives";
+import { Btn, Empty, Field, IconBtn, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
@@ -18,7 +18,8 @@ import { useOpenTraveler } from "../../shell/useTraveler";
 import { usePrefs } from "../../lib/prefs";
 import { useCatalog } from "../projects/kit";
 import { useOutcome } from "../govern/data";
-import { TTYPES, dec, hookUrl, kindsFor, srcName, srcOptions, srcState, useCanAny, whoOptions, type ApiData } from "./kit";
+import { TTYPES, dec, hookUrl, kindsFor, srcName, srcOptions, srcState, useApiData, useCanAny, whoOptions, type ApiData } from "./kit";
+import { ListView, ago } from "../connect/kit";
 
 interface SimResult { outcome: string; msg: string; wo: string; created: boolean; notes: string[]; at: number }
 const outcomeClass = (o: string): string => (o === "created" ? "ok" : o === "refused" ? "denied" : "warn");
@@ -217,7 +218,7 @@ function Detail({ t, d, res, setRes }: { t: Trigger; d: ApiData; res: SimResult 
       <Panel title={<span className="api-th"><Icon name={TTYPES[t.type]?.icon ?? "api"} />{t.name}</span>}>
         <div className="form-grid">
           <LockNote decision={perm} what={`Triggers on ${d.pname(t.project)}`} />
-          {d.cfg && d.cfg.triggersEnabled !== true ? <div className="callout callout-warn" id="api-tr-master"><Icon name="alert" /><span>Triggers are switched off for the organisation, so no trigger fires. Turn them on under Limits.</span></div> : null}
+          {d.cfg && d.cfg.triggersEnabled !== true ? <div className="callout callout-warn" id="api-tr-master"><Icon name="alert" /><span>Triggers are switched off for the organisation, so no trigger fires. Turn them on with the switch above the list.</span></div> : null}
           <div className="toggle-row api-enabled">
             <span><strong>{t.enabled ? "Enabled" : "Disabled"}</strong>{` · ${TTYPES[t.type]?.name ?? t.type} from ${srcName(t.source, d)} · ${d.pname(t.project)}`}</span>
             <Toggle id="api-tr-enabled" checked={t.enabled} onChange={(v) => void toggle(v)} decision={perm} label="Trigger enabled" />
@@ -325,46 +326,57 @@ function Detail({ t, d, res, setRes }: { t: Trigger; d: ApiData; res: SimResult 
 
 /* ---------- the tab ---------- */
 
+function TriggerSwitch({ t, d }: { t: Trigger; d: ApiData }) {
+  const ui = useUI();
+  const perm = dec(useCan("triggers.edit", { project: t.project }));
+  void d;
+  return (
+    <Toggle id={`api-tr-sw-${t.id}`} checked={t.enabled} label="Enabled" decision={perm} onChange={(v) => void ops.saveTrigger(t.id, { enabled: v }, t.version !== undefined ? { ifMatch: t.version } : undefined).then((r) => ui.toast(r.ok ? `${t.name} ${v ? "on" : "off"}` : r.msg, r.ok ? "ok" : "error"))} />
+  );
+}
+
+/** The editor, simulate and run history of one trigger, in a drawer (the list stays the prototype's flush table). */
+function TriggerDrawer({ id, close }: { id: string; close: () => void }) {
+  const d = useApiData();
+  const [sims, setSims] = useState<Record<string, SimResult>>({});
+  const t = d.triggers.find((x) => x.id === id);
+  if (!t) return null;
+  return (
+    <div className="drawer-inner api-trigger-drawer">
+      <div className="drawer-head">
+        <div>
+          <div className="kicker">{TTYPES[t.type]?.name ?? t.type} · {d.pname(t.project)}</div>
+          <h2 className="drawer-title">{t.name}</h2>
+        </div>
+        <IconBtn icon="x" label="Close" className="drawer-close" onClick={close} />
+      </div>
+      <div className="drawer-scroll">
+        <Detail key={`${t.id}:${t.version ?? 0}`} t={t} d={d} res={sims[t.id]} setRes={(r) => setSims((s) => ({ ...s, [t.id]: r }))} />
+      </div>
+    </div>
+  );
+}
+
 export function TriggersTab({ d }: { d: ApiData }) {
   const ui = useUI();
   const guard = useCanAny("triggers.edit", d.vis);
-  const [sel, setSel] = useState<string | null>(null);
-  const [sims, setSims] = useState<Record<string, SimResult>>({});
-  const list = d.triggers;
-  const cur = list.find((t) => t.id === sel) ?? list[0] ?? null;
+  const open = (id: string): void => ui.drawer.open(`trigger:${id}`, (close) => <TriggerDrawer id={id} close={close} />);
+  const last = (t: Trigger): TriggerRun | undefined => t.runs[t.runs.length - 1];
   return (
-    <div className="form-grid">
-      <div className="toolbar">
-        <p className="muted">Triggers open work orders from events on connected source control, issue trackers and CI, and from schedules. Every trigger still goes through Intake and the project's gates, and starts switched off.</p>
-        <Btn label="New trigger" kind="primary" icon="plus" id="api-tr-new" guard={guard} onClick={() => ui.open((c) => <NewTrigger d={d} close={c} onCreated={setSel} />)} />
-      </div>
-      <div className="api-tsplit">
-        <Panel title="Triggers" flush>
-          <ul className="api-tlist">
-            {list.map((x) => {
-              const last = x.runs[x.runs.length - 1];
-              return (
-                <li key={x.id}>
-                  <button type="button" className={`api-titem${x.id === cur?.id ? " is-selected" : ""}${x.enabled ? "" : " is-off"}`} id={`api-tr-open-${x.id}`} aria-pressed={x.id === cur?.id ? "true" : "false"} onClick={() => setSel(x.id)}>
-                    <Icon name={TTYPES[x.type]?.icon ?? "api"} />
-                    <span className="api-titem-main">
-                      <strong>{x.name}</strong>
-                      <span className="small muted">{`${srcName(x.source, d)} · ${TTYPES[x.type]?.name ?? x.type} · ${d.pname(x.project)}`}</span>
-                      {srcState(x.source, d) === "healthy" ? null : <span className="small neg">{`✕ source ${srcState(x.source, d)}`}</span>}
-                    </span>
-                    <span className="api-titem-meta small">
-                      {x.enabled ? <span className="outcome o-ok">on</span> : <span className="outcome">off</span>}
-                      {x.held ? <span className="outcome o-warn" title="Proposals waiting for a person">{`${x.held} held`}</span> : null}
-                      {last ? <span className="muted">{fmt.ago(last.at, Date.now())}</span> : null}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </Panel>
-        {cur ? <Detail key={`${cur.id}:${cur.version ?? 0}`} t={cur} d={d} res={sims[cur.id]} setRes={(r) => setSims((s) => ({ ...s, [cur.id]: r }))} /> : <Empty title="No triggers" text="Create a trigger to open work orders from a connected source." />}
-      </div>
-    </div>
+    <Panel title="Triggers" flush id="api-triggers-panel" tools={<Btn label="New trigger" small kind="primary" icon="plus" id="api-tr-new" guard={guard} onClick={() => ui.open((c) => <NewTrigger d={d} close={c} onCreated={open} />)} />}>
+      <ListView<Trigger>
+        id="trig" noun="trigger" rows={d.triggers} rowKey={(t) => t.id} rowId={(t) => `api-tr-row-${t.id}`} onRow={(t) => open(t.id)} rowLabel={(t) => `Open trigger ${t.name}`}
+        text={(t) => `${t.name} ${t.type}`}
+        empty={<Empty title="No triggers" text="Create a trigger to open work orders from a connected source." />}
+        columns={[
+          { key: "n", label: "Trigger", sort: (t) => t.name.toLowerCase(), render: (t) => (
+            <div><b>{t.name}</b><span className="sub">{d.pname(t.project)} · {t.type}{srcState(t.source, d) === "healthy" ? "" : ` · source ${srcState(t.source, d)}`}</span></div>
+          ) },
+          { key: "r", label: "Runs", align: "end", sort: (t) => t.runs.length, render: (t) => t.runs.length },
+          { key: "l", label: "Last run", sort: (t) => last(t)?.at ?? 0, render: (t) => { const r = last(t); return r ? <span>{ago(r.at)} <span className={`chip ${r.outcome === "created" ? "ok" : "plain"}`}>{r.outcome}</span></span> : "\u2014"; } },
+          { key: "on", label: "Enabled", render: (t) => <TriggerSwitch t={t} d={d} /> },
+        ]}
+      />
+    </Panel>
   );
 }

@@ -7,20 +7,23 @@
  */
 import { useState } from "react";
 import { useCan } from "../api/can";
-import { useMe, useWorkload } from "../api/queries";
+import { useAccessMatrix, useMe, usePeople, useProjects, useWorkload, useWorkOrdersOfProjects } from "../api/queries";
 import type { Workload, WorkloadSuggestion } from "../api/types";
-import { Btn, Empty, Field, Segmented, Select, Tabs, ViewHead } from "../ui/primitives";
-import { Icon } from "../ui/Icon";
-import { fmt } from "@gantry/domain";
+import type { Person } from "@gantry/domain";
+import { Avatar, Btn, Chip, Field, FilterBar, Meter, Panel, SearchBox, Select, Stat, StatRow, ViewHead } from "../ui/primitives";
+import { Async } from "../ui/async";
+import { BarList } from "../ui/charts";
+import { DataTable } from "../ui/DataTable";
+import { hashFor, navigate } from "../lib/router";
 import { useUI } from "../ui/overlay-context";
-import type { SortState } from "../ui/SortTable";
 import { dec } from "./mcp/kit";
 import { DelegateDialog } from "./workload/Delegate";
-import { PersonDrawer } from "./workload/Drawer";
-import { MinutesTab, PeopleTab, TeamsTab, WaitsTab } from "./workload/Tabs";
-import { MIN_N, goConfig, goPerson, goTrust, mins, useDelegateGuard } from "./workload/kit";
+import { useCatalog, metricsOf, type PView } from "./projects/kit";
+import { CountClear, PAGE_SIZE, Pager, parseSort, setQS, sortParam, useQS } from "./govern/kit";
+import { goConfig, goPerson, goTrust, useDelegateGuard } from "./workload/kit";
+import "../styles/views/workload.css";
 
-function SuggestionItem({ s, m, openDelegate }: { s: WorkloadSuggestion; m: Workload; openDelegate: (pid: string) => void }) {
+function SuggestionItem({ s, openDelegate }: { s: WorkloadSuggestion; m: Workload; openDelegate: (pid: string) => void }) {
   const a = s.action;
   const cfg = dec(useCan("approvers.edit", a.project ? { project: a.project } : {}));
   const del = useDelegateGuard(a.person ?? "");
@@ -31,87 +34,131 @@ function SuggestionItem({ s, m, openDelegate }: { s: WorkloadSuggestion; m: Work
     else if (a.type === "person" && a.person) goPerson(a.person);
     else if (a.type === "trust") goTrust(a.project);
   };
+  const label = s.kind === "trust" ? "Raise trust" : s.kind === "delegate" ? "Delegate" : "Add an approver";
   return (
     <li className={`wl-sg wl-sg-${s.kind}`}>
-      <span className="wl-sg-ic" aria-hidden="true"><Icon name={s.icon} /></span>
-      <div className="wl-sg-main"><span className="kicker">{s.kind === "trust" ? "Raise trust" : s.kind === "delegate" ? "Delegate" : "Add an approver"}</span><p>{s.text}</p></div>
+      <Chip text={label} cls={s.kind === "trust" ? "chip-ok" : "chip-accent"} />
+      <p className="wl-sg-text">{s.text}</p>
       <Btn label={a.label} small id={a.id} guard={guard && !guard.allowed ? guard : null} onClick={run} />
     </li>
   );
 }
 
+interface PRow { p: Person; approver: boolean; mine: number; waiting: number; acts: number; oncall: boolean }
+
 export default function WorkloadView() {
   const ui = useUI();
   const me = useMe();
-  const [tab, setTab] = useState("people");
-  const [days, setDays] = useState(7);
-  const [project, setProject] = useState("all");
   const [allSugg, setAllSugg] = useState(false);
-  const [sorts, setSorts] = useState<Record<string, SortState>>({});
-  const q = useWorkload(project, days);
+  const q = useWorkload("all", 7);
+  const projects = useProjects();
+  const peopleQ = usePeople();
+  const matrix = useAccessMatrix().data;
+  const cat = useCatalog();
   const m = q.data;
+  const visible = (projects.data ?? me?.projects ?? []).filter((p) => (p as { status?: string }).status !== "archived");
+  const wos = useWorkOrdersOfProjects(visible.map((p) => p.id));
 
   if (!me) return null;
-  if (!m) return <div className="view view-workload">{q.isError ? <Empty title="Workload is not available" text={(q.error as Error)?.message ?? "Try again shortly."} /> : null}</div>;
+  // until the snapshot arrives the page is its header and the shared loading, not-visible or failed state
+  if (!m) return <div className="view view-workload"><ViewHead title="Workload" kicker="All lines" /><Async query={q} what="workload" id="wl">{() => null}</Async></div>;
 
-  const setSort = (id: string, s: SortState): void => setSorts((x) => ({ ...x, [id]: s }));
-  const openPerson = (pid: string): void => ui.drawer.open(`workload:${pid}`, (close) => <PersonDrawer pid={pid} m={m} close={close} />);
   const openDelegate = (pid: string): void => {
     const row = m.rows.find((r) => r.person === pid);
     ui.open((close) => <DelegateDialog pid={pid} away={row?.away ?? null} close={close} />);
   };
   const t = m.totals;
-  const projSel = (
-    <Select id="wl-project" aria-label="Project scope" value={project} onChange={setProject}
-      options={[{ value: "all", label: m.factoryWide ? "All projects" : `All my projects (${m.projects.length})` }, ...m.projects.map((p) => ({ value: p.id, label: p.name }))]} />
-  );
-  const body = tab === "teams" ? <TeamsTab m={m} sorts={sorts} setSort={setSort} openPerson={openPerson} />
-    : tab === "waits" ? <WaitsTab m={m} sorts={sorts} setSort={setSort} openPerson={openPerson} />
-    : tab === "minutes" ? <MinutesTab m={m} sorts={sorts} setSort={setSort} openPerson={openPerson} />
-    : <PeopleTab m={m} sorts={sorts} setSort={setSort} openPerson={openPerson} />;
   const sugg = m.suggestions;
+
+  // gates and stations across every project the viewer sees (the sheet is factory-wide)
+  const plist = projects.data as PView[] | undefined;
+  const sumBy = (pick: (mm: ReturnType<typeof metricsOf>) => Record<string, number>): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const p of plist ?? []) for (const [k, v] of Object.entries(pick(metricsOf(p)))) out[k] = (out[k] ?? 0) + v;
+    return out;
+  };
+  const byGate = sumBy((x) => x.byGate);
+  const byPos = sumBy((x) => Object.fromEntries(Object.entries(x.byPosition).map(([k, v]) => [k, v.n])));
+  const gateItems = (cat?.gates ?? []).filter((g) => g.kind !== "auto").map((g) => ({ label: `${g.label} ${g.name}`, value: byGate[g.id] ?? 0, tone: "warn" as const }));
+  const stationItems = (cat?.stations ?? []).filter((s) => !s.custom).map((s) => ({ label: s.name, value: byPos[s.id] ?? 0 }));
+  const oldest = Math.max(0, ...m.bottlenecks.map((b) => (b.open ? b.oldestMin : 0)));
+
+  // one row per active person: can they approve (the role matrix grants gate.approve), what they asked for, what sits at a gate, what they did
+  const canApprove = (p: Person): boolean => p.roles.some((g) => !!matrix?.matrix?.[g.role]?.["gate.approve"]);
+  const acts = new Map(m.rows.map((r) => [r.person, r.approvals + r.answered]));
+  const oncall = new Set(m.rows.filter((r) => r.oncall).map((r) => r.person));
+  const rows: PRow[] = (peopleQ.data ?? []).filter((p) => p.status === "active").map((p) => {
+    const mine = wos.items.filter((w) => w.requestedBy === p.id && w.state !== "done" && w.state !== "killed");
+    return { p, approver: canApprove(p), mine: mine.length, waiting: mine.filter((w) => w.state === "waiting").length, acts: acts.get(p.id) ?? 0, oncall: p.oncall || oncall.has(p.id) };
+  });
+
   return (
     <div className="view view-workload">
-      <ViewHead kicker="Govern · Workload" title="Workload"
-        sub="Human attention is the scarce resource. Who waits on whom, how long, out of hours, and where one person is the only way through. Derived from approvals, brief confirmations and answers in the work order records."
-        meta={[["Gates waiting", String(t.gatesWaiting)], ["Median wait", t.timedN >= MIN_N ? mins(t.medianWaitMin) : t.timedN ? `n=${t.timedN}` : "–"], ["After hours", t.acts >= MIN_N ? fmt.pct(t.afterHours / t.acts) : "–"], ["Human minutes", String(t.minutes)]]} />
-      <div className="toolbar wl-tools">
-        <div className="filters">
-          <Field label="Projects" htmlFor="wl-project">{projSel}</Field>
-          <div className="field"><div className="field-label">Window</div><Segmented name="wl-days" label="Window" value={String(days)} onChange={(v) => setDays(+v)} items={[{ id: "1", label: "24 hours" }, { id: "7", label: "7 days" }]} /></div>
-        </div>
-        <div className="wl-snap small muted">
-          {`Snapshot ${fmt.ist(m.at)} IST · ${t.acts} acts`}
-          <Btn label="Refresh" small kind="ghost" icon="swap" id="wl-refresh" onClick={() => void q.refetch()} />
-        </div>
+      <ViewHead title="Workload" kicker="All lines" sub="Who is carrying the approvals, and where the queue is building up." />
+      <StatRow id="wl-stats">
+        <Stat label="Approvals waiting" value={String(t.gatesWaiting)} sub="across people" tone={t.gatesWaiting > 10 ? "wait" : undefined} />
+        <Stat label="Approvers" value={String(rows.filter((r) => r.approver).length)} sub="active" />
+        <Stat label="On call" value={String(rows.filter((r) => r.oncall).length)} />
+        <Stat label="Oldest wait" value={oldest ? `${Math.round(oldest / 60)} h` : "\u2014"} sub="at a gate" tone={oldest ? "wait" : undefined} />
+      </StatRow>
+      <div className="cols wl-charts">
+        <Panel title="Queue by gate"><BarList label="Approvals waiting by gate" items={gateItems} labelWidth={150} valueAtEnd /></Panel>
+        <Panel title="Work by station"><BarList label="Open work by station" items={stationItems} labelWidth={110} valueAtEnd /></Panel>
       </div>
-      {t.soleGates || t.noneGates ? (
-        <div className="callout callout-warn wl-bus" role="note">
-          <Icon name="alert" />
-          <span>{(t.soleGates ? `${t.soleGates} of ${t.gatesWaiting} waiting gates have exactly one eligible approver` : "") + (t.soleGates && t.noneGates ? "; " : "") + (t.noneGates ? `${t.noneGates} have nobody eligible except break-glass` : "")}. That person is the bus factor for that work.</span>
-        </div>
+      <PeoplePanel rows={rows} failed={wos.failed} />
+      {sugg.length ? (
+        <Panel title="Suggestions" cls="wl-sugg" tools={sugg.length > 5 ? <Btn label={allSugg ? "Show top 5" : `Show all ${sugg.length}`} small id="wl-sugg-all" onClick={() => setAllSugg(!allSugg)} /> : undefined}>
+          <ol className="wl-sugg-list">{sugg.slice(0, allSugg ? sugg.length : 5).map((s) => <SuggestionItem key={s.key} s={s} m={m} openDelegate={openDelegate} />)}</ol>
+        </Panel>
       ) : null}
-      <section className="panel wl-sugg" aria-label="Suggestions">
-        <div className="panel-head">
-          <h2 className="panel-title">Suggestions</h2>
-          {sugg.length > 5 ? <Btn label={allSugg ? "Show top 5" : `Show all ${sugg.length}`} small kind="ghost" id="wl-sugg-all" onClick={() => setAllSugg(!allSugg)} /> : null}
-        </div>
-        <div className="panel-body">
-          {sugg.length ? (
-            <ol className="wl-sugg-list">{sugg.slice(0, allSugg ? sugg.length : 5).map((s) => <SuggestionItem key={s.key} s={s} m={m} openDelegate={openDelegate} />)}</ol>
-          ) : (
-            <div className="empty empty-state" id="wl-sugg-empty"><div className="empty-icon" aria-hidden="true"><Icon name="check" /></div><div className="empty-title">No suggestions</div><p>No single points of failure, long waits or pending trust proposals in this scope.</p></div>
-          )}
-        </div>
-      </section>
-      <section className="panel wl-main" aria-label="Workload detail">
-        <div className="wl-tabbar">
-          <Tabs idPrefix="wl-tab" active={tab} onChange={setTab} items={[{ id: "people", label: "People", count: m.rows.length }, { id: "teams", label: "Teams", count: m.teams.length }, { id: "waits", label: "Where work waits", count: m.bottlenecks.filter((b) => b.open).length }, { id: "minutes", label: "Minutes per work order" }]} />
-        </div>
-        <div className="panel-body" id="wl-tab-panel" role="tabpanel">{body}</div>
-      </section>
-      <p className="footnote">{`Out of hours means outside Mon to Fri 09:00 to 19:00 IST. Rates with fewer than ${MIN_N} observations show the raw count and "insufficient data". Factory Admins can decide any gate as break-glass; those are counted separately and not as eligible approvers.`}</p>
     </div>
   );
 }
 
+function PeoplePanel({ rows, failed }: { rows: PRow[]; failed: boolean }) {
+  const [qv, ] = useQS("wl.q");
+  const [appr] = useQS("wl.approver");
+  const [sortV] = useQS("wl.sort");
+  const [pageV] = useQS("wl.page", "0");
+  const s = qv.trim().toLowerCase();
+  const filtered = rows.filter((r) => (!s || r.p.name.toLowerCase().includes(s)) && (!appr || (appr === "yes") === r.approver));
+  const sort = parseSort(sortV, { key: "requests", dir: -1 });
+  const val = (r: PRow): number | string => (sort.key === "person" ? r.p.name : sort.key === "approve" ? Number(r.approver) : sort.key === "gate" ? r.waiting : sort.key === "actions" ? r.acts : r.mine);
+  const sorted = [...filtered].sort((a, b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * sort.dir);
+  const pages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const page = Math.min(Math.max(0, Number(pageV) || 0), pages - 1);
+  const vis = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const on = !!(qv || appr);
+  const clear = () => setQS({ "wl.q": "", "wl.approver": "", "wl.page": "" });
+  return (
+    <Panel title="People" flush id="wl-people-panel">
+      <FilterBar label="Filter people" count={<CountClear n={filtered.length} of={rows.length} noun="person" active={on} onClear={clear} />}>
+        <SearchBox id="wl-q" value={qv} onChange={(v) => setQS({ "wl.q": v, "wl.page": "" })} placeholder={"Search\u2026"} label="Search person" />
+        <Field label="Approver" htmlFor="wl-f-approver"><Select id="wl-f-approver" value={appr} onChange={(v) => setQS({ "wl.approver": v, "wl.page": "" })} options={[{ value: "", label: "All" }, { value: "yes", label: "Approvers" }, { value: "no", label: "Others" }]} /></Field>
+      </FilterBar>
+      <DataTable<PRow>
+        id="wl-people"
+        blueprintSort
+        caption="Workload per person"
+        rows={vis}
+        rowKey={(r) => r.p.id}
+        rowId={(r) => `wl-row-${r.p.id}`}
+        onRow={(r) => goPerson(r.p.id)}
+        sort={sort}
+        onSort={(x) => setQS({ "wl.sort": sortParam(x), "wl.page": "" })}
+        empty={rows.length
+          ? { title: "Nothing matches these filters", text: "Loosen the search or clear the filters.", action: <Btn label="Clear filters" id="wl-clear" onClick={clear} /> }
+          : { title: "Nothing here yet", text: "Items will appear here when they exist." }}
+        columns={[
+          { key: "person", label: "Person", sort: (r) => r.p.name, render: (r) => <div className="row" style={{ flexWrap: "nowrap" }}><Avatar id={r.p.id} /><a className="pri" href={hashFor("person", r.p.id)} onClick={(e) => { e.preventDefault(); navigate("person", r.p.id); }}>{r.p.name}</a></div> },
+          { key: "approve", label: "Can approve", sort: (r) => Number(r.approver), render: (r) => <Chip text={r.approver ? "yes" : "no"} cls={r.approver ? "ok" : "plain"} /> },
+          { key: "requests", label: "Open requests", align: "end", sort: (r) => r.mine, render: (r) => <span className="num">{failed ? "n/a" : r.mine || null}</span> },
+          { key: "gate", label: "At a gate", align: "end", sort: (r) => r.waiting, render: (r) => <span className="num">{failed ? "n/a" : r.waiting || null}</span> },
+          { key: "actions", label: "Actions logged", align: "end", sort: (r) => r.acts, render: (r) => <div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}><div style={{ width: 80 }}><Meter value={Math.min(25, r.acts)} max={25} plain label="Actions logged" /></div><span className="num">{r.acts}</span></div> },
+          { key: "oncall", label: "On call", render: (r) => (r.oncall ? <Chip text="on call" cls="info" /> : "\u2014") },
+        ]}
+      />
+      <Pager id="wl-pager" page={page} total={sorted.length} onPage={(n) => setQS({ "wl.page": n ? String(n) : "" })} />
+    </Panel>
+  );
+}

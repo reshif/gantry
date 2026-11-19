@@ -143,7 +143,7 @@ d("notifications (spec 12.2): routes, producer, deliveries, cards", () => {
       const still = await w.call(MGR, "POST", `/api/v1/deliveries/${dl.id}/retry`);
       expect(still.status).toBe(409);
       expect(still.body.msg).toMatch(/failed again/i);
-      const a = await w.call("p-asha", "POST", "/api/v1/integrations", { type: "webhook", name: "Audit lake", config: { url: `${hook.url}/in`, format: "json" }, secrets: { secret: "whsec_" + "k".repeat(20) }, targetId: "audit-lake", enable: true });
+      const a = await w.call("p-asha", "POST", "/api/v1/integrations", { type: "webhook", name: "Audit lake", config: { url: `${hook.url}/in`, format: "json" }, secrets: { secret: "whsec_" + "k7Kq2mZp9Rt4".repeat(3) }, targetId: "audit-lake", enable: true });
       expect(a.status, JSON.stringify(a.body)).toBe(200);
       expect((await w.call("p-rui", "POST", `/api/v1/deliveries/${dl.id}/retry`)).status).toBe(403);
       const ok = await w.call(MGR, "POST", `/api/v1/deliveries/${dl.id}/retry`);
@@ -224,7 +224,7 @@ d("notifications (spec 12.2): routes, producer, deliveries, cards", () => {
     // The worker posted it: record what Slack answered (the worker test covers the posting itself).
     await w.q(`update deliveries set status = 'sent', message_ref = '{"channel":"C0123","ts":"1700000000.000001"}' where id = $1`, [posted.id]);
     const approver = (await Promise.all(w.APPROVERS.map(async (p) => ({ p, ok: !!(await w.get(id, p)).allowed.approve })))).find((x) => x.ok)!.p;
-    const r = await w.call(approver, "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:G2`)}/approve`, {});
+    const r = await w.call(approver, "POST", await w.gateUrl(id, "G2"), {});
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const upd = (await w.q(`select o.payload, o.destination from outbox o join events e on e.id = o.event_id where e.type = 'gate.decision' and e.wo_id = $1 and o.destination like '%:update'`, [id]));
     expect(upd).toHaveLength(1);

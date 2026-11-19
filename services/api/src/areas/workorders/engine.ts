@@ -9,7 +9,7 @@
  * supersedes every older attempt inside its scope without the stop path having to touch attempts.
  */
 import {
-  gateAfter, gateDef, gateKind, gateProgress, nextStationId, riskTagsOf, route, routeGates, stationDef,
+  checkMatches, gateAfter, gateDef, gateKind, gateProgress, requiredFor, nextStationId, riskTagsOf, route, routeGates, stationDef,
   type Catalog, type Person, type Project, type WorkOrder,
 } from "@gantry/domain";
 import { appendEvent, cancel, enqueue, schedule, type EventCategory, type EventChannel, type Tx } from "@gantry/db";
@@ -20,6 +20,8 @@ import { revokeRunTokens } from "../internal/tokens.js";
 import { ms } from "../../core/read/rows.js";
 import { readProject } from "../projects/store.js";
 import { afterFinish as trustAfterFinish, demoteForBreach, trustDecision, trustInForce } from "../trust/record.js";
+import { editedByPeople } from "./documents.js";
+import { conflict } from "../../core/errors.js";
 import { bayOf, buildWorkOrders, loadFlowDocs, pinnedProject, saveWo, stationIdOf, type Data, type Wo } from "./model.js";
 
 export interface Fx {
@@ -33,6 +35,8 @@ export interface Fx {
   jobs: BuiltJob[];
   /** Legacy slice names for the SSE change message. */
   changes: Set<string>;
+  /** The work order whose entry into a station is already settled (a place was found, or a person overrode the limit): the WIP check lets it through. */
+  wipAdmit?: string;
 }
 
 export async function newFx(tx: Tx, orgId: string, actor: string, now: Date = new Date()): Promise<Fx> {
@@ -123,6 +127,12 @@ export async function acquireSlot(fx: Fx, w: Wo, project: Project): Promise<numb
   const held = await fx.tx.query<{ id: string }>(`select id from slots where org_id = $1 and wo_id = $2 and state = 'held'`, [fx.orgId, w.id]);
   if (held.rows[0]) return Number(held.rows[0].id.split(":").pop());
   const limit = Math.max(0, Number(project.flow.slots) || 0);
+  // The limit counts live holders, not slot numbers: after the limit is lowered, holders on numbers above it still count (S-33). The project's slot table is serialised so two dispatches cannot both see room for one.
+  // Lock order is always the WIP lock, then the slot lock, so a station entry and a slot dispatch can never wait on each other.
+  await lockWip(fx, project.id);
+  await fx.tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [`slots:${fx.orgId}:${project.id}`]);
+  const holders = Number((await fx.tx.query<{ n: string }>(`select count(*) n from slots where org_id = $1 and project_id = $2 and state = 'held'`, [fx.orgId, project.id])).rows[0]?.n ?? 0);
+  if (holders >= limit) return null;
   for (let n = 1; n <= limit; n++) {
     const r = await fx.tx.query(
       `insert into slots (org_id, id, project_id, repo_id, wo_id, state, acquired_at, released_at) values ($1, $2, $3, $4, $5, 'held', $6, null)
@@ -145,6 +155,14 @@ const PRIORITY_SQL = `case priority when 'P0' then 0 when 'P1' then 1 when 'P2' 
 
 /** Moves work waiting in the Queue bay onto free slots, in the deterministic order of spec 9.6 (priority, then age in the bay). Skips stopped scopes and rows another command holds. */
 export async function dispatchQueued(fx: Fx, projectId: string): Promise<string[]> {
+  await lockWip(fx, projectId);
+  const started = await dispatchSlots(fx, projectId);
+  // A place that freed (an order left, was parked, killed or declined, or the limit went up) lets the next order waiting for a full station in, under the same lock.
+  await promoteWip(fx, projectId);
+  return started;
+}
+
+async function dispatchSlots(fx: Fx, projectId: string): Promise<string[]> {
   const started: string[] = [];
   const project = await projectOf(fx, projectId);
   for (let guard = 0; guard < 50; guard++) {
@@ -182,6 +200,262 @@ export async function dispatchQueued(fx: Fx, projectId: string): Promise<string[
   return started;
 }
 
+/* ----------------------------------------------------------------------------------- station WIP limits */
+
+/** The project's WIP limit for a station: 0 or unset means no limit. */
+export const wipLimitOf = (project: Pick<Project, "flow">, stationId: string): number => {
+  const n = Number(project.flow.stations[stationId]?.wip);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+};
+
+/** One lock per project for every decision about places: entering a station, a place freeing, a coding slot. Always taken before the slot lock. */
+export async function lockWip(fx: Pick<Fx, "tx" | "orgId">, projectId: string): Promise<void> {
+  await fx.tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [`wip:${fx.orgId}:${projectId}`]);
+}
+
+/**
+ * Live orders at a station: running or waiting there (on its gate, or finished and waiting for the next station to have room), not parked, declined, done or killed.
+ * Work waiting in the Queue bay for a coding slot has been let into Build, so it counts there. The order asking is never counted against itself.
+ */
+export async function wipLive(fx: Pick<Fx, "tx" | "orgId">, projectId: string, stationId: string, exceptId = ""): Promise<number> {
+  return countWip(fx.tx, fx.orgId, projectId, stationId, exceptId);
+}
+
+export async function countWip(db: Pick<Tx, "query">, orgId: string, projectId: string, stationId: string, exceptId = ""): Promise<number> {
+  const { rows } = await db.query<{ n: string }>(
+    `select count(*) n from work_orders where org_id = $1 and project_id = $2 and id <> $4
+       and ((position = $3 and state in ('running','waiting')) or ($3 = 'build' and position = 'queue' and state = 'parked' and data->>'bayFrom' = 'build'))`,
+    [orgId, projectId, stationId, exceptId],
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+/** Whether the order may enter the station now (the caller holds the WIP lock): null when it may, else how full the station is. */
+async function wipFull(fx: Fx, w: Wo, project: Project, stationId: string): Promise<{ live: number; limit: number } | null> {
+  const limit = wipLimitOf(project, stationId);
+  if (!limit) return null;
+  const live = await wipLive(fx, w.project, stationId, w.id);
+  return live >= limit ? { live, limit } : null;
+}
+
+const stationName = (fx: Fx, id: string): string => stationDef(fx.catalog, id)?.name ?? id;
+
+/** Why an order waits for a full station: it advanced (forward), was sent back (back), is retried (retry), or returns from a bay (unpark). */
+export type WipKind = "forward" | "back" | "retry" | "unpark" | "restore" | "merge";
+interface WipWaitData { station: string; since: number; live: number; limit: number; kind?: WipKind; by?: string; reason?: string; restore?: { state: string; station: string; fencing: string } }
+
+/** Whether the order already holds a place at the station: live there (running or waiting). A failed or blocked order is not counted, so its retry or redo needs a place like any entry. */
+const holdsPlaceAt = (w: Wo, to: string): boolean =>
+  (w.position === to && (w.state === "running" || w.state === "waiting")) || (to === "build" && w.position === "queue" && w.state === "parked" && w.data.bayFrom === "build");
+
+/**
+ * THE choke point for a limit: every entry into a station (an advance, a send-back, a retry, a return from a bay, a restore after a kill, `enterStation` itself) asks here.
+ * When the station is full the order waits instead: it keeps its place in the line, holds no coding slot, and goes in when a place frees. Returns whether it was held.
+ * The limit and the count are read under the project's WIP lock (a limit changed since the first look never strands a waiter). `force` ignores a place the order seems to
+ * hold (a restored order is not counted in the rows yet). The caller saves the order.
+ */
+export async function wipHoldCheck(fx: Fx, w: Wo, to: string, kind: WipKind, extra: { by?: string; reason?: string; force?: boolean; restore?: WipWaitData["restore"] } = {}): Promise<boolean> {
+  if (fx.wipAdmit === w.id) return false;
+  if (!wipLimitOf(await projectOf(fx, w.project), to) || (!extra.force && holdsPlaceAt(w, to))) return false;
+  await lockWip(fx, w.project);
+  const project = await projectOf(fx, w.project); // again, under the lock
+  const full = await wipFull(fx, w, project, to);
+  if (!full) return false;
+  const { force: _f, ...keep } = extra;
+  await holdForWip(fx, w, to, full, kind, keep);
+  return true;
+}
+
+async function holdForWip(fx: Fx, w: Wo, next: string, full: { live: number; limit: number }, kind: WipKind, extra: { by?: string; reason?: string; restore?: WipWaitData["restore"] }): Promise<void> {
+  const from = stationIdOf(fx.catalog, w);
+  const text = `Waiting: ${stationName(fx, next)} is full (${full.live}/${full.limit})`;
+  if (kind === "forward") closeEntry(w, fx, `waiting for ${stationName(fx, next)}`);
+  // A finished or sent-back order waits on the belt; a retry or a return from a bay stays as it is (failed, or in its bay) until it can go in; a restored order is parked on its station, not counted.
+  // (a failed order redone at its own station stays failed, as a retry does: it is not counted there, and counting it would make it wait for itself)
+  // Only an order that is live (running or waiting) stays counted as waiting; a failed, blocked or parked one (an epic child not yet in Build) keeps its uncounted state, wherever it is going.
+  if (kind === "forward" || (kind === "back" && (w.state === "running" || w.state === "waiting"))) w.state = "waiting";
+  if (kind === "restore") w.state = "parked";
+  w.data.wipWait = { station: next, since: fx.now.getTime(), live: full.live, limit: full.limit, kind, ...extra } satisfies WipWaitData;
+  w.data.blockReason = text;
+  await releaseSlot(fx, w);
+  note(w, fx, "system", `${text}. ${w.id} waits ${kind === "unpark" || kind === "merge" ? "in its bay" : kind === "restore" ? "after its restore" : `at ${stationName(fx, from)}`} until a place frees.`);
+  ev(fx, w, "wo.wip.wait", { station: from, to: next, live: full.live, limit: full.limit, kind, text });
+  fx.changes.add("floor");
+}
+
+/** Lets a waiting order into the station it was waiting for (a place freed, or a person overrode the limit). The caller saves the order. */
+async function runWipEntry(fx: Fx, w: Wo, how: { override?: { by: string; reason: string } }): Promise<void> {
+  const wait = w.data.wipWait as WipWaitData;
+  const next = wait.station;
+  const kind = wait.kind ?? "forward";
+  const from = stationIdOf(fx.catalog, w);
+  const waited = fx.now.getTime() - Number(wait.since ?? fx.now.getTime());
+  delete w.data.wipWait;
+  w.data.blockReason = null;
+  const prevAdmit = fx.wipAdmit;
+  fx.wipAdmit = w.id;
+  try {
+  if (kind === "forward" || kind === "back") {
+    const project = await pinned(fx, w);
+    if (kind === "forward") closeEntry(w, fx, "moved on");
+    await enterStation(fx, w, next, { project });
+  } else if (kind === "restore") {
+    const r = wait.restore ?? { state: "running", station: next, fencing: "0" };
+    w.state = r.state as Wo["state"];
+    await (await import("../stops/enforce.js")).resumeRestored(fx, w, r.station, r.fencing);
+  } else {
+    const m = await import("./moves.js");
+    if (kind === "retry") await m.retryCore(fx, w, wait.by ?? "system");
+    else if (kind === "merge") await m.retryMergeCore(fx, w, wait.by ?? "system");
+    else await m.unparkCore(fx, w, wait.by ?? "system", wait.reason);
+  }
+  } finally {
+    fx.wipAdmit = prevAdmit;
+  }
+  const live = await wipLive(fx, w.project, next);
+  const limit = wipLimitOf(await projectOf(fx, w.project), next);
+  if (how.override) {
+    note(w, fx, how.override.by, `Moved into ${stationName(fx, next)} past its WIP limit (${live}/${limit || "no limit"}): ${how.override.reason}`);
+    ev(fx, w, "wo.wip.override", { station: next, from, live, limit, kind, by: how.override.by, text: how.override.reason, waitedMs: waited }, { category: "approvals" });
+  } else {
+    note(w, fx, "system", `A place freed at ${stationName(fx, next)} (${live}/${limit}); ${w.id} moved in after waiting ${Math.max(0, Math.round(waited / 1000))} s.`);
+    ev(fx, w, "wo.wip.enter", { station: next, from, live, limit, kind, waitedMs: waited, text: `Entered ${stationName(fx, next)}` });
+  }
+  fx.changes.add("floor");
+}
+
+/** Where the order goes next on its own route, the way `advance` works it out. */
+async function nextOf(fx: Fx, w: Wo): Promise<string | null> {
+  const p = await pinned(fx, w);
+  return nextStationId(fx.catalog, p, { cls: w.cls, station: fx.catalog.stations.findIndex((s) => s.id === stationIdOf(fx.catalog, w)) });
+}
+
+const WAITING_STATES = `('waiting','parked','failed','blocked')`;
+
+interface WaiterRow { id: string; position: string; state: string; kind: WipKind; target: string }
+
+/**
+ * Moves orders waiting for a full station in as places free: a send-back first (so work going back is never starved by work going forward), then highest priority, then the
+ * one that has waited longest. Runs under the project's WIP lock, taken before anything is read, so two orders cannot take the last place and no waiter is missed. Nobody is
+ * ever evicted: a lowered limit only stops new entries. Skips stopped scopes and rows another command holds.
+ *
+ * Cycles: an order at A waiting to go back to B, while B is full of orders waiting to go forward to A, would wait for ever, because neither station frees a place. The waiters
+ * make a graph of stations (an edge from A to B when someone at A wants B); a loop in it is found by one depth-first search with a visited set (stations plus edges, no
+ * backtracking), and every order on the loop moves at once: each leaves one place and takes one, so no count changes.
+ */
+const promoting = new WeakSet<Fx>();
+export async function promoteWip(fx: Fx, projectId: string): Promise<string[]> {
+  const entered: string[] = [];
+  if (promoting.has(fx)) return entered; // a promotion that re-judges an order is already looping; it sees every place that frees
+  promoting.add(fx);
+  try {
+    return await promoteLoop(fx, projectId, entered);
+  } finally {
+    promoting.delete(fx);
+  }
+}
+
+const STOPPED_SQL = `exists (select 1 from stops s where s.org_id = w.org_id and s.lifted_at is null
+  and (s.scope_type = 'factory' or (s.scope_type = 'project' and s.project_id = w.project_id) or (s.scope_type = 'repo' and s.repo_id = w.repo_id) or (s.scope_type = 'wo' and (s.wo_id = w.id or s.wo_id = w.parent_id))))`;
+
+async function promoteLoop(fx: Fx, projectId: string, entered: string[]): Promise<string[]> {
+  await lockWip(fx, projectId); // first: a waiter another command is still holding (not yet committed) is seen once it commits
+  const any = await fx.tx.query(`select 1 from work_orders where org_id = $1 and project_id = $2 and state in ${WAITING_STATES} and position <> 'declined' and data ? 'wipWait' limit 1`, [fx.orgId, projectId]);
+  if (!any.rowCount) return entered;
+  const { toWo, WO_COLS } = await import("./model.js");
+  const load = async (id: string): Promise<Wo> => toWo((await fx.tx.query(`select ${WO_COLS} from work_orders where org_id = $1 and id = $2`, [fx.orgId, id])).rows[0]);
+  const bays = new Set(fx.catalog.bays.map((b) => b.id));
+  for (let guard = 0; guard < 100; guard++) {
+    const project = await projectOf(fx, projectId);
+    const { rows } = await fx.tx.query<{ id: string; position: string; state: string; kind: string | null; target: string }>(
+      `select w.id, w.position, w.state, w.data->'wipWait'->>'kind' kind, w.data->'wipWait'->>'station' target from work_orders w
+        where w.org_id = $1 and w.project_id = $2 and w.state in ${WAITING_STATES} and w.position <> 'declined' and w.data ? 'wipWait' and coalesce(w.data->>'heldByKill', '') = '' and not ${STOPPED_SQL}
+        order by case w.data->'wipWait'->>'kind' when 'back' then 0 else 1 end, ${PRIORITY_SQL.replace("priority", "w.priority")}, coalesce((w.data->'wipWait'->>'since')::bigint, 0), w.created_at, w.id for update of w skip locked`,
+      [fx.orgId, projectId],
+    );
+    if (!rows.length) break;
+    const counts = new Map<string, number>(
+      (await fx.tx.query<{ s: string; n: string }>(
+        `select case when position = 'queue' then 'build' else position end s, count(*) n from work_orders where org_id = $1 and project_id = $2
+          and ((position <> 'queue' and state in ('running','waiting')) or (position = 'queue' and state = 'parked' and data->>'bayFrom' = 'build')) group by 1`,
+        [fx.orgId, projectId],
+      )).rows.map((r) => [r.s, Number(r.n)]),
+    );
+    const waiters: WaiterRow[] = rows.map((r) => ({ id: r.id, position: r.position, state: r.state, kind: (r.kind ?? "forward") as WipKind, target: r.target }));
+    // The graph of stations: from where a waiter on the belt is to where it wants to go, in promotion order.
+    const edges = new Map<string, WaiterRow[]>();
+    for (const x of waiters) if (x.state === "waiting" && !bays.has(x.position) && (x.kind === "forward" || x.kind === "back")) (edges.get(x.position) ?? edges.set(x.position, []).get(x.position)!).push(x);
+    let moved = false;
+    for (const c of waiters) {
+      const limit = wipLimitOf(project, c.target);
+      const full = limit > 0 && (counts.get(c.target) ?? 0) >= limit;
+      if (!full) {
+        const w = await load(c.id);
+        if (c.kind === "forward") {
+          const next = await nextOf(fx, w);
+          if (next !== c.target) {
+            // The route changed while it waited (a station was switched off): the order is re-judged from where it is.
+            delete w.data.wipWait;
+            w.data.blockReason = null;
+            await advance(fx, w, "system");
+            await saveWo(fx.tx, fx.orgId, w);
+            if (w.data.wipWait === undefined) entered.push(w.id);
+            moved = true;
+            break;
+          }
+        }
+        await runWipEntry(fx, w, {});
+        await saveWo(fx.tx, fx.orgId, w);
+        entered.push(w.id);
+        moved = true;
+        break;
+      }
+      const cycle = findCycle(c, edges);
+      if (!cycle) continue;
+      for (const m of cycle) {
+        const w = await load(m.id);
+        await runWipEntry(fx, w, {});
+        await saveWo(fx.tx, fx.orgId, w);
+        entered.push(w.id);
+      }
+      moved = true;
+      break;
+    }
+    if (!moved) break;
+  }
+  return entered;
+}
+
+/** The waiters (starting with `start`) that form a closed loop of stations, or null: one depth-first search with a visited set, so the cost is stations plus waiters. */
+function findCycle(start: WaiterRow, edges: Map<string, WaiterRow[]>): WaiterRow[] | null {
+  if (start.state !== "waiting") return null;
+  const origin = start.position;
+  const visited = new Set<string>([origin]);
+  const walk = (station: string): WaiterRow[] | null => {
+    if (station === origin) return [];
+    if (visited.has(station)) return null;
+    visited.add(station);
+    for (const o of edges.get(station) ?? []) {
+      const rest = walk(o.target);
+      if (rest) return [o, ...rest];
+    }
+    return null;
+  };
+  const rest = walk(start.target);
+  return rest ? [start, ...rest] : null;
+}
+
+/** A Factory Admin pushes one waiting order into its station past the limit (audited with the reason). Works for an advance, a send-back, a retry and a return from a bay. */
+export async function overrideWip(fx: Fx, w: Wo, by: string, reason: string): Promise<{ station: string }> {
+  const wait = w.data.wipWait as WipWaitData | undefined;
+  if (!wait?.station || w.state === "done" || w.state === "killed") throw conflict(`${w.id} is not waiting for a station to have room.`);
+  await lockWip(fx, w.project);
+  await runWipEntry(fx, w, { override: { by, reason } });
+  await saveWo(fx.tx, fx.orgId, w);
+  await dispatchQueued(fx, w.project);
+  return { station: wait.station };
+}
+
 /* ----------------------------------------------------------------------------------- attempts (F3) */
 
 export interface Attempt { id: string; fencing: number }
@@ -191,9 +465,13 @@ export async function startAttempt(fx: Fx, w: Wo, stationId: string): Promise<At
   await fx.tx.query(`update attempts set state = 'superseded', ended_at = $4, updated_at = now(), version = version + 1 where org_id = $1 and wo_id = $2 and station = $3 and state in ('queued','running')`, [fx.orgId, w.id, stationId, fx.now]);
   const visit = Number((await fx.tx.query(`select coalesce(max(visit), 0) + 1 as v from attempts where org_id = $1 and wo_id = $2 and station = $3`, [fx.orgId, w.id, stationId])).rows[0].v);
   const id = `ATT-${w.id}-${stationId}-${visit}`;
+  // A one-off limit raise a person approved applies to this attempt only: it moves from the work order onto the attempt, and is gone for the next one.
+  const pending = w.data.limitRaise as { station?: string } | undefined;
+  const raise = pending && (!pending.station || pending.station === stationId) ? pending : null;
+  if (raise) delete w.data.limitRaise;
   const { rows } = await fx.tx.query<{ fencing: string }>(
     `insert into attempts (org_id, id, wo_id, station, visit, state, data) values ($1,$2,$3,$4,$5,'queued',$6::jsonb) returning fencing`,
-    [fx.orgId, id, w.id, stationId, visit, JSON.stringify({ agent: openEntry(w)?.agent ?? stationDef(fx.catalog, stationId)?.agent ?? "" })],
+    [fx.orgId, id, w.id, stationId, visit, JSON.stringify({ agent: openEntry(w)?.agent ?? stationDef(fx.catalog, stationId)?.agent ?? "", ...(raise ? { limitRaise: raise } : {}) })],
   );
   const fencing = Number(rows[0]!.fencing);
   fx.jobs.push(job("attempt.dispatch", { woId: w.id, station: stationId, attemptId: id, fencing }, { dedupeKey: `attempt:${id}` }));
@@ -303,12 +581,26 @@ export const pinned = async (fx: Fx, w: Wo): Promise<Project> => {
 /* ----------------------------------------------------------------------------------- the machine */
 
 /** Puts a work order at a station: Intake waits on its conversation and brief; other stations get a run (Build first needs a coding slot). */
-export async function enterStation(fx: Fx, w: Wo, stationId: string, o: { project?: Project; entryNote?: string } = {}): Promise<void> {
+export async function enterStation(fx: Fx, w: Wo, stationId: string, o: { project?: Project; entryNote?: string; /** The caller already settled the place (or the entry is not limited, as an epic child created into Intake). */ noWip?: boolean } = {}): Promise<boolean> {
+  // The WIP limit lives here so no caller can bypass it: a full station keeps the order where it is (in its bay if it came from one) and it goes in when a place frees.
+  if (!o.noWip && (await wipHoldCheck(fx, w, stationId, bayOf(fx.catalog, w) ? "unpark" : "back", { by: fx.actor }))) return false;
+  // A swarm still open when the work order enters a station again (a halt and resume, a send-back) is over: its live scouts count as stopped.
+  const sw = w.data.swarm as { endedAt?: number; scouts?: Array<{ state: string }> } | undefined;
+  if (sw && !sw.endedAt) {
+    sw.endedAt = fx.now.getTime();
+    for (const sc of sw.scouts ?? []) if (sc.state === "queued" || sc.state === "running") sc.state = "stopped";
+  }
   const project = o.project ?? (await pinned(fx, w));
   const live = await projectOf(fx, w.project);
   delete w.data.bayReason;
   delete w.data.bayFrom;
   delete w.data.bayAt;
+  delete w.data.bayCause;
+  delete w.data.failPhase;
+  delete w.data.limitStop;
+  // A pending raise is for the next attempt at its own station only.
+  if (w.data.limitRaise && (w.data.limitRaise as { station?: string }).station !== stationId) w.data.limitRaise = undefined;
+  delete w.data.wipWait;
   w.data.blockReason = null;
   w.data.failReason = null;
   if (stationId === "intake") {
@@ -319,7 +611,7 @@ export async function enterStation(fx: Fx, w: Wo, stationId: string, o: { projec
     const wasOpen = await openInstanceOf(fx.tx, fx.orgId, w.id, "G0G1");
     if (!wasOpen) await openInstance(fx.tx, fx.orgId, w, "G0G1", { station: "intake", flowVersion: w.flowVersion, now: fx.now });
     ev(fx, w, "wo.enter", { station: "intake" });
-    return;
+    return true;
   }
   if (stationId === "build") {
     const n = await acquireSlot(fx, w, live);
@@ -331,7 +623,7 @@ export async function enterStation(fx: Fx, w: Wo, stationId: string, o: { projec
       w.state = "parked";
       note(w, fx, "system", "Waiting in the Queue for a coding slot.");
       ev(fx, w, "wo.bay", { bay: "queue", from: null, station: "build", text: "Waiting for a free coding slot" });
-      return;
+      return true;
     }
   } else {
     await releaseSlot(fx, w);
@@ -344,6 +636,7 @@ export async function enterStation(fx: Fx, w: Wo, stationId: string, o: { projec
   if (o.entryNote) note(w, fx, fx.actor, o.entryNote);
   ev(fx, w, "wo.enter", { station: stationId });
   void project;
+  return true;
 }
 
 /** The brief says an epic splits into children after Plan: creates them, each skipping straight to Build (spec 9.6). The parent waits until every child is closed. */
@@ -353,8 +646,11 @@ async function splitEpic(fx: Fx, w: Wo, project: Project, by: string): Promise<v
   const { newWoId, createWorkOrder } = await import("./create.js");
   for (const name of names) {
     const id = await newWoId(fx.tx);
+    // The Plan agent writes each child as "Title: one-line goal"; the title and the goal are its words, not Gantry's.
+    const [t, ...g] = name.split(":");
+    const goal = g.join(":").trim();
     await createWorkOrder(fx, {
-      id, project: project.id, repo: w.repo ?? "", title: `${w.title}: ${name}`, description: `Child of ${w.id}. ${name} part of the epic.`, forceCls: "feature", requestedBy: w.submitter ?? by, source: "epic", parent: w.id, childOf: { by, parent: w.id },
+      id, project: project.id, repo: w.repo ?? "", title: `${w.title}: ${(g.length ? t! : name).trim()}`, description: `Child of ${w.id} (${w.title}).${goal ? ` ${goal}` : g.length ? "" : ` ${name}`}`, forceCls: "feature", requestedBy: w.submitter ?? by, source: "epic", parent: w.id, childOf: { by, parent: w.id },
     });
     ids.push(id);
   }
@@ -375,6 +671,12 @@ export async function advance(fx: Fx, w: Wo, by: string, project?: Project): Pro
   const sid = stationIdOf(fx.catalog, w);
   const idx = fx.catalog.stations.findIndex((s) => s.id === sid);
   if (w.cls === "epic" && sid === "plan" && Array.isArray(w.data.brief?.children) && w.data.brief.children.length && !w.data.split) return splitEpic(fx, w, p, by);
+  // An epic with no split is never silently built as one work order: Gantry asks a person (who may add children to the brief or send it back to the Plan agent).
+  if (w.cls === "epic" && sid === "plan" && !w.data.split && !(Array.isArray(w.data.brief?.children) && w.data.brief.children.length)) {
+    const { parkInto } = await import("./intake.js");
+    note(w, fx, "system", "The plan did not split this epic into child work orders.");
+    return parkInto(fx, w, "person", "This epic has no split into child work orders. Add children to the brief, or return it to Plan so the Plan agent proposes one.");
+  }
   const next = nextStationId(fx.catalog, p, { cls: w.cls, station: idx });
   if (!next) {
     const g6 = routeGates(fx.catalog, p, w.cls).includes("G6");
@@ -385,7 +687,54 @@ export async function advance(fx: Fx, w: Wo, by: string, project?: Project): Pro
     }
     return finish(fx, w, by);
   }
-  await enterStation(fx, w, next, { project: p });
+  // A full station keeps the order where it is (the places are counted under the project's WIP lock, so two orders cannot take the last one).
+  if (await wipHoldCheck(fx, w, next, "forward")) {
+    await saveWo(fx.tx, fx.orgId, w); // the places are counted from the rows, so the move is written before the next order is let in
+    await dispatchQueued(fx, w.project);
+    return;
+  }
+  await enterStation(fx, w, next, { project: p, noWip: true });
+  // The station it left has a place now (written first: the places are counted from the rows).
+  await saveWo(fx.tx, fx.orgId, w);
+  await promoteWip(fx, w.project);
+}
+
+export type GateCheck = { name: string; ok: boolean; warn?: boolean; note?: string };
+export type GateEvidenceSource = "observed" | "person" | "github" | "none";
+/** Where an automatic gate's checks came from, recorded on the instance and its decision (GitHub check ids make the verdict traceable). */
+export interface GateEvidence { source: GateEvidenceSource; headSha?: string; githubCheckIds?: Array<number | string> }
+
+const CI_PASS = new Set(["success", "neutral", "skipped"]);
+
+/**
+ * The real CI results for a work order's pull request head (spec 9.5, G4 "Required checks"): the repository's required checks; with none configured
+ * there is no complete set to judge, so there is no evidence. A completed check that did not succeed fails the gate; a required check that is missing or still running is
+ * no evidence yet (null), so the gate waits for a person. Fails closed.
+ */
+async function ciEvidence(fx: Fx, w: Wo, headSha: string | null): Promise<{ checks: GateCheck[]; evidence: GateEvidence } | null> {
+  const pr = (await fx.tx.query<{ repo_id: string; head_sha: string | null }>(`select repo_id, head_sha from pull_requests where org_id = $1 and wo_id = $2 and state = 'open' order by number desc limit 1`, [fx.orgId, w.id])).rows[0];
+  const sha = headSha ?? pr?.head_sha ?? null;
+  if (!pr || !sha) return null;
+  const rows = (await fx.tx.query<{ name: string; status: string; conclusion: string | null; github_id: string | null }>(`select name, status, conclusion, github_id::text from checks where org_id = $1 and repo_id = $2 and head_sha = $3`, [fx.orgId, pr.repo_id, sha])).rows;
+  const required = (await fx.tx.query<{ required_checks: string[] }>(`select required_checks from repo_config where org_id = $1 and repo_id = $2`, [fx.orgId, pr.repo_id])).rows[0]?.required_checks ?? [];
+  // Without required checks there is no way to know the set is complete (a fast check may report before the others exist), so a person decides.
+  if (!required.length) return null;
+  const names = required;
+  const checks: GateCheck[] = [];
+  const ids: Array<number | string> = [];
+  let unsettled = false;
+  for (const name of names) {
+    const r = rows.find((x) => x.name === name) ?? rows.find((x) => checkMatches(name, x.name));
+    if (!r || r.status !== "completed") {
+      unsettled = true;
+      continue;
+    }
+    if (r.github_id) ids.push(r.github_id);
+    const ok = !!r.conclusion && CI_PASS.has(r.conclusion);
+    checks.push({ name, ok, note: `GitHub check ${r.github_id ?? "?"}: ${r.conclusion ?? "no conclusion"}` });
+  }
+  if (!checks.some((c) => !c.ok) && unsettled) return null;
+  return { checks, evidence: { source: "github", headSha: sha, githubCheckIds: ids } };
 }
 
 /** A station finished: run the gate behind it, if the class passes one, otherwise advance. `checks` are the observed results for automatic and mixed gates. */
@@ -398,21 +747,45 @@ export async function arriveAtGate(fx: Fx, w: Wo, by: string, o: { checks?: Arra
 }
 
 /** Opens a gate instance and, for automatic and mixed gates, judges the checks (spec 9.5). Trust levels above L1 are off by default, so a human gate always waits. */
-export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Project; checks?: Array<{ name: string; ok: boolean; warn?: boolean; note?: string }>; headSha?: string | null } = {}): Promise<void> {
+export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Project; checks?: Array<{ name: string; ok: boolean; warn?: boolean; note?: string }>; headSha?: string | null; evidence?: GateEvidenceSource } = {}): Promise<void> {
   const project = o.project ?? (await pinned(fx, w));
   const g = gateDef(fx.catalog, gateId);
   if (!g) throw new Error(`unknown gate ${gateId}`);
   const kind = gateKind(fx.catalog, project, gateId);
   const sid = stationIdOf(fx.catalog, w);
   const tags = riskTagsOf({ files: (w.data.files as WorkOrder["files"]) ?? [], paths: (w.data.paths as string[]) ?? [], risk: w.risk ?? "normal" });
-  const checks: Array<{ name: string; ok: boolean; warn?: boolean; note?: string }> = o.checks ?? (Array.isArray((w.data.gateChecks ?? {})[gateId]) ? (w.data.gateChecks[gateId] as Array<{ name: string; ok: boolean }>) : g.checks.map((c) => ({ name: c, ok: true })));
-  const instance = await openInstance(fx.tx, fx.orgId, w, gateId, { station: sid, flowVersion: w.flowVersion, headSha: o.headSha ?? null, basis: { riskTags: tags, forcedHuman: tags.length > 0, checks, required: Math.max(1, Number(project.approvers[gateId]?.required) || 1) }, now: fx.now });
+  // Spec 13.3: a change that is over its agent's diff limit or touches a forbidden or protected path is decided by a person, on any gate, and the cell drops to L1.
+  const gr = (w.data.guardrail ?? {}) as { over?: boolean; size?: number; protectedTouched?: string[]; forbiddenTouched?: string[] };
+  const breach = [...(gr.forbiddenTouched ?? []), ...(gr.protectedTouched ?? [])];
+  const guardrailBreach = !!gr.over || breach.length > 0;
+  if (guardrailBreach) await demoteForBreach(fx.tx, fx.orgId, { woId: w.id, kind: "guardrail", gateId, text: gr.over && !breach.length ? `The diff is ${gr.size} lines, over the agent's limit.` : `The change touches guarded paths: ${breach.slice(0, 5).join(", ")}.` }, fx.now, (e) => fx.events.push(e));
+  // Evidence comes from the system, never from the agent's own report: checks the worker observed, a person's release, or the GitHub check runs
+  // stored for this pull request's head. Nothing else counts, and no evidence is not a pass: an automatic gate then waits for a person.
+  // An empty list is not observed evidence: an automatic gate with zero checks must never pass on it.
+  const given = o.checks?.length ? o.checks : undefined;
+  let checks: GateCheck[] = given ?? [];
+  let evidence: GateEvidence = given ? { source: o.evidence ?? "observed" } : { source: "none" };
+  if (!given && (kind === "auto" || kind === "mixed") && gateId === "G1f") {
+    // Feasibility: judged from what the system holds, a research document a station wrote and no blocking question still open, not from the agent's claim.
+    const note_ = (await fx.tx.query(`select 1 from artefacts where org_id = $1 and wo_id = $2 and station = 'research' and doc is not null and author_kind <> 'system' limit 1`, [fx.orgId, w.id])).rowCount;
+    const blocking = (await fx.tx.query(`select 1 from wo_questions where org_id = $1 and wo_id = $2 and blocking and status = 'open' limit 1`, [fx.orgId, w.id])).rowCount;
+    checks = [{ name: "Research note attached", ok: !!note_ }, { name: "No blocking unknowns", ok: !blocking }];
+    evidence = { source: "observed" };
+  }
+  if (!given && (kind === "auto" || kind === "mixed") && gateId === "G4") {
+    const ci = await ciEvidence(fx, w, o.headSha ?? null);
+    if (ci) {
+      checks = ci.checks;
+      evidence = ci.evidence;
+    }
+  }
+  const instance = await openInstance(fx.tx, fx.orgId, w, gateId, { station: sid, flowVersion: w.flowVersion, headSha: o.headSha ?? null, basis: { riskTags: tags, forcedHuman: tags.length > 0 || guardrailBreach, checks, evidence, required: requiredFor(project.approvers[gateId], w.cls), ...(g.after === "review" && w.data.review ? { review: w.data.review } : {}) }, now: fx.now });
   if (kind === "auto" || kind === "mixed") {
     (w.data.gateChecks ??= {})[gateId] = checks;
     const failed = checks.some((c) => !c.ok && !c.warn);
     if (failed) {
       await closeInstance(fx, instance, "decision");
-      await fx.tx.query(`insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, rule, flow_version, detail, at) values ($1,$2,$3,$4,'auto_failed',$5,$6,$7::jsonb,$8)`, [fx.orgId, `GD-${instance}`, instance, w.id, `AUTO-${gateId}`, w.flowVersion, JSON.stringify({ checks, mode: "auto" }), fx.now]);
+      await fx.tx.query(`insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, rule, flow_version, detail, at) values ($1,$2,$3,$4,'auto_failed',$5,$6,$7::jsonb,$8)`, [fx.orgId, `GD-${instance}`, instance, w.id, `AUTO-${gateId}`, w.flowVersion, JSON.stringify({ checks, mode: "auto", evidence }), fx.now]);
       (w.data.gateStatus ??= {})[gateId] = "failed";
       closeEntry(w, fx, `failed at ${g.label}`);
       if (gateId === "G3G3s") {
@@ -435,9 +808,14 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
       await saveWo(fx.tx, fx.orgId, w);
       return;
     }
-    if (kind === "auto") {
+    // Spec 9.5: any risk tag forces a human vote, even on an automatic gate. A change to CI, dependencies, code owners, auth,
+    // migrations or the tests it is judged by must not pass on checks the change itself could influence.
+    if (kind === "auto" && tags.length) note(w, fx, "system", `${g.label} ${g.name} checks passed; a person must decide because the change touches ${tags.join(", ")}.`);
+    if (kind === "auto" && guardrailBreach && !tags.length) note(w, fx, "system", `${g.label} ${g.name} checks passed; a person must decide because the change breaks a guardrail (${gr.over ? "diff over the limit" : breach.slice(0, 3).join(", ")}).`);
+    if (kind === "auto" && !tags.length && !guardrailBreach && evidence.source === "none") note(w, fx, "system", `${g.label} ${g.name} has no verified check results to judge, so a person must decide.`);
+    if (kind === "auto" && !tags.length && !guardrailBreach && evidence.source !== "none") {
       await closeInstance(fx, instance, "decision");
-      await fx.tx.query(`insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, rule, flow_version, detail, at) values ($1,$2,$3,$4,'auto_passed',$5,$6,$7::jsonb,$8)`, [fx.orgId, `GD-${instance}`, instance, w.id, `AUTO-${gateId}`, w.flowVersion, JSON.stringify({ checks, mode: "auto" }), fx.now]);
+      await fx.tx.query(`insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, rule, flow_version, detail, at) values ($1,$2,$3,$4,'auto_passed',$5,$6,$7::jsonb,$8)`, [fx.orgId, `GD-${instance}`, instance, w.id, `AUTO-${gateId}`, w.flowVersion, JSON.stringify({ checks, mode: "auto", evidence }), fx.now]);
       note(w, fx, "system", `${g.label} ${g.name} passed automatically.`);
       ev(fx, w, "gate.decision", { gate: gateId, mode: "auto", trust: null }, { category: "approvals" });
       closeEntry(w, fx, "passed");
@@ -446,8 +824,7 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
   }
   // Spec 13.3: a cell that has earned L2 or L3 (those levels are switched off in a new install) lets this gate pass without a person, except where a person always decides.
   if (kind === "human" || kind === "mixed") {
-    const gr = (w.data.guardrail ?? {}) as { over?: boolean; protectedTouched?: unknown[] };
-    const t = await trustDecision(fx.tx, fx.orgId, fx.catalog, { woId: w.id, gateId, instance, cls: w.cls, project: w.project, repo: w.repo, source: w.source, data: w.data, riskTags: tags, guardrailBreach: !!gr.over || (gr.protectedTouched?.length ?? 0) > 0, now: fx.now });
+    const t = await trustDecision(fx.tx, fx.orgId, fx.catalog, { woId: w.id, gateId, instance, cls: w.cls, project: w.project, repo: w.repo, source: w.source, data: w.data, riskTags: tags, guardrailBreach, now: fx.now });
     if (t.auto) {
       await closeInstance(fx, instance, "decision");
       await fx.tx.query(
@@ -491,19 +868,41 @@ export async function finish(fx: Fx, w: Wo, by: string): Promise<void> {
   await dispatchQueued(fx, w.project);
 }
 
-async function completeParentIfDone(fx: Fx, parentId: string, by: string): Promise<void> {
-  const open = await fx.tx.query(`select 1 from work_orders where org_id = $1 and parent_id = $2 and state not in ('done') limit 1`, [fx.orgId, parentId]);
-  if (open.rowCount) return;
+/**
+ * An epic parent settles once every child has ended: done, killed, or declined. All done completes the parent. Any other mix puts the parent in Needs a person
+ * with a summary of how each child ended, so it never waits for ever on a child that will not finish (the person decides: add children, return it to Plan, or
+ * close it). Safe to call after any child's end and again later: a parent that is not waiting on its children is left alone.
+ */
+export async function completeParentIfDone(fx: Fx, parentId: string, by: string): Promise<void> {
+  const kids = (await fx.tx.query<{ id: string; state: string; position: string }>(`select id, state, position from work_orders where org_id = $1 and parent_id = $2 order by id`, [fx.orgId, parentId])).rows;
+  const how = (k: { state: string; position: string }): string => (k.position === "declined" ? "declined" : k.state);
+  if (!kids.length || kids.some((k) => how(k) !== "done" && how(k) !== "killed" && how(k) !== "declined")) return;
   const { lockWo } = await import("./model.js");
   const parent = await lockWo(fx.tx, fx.orgId, parentId);
-  if (parent.state === "done" || parent.state === "killed") return;
-  parent.state = "done";
-  parent.closedAt = fx.now;
-  parent.data.progress = 100;
+  if (parent.state === "done" || parent.state === "killed" || parent.position === "declined") return;
+  if (kids.every((k) => how(k) === "done")) {
+    if (bayOf(fx.catalog, parent)) {
+      // It was waiting for a person because a child had not finished; that child finished after all (restored), so the wait is over.
+      await leaveBay(fx, parent);
+      parent.position = String(parent.data.bayFrom ?? "plan");
+      for (const k of ["bayReason", "bayFrom", "bayAt", "bayCause"]) delete parent.data[k];
+    }
+    parent.state = "done";
+    parent.closedAt = fx.now;
+    parent.data.progress = 100;
+    parent.data.blockReason = null;
+    note(parent, fx, by, "Every child work order is closed.");
+    await saveWo(fx.tx, fx.orgId, parent);
+    ev(fx, parent, "wo.state", { from: "waiting", to: "done" });
+    return;
+  }
+  if (bayOf(fx.catalog, parent)) return; // already waiting for a person
+  const summary = kids.map((k) => `${k.id} ${how(k)}`).join(", ");
+  const { parkInto } = await import("./intake.js");
   parent.data.blockReason = null;
-  note(parent, fx, by, "Every child work order is closed.");
+  note(parent, fx, "system", `Every child work order has ended, but not all finished: ${summary}.`);
+  await parkInto(fx, parent, "person", `Every child work order has ended, but not all of them finished (${summary}). Decide whether the epic is complete: add children to the brief, or return it to Plan so the Plan agent proposes the rest.`);
   await saveWo(fx.tx, fx.orgId, parent);
-  ev(fx, parent, "wo.state", { from: "waiting", to: "done" });
 }
 
 /* ----------------------------------------------------------------------------------- votes and decisions */
@@ -538,8 +937,8 @@ export async function recordDecision(fx: Fx, w: Wo, inst: { id: string; opened_a
       tuple ? JSON.stringify(tuple.skill_versions) : null, tuple?.instruction_hash ?? null, tuple?.model_id ?? null, inst.head_sha ?? pr?.head_sha ?? null,
       JSON.stringify({
         mode: "human", channel: by.channel, via: by.via, reason: o.reason ?? "", reasonCode: decision === "approved" ? "approved" : "rejected", timeToDecideMs: fx.now.getTime() - (ms(inst.opened_at) ?? fx.now.getTime()),
-        voters: votes.map((v) => ({ by: v.voter, vote: v.vote, at: ms(v.at) })), approvals: o.approvals ?? votes.filter((v) => v.vote === "approve").length, riskTags: inst.basis.riskTags ?? [], samplingReason: inst.basis.forcedHuman ? "risk-triggered" : inst.basis.sampled ? "sampled" : "gated", artefactEdited: null, reviewSurface: null, policies, trustLevelNum: lvl.effective, trustGranted: lvl.granted, trustCell: lvl.cellId,
-        ...(o.override ? { override: true, overrideBy: "factory_admin" } : {}),
+        voters: votes.map((v) => ({ by: v.voter, vote: v.vote, at: ms(v.at) })), approvals: o.approvals ?? votes.filter((v) => v.vote === "approve").length, riskTags: inst.basis.riskTags ?? [], samplingReason: inst.basis.forcedHuman ? "risk-triggered" : inst.basis.sampled ? "sampled" : "gated", artefactEdited: await editedByPeople(fx.tx, fx.orgId, w.id), reviewSurface: null, policies, trustLevelNum: lvl.effective, trustGranted: lvl.granted, trustCell: lvl.cellId,
+        override: !!o.override, ...(o.override ? { overrideBy: "factory_admin" } : {}),
       }),
       fx.now,
       lvl.grantId,
@@ -556,7 +955,9 @@ export { bayOf, stationIdOf };
 /* ----------------------------------------------------------------------------------- shared helpers for the commands */
 
 /** Cancels the work order's live attempts (send-back, park, decline, stop). The run tokens are revoked in the same transaction, so the edge refuses the run on its next call and the reaper removes the sandbox. */
-export async function cancelAttempts(fx: Fx, w: Pick<Wo, "id">, reason: string): Promise<number> {
+export async function cancelAttempts(fx: Fx, w: Pick<Wo, "id"> & { data?: Record<string, unknown> }, reason: string): Promise<number> {
+  // A pending one-off limit raise belongs to the attempt the person's retry starts; a send-back, redo, park, decline or any other cancel drops it.
+  if (w.data) w.data.limitRaise = undefined;
   const r = await fx.tx.query(
     `update attempts set state = 'cancelled', outcome = $4, ended_at = $3, updated_at = now(), version = version + 1 where org_id = $1 and wo_id = $2 and state in ('queued','running')`,
     [fx.orgId, w.id, fx.now, reason],
@@ -565,6 +966,19 @@ export async function cancelAttempts(fx: Fx, w: Pick<Wo, "id">, reason: string):
     await revokeRunTokens(fx.tx, { orgId: fx.orgId, woId: w.id, reason });
     fx.changes.add("floor");
   }
+  return r.rowCount ?? 0;
+}
+
+/**
+ * S-62: a station question nobody can act on any more is closed (status dismissed, with the reason in the answer and "system" as who closed it), so it leaves the Inbox and is not counted
+ * by the feasibility check of a new run. Used when the work order is declined or killed, and when it is sent back (the station asks again if it still needs to).
+ */
+export async function closeOpenQuestions(fx: Fx, woId: string, reason: string): Promise<number> {
+  const r = await fx.tx.query(
+    `update wo_questions set status = 'dismissed', answer = $3, answered_by = 'system', answered_at = $4, updated_at = $4 where org_id = $1 and wo_id = $2 and status = 'open'`,
+    [fx.orgId, woId, reason, fx.now],
+  );
+  if (r.rowCount) fx.changes.add("home");
   return r.rowCount ?? 0;
 }
 

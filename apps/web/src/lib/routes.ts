@@ -26,22 +26,34 @@ export interface RouteCtx {
 
 export const anyRole = (me: Me, roles: readonly string[]): boolean => me.person.roles.some((g) => roles.includes(g.role));
 
-export const FACTORY_READ = ["factory_admin", "auditor"] as const;
+/**
+ * Factory-wide pages (Access, Security, System health, Models with vendors, prices, budgets and routing) are for factory-level roles
+ * only, held at factory scope: the same rule the server applies (a factory-scope right never reaches a project role). Display only.
+ */
+export const factoryRole = (me: Me, roles: readonly string[] = FACTORY_READ): boolean => me.person.roles.some((g) => g.scope === "factory" && roles.includes(g.role));
+
+/** Factory-level roles that read the factory registers (the route rules are display only; the read rights decide). */
+export const FACTORY_READ = ["factory_admin", "auditor", "factory_manager", "security_reviewer"] as const;
 export const BUILD_READ = [...FACTORY_READ, "project_admin", "line_lead"] as const;
 
 export const ROUTES: readonly RouteDef[] = [
   { id: "home", title: "Home", group: "Overview", icon: "home" },
-  { id: "projects", title: "Projects", group: "Overview", icon: "project" },
+  { id: "inbox", title: "Inbox", group: "Overview", icon: "inbox" },
+  { id: "projects", title: "Projects", group: "Overview", icon: "folder" },
+  { id: "workspace", title: "Agents at work", group: "Overview", icon: "chat" },
   { id: "console", title: "Console", group: "Overview", icon: "console" },
   { id: "floor", title: "Floor", group: "Project", icon: "belt", project: true },
   { id: "work-orders", title: "Work orders", group: "Project", icon: "list", project: true },
   { id: "conversations", title: "Conversations", group: "Project", icon: "chat", project: true },
   { id: "onboarding", title: "Onboarding", group: "Project", icon: "rocket", project: true },
   { id: "project-config", title: "Project config", group: "Project", icon: "filter", project: true },
-  { id: "record", title: "Work order record", group: "Project", icon: "record", project: true, nav: false },
+  { id: "record", title: "Work order", group: "Project", icon: "record", project: true, nav: false },
+  { id: "traveler", title: "Traveler", group: "Project", icon: "record", project: true, nav: false },
+  { id: "changes", title: "Changes", group: "Project", icon: "branch", project: true, nav: false },
+  { id: "dossier", title: "Dossier", group: "Project", icon: "record", project: true, nav: false },
   { id: "agents", title: "Agents", group: "Agents", icon: "agent", perm: "agents.view", canSee: (me) => anyRole(me, BUILD_READ) },
   { id: "skills", title: "Skills", group: "Agents", icon: "skill", perm: "agents.view", canSee: (me) => anyRole(me, BUILD_READ) },
-  { id: "models", title: "Models", group: "Agents", icon: "model", perm: "models.view", canSee: (me) => anyRole(me, BUILD_READ) },
+  { id: "models", title: "Models", group: "Agents", icon: "model", perm: "models.view", canSee: (me) => factoryRole(me) },
   { id: "evals", title: "Evals", group: "Agents", icon: "eval", perm: "agents.view", canSee: (me) => anyRole(me, BUILD_READ) },
   { id: "trust", title: "Trust", group: "Agents", icon: "trust", perm: "agents.view", canSee: (me) => anyRole(me, [...BUILD_READ, "approver", "release_manager"]) },
   { id: "learning", title: "Learning", group: "Agents", icon: "learn", perm: "agents.view", canSee: (me) => anyRole(me, BUILD_READ) },
@@ -50,10 +62,14 @@ export const ROUTES: readonly RouteDef[] = [
   { id: "mcp", title: "MCP servers", group: "Connect", icon: "server", perm: "integrations.view", canSee: (me) => anyRole(me, BUILD_READ) },
   { id: "api", title: "API & triggers", group: "Connect", icon: "api", perm: "integrations.view", canSee: (me) => anyRole(me, [...FACTORY_READ, "project_admin"]) },
   { id: "people", title: "People & teams", group: "Govern", icon: "people", perm: "people.view", canSee: (me) => anyRole(me, [...FACTORY_READ, "project_admin"]) },
+  { id: "person", title: "Person", group: "Govern", icon: "people", nav: false, perm: "people.view", canSee: (me) => anyRole(me, [...FACTORY_READ, "project_admin"]) },
+  { id: "account", title: "Account", group: "Govern", icon: "user", nav: false },
   { id: "workload", title: "Workload", group: "Govern", icon: "workload", perm: "people.view", canSee: (me) => anyRole(me, BUILD_READ) },
-  { id: "access", title: "Access", group: "Govern", icon: "lock", perm: "policy.view", canSee: (me) => anyRole(me, FACTORY_READ) },
-  { id: "security", title: "Security", group: "Govern", icon: "shield", perm: "policy.view", canSee: (me) => anyRole(me, FACTORY_READ) },
-  { id: "audit", title: "Audit", group: "Govern", icon: "ledger", perm: "audit.view", canSee: (me, ctx) => ctx.canAudit === true || anyRole(me, ["project_admin"]) || (ctx.canAudit === undefined && anyRole(me, FACTORY_READ)) },
+  { id: "access", title: "Access", group: "Govern", icon: "lock", perm: "policy.view", canSee: (me) => factoryRole(me) },
+  { id: "security", title: "Security", group: "Govern", icon: "shield", perm: "policy.view", canSee: (me) => factoryRole(me) },
+  { id: "audit", title: "Audit ledger", group: "Govern", icon: "ledger", perm: "audit.view", canSee: (me, ctx) => ctx.canAudit === true || anyRole(me, ["project_admin"]) || (ctx.canAudit === undefined && anyRole(me, FACTORY_READ)) },
+  { id: "system", title: "System health", group: "Govern", icon: "pulse", perm: "integrations.view", canSee: (me) => factoryRole(me) },
+  { id: "design-system", title: "Design system", group: "Reference", icon: "grid", nav: false }, // a developer reference: reachable at #design-system, not in the side nav (owner 2026-11-19)
 ];
 
 /** Read actions behind each nav route, asked once per session. */
@@ -62,7 +78,7 @@ export const ROUTE_PERMS: ReadonlyArray<{ id: string; action: string }> = ROUTES
 /** A person with no grants at all: only their own profile is readable. */
 export const hasNoAccess = (me: Me): boolean => !me.projects.length && !me.person.roles.length;
 
-export const NAV_GROUPS = ["Overview", "Project", "Agents", "Connect", "Govern"] as const;
+export const NAV_GROUPS = ["Overview", "Project", "Agents", "Connect", "Govern", "Reference"] as const;
 
 export const isProjectRoute = (id: string): boolean => !!ROUTES.find((r) => r.id === id)?.project;
 
@@ -99,3 +115,35 @@ export function landingFor(me: Me): { id: string; project: string | null } {
   if (only && !me.person.roles.some((g) => FACTORY_WIDE.has(g.role))) return { id: "floor", project: only.id };
   return { id: "home", project: null };
 }
+
+/**
+ * Words a person types for a screen that has another name (the palette matches them) and the old or likely addresses that should land on the screen they mean
+ * instead of "Sheet not found". `tab` is the project config tab (`?tab=`) the address stands for. Spend and gates are not screens of their own.
+ */
+export const ROUTE_KEYWORDS: Readonly<Record<string, string>> = {
+  inbox: "gates approvals approve decisions waiting on me",
+  "project-config": "spend budget cost approvers gates flow members repos mcp line control",
+  models: "spend cost prices budget routing vendors",
+  home: "spend overview",
+  account: "settings preferences profile",
+};
+
+export const ROUTE_ALIASES: Readonly<Record<string, { id: string; tab?: string }>> = {
+  spend: { id: "project-config", tab: "budget" },
+  budget: { id: "project-config", tab: "budget" },
+  cost: { id: "project-config", tab: "budget" },
+  costs: { id: "project-config", tab: "budget" },
+  gates: { id: "inbox" },
+  gate: { id: "inbox" },
+  approvals: { id: "inbox" },
+  approval: { id: "inbox" },
+  approvers: { id: "project-config", tab: "approvers" },
+  flow: { id: "project-config", tab: "flow" },
+  settings: { id: "account" },
+  config: { id: "project-config" },
+  "work-order": { id: "work-orders" },
+  workorders: { id: "work-orders" },
+  wo: { id: "work-orders" },
+  members: { id: "project-config", tab: "members" },
+  repos: { id: "project-config", tab: "repos" },
+};

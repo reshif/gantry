@@ -3,10 +3,9 @@
 // Each refusal that came from the decision point must also be audited (an `<action>.denied` event). Usage: node t12-sweep.mjs
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { chromium } from "/opt/node22/lib/node_modules/playwright/index.mjs";
-const PSQL = "/tmp/claude-0/w3e2e/psql.sh";
+import { PSQL, ROUTES, launchChromium } from "./paths.mjs";
 const q = (sql) => execFileSync(PSQL, ["-tA", "-F", "|", "-c", sql], { encoding: "utf8" }).trim().split("\n").filter(Boolean).map((l) => l.split("|"));
-const routes = JSON.parse(readFileSync("/tmp/claude-0/w3e2e/routes.json", "utf8"));
+const routes = JSON.parse(readFileSync(ROUTES, "utf8"));
 const WO = process.env.T12_WO ?? "WO-1003", GATE = process.env.T12_GATE ?? "WO-1003:G3G3s";
 const params = { ":role": "engineer", ":action": "wo.submit", ":id": "payments", ":kind": "stations", ":sub": "plan" };
 const idFor = (path) => {
@@ -52,7 +51,7 @@ const bodies = {
   "POST /api/v1/projects/:id/archive": { confirmText: "x" },
   "PATCH /api/v1/security": { path: "sessionIdleMin", value: 5 },
 };
-const browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", args: ["--no-sandbox"] });
+const browser = await launchChromium();
 const ctx = await browser.newContext({ ignoreHTTPSErrors: true });
 const page = await ctx.newPage();
 await page.goto("https://localhost/", { waitUntil: "networkidle" });
@@ -76,7 +75,7 @@ for (const [method, path] of routes) {
   const url = "https://localhost" + path.replace(/:(\w+)/g, (m, n) => (params[m] && !["id"].includes(n) ? params[m] : n === "id" ? idFor(path) : params[m] ?? "x"));
   const body = bodies[key] ?? {};
   const r = await ctx.request.fetch(url, { method, headers: { "x-csrf-token": csrf, "content-type": "application/json", origin: "https://localhost" }, data: JSON.stringify(body), failOnStatusCode: false });
-  let j = {}; try { j = await r.json(); } catch {}
+  let j = {}; try { j = await r.json(); } catch { /* not JSON */ }
   rows.push({ key, status: r.status(), msg: String(j.msg ?? "").slice(0, 90), rule: j.rule?.id ?? "" });
 }
 const after = Number(q("select count(*) from events where type like '%.denied'")[0][0]);

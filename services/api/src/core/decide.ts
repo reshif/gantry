@@ -13,6 +13,8 @@ export interface Scope {
   wo?: string | null;
   /** Epoch ms of the question; defaults to now. */
   time?: number;
+  /** A Factory Admin has given a reason for a break-glass override of a freeze or an andon halt (owner decision 2026-11-19). */
+  override?: boolean;
 }
 
 /** Policy state for this request, loaded once (spec 14.3: cached per request). Inside a transaction pass `tx` to read the transaction's view (uncached). */
@@ -51,8 +53,57 @@ export function decideFor(st: PolicyStateLoaded, principal: Principal | null, ac
     project: scope.project ?? null,
     repo: scope.repo ?? null,
     time,
+    ...(scope.override ? { override: true } : {}),
     ...(scope.wo ? { wo: { id: scope.wo, state: killed ? "killed" : "running", ...(killed ? { killed } : {}) } as never } : {}),
   });
+}
+
+/**
+ * Spec 14.3 and the QA review: a request that fails validation must not teach a caller who may not write at all what the body should
+ * look like. Handlers parse their body before they reach command()'s decision point, so the error handler asks this first. It returns the
+ * denial (and the action it was decided for) when the principal holds no right to change anything in any scope: every action other than
+ * the read rights and asking the console is refused for them, factory-wide and in each project. A caller who holds any such right still gets the
+ * validation message, because for them it is the form they are allowed to fill.
+ */
+export async function noWriteRight(req: FastifyRequest): Promise<{ action: string; decision: Decision } | null> {
+  const principal = req.gx.principal;
+  // Services answer for their own bodies (/internal/v1 is authenticated by token, not by the matrix); a key holds what its scopes name.
+  if (!principal || principal.kind === "service") return null;
+  if (principal.kind === "apikey" && principal.scopes.some((x) => x === "*" || !x.endsWith(".view"))) return null;
+  const st = await policyState(req);
+  const writes = st.catalog.actions.filter((a) => !a.id.endsWith(".view") && a.id !== "console.use");
+  const scopes: Scope[] = [{}, ...st.projects.filter((p) => p.status !== "archived").map((p) => ({ project: p.id }))];
+  let first: { action: string; decision: Decision } | null = null;
+  for (const a of writes) {
+    for (const scope of scopes) {
+      const d = decideFor(st, principal, a.id, scope);
+      if (d.allowed) return null;
+      first ??= { action: a.id, decision: d };
+    }
+  }
+  return first;
+}
+
+/**
+ * The per-route write gate (core/write-gate.ts): does this person hold at least one of `actions` somewhere, in the factory or in any live project?
+ * Returns null when they do. A denial that is not the plain matrix refusal (a stop, a freeze, a deny policy) is only ever given to someone who
+ * does hold the right, so it counts as holding it: the handler's own decision says why it cannot be used now. Otherwise the refusal for the first
+ * action, factory-wide, so the message names a right the caller may ask for.
+ */
+export async function lacksEveryRight(req: FastifyRequest, actions: readonly string[]): Promise<{ action: string; decision: Decision } | null> {
+  const principal = req.gx.principal;
+  if (principal?.kind !== "person" || !actions.length) return null;
+  const st = await policyState(req);
+  const scopes: Scope[] = [{}, ...st.projects.filter((p) => p.status !== "archived").map((p) => ({ project: p.id }))];
+  let first: { action: string; decision: Decision } | null = null;
+  for (const action of actions) {
+    for (const scope of scopes) {
+      const d = decideFor(st, principal, action, scope);
+      if (d.allowed || d.rule.kind !== "matrix") return null;
+      if (!first && !scope.project) first = { action, decision: d };
+    }
+  }
+  return first;
 }
 
 const deny = (reason: string, id: string, name: string, kind = "apikey", needs = ""): Decision => ({ allowed: false, reason, rule: { kind, id, name }, needs });
@@ -78,7 +129,10 @@ export function refuseDecision(d: Decision): Refusal {
   return refuse(d.rule.kind === "stop" ? "stopped" : "denied", d.reason, { rule: d.rule, ...(d.needs ? { needs: d.needs } : {}) });
 }
 
-/** Spec 14.1: a fresh, strong sign-in for kill, restore, policy, role, security and key operations. */
+/**
+ * Spec 14.1: a fresh sign-in for kill, restore, policy, role, security and key operations. "Fresh" means auth_time is inside the window.
+ * It is a fresh sign-in; a Factory Admin session also needs a second factor (core/auth/mfa.ts), which a step-up keeps asking for.
+ */
 export function stepUpSatisfied(req: FastifyRequest, maxAgeSec = 300): boolean {
   const s = req.gx.session;
   return !!s?.authTime && Date.now() - s.authTime <= maxAgeSec * 1000;

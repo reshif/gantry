@@ -1,0 +1,9 @@
+
+.hm-lbl { font-size: var(--t-sm); color: var(--faint); letter-spacing: 0; text-transform: none; }
+.hm-att-item { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.hm-att-item:last-child { border-bottom: 0; }
+.hm-att-item { border-left: 3px solid transparent; padding-left: 13px; }
+.hm-step-n .ic { width: 13px; height: 13px; }
+@media (max-width: 640px) {
+  .hm-att-item { grid-template-columns: 24px minmax(0, 1fr); } }
+.proto-list .fbar .field { margin-bottom: 0; }

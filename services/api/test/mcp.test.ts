@@ -242,6 +242,28 @@ d("MCP registry (spec 8.8, 12.4)", () => {
     expect((await w.call(ADMIN, "PATCH", `/api/v1/mcp/servers/${id}`, { enabled: true })).body.server.enabled).toBe(true);
   });
 
+  it("S-21: an address change stays 'needs re-approval' through switch-off and switch-on, and is audited; only approving clears it", async () => {
+    asApproved();
+    await w.call(ADMIN, "POST", `/api/v1/mcp/servers/${id}/approve`, {}).catch(() => null);
+    const moved = await w.call(ADMIN, "PATCH", `/api/v1/mcp/servers/${id}`, { url: "https://third.example.net/mcp" });
+    expect(moved.body.server.enabled).toBe(false);
+    const off = await w.call(ADMIN, "PATCH", `/api/v1/mcp/servers/${id}`, { enabled: false });
+    expect(off.status, JSON.stringify(off.body)).toBe(200);
+    expect(off.body.server.disabledReason).toMatch(/Discover its tools again and re-approve/i);
+    expect(off.body.server.needsReapproval).toBe(true);
+    const on = await w.call(ADMIN, "PATCH", `/api/v1/mcp/servers/${id}`, { enabled: true });
+    expect(on.status, JSON.stringify(on.body)).toBe(409);
+    expect(JSON.stringify(on.body)).toMatch(/discover.*approve|re-approve/i);
+    expect((await server(id)).enabled).toBe(false);
+    const ev = (await evs("mcp.edit")).at(-1)!;
+    expect(JSON.stringify(ev.after)).toContain("third.example.net");
+    const ok = await w.call(ADMIN, "POST", `/api/v1/mcp/servers/${id}/approve`, {});
+    expect(ok.body.server).toMatchObject({ enabled: true, disabledReason: null });
+    // after approval the plain switch-off / switch-on works again
+    expect((await w.call(ADMIN, "PATCH", `/api/v1/mcp/servers/${id}`, { enabled: false })).body.server.enabled).toBe(false);
+    expect((await w.call(ADMIN, "PATCH", `/api/v1/mcp/servers/${id}`, { enabled: true })).body.server.enabled).toBe(true);
+  });
+
   it("calls: the usage log in the legacy shape, filterable, newest first", async () => {
     const o = t.orgId;
     for (const [tool, outcome, agent, ms] of [["search", "ok", "ag-build", 31], ["update_page", "denied", "ag-build", 0], ["search", "error", "ag-review", 90]] as const) {
@@ -269,8 +291,29 @@ d("MCP registry (spec 8.8, 12.4)", () => {
     expect(ok.body).toMatchObject({ attempt: "at-mcp-1", station: "build", grants: [`${id}/update_page`] });
     expect((await w.q(`select data from attempts where id = 'at-mcp-1'`))[0].data.writeGrants).toEqual([`${id}/update_page`]);
     expect((await evs("mcp.grant")).at(-1)).toMatchObject({ wo_id: "WO-mcp-1" });
+    expect((await g("p-daniel", {})).status).toBe(403);
+    const wild = await g(ADMIN, { tools: [`${id}/*`] });
+    expect(wild.status, JSON.stringify(wild.body)).toBe(200);
+    expect((await evs("mcp.grant")).at(-1)!.after).toMatchObject({ wildcard: [`${id}/*`] });
     await w.q(`update attempts set state = 'succeeded' where id = 'at-mcp-1'`);
     expect((await g(ADMIN, {})).status).toBe(409);
+  });
+
+  it("S-22: a Factory Admin who requested the work order pre-authorises with a reason (audited override); no reason is refused with needs override_reason", async () => {
+    await w.insertWo("WO-mcp-2", { project: "payments", repo: "payments-api", state: "running", position: "build", requestedBy: ADMIN });
+    await w.q(`insert into attempts (org_id, id, wo_id, station, visit, state) values ($1,'at-mcp-2','WO-mcp-2','build',1,'running')`, [t.orgId]);
+    const g = (o: Record<string, unknown>) => w.call(ADMIN, "POST", "/api/v1/mcp/grants", { wo: "WO-mcp-2", tools: [`${id}/update_page`], ...o }, { "idempotency-key": "g-" + randomBytes(4).toString("hex") });
+    const bare = await g({});
+    expect(bare.status).toBe(403);
+    expect(bare.body.needs).toBe("override_reason");
+    expect((await g({ reason: "no" })).body.needs).toBe("override_reason");
+    expect((await w.q(`select data from attempts where id = 'at-mcp-2'`))[0].data.writeGrants ?? null).toBeNull();
+    const ok = await g({ reason: "Lone admin; reviewed the tool" });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect((await w.q(`select data from attempts where id = 'at-mcp-2'`))[0].data.writeGrants).toEqual([`${id}/update_page`]);
+    expect((await evs("mcp.grant")).at(-1)!.after).toMatchObject({ override: true, reason: "Lone admin; reviewed the tool", requester: true });
+    // a non-admin is unchanged: still refused, a reason does not help
+    expect((await w.call("p-daniel", "POST", "/api/v1/mcp/grants", { wo: "WO-mcp-2", tools: [`${id}/update_page`], reason: "please please" }, { "idempotency-key": "g-nd" })).status).toBe(403);
   });
 
   it("a killed factory refuses every registry change, with the stop's reason", async () => {

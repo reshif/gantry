@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { backoffDelay, parseChange, startStream, type EventSourceLike } from "./stream";
 import { bindQueryClient, expandSlices, onCanInvalidated } from "./keys";
+import { connection, pollWhenStreamDown } from "../lib/connection/store";
 
 describe("keys", () => {
   it("expands a slice to its dependents once", () => {
@@ -40,7 +41,7 @@ function fakeSource() {
     onopen: null,
     onerror: null,
   } as unknown as EventSourceLike & { onopen: (() => void) | null; onerror: (() => void) | null };
-  return { es, emit: (data: string) => handlers.change?.({ data } as MessageEvent) };
+  return { es, emit: (data: string) => handlers.change?.({ data } as MessageEvent), fire: (t: string) => handlers[t]?.({ data: "{}" } as MessageEvent) };
 }
 
 describe("startStream", () => {
@@ -49,7 +50,7 @@ describe("startStream", () => {
     const spy = vi.spyOn(qc, "invalidateQueries");
     bindQueryClient(qc);
     const src = fakeSource();
-    const stop = startStream({ create: () => src.es });
+    const stop = startStream({ create: () => src.es, coalesceMs: 0 });
     src.emit('{"keys":["workOrders"],"project":"p1"}');
     const keys = spy.mock.calls.map((c) => (c[0] as { queryKey: string[] }).queryKey[0]);
     expect(keys).toEqual(expect.arrayContaining(["workOrders", "floor", "home"]));
@@ -57,11 +58,49 @@ describe("startStream", () => {
     bindQueryClient(null);
   });
 
+  it("does not reconnect after the server says the stream was superseded", () => {
+    const sources: ReturnType<typeof fakeSource>[] = [];
+    const timers: Array<{ fn: () => void; ms: number }> = [];
+    const stop = startStream({
+      create: () => { const s = fakeSource(); sources.push(s); return s.es; },
+      setTimer: (fn, ms) => { timers.push({ fn, ms }); return 0 as unknown as ReturnType<typeof setTimeout>; },
+      clearTimer: () => undefined,
+    });
+    sources[0]!.fire("superseded");
+    expect(sources[0]!.es.close).toHaveBeenCalled();
+    (sources[0]!.es.onerror as () => void)();
+    expect(timers).toHaveLength(0);
+    expect(sources).toHaveLength(1);
+    stop();
+  });
+
+  it("with the default window, a burst of change events is one flush per 250ms carrying the union of slices", () => {
+    vi.useFakeTimers();
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    bindQueryClient(qc);
+    const src = fakeSource();
+    const stop = startStream({ create: () => src.es });
+    src.emit('{"keys":["workOrders"]}');
+    src.emit('{"keys":["audit"]}');
+    src.emit('{"keys":["workOrders"]}');
+    expect(spy).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(249);
+    expect(spy).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    const keys = spy.mock.calls.map((c) => (c[0] as { queryKey: string[] }).queryKey[0]);
+    expect(keys).toEqual(expect.arrayContaining(["workOrders", "audit"]));
+    expect(keys.filter((k) => k === "workOrders")).toHaveLength(1);
+    stop();
+    bindQueryClient(null);
+    vi.useRealTimers();
+  });
+
   it("clears the can() cache when a decision input changes", () => {
     const fn = vi.fn();
     const off = onCanInvalidated(fn);
     const src = fakeSource();
-    const stop = startStream({ create: () => src.es });
+    const stop = startStream({ create: () => src.es, coalesceMs: 0 });
     src.emit('{"keys":["matrix"]}');
     expect(fn).toHaveBeenCalledTimes(1);
     src.emit('{"keys":["audit"]}');
@@ -100,5 +139,45 @@ describe("startStream", () => {
     stop();
     timers.at(-1)!.fn(); // a pending reconnect after stop does nothing
     expect(sources).toHaveLength(3);
+  });
+
+  it("a superseded stream is shown as paused (not Live), screens poll meanwhile, and Reconnect opens a fresh stream", () => {
+    connection.reset();
+    const sources: ReturnType<typeof fakeSource>[] = [];
+    const stop = startStream({ create: () => { const s = fakeSource(); sources.push(s); return s.es; }, setTimer: () => 0 as unknown as ReturnType<typeof setTimeout>, clearTimer: () => undefined });
+    (sources[0]!.es.onopen as () => void)();
+    expect(connection.get()).toMatchObject({ state: "live", streamDown: false });
+    expect(pollWhenStreamDown(5000)()).toBe(false);
+    sources[0]!.fire("superseded");
+    expect(connection.get()).toMatchObject({ state: "paused", streamDown: true });
+    expect(pollWhenStreamDown(5000)()).toBe(5000);
+    connection.reconnect();
+    expect(sources).toHaveLength(2);
+    expect(connection.get().state).toBe("reconnecting");
+    (sources[1]!.es.onopen as () => void)();
+    expect(connection.get()).toMatchObject({ state: "live", streamDown: false });
+    stop();
+    connection.reset();
+  });
+
+  it("a capped tab (409 on connect) is named after two failed connects: paused, not Reconnecting forever", async () => {
+    connection.reset();
+    const sources: ReturnType<typeof fakeSource>[] = [];
+    const timers: Array<() => void> = [];
+    const stop = startStream({
+      create: () => { const s = fakeSource(); sources.push(s); return s.es; },
+      setTimer: (fn) => { timers.push(fn); return timers.length as unknown as ReturnType<typeof setTimeout>; },
+      clearTimer: () => undefined,
+      probe: () => Promise.resolve(409),
+    });
+    (sources[0]!.es.onerror as () => void)();
+    expect(connection.get().state).toBe("reconnecting");
+    timers.shift()!();
+    (sources[1]!.es.onerror as () => void)();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(connection.get().state).toBe("paused");
+    stop();
+    connection.reset();
   });
 });

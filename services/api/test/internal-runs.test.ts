@@ -28,7 +28,7 @@ d("internal runs API", () => {
 
   interface Made { runId: string; attemptId: string; woId: string; token: string; fencing: string; project: string }
   /** A work order with a running attempt and a starting run, and its token. */
-  async function makeRun(o: { project?: string; model?: string | null; woData?: object; runData?: object; attemptData?: object; attemptState?: string } = {}): Promise<Made> {
+  async function makeRun(o: { project?: string; model?: string | null; woData?: object; runData?: object; attemptData?: object; attemptState?: string; station?: string } = {}): Promise<Made> {
     const i = ++n;
     const project = o.project ?? "payments";
     const woId = `WO-w3-${i}`;
@@ -36,7 +36,7 @@ d("internal runs API", () => {
     const runId = `run-w3-${i}`;
     const org = t.orgId;
     await q(`insert into work_orders (org_id, id, project_id, title, class, position, state, flow_version, data) values ($1,$2,$3,'Test','feature','build','running',1,$4::jsonb)`, [org, woId, project, JSON.stringify(o.woData ?? {})]);
-    const a = await q(`insert into attempts (org_id, id, wo_id, station, visit, state, data) values ($1,$2,$3,'build',1,$4,$5::jsonb) returning fencing::text as fencing`, [org, attemptId, woId, o.attemptState ?? "running", JSON.stringify(o.attemptData ?? {})]);
+    const a = await q(`insert into attempts (org_id, id, wo_id, station, visit, state, data) values ($1,$2,$3,$6,1,$4,$5::jsonb) returning fencing::text as fencing`, [org, attemptId, woId, o.attemptState ?? "running", JSON.stringify(o.attemptData ?? {}), o.station ?? "build"]);
     await q(`insert into runs (org_id, id, attempt_id, wo_id, model_id, data) values ($1,$2,$3,$4,$5,$6::jsonb)`, [org, runId, attemptId, woId, o.model === undefined ? "claude-test-1" : o.model, JSON.stringify(o.runData ?? {})]);
     const fencing = a[0].fencing as string;
     const tk = await withTx(t.db.app, (tx) => issueRunToken(tx, runId, attemptId, fencing));
@@ -45,6 +45,29 @@ d("internal runs API", () => {
   const authorize = (r: Made, model?: string, token = r.token) => call("POST", `/internal/v1/runs/${r.runId}/authorize`, { token, ...(model ? { model } : {}) });
   const setStop = (scope: string, target: string, mode: "halt" | "kill", id = `${scope}:${target}:t${++n}`) =>
     q(`insert into stops (org_id, id, scope_type, ${scope === "wo" ? "wo_id" : scope === "project" ? "project_id" : "repo_id"}, mode, reason, set_by) values ($1,$2,$3,$4,$5,'test stop','p-asha')`, [t.orgId, id, scope, target, mode]).then(() => id);
+
+  describe("S-94: a run past its wall clock", () => {
+    it("is refused model calls by authorize even though its token is live and the launcher has not stopped it", async () => {
+      const r = await makeRun({ runData: { wallClockSeconds: 60, dispatch: { phase: "started" } } });
+      await q(`update runs set started_at = now() - interval '2 hours' where id = $1`, [r.runId]);
+      const res = await authorize(r, "claude-test-1");
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ allow: false, code: "ended" });
+      expect(JSON.stringify(res.json())).toMatch(/wall-clock limit of 60 seconds/);
+      // a run inside its limit is still allowed
+      const ok = await makeRun({ runData: { wallClockSeconds: 3600, dispatch: { phase: "started" } } });
+      await q(`update runs set started_at = now() - interval '2 minutes' where id = $1`, [ok.runId]);
+      expect((await authorize(ok, "claude-test-1")).json()).toMatchObject({ allow: true });
+    });
+  });
+
+  describe("G-S9: the wall clock starts when the runner starts", () => {
+    it("a run still waiting for a slot (old row, no started dispatch) is not past its wall clock", async () => {
+      const r = await makeRun({ runData: { wallClockSeconds: 900 } });
+      await q(`update runs set started_at = now() - interval '20 minutes' where id = $1`, [r.runId]);
+      expect((await authorize(r, "claude-test-1")).json()).toMatchObject({ allow: true });
+    });
+  });
 
   describe("service auth", () => {
     it("refuses a missing or wrong service token and a browser-style caller", async () => {
@@ -191,6 +214,18 @@ d("internal runs API", () => {
       const um = (await q(`select * from usage_meter where run_id = $1`, [r.runId]))[0];
       expect(um).toMatchObject({ station: "build", cost_micros: "6525", vendor_id: "w3-anthropic", cache_write_tokens: "100" });
     });
+    it("a run's model calls carry the run's prompt manifest hash, so the prompt record can say what the agent was given", async () => {
+      const h = "c".repeat(64);
+      const r = await makeRun({ runData: { promptHash: h, promptManifest: { v: 1, kind: "run", hash: h, parts: [{ kind: "repo_context", name: "AGENTS.md", sha256: "d".repeat(64) }] } } });
+      expect((await usage(r, { requestId: "pm-1", traceRef: `sha256/${"b".repeat(64)}` })).statusCode).toBe(200);
+      expect((await q(`select prompt_hash from usage_meter where run_id = $1`, [r.runId]))[0]).toMatchObject({ prompt_hash: h });
+    });
+    it("the run shows the model that actually answered, not the one pinned when it was prepared", async () => {
+      const r = await makeRun();
+      await q(`update runs set model_id = 'claude-sonnet-5-5' where id = $1`, [r.runId]);
+      await usage(r, { requestId: "model-1", model: "claude-test-1" });
+      expect((await q(`select model_id from runs where id = $1`, [r.runId]))[0].model_id).toBe("claude-test-1");
+    });
     it("is idempotent per request id", async () => {
       const r = await makeRun();
       await usage(r, { requestId: "dup-1" });
@@ -229,6 +264,7 @@ d("internal runs API", () => {
       expect((await call("POST", `/internal/v1/runs/${r.runId}/heartbeat`, { token: r.token, seq: 1 })).json().stop).toBe("halt");
     });
     it("a project monthly budget is enforced at authorize and at usage", async () => {
+      await q(`delete from usage_meter where project_id = 'identity'`); // project spend counts all metered spend: start from none
       await q(`insert into budgets (org_id, project_id, monthly_limit_micros) values ($1,'identity',9000) on conflict (org_id, project_id) do update set monthly_limit_micros = 9000`, [t.orgId]);
       const a = await makeRun({ project: "identity" });
       expect((await authorize(a)).json().allow).toBe(true);
@@ -240,8 +276,11 @@ d("internal runs API", () => {
       const denied = (await authorize(c)).json();
       expect(denied).toMatchObject({ allow: false, code: "budget" });
       expect(denied.reason).toMatch(/project budget is spent/);
-      await q(`update budgets set monthly_limit_micros = 0 where project_id = 'identity'`); // 0 = no cap configured
-      expect((await authorize(c)).json().allow).toBe(true);
+      // The refusal is not silent (S-44): the work order carries a budget halt, which stays until the cap is raised.
+      expect(await q(`select cause from stops where wo_id = $1 and lifted_at is null`, [c.woId])).toEqual([expect.objectContaining({ cause: "budget" })]);
+      await q(`update budgets set monthly_limit_micros = 0, monthly_zero_cap = false where project_id = 'identity'`); // 0 means no cap
+      const d = await makeRun({ project: "identity" });
+      expect((await authorize(d)).json().allow).toBe(true);
     });
   });
 
@@ -329,10 +368,76 @@ d("internal runs API", () => {
       expect(s.instructions).toBe("## Factory base\n\nFactory rules.\n\n## Project overlay\n\nPayments overlay.\n\n## Agent\n\nAgent says build.");
       expect(s.instructionsHash).toMatch(/^[0-9a-f]{64}$/);
       expect(s.skills).toEqual([{ name: "Testing skill", content: "Always run tests." }]);
-      expect(s.toolAllowList.sort()).toEqual(["Bash", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "Write"]);
+      // the prompt manifest names every part in order, with source, version and hash; its hash is the instruction hash and is recorded on the run
+      expect(s.promptManifest.hash).toBe(s.instructionsHash);
+      expect(s.promptManifest.parts.map((p: { kind: string; name: string }) => `${p.kind}:${p.name}`)).toEqual(["layer:Factory base", "layer:Project overlay", "layer:Agent", "skill:Testing skill", "station_tools:Station tools", "result_instruction:Result instruction", "result_schema:Station result shape"]);
+      expect(s.promptManifest.parts[3]).toMatchObject({ version: 1, bytes: "Always run tests.".length, source: "skill_versions sk-w3" });
+      expect(s.promptManifest.parts[0]).toMatchObject({ version: 90 });
+      expect(s.promptManifest.handoff.bytes).toBeGreaterThan(10);
+      const stored = (await q(`select data from runs where id = $1`, [r.runId]))[0]!.data;
+      expect(stored.promptManifest.hash).toBe(s.instructionsHash);
+      expect(stored.promptDrift).toBe(true); // the test tuple was pinned with the placeholder hash 'h'
+      // serving the same spec again writes nothing new (no repeated update, no new audit rows)
+      const stamp = (await q(`select updated_at from runs where id = $1`, [r.runId]))[0]!.updated_at;
+      const rows = Number((await q(`select count(*)::int as n from events`))[0].n);
+      await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token });
+      expect((await q(`select updated_at from runs where id = $1`, [r.runId]))[0]!.updated_at).toEqual(stamp);
+      expect(Number((await q(`select count(*)::int as n from events`))[0].n)).toBe(rows);
+      // "may run tests" is a set of test commands, never a bare shell
+      expect(s.toolAllowList).not.toContain("Bash");
+      expect(s.toolAllowList.filter((t: string) => !t.startsWith("Bash(")).sort()).toEqual(["Edit", "Glob", "Grep", "NotebookEdit", "Read", "Write"]);
+      expect(s.toolAllowList).toContain("Bash(npm test:*)");
+      expect(s.toolAllowList.filter((t: string) => t.startsWith("Bash(")).every((t: string) => /^Bash\((npm|npx|pnpm|yarn|pytest|python|go|cargo|git (status|diff|log|show|add|commit))[ :]/.test(t))).toBe(true);
       expect(s.input.brief).toEqual({ goal: "ship" });
       // the per-run cost cap (agent budget 2.5) is enforced at authorize
       expect((await authorize(r)).json().allow).toBe(true);
+    });
+    it("a run's limits and tool allow-list come from its pinned version, never from the agent's draft", async () => {
+      const o = t.orgId;
+      // the draft (agents.data) has wide limits and an explicit allow-list; the pinned version has neither key
+      await q(`insert into agents (org_id, id, name, station, live_version, data) values ($1,'ag-w3d','W3 draft','build',1,$2::jsonb)`, [o, JSON.stringify({ budget: 2, limits: { turns: 500, wallClockSeconds: 99999 }, toolAllowList: ["Bash", "WebFetch"], tools: { readRepo: true, writeBranch: true, runTests: true } })]);
+      await q(`insert into agent_versions (org_id, agent_id, version, body, model_id, published_at) values ($1,'ag-w3d',1,$2::jsonb,'claude-test-1',now())`, [o, JSON.stringify({ instructions: "Read only.", tools: { readRepo: true } })]);
+      await q(`insert into agent_version_tuples (org_id, id, agent_id, agent_version, skill_versions, instruction_hash, harness_version, model_id) values ($1,'tup-w3d','ag-w3d',1,'{}','h','1','claude-test-1')`, [o]);
+      const r = await makeRun({ model: null });
+      await q(`update attempts set tuple_id = 'tup-w3d' where id = $1`, [r.attemptId]);
+      const s = (await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token })).json();
+      expect(s.limits).toMatchObject({ turns: 40, wallClockSeconds: 3600 });
+      expect(s.toolAllowList).toEqual(["Read", "Glob", "Grep"]);
+      // a version that does carry limits and an allow-list wins
+      await q(`insert into agent_versions (org_id, agent_id, version, body, model_id, published_at) values ($1,'ag-w3d',2,$2::jsonb,'claude-test-1',now())`, [o, JSON.stringify({ instructions: "Read only.", limits: { turns: 7 }, toolAllowList: ["Read"] })]);
+      await q(`insert into agent_version_tuples (org_id, id, agent_id, agent_version, skill_versions, instruction_hash, harness_version, model_id) values ($1,'tup-w3e','ag-w3d',2,'{}','h','1','claude-test-1')`, [o]);
+      const r2 = await makeRun({ model: null });
+      await q(`update attempts set tuple_id = 'tup-w3e' where id = $1`, [r2.attemptId]);
+      const s2 = (await call("GET", `/internal/v1/runs/${r2.runId}/spec`, undefined, { ...EDGE, "x-run-token": r2.token })).json();
+      expect(s2.limits.turns).toBe(7);
+      expect(s2.toolAllowList).toEqual(["Read"]);
+    });
+    it("the project's confirmed test command joins the allow-list of an agent that may run tests, narrowly; a proposal alone, an unsafe command or an agent with no test permission gets nothing", async () => {
+      const o = t.orgId;
+      await q(`insert into agents (org_id, id, name, station, live_version, data) values ($1,'ag-w3t','W3 tests','verify',1,'{}'::jsonb)`, [o]);
+      await q(`insert into agent_versions (org_id, agent_id, version, body, model_id, published_at) values ($1,'ag-w3t',1,$2::jsonb,'claude-test-1',now())`, [o, JSON.stringify({ instructions: "Verify.", tools: { readRepo: true, runTests: true } })]);
+      await q(`insert into agent_versions (org_id, agent_id, version, body, model_id, published_at) values ($1,'ag-w3t',2,$2::jsonb,'claude-test-1',now())`, [o, JSON.stringify({ instructions: "Read.", toolAllowList: ["Read"] })]);
+      await q(`insert into agent_version_tuples (org_id, id, agent_id, agent_version, skill_versions, instruction_hash, harness_version, model_id) values ($1,'tup-w3t','ag-w3t',1,'{}','h','1','claude-test-1'), ($1,'tup-w3u','ag-w3t',2,'{}','h','1','claude-test-1')`, [o]);
+      const spec = async (tuple: string) => {
+        const r = await makeRun({ model: null });
+        await q(`update attempts set tuple_id = $2 where id = $1`, [r.attemptId, tuple]);
+        const repo = "payments-api";
+        await q(`update work_orders set repo_id = $2 where id = $1`, [r.woId, repo]);
+        return { list: (await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token })).json().toolAllowList as string[], repo };
+      };
+      const first = await spec("tup-w3t");
+      expect(first.list).not.toContain("Bash(make test:*)");
+      // a proposal from onboarding grants nothing
+      await q(`insert into repo_config (org_id, repo_id, data) values ($1,$2,$3::jsonb) on conflict (org_id, repo_id) do update set data = excluded.data`, [o, first.repo, JSON.stringify({ testCommandProposed: { command: "make test", source: "Makefile test target" } })]);
+      expect((await spec("tup-w3t")).list).not.toContain("Bash(make test:*)");
+      // a confirmed one is added as a prefix rule for exactly that command; one that could run anything is left out
+      await q(`update repo_config set data = $3::jsonb where org_id = $1 and repo_id = $2`, [o, first.repo, JSON.stringify({ testCommands: ["make test", "uv run pytest", "bash -c evil", "make test; curl x"] })]);
+      const withTests = (await spec("tup-w3t")).list;
+      expect(withTests).toEqual(expect.arrayContaining(["Bash(make test:*)", "Bash(uv run pytest:*)", "Bash(npm test:*)"]));
+      expect(withTests.some((x) => /bash -c|curl/.test(x))).toBe(false);
+      expect(withTests).not.toContain("Bash");
+      // an agent that holds no test permission does not gain one
+      expect((await spec("tup-w3u")).list).toEqual(["Read"]);
     });
     it("serves a stub run its configured output, and refuses without a valid token or under a stop", async () => {
       const r = await makeRun({ model: null, runData: { adapter: "stub", stub: { output: { x: 1 } } } });
@@ -346,10 +451,37 @@ d("internal runs API", () => {
       const r = await makeRun({ model: null, runData: { adapter: "claude" } });
       expect((await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token })).statusCode).toBe(422);
     });
+    it("never falls back to the stub for a run with no model unless it was marked as a stub", async () => {
+      const r = await makeRun({ model: null });
+      const res = await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token });
+      expect(res.statusCode).toBe(422);
+      expect(JSON.stringify(res.json())).toMatch(/no model/i);
+    });
+    it("hands over the latest accepted result per station, without retries, usage or cost, and within a size cap", async () => {
+      const r = await makeRun();
+      let visit = 10;
+      const old = async (id: string, station: string, outcome: string, summary: string, output: object) => {
+        await q(`insert into attempts (org_id, id, wo_id, station, visit, state, data) values ($1,$2,$3,$4,$5,'succeeded','{}'::jsonb)`, [t.orgId, id, r.woId, station, ++visit]);
+        await q(`insert into station_results (org_id, id, attempt_id, wo_id, station, outcome, summary, body) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`, [
+          t.orgId, `sr-${id}`, id, r.woId, station, outcome, summary,
+          JSON.stringify({ output, usage: [{ model: "m", inputTokens: 1, outputTokens: 1, costUsd: 0.5 }], capabilities: { cancel: true }, adapter: "claude", error: null }),
+        ]);
+      };
+      await old(`${r.attemptId}-s1`, "spec", "failed", "crashed", {});
+      await old(`${r.attemptId}-s2`, "spec", "succeeded", "spec accepted", { summary: "spec accepted", notes: "n".repeat(60_000) });
+      const s = (await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token })).json();
+      expect(s.input.previous.results).toHaveLength(1);
+      expect(s.input.previous.results[0]).toMatchObject({ station: "spec", summary: "spec accepted", truncated: { omittedFields: ["notes"] } });
+      expect(s.input.previous.omitted.attempts).toBe(1);
+      expect(JSON.stringify(s.input.previous.results)).not.toMatch(/costUsd|capabilities|usage/);
+      expect(JSON.stringify(s.input.previous).length).toBeLessThan(16_000);
+    });
   });
 
   describe("mcp-authorize", () => {
-    const mcp = (r: Made, body: object) => call("POST", `/internal/v1/runs/${r.runId}/mcp-authorize`, { token: r.token, server: "w3-mcp", tool: "search", ...body });
+    const HASHES: Record<string, string> = { search: "h1", delete: "h2", hidden: "h3" };
+    // The edge always sends the live definition hash; a call without one is refused (see the fail-closed test below).
+    const mcp = (r: Made, body: { tool?: string } & Record<string, unknown>) => call("POST", `/internal/v1/runs/${r.runId}/mcp-authorize`, { token: r.token, server: "w3-mcp", tool: "search", definitionHash: HASHES[body.tool ?? "search"] ?? "hx", ...body });
     beforeAll(async () => {
       const o = t.orgId;
       await q(`insert into mcp_servers (org_id, id, name, url) values ($1,'w3-mcp','docs','https://mcp.example.net/sse')`, [o]);
@@ -393,6 +525,13 @@ d("internal runs API", () => {
       expect((await q(`select pending_hash from mcp_tools where server_id = 'w3-mcp' and name = 'search'`))[0].pending_hash).toBe("changed");
       await q(`update mcp_servers set enabled = true where id = 'w3-mcp'`);
       await q(`update mcp_tools set pending_hash = null where server_id = 'w3-mcp'`);
+    });
+    it("fails closed when the edge could not read the live definition: no hash, no call", async () => {
+      const r = await makeRun();
+      expect((await mcp(r, { definitionHash: undefined })).json()).toMatchObject({ allow: false, code: "definition" });
+      const g = await makeRun({ attemptData: { writeGrants: ["w3-mcp/delete"] } });
+      expect((await mcp(g, { tool: "delete", definitionHash: undefined })).json()).toMatchObject({ allow: false, code: "definition" });
+      expect((await q(`select enabled from mcp_servers where id = 'w3-mcp'`))[0]).toMatchObject({ enabled: true });
     });
     it("is refused under a stop", async () => {
       const r = await makeRun();
@@ -451,18 +590,40 @@ d("internal runs API", () => {
   });
 
   describe("egress and vendor keys", () => {
-    it("builds the project allow-list: defaults, vendor endpoints, project extras, never MCP hosts (gateway only); refuses a bad token", async () => {
+    it("builds the project allow-list: defaults, project extras, never vendor hosts or MCP hosts (gateway only); refuses a bad token", async () => {
       await q(`update projects set config = jsonb_set(config, '{extra}', '{"allowedHosts":["packages.internal.example"]}') where id = 'payments'`);
       const r = await makeRun();
       const res = await call("POST", `/internal/v1/runs/${r.runId}/egress`, { token: r.token });
       const h: string[] = res.json().hosts;
-      for (const x of ["github.com", "registry.npmjs.org", "pypi.org", "api.anthropic.com", "gpu.example.org", "packages.internal.example"]) expect(h, x).toContain(x);
+      for (const x of ["github.com", "registry.npmjs.org", "pypi.org", "api.anthropic.com", "packages.internal.example"]) expect(h, x).toContain(x);
       expect(h).not.toContain("evil.example.com");
+      // S-67: a run reaches models only through the edge gateway, so a connected vendor's endpoint host is not on its list.
+      expect(h).not.toContain("gpu.example.org");
       // Spec 12.4: MCP servers are reached only through the edge's gateway (scope, definition hash, write pre-authorisation), never directly.
       expect(h).not.toContain("mcp.example.net");
       expect((await call("POST", `/internal/v1/runs/${r.runId}/egress`, { token: "grt.xx.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" })).statusCode).toBe(403);
       await setStop("wo", r.woId, "kill");
       expect((await call("POST", `/internal/v1/runs/${r.runId}/egress`, { token: r.token })).statusCode).toBe(409);
+    });
+
+    it("the Python package index is allowed only for stations that may run tests (owner decision 2026-11-18): Verify and Build yes, every other station no", async () => {
+      const hostsFor = async (station: string): Promise<string[]> => {
+        const r = await makeRun({ station });
+        return (await call("POST", `/internal/v1/runs/${r.runId}/egress`, { token: r.token })).json().hosts;
+      };
+      for (const st of ["verify", "build"]) {
+        const h = await hostsFor(st);
+        expect(h, st).toContain("pypi.org");
+        expect(h, st).toContain("files.pythonhosted.org");
+      }
+      for (const st of ["spec", "review", "research", "deploy"]) {
+        const h = await hostsFor(st);
+        expect(h, st).not.toContain("pypi.org");
+        expect(h, st).not.toContain("files.pythonhosted.org");
+        expect(h, st).toContain("github.com");
+      }
+      const v = await hostsFor("verify");
+      for (const x of ["python.org", "astral.sh", "pythonhosted.org", "test.pypi.org"]) expect(v, x).not.toContain(x);
     });
     it("system hosts include integration endpoints", async () => {
       await q(`insert into integration_types (org_id, id, name) values ($1,'w3-hook','Hook') on conflict do nothing`, [t.orgId]);

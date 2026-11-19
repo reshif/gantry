@@ -11,11 +11,13 @@ export type ConfigEdit =
   | { kind: "slots"; value: number }
   | { kind: "station-enabled"; id: string; value: boolean }
   | { kind: "station-wip"; id: string; value: number }
+  | { kind: "station-run-limits"; id: string; value: Record<string, number | null> }
   | { kind: "gate-enabled"; id: string; value: boolean }
   | { kind: "classes"; value: WorkClass[] }
   | { kind: "notifications"; value: z.infer<typeof RouteSchema>[] }
   | { kind: "mcp"; value: string[] }
-  | { kind: "budget-monthly"; value: number }
+  | { kind: "oncall-page"; value: boolean }
+  | { kind: "budget-monthly"; value: number | null }
   | { kind: "budget-alert"; value: number };
 
 const parse = <T extends z.ZodType>(s: T, v: unknown, what: string): z.infer<T> => {
@@ -34,18 +36,20 @@ export function parseConfigEdit(path: string, value: unknown): ConfigEdit {
     if (a === "notifications") return { kind: "notifications", value: parse(z.array(RouteSchema).max(100), value, "Notification routes") };
     if (a === "mcp") return { kind: "mcp", value: parse(z.array(z.string().min(1).max(100)).max(100), value, "MCP servers") };
   }
+  if (a === "notifications" && p.length === 2 && b === "oncallPage") return { kind: "oncall-page", value: parse(z.boolean(), value, "On-call page") };
   if (a === "flow" && p.length === 2 && b === "slots") return { kind: "slots", value: parse(z.number().int().min(1).max(8), value, "Coding slots") };
   if (a === "flow" && p.length === 2 && b === "classes") return { kind: "classes", value: parse(z.array(ClassSchema).min(1).max(100), value, "Classes") as WorkClass[] };
   if (a === "flow" && b === "stations" && c && p.length === 4) {
     if (d === "enabled") return { kind: "station-enabled", id: c, value: parse(z.boolean(), value, "On or off") };
-    if (d === "wip") return { kind: "station-wip", id: c, value: parse(z.number().int().min(1).max(30), value, "WIP limit") };
+    if (d === "runLimits") return { kind: "station-run-limits", id: c, value: parse(z.record(z.string(), z.number().nullable()), value, "Run limits") };
+    if (d === "wip") return { kind: "station-wip", id: c, value: parse(z.number().int().min(0).max(30), value, "WIP limit (0 is no limit)") };
   }
   if (a === "flow" && b === "gates" && c && p.length === 4 && d === "enabled") return { kind: "gate-enabled", id: c, value: parse(z.boolean(), value, "On or off") };
-  if (a === "budget" && p.length === 2 && b === "monthly") return { kind: "budget-monthly", value: parse(z.number().min(0).max(10_000_000), value, "Monthly budget") };
+  if (a === "budget" && p.length === 2 && b === "monthly") return { kind: "budget-monthly", value: parse(z.number().min(0).max(10_000_000).nullable(), value, "Monthly budget") };
   if (a === "budget" && p.length === 2 && b === "alertAt") return { kind: "budget-alert", value: parse(z.number().min(0.05).max(1), value, "Alert line") };
   if (a === "approvers") throw invalid("Approver rules are saved with PUT /projects/{id}/approvers/{gate}.");
   throw invalid(`${path} is not an editable project setting.`);
 }
 
 /** The catalogue action a path needs (legacy: approvers.edit, notify.edit, otherwise project.config). */
-export const actionFor = (e: ConfigEdit): "notify.edit" | "project.config" => (e.kind === "notifications" ? "notify.edit" : "project.config");
+export const actionFor = (e: ConfigEdit): "notify.edit" | "project.config" => (e.kind === "notifications" || e.kind === "oncall-page" ? "notify.edit" : "project.config");

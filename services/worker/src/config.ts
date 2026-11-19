@@ -9,7 +9,7 @@ export interface WorkerConfig {
   brokerToken: string;
   /** Runner image variant the launcher is asked for (a key of the launcher's RUNNER_VARIANTS). */
   runnerVariant: string;
-  smtp: { host: string; port: number; from: string; secure: boolean };
+  smtp: { host: string; port: number; from: string; secure: boolean; auth?: { user: string; pass: string } };
   /** Forward proxy for outbound chat and webhook traffic (spec 12.2): the edge's :8444. Null sends directly (local development only). */
   egressProxy: string | null;
   /** PEM bundle trusted for outbound HTTPS in addition to the system store. */
@@ -32,11 +32,15 @@ export interface WorkerConfig {
   reconcileEveryMs: number;
   verifyEveryMs: number;
   watchdogEveryMs: number;
+  /** A repository's recorded base commit older than this is checked against GitHub when a work order with no commit of its own is dispatched (S-140). */
+  baseStaleMs: number;
   /** Time a freshly dispatched run has to send its first heartbeat before the attempt is lost (F9). */
   startupLeaseMs: number;
   /** Time the result intake keeps the attempt's lease while it publishes. */
   publishLeaseMs: number;
   maxDispatchDeferrals: number;
+  /** Lets a run with no model use the stub adapter (canned output). Tests and local development only; off by default so a missing model is a visible failure. */
+  allowStubAdapter?: boolean;
   dataKey: Buffer | null;
   /** Onboarding and readiness (spec 11.3). */
   /** Name of the Gantry gate check, which is not counted as CI on an onboarding pull request. */
@@ -53,6 +57,8 @@ export interface WorkerConfig {
   onboardingCollectEveryMs?: number;
   /** How long a verification waits for CI to report a check on the canary. */
   canaryWaitMs?: number;
+  /** Port of the worker's /metrics (0 turns it off). */
+  metricsPort?: number;
 }
 
 const int = (v: string | undefined, d: number): number => {
@@ -64,13 +70,15 @@ export async function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): Pr
   const [launcherToken, brokerToken] = await Promise.all([readSecret("launcher_token", env), readSecret("github_token", env)]);
   const dataKey = await loadDataKey(env).catch(() => null);
   const s3Secret = env.S3_ENDPOINT ? await readSecret("minio_root_password", env).catch(() => null) : null;
+  // A relay that needs a login: SMTP_USER here, the password in the smtp_password secret file.
+  const smtpPass = env.SMTP_USER ? await readSecret("smtp_password", env).catch(() => null) : null;
   return {
     launcherUrl: (env.LAUNCHER_URL || "http://gantry-launcher:9100").replace(/\/+$/, ""),
     launcherToken,
     brokerUrl: (env.GITHUB_BROKER_URL || "http://gantry-github:9200").replace(/\/+$/, ""),
     brokerToken,
     runnerVariant: env.RUNNER_VARIANT || "base",
-    smtp: { host: env.SMTP_HOST || "mailpit", port: int(env.SMTP_PORT, 1025), from: env.SMTP_FROM || "Gantry <gantry@localhost>", secure: env.SMTP_SECURE === "true" },
+    smtp: { host: env.SMTP_HOST || "mailpit", port: int(env.SMTP_PORT, 1025), from: env.SMTP_FROM || "Gantry <gantry@localhost>", secure: env.SMTP_SECURE === "true", ...(env.SMTP_USER && smtpPass ? { auth: { user: env.SMTP_USER, pass: smtpPass } } : {}) },
     egressProxy: env.HTTPS_PROXY || env.https_proxy || null,
     egressCa: env.WORKER_EGRESS_CA || null,
     s3: { endpoint: env.S3_ENDPOINT || null, bucket: env.S3_BUCKET || "gantry", accessKey: env.S3_ACCESS_KEY || "gantry", secretKey: s3Secret, region: env.S3_REGION || "us-east-1" },
@@ -86,14 +94,17 @@ export async function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): Pr
     reconcileEveryMs: int(env.WORKER_RECONCILE_EVERY_MS, 5 * 60_000),
     verifyEveryMs: int(env.WORKER_VERIFY_EVERY_MS, 24 * 3600_000),
     watchdogEveryMs: int(env.WORKER_WATCHDOG_EVERY_MS, 15_000),
+    baseStaleMs: int(env.WORKER_BASE_STALE_MS, 10 * 60_000),
     startupLeaseMs: int(env.WORKER_STARTUP_LEASE_MS, 180_000),
     publishLeaseMs: int(env.WORKER_PUBLISH_LEASE_MS, 15 * 60_000),
     maxDispatchDeferrals: int(env.WORKER_MAX_DISPATCH_DEFERRALS, 60),
+    allowStubAdapter: env.GANTRY_ALLOW_STUB_ADAPTER === "1",
     dataKey,
     gateCheckName: env.GITHUB_GATE_CHECK_NAME || "Gantry gates",
     runnerToolchains: parseToolchains(env.RUNNER_TOOLCHAINS),
     readinessEveryMs: int(env.WORKER_READINESS_EVERY_MS, 6 * 3600_000),
     canaryEveryMs: int(env.WORKER_CANARY_EVERY_MS, 24 * 3600_000),
     canaryWaitMs: int(env.WORKER_CANARY_WAIT_MS, 120_000),
+    metricsPort: int(env.WORKER_METRICS_PORT, 9464),
   };
 }

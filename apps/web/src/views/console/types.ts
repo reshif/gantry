@@ -17,6 +17,9 @@ export interface Proposal {
   entities: Cited[];
   status: "pending" | "done" | "failed" | "dismissed";
   result?: string;
+  /** What the server said would let a failed card through, and the refusal it recorded (set when the server ran the card). */
+  needs?: string;
+  refusal?: { code: number; rule?: unknown; overrideKind?: string };
 }
 
 export interface ConsoleModel { id: string; name: string; vendor: string; vendorName: string; tier: string; canonical: string; inPrice: number; outPrice: number; context: number }
@@ -53,7 +56,9 @@ export interface ThreadMessage {
   role: "user" | "assistant" | "system";
   text: string;
   at: number;
-  data: { mode?: string; model?: string | null; cited?: Cited[]; proposals?: Proposal[]; tools?: string[]; stopped?: boolean; truncated?: boolean; kind?: string; code?: string; project?: string };
+  /** Who wrote a person's message in a shared chat (null: the chat's owner); the agent's id on an answer in a side thread. */
+  author?: string | null;
+  data: { mode?: string; model?: string | null; agent?: string; agentName?: string; costMicros?: number; askedBy?: string; cited?: Cited[]; proposals?: Proposal[]; tools?: string[]; stopped?: boolean; truncated?: boolean; kind?: string; code?: string; project?: string };
 }
 export interface Thread {
   id: string;
@@ -64,6 +69,16 @@ export interface Thread {
   expiresAt: number;
   retentionDays: number;
   messages: ThreadMessage[];
+  owner?: string;
+  scope?: { kind: "factory" | "project" | "work_order" | "repo"; id: string | null };
+  projectId?: string | null;
+  agentId?: string | null;
+  visibility?: "private" | "project";
+  status?: "active" | "archived";
+  archivedAt?: number | null;
+  archivedBy?: string | null;
+  members?: string[];
+  can?: { post: boolean; manage: boolean };
 }
 export interface ThreadSummary { id: string; title: string; pinned: string[]; updatedAt: number; expiresAt: number; retentionDays: number; count?: number }
 
@@ -86,8 +101,8 @@ export interface Msg {
   role: "user" | "factory";
   at: number;
   text: string;
-  /** model: answered by the model; slash: read directly from live data; none: no model, a notice; error: the answer failed. */
-  mode: "model" | "slash" | "none" | "error" | "pending";
+  /** model: answered by the model; slash: read directly from live data; live: worked out at once from live work-order state; none: no model, a notice; error: the answer failed. */
+  mode: "model" | "slash" | "live" | "none" | "error" | "pending";
   by?: string;
   cited?: Cited[];
   cards?: Card[];

@@ -47,6 +47,14 @@ d("models, vendors, routing, prices and budgets (spec 8.7, 10.4, 10.5)", () => {
   });
 
   describe("reads", () => {
+    it("lists published routing versions newest first for any signed-in person", async () => {
+      const r = await w.call(ADMIN, "GET", "/api/v1/routing/versions");
+      expect(r.status).toBe(200);
+      const rows = r.body as any[];
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows[0]).toMatchObject({ version: expect.any(Number), publishedAt: expect.any(String), note: expect.any(String) });
+      expect(rows.map((x) => x.version)).toEqual([...rows.map((x) => x.version)].sort((a, b) => b - a));
+    });
     it("returns the legacy shapes from the seeded data", async () => {
       const vs = await vendors();
       expect(vs.map((v) => v.id)).toEqual(["anthropic", "openai", "bedrock", "local"]);
@@ -77,7 +85,7 @@ d("models, vendors, routing, prices and budgets (spec 8.7, 10.4, 10.5)", () => {
 
   describe("vendors (setVendor, addVendor)", () => {
     it("connects a vendor with a key: sealed with the data key, masked everywhere, never in an event", async () => {
-      const r = await w.call(ADMIN, "PATCH", "/api/v1/vendors/local", { patch: { key: FAKE_KEY, connected: true, endpoint: "http://gpu-pool.internal:8000/v1", budget: 0 }, action: "vendor.connect" });
+      const r = await w.call(ADMIN, "PATCH", "/api/v1/vendors/local", { patch: { key: FAKE_KEY, connected: true, endpoint: "http://gpu.example.org:8000/v1", budget: 0 }, action: "vendor.connect" });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
       expect(r.body.msg).toBe("Local models connected.");
       const v = await vendor("local");

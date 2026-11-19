@@ -1,5 +1,5 @@
 /** Shared pieces of the Learning screen (legacy js/views/learning.js): kinds, signals, statuses, the word diff, what a change does, the status pipeline and evidence chips. */
-import { flowOf, fmt, type Catalog, type LearningProposal } from "@gantry/domain";
+import { fmt, type LearningProposal } from "@gantry/domain";
 import { useAgents, useProjects, useSkills, useSuites } from "../../api/queries";
 import { Icon } from "../../ui/Icon";
 import { useOpenRecordRoute } from "../record/nav";
@@ -65,6 +65,7 @@ export function WordDiff({ a, b }: { a: string; b: string }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- a proposal's change is free-form JSON from the agent
 type Change = Record<string, any>;
 
 /** What a proposal changes, in plain terms. */
@@ -119,3 +120,16 @@ export function Pipeline({ lp }: { lp: LearningProposal }) {
   );
 }
 
+
+/** The prototype's plain before/after block for a skill edit. */
+export function PlainDiff({ lp }: { lp: LearningProposal }) {
+  const c = (lp.change ?? {}) as { before?: string; after?: string };
+  return <div className="diff pre"><div className="d">{`− ${c.before ?? ""}`}</div><div className="a">{`+ ${c.after ?? ""}`}</div></div>;
+}
+
+/** The prototype's evidence link: the bare work order id in mono, a link to its record. */
+export function WoLink({ id, project }: { id: string; project?: string | null }) {
+  const open = useOpenRecordRoute();
+  if (!/^WO-/.test(id)) return <span className="mono">{id}</span>;
+  return <a className="pri mono" href="#record" onClick={(e) => { e.preventDefault(); open(id, project ?? undefined); }}>{id}</a>;
+}

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   answerConversation, buildWorkOrder, can, canMany, checkAgentAuthority, checkFlowEntryRemoval, checkMatrixEdit, checkPersonRemoval, checkRoleChange, checkRoleDelete, classify,
   completeness, defaultMatrix, devSeed, effectiveStop, gateDecision, gateProgress, hasIndependentApprover, istTime, learningSignals, lockedOutRights, moveCheck, queueOrder, refusalBody,
-  httpStatusFor, replay, riskTagsFor, riskTagsOf, forcesHuman, slotsUsed, freeSlot, stateAt, submitGuard, summaryText, trackStates, trust, workloadSummary, err, ok, DEFAULT_CATALOG,
+  httpStatusFor, replay, riskTagsFor, riskTagsOf, forcesHuman, slotsUsed, freeSlot, stateAt, submitGuard, summaryText, trackStates, trust, workloadSummary, err, ok, DEFAULT_CATALOG, PROTECTED_RIGHTS, READ_ACTIONS,
   SEED_ANCHOR, gantryError,
 } from "./index.js";
 import { NOW, mutate, seedState } from "./testkit.js";
@@ -33,7 +33,7 @@ describe("can(): cases as the legacy views ask them", () => {
     ["Nikhil (project admin) edits approvers in Risk", "p-nikhil", "approvers.edit", { project: "risk" }, true, "MATRIX"],
     ["Grace may approve gates in Risk", "p-grace", "gate.approve", { project: "risk" }, true, "MATRIX"],
     ["Asha as factory admin sees any project", "p-asha", "project.view", { project: "identity" }, true, "MATRIX"],
-    ["Asha releases Identity under break-glass POL-105 (not on call, so POL-103 does not apply)", "p-asha", "release", { project: "identity", time: wed11 }, true, "POL-105"],
+    ["Asha releases Identity: allow policies never restrict a Factory Admin (the matrix decides)", "p-asha", "release", { project: "identity", time: wed11 }, true, "MATRIX"],
     ["Omar edits policy", "p-omar", "policy.edit", {}, true, "MATRIX"],
     ["Priya halts a line as reviewer", "p-priya", "line.halt", { project: "payments" }, true, "MATRIX"],
     ["Chloe confirms briefs in Storefront (line lead)", "p-chloe", "brief.confirm", { project: "storefront" }, true, "MATRIX"],
@@ -156,7 +156,7 @@ describe("invariants (spec 5.1 and 14.4)", () => {
 
   it("a Factory Admin keeps stop commands even if the matrix is damaged (I7)", () => {
     const s = mutate(S, (x) => { x.matrix = defaultMatrix(); x.matrix.factory_admin!["kill.factory"] = false; });
-    expect(can(s, "p-asha", "kill.factory", {})).toMatchObject({ allowed: true, rule: { id: "I7" } });
+    expect(can(s, "p-asha", "kill.factory", {})).toMatchObject({ allowed: true });
     expect(can(s, "p-meera", "kill.factory", {}).allowed).toBe(false);
   });
 
@@ -167,6 +167,7 @@ describe("invariants (spec 5.1 and 14.4)", () => {
     const wo = structuredClone(S.workOrders.find((w) => w.project === "payments" && w.gates.G5))!;
     project.approvers.G5!.sod = false;
     project.approvers.G5!.required = 1;
+    project.approvers.G5!.people = [wo.requestedBy, "p-meera", "p-priya"];
     wo.gates.G5!.approvals = [{ by: wo.requestedBy, at: NOW, via: "web" }];
     const alone = gateProgress(project, wo, "G5", S.people);
     expect(alone).toMatchObject({ have: 1, need: 1, onlyRequester: true });
@@ -301,7 +302,12 @@ describe("intake: classification, conversation and brief", () => {
     expect(wo).toMatchObject({ cls: "bug", state: "waiting", station: 0, priority: "P2", risk: "normal" });
     expect(wo.gates.G0G1!.status).toBe("waiting");
     expect(Object.keys(wo.gates)).toEqual(expect.arrayContaining(["G0G1", "G2", "G5"]));
-    expect(wo.conv.questions.map((q) => q.id)).toEqual(expect.arrayContaining(["scope", "ac", "testdata", "repro", "extra"]));
+    expect(wo.conv.questions.map((q) => q.id)).toEqual(["scope", "ac", "extra"]);
+    // Fallback form only: no canned answer chips, and nothing invented in the history (no model, tokens or cost before anything ran).
+    expect(wo.conv.questions.every((q) => q.chips.length === 0)).toBe(true);
+    expect(wo.conv.misses).toEqual([]);
+    expect(wo.history).toEqual([{ station: "intake", agent: "ag-intake", model: "", startedAt: NOW, endedAt: null, tokens: 0, cost: 0, outcome: null, note: "" }]);
+    expect(JSON.stringify(wo)).not.toMatch(/claude-haiku|"tokens":4200|"cost":0.02/);
     expect(wo.brief.route[0]).toBe("intake");
     expect(wo.slaDue - wo.createdAt).toBe(48 * 3600000);
   });
@@ -311,14 +317,46 @@ describe("intake: classification, conversation and brief", () => {
     let t = NOW;
     while (!wo.conv.done) {
       const frozen = JSON.stringify(wo.conv);
-      const q = wo.conv.questions[wo.conv.qi]!;
-      const r = answerConversation(S.catalog, payments, wo, q.chips[0]!, "p-tomas", (t += 60000));
+      const r = answerConversation(S.catalog, payments, wo, "A typed answer", "p-tomas", (t += 60000));
       expect(JSON.stringify(wo.conv)).toBe(frozen);
       wo = { ...wo, conv: r.conv, brief: r.brief };
     }
     expect(wo.brief.open).toEqual([]);
     expect(wo.brief.scopeIn.length).toBe(1);
     expect(wo.conv.messages.at(-1)!.text).toMatch(/brief is ready/);
+  });
+
+  it("keeps the class a person chose, even when the keyword guess is confident and different (G-01)", () => {
+    const payments = S.projects.find((p) => p.id === "payments")!;
+    const mk = (title: string, requestedCls: string | null) => buildWorkOrder(S.catalog, payments, { id: "WO-9100", project: "payments", repo: "payments-api", title, requestedCls, requestedBy: "p-tomas", createdAt: NOW });
+    expect(classify(S.catalog, "Fix the rounding bug", null).cls).toBe("bug");
+    const chosen = mk("Fix the rounding bug", "chore");
+    expect(chosen.cls).toBe("chore");
+    expect(chosen.clsSuggested).toBe("bug");
+    expect(chosen.clsConfidence).toBe(1);
+    expect(chosen.clsRationale).toMatch(/Chosen by the submitter/);
+    expect(chosen.clsRationale).toMatch(/rule-based keyword match/i);
+    // No choice: the keyword match is only a labelled first guess.
+    const guess = mk("Fix the rounding bug", null);
+    expect(guess.cls).toBe("bug");
+    expect(guess.clsRationale).toMatch(/^Provisional rule-based keyword match \(no agent has read the request yet/);
+  });
+
+  it("writes no agent voice and no invented epic split: scripted notes are Gantry's, children come from an agent or a person", () => {
+    const payments = S.projects.find((p) => p.id === "payments")!;
+    let wo = buildWorkOrder(S.catalog, payments, { id: "WO-9101", project: "payments", repo: "payments-api", title: "Three report jobs for the billing team", requestedCls: "epic", requestedBy: "p-tomas", createdAt: NOW });
+    expect(wo.cls).toBe("epic");
+    expect(wo.conv.questions.some((q) => q.id === "children" || /data model|child work orders/i.test(q.text))).toBe(false);
+    expect(wo.conv.messages.every((m) => m.from === "system" && m.scripted === true)).toBe(true);
+    expect(wo.conv.messages.some((m) => /Intake Clerk|I read this/.test(m.text))).toBe(false);
+    expect(wo.conv.awaiting).toBe("submitter");
+    let t = NOW;
+    while (!wo.conv.done) {
+      const r = answerConversation(S.catalog, payments, wo, "A typed answer", "p-tomas", (t += 60000));
+      wo = { ...wo, conv: r.conv, brief: r.brief };
+      expect(wo.brief.children).toEqual([]);
+    }
+    expect(wo.conv.awaiting).toBe("approver");
   });
 
   it("classifies a regulated project's work as high risk and honours requested class below 0.8 confidence", () => {
@@ -425,5 +463,59 @@ describe("dev seed", () => {
     const { state } = devSeed(NOW);
     const dm = defaultMatrix(DEFAULT_CATALOG.actions);
     for (const role of Object.keys(dm)) for (const a of DEFAULT_CATALOG.actions) expect(state.matrix[role]![a.id], `${role} ${a.id}`).toBe(dm[role]![a.id]);
+  });
+});
+
+describe("on call is per project (owner decision 7)", () => {
+  const release = (st: typeof S, project: string) => can(st, "p-lena", "release", { project, time: sun03 });
+
+  it("Lena's on-call release on Identity needs Identity's own on-call list, not another project's", () => {
+    expect(S.projects.find((p) => p.id === "identity")?.oncall).toContain("p-lena");
+    expect(release(S, "identity")).toMatchObject({ allowed: true, rule: { id: "POL-103" } });
+    const elsewhere = mutate(S, (s) => {
+      for (const p of s.projects) p.oncall = p.id === "payments" ? ["p-lena"] : (p.oncall ?? []).filter((x) => x !== "p-lena");
+    });
+    const d = release(elsewhere, "identity");
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toContain("not on call");
+  });
+
+  it("the person's own legacy switch no longer counts", () => {
+    const st = mutate(S, (s) => {
+      for (const p of s.projects) p.oncall = [];
+      for (const p of s.people) p.oncall = true;
+    });
+    expect(release(st, "identity").allowed).toBe(false);
+  });
+
+  it("a Factory Admin always counts as on call, with no list", async () => {
+    const { isOnCall } = await import("./policy.js");
+    const st = mutate(S, (s) => { for (const p of s.projects) p.oncall = []; });
+    const asha = st.people.find((p) => p.id === "p-asha")!;
+    const lena = st.people.find((p) => p.id === "p-lena")!;
+    expect(isOnCall(st, asha, "identity")).toBe(true);
+    expect(isOnCall(st, asha, null)).toBe(true);
+    expect(isOnCall(st, lena, "identity")).toBe(false);
+  });
+});
+
+describe("role templates: Factory Manager and Security Reviewer (owner decision 6)", () => {
+  const m = defaultMatrix(DEFAULT_CATALOG.actions);
+  const has = (role: string, ids: string[]) => ids.filter((a) => m[role]?.[a] !== true);
+  const lacks = (role: string, ids: string[]) => ids.filter((a) => m[role]?.[a] === true);
+
+  it("are factory-level built-in roles", () => {
+    for (const id of ["factory_manager", "security_reviewer"]) expect(DEFAULT_CATALOG.roles.find((r) => r.id === id)?.level).toBe("factory");
+  });
+
+  it("a Factory Manager reads everything and operates every project, but administers no access", () => {
+    expect(has("factory_manager", ["project.view", ...READ_ACTIONS, "audit.view", "wo.move", "gate.approve", "flow.edit", "project.config", "line.halt", "line.resume", "kill.project", "restore.project", "halt.factory", "resume.factory", "project.create", "template.edit"])).toEqual([]);
+    expect(lacks("factory_manager", [...PROTECTED_RIGHTS, "project.members", "approvers.edit", "trust.grant", "api.keys", "kill.factory", "agent.edit", "model.edit", "integration.edit"])).toEqual([]);
+    expect(lacks("factory_manager", DEFAULT_CATALOG.actions.map((a) => a.id).filter((a) => a.startsWith("console.propose")))).toEqual([]);
+  });
+
+  it("a Security Reviewer reads everything and can stop or sign off risky work, and changes no configuration", () => {
+    expect(has("security_reviewer", ["project.view", ...READ_ACTIONS, "audit.view", "gate.approve", "wo.sendback", "line.halt", "kill.workorder"])).toEqual([]);
+    expect(lacks("security_reviewer", [...PROTECTED_RIGHTS, "line.resume", "flow.edit", "project.config", "wo.move", "release", "agent.edit"])).toEqual([]);
   });
 });

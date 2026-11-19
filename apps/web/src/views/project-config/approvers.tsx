@@ -1,20 +1,22 @@
-/** Project config: Approvers tab, rule editor and away dialog (legacy project-config.js approversTab, ruleEditor, awayDialog). */
+/** Project config > Approvers: the full rule editor (roles, people, approvals required, per-class counts, conditions, escalation, fallback, SoD, away and delegates, a test scenario) and the away dialog. */
+import { gateLabelOf } from "../../lib/gate-label";
 import { useState } from "react";
-import { DAY, fmt, flowOf, type ApproverCondition, type ApproverRule, type Catalog, type Person } from "@gantry/domain";
-import { ops } from "../../api/ops";
+import { DAY, fmt, flowOf, requiredFor, type ApproverCondition, type ApproverRule, type Catalog, type Person } from "@gantry/domain";
+import { commands as ops } from "../../api/commands";
 import { useCan } from "../../api/can";
 import { Dialog } from "../../ui/Overlay";
-import { Btn, Field, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
+import { Btn, Field, Input, Panel, Select, Toggle } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
-import { GateDiamond, NumInput, classOf, gateState, projectRoles, roleName, useRes, type PView } from "../projects/kit";
+import { NumInput, classOf, projectRoles, roleName, useRes, type PView } from "../projects/kit";
 import { membersOf, rolesIn, type PcProps } from "./ctx";
 import { HistoryList } from "./history";
+import { useUrlDialog } from "./url-dialog";
 
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
-function isDirty(p: PView, drafts: Record<string, ApproverRule>, gid: string): boolean {
+export function isDirty(p: PView, drafts: Record<string, ApproverRule>, gid: string): boolean {
   return !!drafts[gid] && JSON.stringify(drafts[gid]) !== JSON.stringify(p.approvers[gid]);
 }
 
@@ -24,6 +26,36 @@ function eligibleOf(p: PView, people: Person[], rule: ApproverRule): Person[] {
     const roles = rolesIn(x, p.id);
     return rule.people.includes(x.id) || rule.roles.some((r) => roles.includes(r));
   });
+}
+
+/** Away and delegates for everyone who may approve a gate here: one click from the tab (Set away), not inside a rule editor. */
+export function AwayPanel({ p, cat, people }: Pick<PcProps, "p" | "cat" | "people">) {
+  const res = useRes();
+  const actor = useActors();
+  const d = useCan("approvers.edit", { project: p.id });
+  const [now] = useState(() => Date.now());
+  const name = (id: string) => actor(id).name.replace(" (agent)", "");
+  const who = membersOf(people, p).filter((x) => x.status === "active" && Object.values(p.approvers).some((r) => eligibleOf(p, people, r).some((e) => e.id === x.id)));
+  const setAway = useUrlDialog("away", (pid, close) => { const x = people.find((y) => y.id === pid); return x ? <AwayDialog p={p} cat={cat} person={x} people={people} close={close} /> : null; });
+  return (
+    <Panel title="Away and delegates" id="pcf-away">
+      {who.length ? (
+        <ul className="plain-list">
+          {who.map((x) => {
+            const isAway = !!x.away && x.away.to > now;
+            return (
+              <li key={x.id} className="pcf-deleg-row">
+                <span>{x.name}</span>
+                <span className={`small ${isAway ? "warn-text" : "muted"}`}>{isAway ? `away until ${fmt.istDate(x.away!.to)}, ${name(x.away!.delegate ?? "")} approves instead` : "present"}</span>
+                <Btn small kind="ghost" id={`pcf-away-${x.id}`} guard={d} label={isAway ? "Change" : "Set away"} aria={`${isAway ? "Change" : "Set"} away for ${x.name}`} onClick={() => setAway(x.id)} />
+                {isAway ? <Btn small kind="ghost" id={`pcf-away-clr-${x.id}`} guard={d} label="Clear" aria={`Clear away for ${x.name}`} onClick={async () => res(await ops.setAway(x.id, null, p.id))} /> : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : <p className="muted small">Nobody can approve a gate here yet.</p>}
+    </Panel>
+  );
 }
 
 function AwayDialog({ p, cat, person, people, close }: { p: PView; cat: Catalog; person: Person; people: Person[]; close: () => void }) {
@@ -58,61 +90,27 @@ function AwayDialog({ p, cat, person, people, close }: { p: PView; cat: Catalog;
   );
 }
 
-export function ApproversTab({ p, cat, people, s, set }: PcProps) {
+/** The full rule editor for one gate, opened in place under the gate table (`?rule=<gate>`). */
+export function RulePanel({ p, cat, people, s, set, gid, onClose }: PcProps & { gid: string; onClose: () => void }) {
   const d = useCan("approvers.edit", { project: p.id });
-  const locked = !d.allowed;
-  const fg = flowOf(cat, p).gates;
-  const g = fg.find((x) => x.id === s.gate) ?? fg.find((x) => x.id === "G5") ?? fg[0];
-  const actor = useActors();
-  const name = (id: string) => actor(id).name.replace(" (agent)", "");
-  if (!g) return null;
-  return (
-    <div className="pcf-stack">
-      <LockNote decision={d} what="Approver rules" />
-      <div className="pcf-ap">
-        <Panel title="Gates" flush cls="pcf-ap-list">
-          <ul className="pcf-gates" role="list">
-            {fg.map((x) => {
-              const r = p.approvers[x.id];
-              const gs = gateState(p, x.id);
-              const sum = x.mode === "auto" ? "Automatic checks" : x.id === "G0G1" ? "Submitter confirms" : r ? `${r.required} of ${r.roles.map((y) => roleName(cat, y)).concat(r.people.map(name)).join(", ") || "nobody"}${r.conditions.length ? ` · ${r.conditions.length} condition${r.conditions.length > 1 ? "s" : ""}` : ""}` : "No rule";
-              return (
-                <li key={x.id}>
-                  <button type="button" id={`pcf-ap-g-${x.id}`} className={`pcf-gate-btn${x.id === g.id ? " is-sel" : ""}`} aria-current={x.id === g.id ? "true" : undefined} onClick={() => set({ gate: x.id })}>
-                    <GateDiamond cat={cat} gateId={x.id} state={gs.state} count={gs.waiting || gs.failing} size="sm" />
-                    <span className="pcf-gate-main">
-                      <span>
-                        <span className="mono">{x.label}</span>{` ${x.name}`}
-                        {x.custom ? <span className="tag pcf-tag-custom">custom</span> : null}
-                        {isDirty(p, s.drafts, x.id) ? <span className="chip chip-warn">unsaved</span> : null}
-                      </span>
-                      <span className="muted small">{sum}</span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </Panel>
-        {g.mode === "auto" ? (
-          <Panel title={`${g.label} ${g.name}`}>
-            <div className="form-grid">
-              <p>{g.purpose}</p>
-              <p className="muted small">{`This gate is automatic in ${p.name}. It passes when its checks pass; nobody approves it. Change its mode on the Flow tab.`}</p>
-              {g.checks.length ? <ul className="checklist">{g.checks.map((c) => <li key={c} className="ok">{c}</li>)}</ul> : <p className="muted small">No checks: it passes straight through.</p>}
-            </div>
-          </Panel>
-        ) : (
-          <RuleEditor key={`${p.id}:${g.id}`} p={p} cat={cat} people={people} gate={g} s={s} set={set} d={d} locked={locked} />
-        )}
-      </div>
-    </div>
-  );
+  const g = flowOf(cat, p).gates.find((x) => x.id === gid);
+  if (!g) return <Panel title="Gate not found" id="pcf-rule" tools={<Btn small kind="ghost" id="pcf-ap-close" label="Close" onClick={onClose} />}><p className="small">{`${gateLabelOf(null, gid)} is not a gate in ${p.name}'s flow (it may have been removed). Pick a gate from the table above.`}</p></Panel>;
+  if (g.mode === "auto") {
+    return (
+      <Panel title={`${g.label} ${g.name}`} id="pcf-rule" tools={<Btn small kind="ghost" id="pcf-ap-close" label="Close" onClick={onClose} />}>
+        <div className="form-grid">
+          <p>{g.purpose}</p>
+          <p className="muted small">{`This gate is automatic in ${p.name}. It passes when its checks pass; nobody approves it. Change its mode on the Flow tab.`}</p>
+          {g.checks.length ? <ul className="checklist">{g.checks.map((c) => <li key={c} className="ok">{c}</li>)}</ul> : <p className="muted small">No checks: it passes straight through.</p>}
+        </div>
+      </Panel>
+    );
+  }
+  return <RuleEditor key={`${p.id}:${g.id}`} p={p} cat={cat} people={people} gate={g} s={s} set={set} d={d} locked={!d.allowed} onClose={onClose} />;
 }
 
-function RuleEditor({ p, cat, people, gate: g, s, set, d, locked }: PcProps & { gate: ReturnType<typeof flowOf>["gates"][number]; d: ReturnType<typeof useCan>; locked: boolean }) {
+function RuleEditor({ p, cat, people, gate: g, s, set, d, locked, onClose }: PcProps & { gate: ReturnType<typeof flowOf>["gates"][number]; d: ReturnType<typeof useCan>; locked: boolean; onClose: () => void }) {
   const ui = useUI();
-  const res = useRes();
   const actor = useActors();
   const name = (id: string) => actor(id).name.replace(" (agent)", "");
   const gid = g.id;
@@ -141,6 +139,10 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked }: PcProps & { 
     if (gid !== "G0G1" && r.required < 1) return setErr("A human gate needs at least one approval.");
     if (!r.roles.length && !r.people.length) return setErr("Pick at least one role or named person.");
     if (r.required > elig.length) return setErr(`Needs ${r.required} approvals but only ${elig.length} eligible ${elig.length === 1 ? "person is" : "people are"} in ${p.name}.`);
+    for (const [c, n] of Object.entries(r.classRequired ?? {})) {
+      if (!Number.isInteger(n) || n < 1) return setErr(`Approvals required for ${c} must be at least 1.`);
+      if (n > elig.length) return setErr(`${c} needs ${n} approvals but only ${elig.length} eligible ${elig.length === 1 ? "person is" : "people are"} in ${p.name}.`);
+    }
     if (r.conditions.some((c) => !c.needs.roles.length && !c.needs.people.length)) return setErr("Every condition needs at least one role.");
     const prev = saved?.conditions ?? [];
     const out = clone(r);
@@ -161,14 +163,13 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked }: PcProps & { 
   const sc = s.scen;
   const paths = sc.path ? [sc.path] : [];
   const scConds = r.conditions.filter((c) => (c.when.type === "class" ? sc.cls === c.when.value : c.when.type === "risk" ? sc.risk === c.when.value : paths.some((x) => x.startsWith(c.when.value))));
-  const away = elig.filter((x) => x.away && x.away.to > now);
   const classesOn = p.flow.classes.filter((c) => c.enabled !== false);
   const sodId = "pcf-ap-sod";
   return (
-    <section className="panel pcf-rule" aria-label={`${g.label} approver rule`}>
+    <section className="panel pcf-rule" id="pcf-rule" aria-label={`${g.label} approver rule`}>
       <div className="panel-head">
         <h2 className="panel-title"><span className="mono">{g.label}</span>{` ${g.name}`}</h2>
-        {dirty ? <span className="chip chip-warn">Unsaved changes</span> : <span className="muted small mono">{`APR-${gid}`}</span>}
+        <span className="row">{dirty ? <span className="chip chip-warn">Unsaved changes</span> : <span className="muted small mono">{`APR-${gateLabelOf(null, gid)}`}</span>}<Btn small kind="ghost" id="pcf-ap-close" label="Close" onClick={onClose} /></span>
       </div>
       <div className="panel-body form-grid">
         <p className="small">{g.purpose}{r.note ? <span className="muted">{` ${r.note}`}</span> : null}</p>
@@ -211,6 +212,26 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked }: PcProps & { 
             <span>{`of ${elig.length} eligible: `}</span>
             <span className="small">{elig.map((x) => x.name + (x.oncall ? " (on call)" : "") + (x.away && x.away.to > now ? " (away)" : "")).join(", ") || "nobody yet"}</span>
           </div>
+          {gid !== "G0G1" ? (
+            <div className="pcf-cls-counts">
+              <div className="small strong">Approvals required per class</div>
+              <p className="muted small">{`Optional. Changes only the count for that class; a class without its own number needs ${r.required}. The author still cannot approve when the rule says so.`}</p>
+              <ul className="plain-list">
+                {classesOn.map((c) => {
+                  const own = r.classRequired?.[c.id];
+                  return (
+                    <li key={c.id} className="pcf-deleg-row">
+                      <span>{c.name}</span>
+                      <NumInput id={`pcf-ap-cls-${c.id}`} value={own ?? r.required} min={1} max={9} locked={locked} label={`Approvals required for ${c.name}`}
+                        onCommit={(v) => upd((x) => { const m = { ...(x.classRequired ?? {}) }; if (v === x.required) delete m[c.id]; else m[c.id] = v; if (Object.keys(m).length) x.classRequired = m; else delete x.classRequired; })} />
+                      <span className="small muted">{own !== undefined ? `instead of ${r.required}` : "base count"}</span>
+                      {own !== undefined ? <Btn small kind="ghost" id={`pcf-ap-cls-${c.id}-clr`} guard={d} label="Use base" onClick={() => upd((x) => { const m = { ...(x.classRequired ?? {}) }; delete m[c.id]; if (Object.keys(m).length) x.classRequired = m; else delete x.classRequired; })} /> : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
           <div className="toggle-row">
             <label htmlFor={sodId}>Author cannot approve (separation of duties)</label>
             <Toggle id={sodId} checked={r.sod} decision={d} onChange={(v) => upd((x) => { x.sod = v; })} />
@@ -233,7 +254,7 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked }: PcProps & { 
                       ) : c.when.type === "risk" ? (
                         <Select id={`${idp}-val`} aria-label="Risk" disabled={locked} options={[{ value: "high", label: "High risk" }, { value: "normal", label: "Normal risk" }]} value={c.when.value} onChange={(v) => upd((x) => { const y = x.conditions[i]!; y.when.value = v; y.text = condText(y); })} />
                       ) : (
-                        <input id={`${idp}-val`} className="input mono" defaultValue={c.when.value} disabled={locked} aria-label="Path prefix" placeholder="/payments" onBlur={(e) => { if (e.target.value.trim() !== c.when.value) upd((x) => { const y = x.conditions[i]!; y.when.value = e.target.value.trim() || "/"; y.text = condText(y); }); }} />
+                        <Input id={`${idp}-val`} className="mono" defaultValue={c.when.value} disabled={locked} aria-label="Path prefix" placeholder="/payments" onBlur={(e) => { if (e.target.value.trim() !== c.when.value) upd((x) => { const y = x.conditions[i]!; y.when.value = e.target.value.trim() || "/"; y.text = condText(y); }); }} />
                       )}
                     </div>
                     <div className="pcf-cond-needs">
@@ -279,33 +300,16 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked }: PcProps & { 
               <Select id="pcf-ap-fallback" disabled={locked} options={[{ value: "", label: `Project owner (${name(p.owner)})` }, ...people2.map((x) => ({ value: x.id, label: x.name }))]} value={r.fallback || ""} onChange={(v) => upd((x) => { x.fallback = v || null; })} />
             </Field>
           </div>
-          <div className="pcf-deleg">
-            <div className="small strong">Away and delegates</div>
-            <ul className="plain-list">
-              {elig.map((x) => {
-                const isAway = !!x.away && x.away.to > now;
-                return (
-                  <li key={x.id} className="pcf-deleg-row">
-                    <span>{x.name}</span>
-                    <span className={`small ${isAway ? "warn-text" : "muted"}`}>{isAway ? `away until ${fmt.istDate(x.away!.to)}, ${name(x.away!.delegate ?? "")} approves instead` : "present"}</span>
-                    <Btn small kind="ghost" id={`pcf-away-${x.id}`} guard={d} label={isAway ? "Change" : "Set away"} onClick={() => ui.open((close) => <AwayDialog p={p} cat={cat} person={x} people={people} close={close} />)} />
-                    {isAway ? <Btn small kind="ghost" id={`pcf-away-clr-${x.id}`} guard={d} label="Clear" onClick={async () => res(await ops.setAway(x.id, null, p.id))} /> : null}
-                  </li>
-                );
-              })}
-            </ul>
-            {away.length ? null : <p className="muted small">Nobody eligible is away.</p>}
-          </div>
         </fieldset>
         <fieldset className="pcf-fs pcf-scen">
           <legend className="sub-h">Try a work order</legend>
           <div className="form-row">
             <Field label="Class" htmlFor="pcf-sc-cls"><Select id="pcf-sc-cls" options={classesOn.map((x) => ({ value: x.id, label: classOf(cat, p, x.id).name }))} value={sc.cls} onChange={(v) => set({ scen: { ...sc, cls: v } })} /></Field>
             <Field label="Risk" htmlFor="pcf-sc-risk"><Select id="pcf-sc-risk" options={["normal", "high"]} value={sc.risk} onChange={(v) => set({ scen: { ...sc, risk: v } })} /></Field>
-            <Field label="Changed path" htmlFor="pcf-sc-path"><input id="pcf-sc-path" className="input mono" defaultValue={sc.path} placeholder="/payments/refunds" onBlur={(e) => set({ scen: { ...sc, path: e.target.value.trim() } })} /></Field>
+            <Field label="Changed path" htmlFor="pcf-sc-path"><Input id="pcf-sc-path" className="mono" defaultValue={sc.path} placeholder="/payments/refunds" onBlur={(e) => set({ scen: { ...sc, path: e.target.value.trim() } })} /></Field>
           </div>
           <p className="small" aria-live="polite">
-            {`${r.required} approval${r.required > 1 ? "s" : ""} from ${r.roles.map((x) => roleName(cat, x)).concat(r.people.map(name)).join(", ") || "nobody"}${r.sod ? ", not the author" : ""}${scConds.length ? `; plus: ${scConds.map(condText).join("; ")}` : "; no conditions apply"}.`}
+            {`${requiredFor(r, sc.cls)} approval${requiredFor(r, sc.cls) > 1 ? "s" : ""} from ${r.roles.map((x) => roleName(cat, x)).concat(r.people.map(name)).join(", ") || "nobody"}${r.sod ? ", not the author" : ""}${scConds.length ? `; plus: ${scConds.map(condText).join("; ")}` : "; no conditions apply"}.`}
           </p>
         </fieldset>
         <div className="form-err" role="alert">{err}</div>

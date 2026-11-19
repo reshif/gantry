@@ -18,7 +18,8 @@ export interface UsageEntry {
   costUsd?: number;
 }
 
-export type RunStatus = "succeeded" | "failed" | "interrupted";
+/** `needs_person`: the agent asked a blocking question; the run ends and the station starts again with the answer. */
+export type RunStatus = "succeeded" | "failed" | "interrupted" | "needs_person";
 
 export interface RunResult {
   status: RunStatus;

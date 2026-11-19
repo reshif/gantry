@@ -1,17 +1,24 @@
 import { createHash, randomBytes } from "node:crypto";
-import { gateLock, ruleWarning, isFactoryAdminPerson, type ApproverRule, type Project, type ProjectFlow, type Template, type WorkClass } from "@gantry/domain";
-import type { Tx } from "@gantry/db";
+import { can, gateLock, ruleWarning, isFactoryAdminPerson, type ApproverRule, type Project, type ProjectFlow, type Template, type WorkClass } from "@gantry/domain";
+import { cancel, schedule, type Tx } from "@gantry/db";
 import type { z } from "zod";
 import type { Actor, CommandResult, EventSpec } from "../../core/command.js";
+import { capOfReason, overBudget, overText } from "../workorders/budget-state.js";
+import { liftBudgetHalt } from "../workorders/budget.js";
+import { isMandatoryEvent } from "../notifications/events.js";
+import { dispatchQueued, newFx } from "../workorders/engine.js";
 import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
+import { job } from "../../core/jobs-contract.js";
+import { loadPolicyState } from "../../core/read/state.js";
 import { readCatalog, readPeople, readRoles, readTemplates } from "../../core/read/index.js";
+import { pruneOncall } from "./oncall.js";
 import { parseConfigEdit, type ConfigEdit } from "./config.js";
-import { addBay, addClass, addGate, addStation, draftOf, moveStation, removeStation, replaceClasses, setEnabled, setGateMode, setWip, updateClass, type FlowDraft } from "./flowedit.js";
+import { addBay, addClass, type OverrideRecord, addGate, addStation, draftOf, moveStation, removeStation, replaceClasses, setEnabled, setGateMode, setRunLimits, setWip, updateClass, type FlowDraft } from "./flowedit.js";
 import { approversPreset, flowFrom, routesPreset } from "./presets.js";
 import { checkRule, checkRuleRefs, ruleContext } from "./rules.js";
 import type { ArchiveBody, BayBody, ClassBody, ClassPatch, GateBody, MoveBody, NewProject, StationBody, TemplateCreate, TemplatePatch, ViewCreate, ViewPatch } from "./schemas.js";
 import {
-  loadDraft, lockProject, openByClass, openWorkOrders, persistDraft, publishRule, readProject, saveCatalog,
+  factoryAdminActor, loadDraft, lockProject, openByClass, openWorkOrders, persistDraft, publishRule, readProject, saveCatalog,
 } from "./store.js";
 import { applyCustom, checkTemplatePatch, customCount, customOf, templateBodyFromProject, type TemplateCustom } from "./templates.js";
 
@@ -69,7 +76,7 @@ export async function createProject(tx: Tx, a: Actor, body: NewProjectBody): Pro
     if (bad.length) throw invalid(`A regulated project keeps every gate on, so ${tpl.name} cannot be used with ${bad.join(", ")} off.`);
   }
   const flow = flowFrom(catalog, tpl);
-  const approvers: Record<string, ApproverRule> = (body.approvers as Record<string, ApproverRule> | null | undefined) ?? approversPreset(tpl.approverPreset, catalog);
+  const approvers: Record<string, ApproverRule> = (body.approvers as Record<string, ApproverRule> | null | undefined) ?? (tpl.approvers ? (JSON.parse(json(tpl.approvers)) as Record<string, ApproverRule>) : approversPreset(tpl.approverPreset, catalog));
   const draft = draftOf(id, flow, approvers, catalog);
   const custom = customCount(customOf(tpl as Template & { custom?: unknown })) ? await replayCustom(tx, org, draft, tpl as Template & { custom?: unknown }) : { done: [] as string[], failed: [] as string[] };
   if (draft.catalogChanged) await saveCatalog(tx, org, draft.catalog);
@@ -94,7 +101,7 @@ export async function createProject(tx: Tx, a: Actor, body: NewProjectBody): Pro
       [org, `${id}:${r.id || `NR-${i + 1}`}`, id, r.event, json(r.dest), r.template, json(r.cond), json(r.fields), r.enabled],
     );
   }
-  await tx.query(`insert into budgets (org_id, project_id, monthly_limit_micros, alert_at) values ($1,$2,$3,0.8)`, [org, id, Math.round((body.budget ?? 1000) * 1_000_000)]);
+  await tx.query(`insert into budgets (org_id, project_id, monthly_limit_micros, monthly_zero_cap, alert_at) values ($1,$2,$3,$4,0.8)`, [org, id, Math.round((body.budget ?? 1000) * 1_000_000), false]);
 
   const events: EventSpec[] = [evt("project.create", id, { type: "project", id }, undefined, { name, key, template: tpl.id, owner: ownerId })];
   const grant = !isFactoryAdminPerson(owner);
@@ -120,7 +127,7 @@ async function replayCustom(tx: Tx, org: string, draft: FlowDraft, tpl: Template
 const jsonOf = (v: unknown) => JSON.parse(JSON.stringify(v ?? null)) as unknown;
 
 /** `PATCH /projects/{id}/config` with `{ path, value }`. Flow edits publish a new flow version; the rest update the project in place and bump its version. */
-export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: ConfigEdit, path: string): Promise<Out<{ version: number; flowVersion?: number }>> {
+export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: ConfigEdit, path: string, reason?: string): Promise<Out<{ version: number; flowVersion?: number }>> {
   const row = await lockProject(tx, a.orgId, projectId, a.ifMatch);
   const org = a.orgId;
   const subject = { type: "project", id: projectId };
@@ -130,6 +137,12 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
       msg, events: [{ ...evt(type, projectId, subject, jsonOf(before), jsonOf(after), category), subject: { ...subject, path } }],
       extra: { version, ...(flowVersion !== undefined ? { flowVersion } : {}) }, changes: ["projects"], project: projectId,
     };
+  };
+
+  /** A lock overridden by a Factory Admin: one `flow.override` event with project, gate, before, after and the reason, in the project's audit. */
+  const overridden = async (o: OverrideRecord, msg: string, flowVersion: number): Promise<Out<{ version: number; flowVersion?: number }>> => {
+    const version = Number((await tx.query(`select version from projects where org_id = $1 and id = $2`, [org, projectId])).rows[0].version);
+    return { msg, events: [flowOverrideEvent(projectId, o)], extra: { version, flowVersion }, changes: ["projects", "floor"], project: projectId };
   };
 
   switch (edit.kind) {
@@ -159,8 +172,23 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
       await tx.query(`update projects set config = jsonb_set(config, '{mcp}', $3::jsonb) where org_id = $1 and id = $2`, [org, projectId, json([...new Set(edit.value)])]);
       return done("project.config", before, edit.value, `Saved ${path}.`);
     }
+    case "oncall-page": {
+      // Whether the default page to the people on call goes out for halts, blocked work orders, security holds and escalations. Kill and restore page whatever this says.
+      const before = (row.config as { oncallPage?: boolean }).oncallPage !== false;
+      await tx.query(`update projects set config = jsonb_set(config, '{oncallPage}', $3::jsonb) where org_id = $1 and id = $2`, [org, projectId, json(edit.value)]);
+      return done("project.config", before, edit.value, `On-call page ${edit.value ? "on" : "off"} for halts, blocked work orders, security holds and escalations. Kill and restore always page.`);
+    }
     case "notifications": {
       const old = (await readProject(tx, org, projectId))!.notifications;
+      // The kill and restore routes are locked as they are on the single-route path (S-35): none may be dropped, switched off or narrowed by a bulk save.
+      const next = new Map(edit.value.map((r, i) => [r.id || `NR-${i + 1}`, r]));
+      for (const o of old.filter((r) => isMandatoryEvent(r.event))) {
+        const n = next.get(o.id);
+        if (!n || n.event !== o.event) throw conflict("Kill and restore routes cannot be removed. Change where they go instead.");
+      }
+      for (const r of edit.value) {
+        if (isMandatoryEvent(r.event) && (!r.enabled || r.cond.classes.length || r.cond.priority.length || r.cond.hours !== "any")) throw invalid("Kill and restore notifications cannot be switched off or narrowed.");
+      }
       await tx.query(`delete from notification_routes where org_id = $1 and project_id = $2`, [org, projectId]);
       const ids = new Set<string>();
       for (const [i, r] of edit.value.entries()) {
@@ -175,12 +203,36 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
       return done("notify.edit", old, edit.value, `Saved ${path}.`, "integrations");
     }
     case "budget-monthly": {
-      const before = Number((await tx.query(`select monthly_limit_micros from budgets where org_id = $1 and project_id = $2`, [org, projectId])).rows[0]?.monthly_limit_micros ?? 0) / 1_000_000;
+      // 0 or null means no cap (owner decision, reversing the S-43 zero cap); monthly_zero_cap is never set and stays false.
+      const prior = (await tx.query<{ m: string }>(`select monthly_limit_micros::text as m from budgets where org_id = $1 and project_id = $2`, [org, projectId])).rows[0];
+      const beforeCap: number | null = prior && Number(prior.m) > 0 ? Number(prior.m) / 1_000_000 : null;
+      const before = beforeCap ?? 0;
+      const value: number | null = edit.value !== null && edit.value > 0 ? edit.value : null;
       await tx.query(
-        `insert into budgets (org_id, project_id, monthly_limit_micros) values ($1,$2,$3) on conflict (org_id, project_id) do update set monthly_limit_micros = excluded.monthly_limit_micros, version = budgets.version + 1, updated_at = now()`,
-        [org, projectId, Math.round(edit.value * 1_000_000)],
+        `insert into budgets (org_id, project_id, monthly_limit_micros, monthly_zero_cap) values ($1,$2,$3,$4) on conflict (org_id, project_id) do update set monthly_limit_micros = excluded.monthly_limit_micros, monthly_zero_cap = excluded.monthly_zero_cap, version = budgets.version + 1, updated_at = now()`,
+        [org, projectId, value === null ? 0 : Math.round(value * 1_000_000), false],
       );
-      return done("project.config", before, edit.value, `Saved ${path}.`);
+      // Raising the monthly budget lifts the budget halts it was holding (audited as a resume, naming the cap), unless something else still holds the work order.
+      const lifted: string[] = [];
+      const kept: string[] = [];
+      const events: EventSpec[] = [];
+      const jobs: NonNullable<CommandResult["jobs"]> = [];
+      if (value === null || value > before) {
+        const halts = (await tx.query<{ wo_id: string; reason: string }>(
+          `select s.wo_id, s.reason from stops s join work_orders w on w.org_id = s.org_id and w.id = s.wo_id where s.org_id = $1 and w.project_id = $2 and s.scope_type = 'wo' and s.mode = 'halt' and s.cause = 'budget' and s.lifted_at is null order by s.wo_id`, [org, projectId],
+        )).rows;
+        for (const h of halts) {
+          if (capOfReason(h.reason) !== "project") continue;
+          const still = await overBudget(tx, org, h.wo_id);
+          if (still.length) { kept.push(`${h.wo_id} (${still.map(overText).join(" and ")})`); continue; }
+          const l = await liftBudgetHalt(tx, a, h.wo_id, value === null ? "Project monthly cap taken off" : `Project monthly budget raised to $${value}`);
+          events.push(...l.events);
+          jobs.push(...l.jobs);
+          lifted.push(h.wo_id);
+        }
+      }
+      const r = await done("project.config", beforeCap, value, `${value === null ? "Took the monthly cap off." : `Saved ${path}.`}${lifted.length ? ` Lifted the budget halt on ${lifted.join(", ")}.` : ""}${kept.length ? ` Still halted: ${kept.join("; ")}.` : ""}`);
+      return lifted.length ? { ...r, events: [...r.events, ...events], jobs, changes: [...(r.changes ?? []), "workOrders", "stops", "floor", "home"] } : r;
     }
     case "budget-alert": {
       const before = Number((await tx.query(`select alert_at from budgets where org_id = $1 and project_id = $2`, [org, projectId])).rows[0]?.alert_at ?? 0.8);
@@ -205,29 +257,45 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
       after = edit.value;
       break;
     case "station-enabled": {
+      const adm = await factoryAdminActor(tx, a);
+      // The lock is judged first (a station carrying G5 is refused whoever asks), then whether work is at it.
+      const r = setEnabled(draft, "stations", edit.id, edit.value, { regulated: !!row.regulated, admin: !!adm, reason, by: a.id, byName: adm?.name ?? a.name, at: a.now.getTime() });
       if (!edit.value) {
         const busy = await openWorkOrders(tx, org, projectId, { position: edit.id });
         if (busy) throw conflict(`${busy} work order${busy > 1 ? "s are" : " is"} at ${draft.catalog.stations.find((s) => s.id === edit.id)?.name ?? edit.id}. Move ${busy > 1 ? "them" : "it"} first.`);
       }
-      before = setEnabled(draft, "stations", edit.id, edit.value).before;
+      before = r.before;
       after = edit.value;
+      if (r.override) {
+        const flowVersion = await persistDraft(tx, org, draft, a.id, `${path} (override: ${r.override.reason})`);
+        const name = draft.catalog.stations.find((s) => s.id === edit.id)?.name ?? edit.id;
+        return overridden(r.override, `${name} turned off by Factory Admin override.`, flowVersion);
+      }
       break;
     }
     case "gate-enabled": {
-      const r = setEnabled(draft, "gates", edit.id, edit.value, { regulated: !!row.regulated });
+      const adm = await factoryAdminActor(tx, a);
+      const r = setEnabled(draft, "gates", edit.id, edit.value, { regulated: !!row.regulated, admin: !!adm, reason, by: a.id, byName: adm?.name ?? a.name, at: a.now.getTime() });
       before = r.before;
       after = edit.value;
-      const flowVersion = await persistDraft(tx, org, draft, a.id, path);
+      const flowVersion = await persistDraft(tx, org, draft, a.id, r.override ? `${path} (override: ${r.override.reason})` : path);
       const gd = draft.catalog.gates.find((g) => g.id === edit.id)!;
       const inflight = edit.value ? 0 : await openWorkOrders(tx, org, projectId, {});
+      if (r.override) return overridden(r.override, `${gd.name} (${gd.label}) turned off by Factory Admin override.${inflight ? ` ${inflight} open work order${inflight > 1 ? "s keep" : " keeps"} the flow ${inflight > 1 ? "they" : "it"} started with.` : ""}`, flowVersion);
       return done("project.config", before, after, `${gd.name} (${gd.label}) turned ${edit.value ? "on" : "off"}.${edit.value ? "" : ` New work orders skip it${inflight ? `; ${inflight} open work order${inflight > 1 ? "s keep" : " keeps"} the flow ${inflight > 1 ? "they" : "it"} started with` : ""}.`}`, "config", flowVersion);
     }
     case "station-wip":
       before = setWip(draft, edit.id, edit.value).before;
       after = edit.value;
       break;
+    case "station-run-limits": {
+      const r = setRunLimits(draft, edit.id, edit.value);
+      before = r.before;
+      after = r.after;
+      break;
+    }
     case "classes": {
-      const r = replaceClasses(draft, edit.value, await openByClass(tx, org, projectId));
+      const r = replaceClasses(draft, edit.value, await openByClass(tx, org, projectId), { regulated: !!row.regulated });
       before = r.before.map((c) => c.id);
       after = r.after;
       break;
@@ -236,20 +304,39 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
       throw invalid(`${path} is not an editable project setting.`);
   }
   const flowVersion = await persistDraft(tx, org, draft, a.id, path);
-  return done("project.config", before, after, `Saved ${path}.`, "config", flowVersion);
+  const saved = await done("project.config", before, after, `Saved ${path}.`, "config", flowVersion);
+  // Raising the coding slots, or raising or lifting a station's WIP limit: waiting work moves in now, in priority then age order (S-32).
+  const freed = edit.kind === "slots" ? Number(after) > Number(before) : edit.kind === "station-wip" ? Number(after) === 0 || Number(after) > Number(before) : false;
+  if (!freed) return saved;
+  const fx = await newFx(tx, org, a.id, a.now);
+  const started = await dispatchQueued(fx, projectId);
+  const entered = edit.kind === "station-wip" ? fx.events.filter((e) => e.type === "wo.wip.enter").map((e) => e.woId) : [];
+  if (!started.length && !entered.length) return saved;
+  return {
+    ...saved, msg: edit.kind === "station-wip" ? `Saved ${path}. ${entered.join(", ")} moved in.` : `Saved ${path}. ${started.join(", ")} left the Queue for the new slot${started.length > 1 ? "s" : ""}.`,
+    events: [...saved.events, ...fx.events], jobs: [...(saved.jobs ?? []), ...fx.jobs], changes: [...new Set([...(saved.changes ?? []), "workOrders", "floor", "home"])],
+  };
 }
 
 const modeText = (m: string): string => (m === "auto" ? "automatic" : m === "mixed" ? "checks, then a person" : "a human approval");
 
-export async function changeGateMode(tx: Tx, a: Actor, projectId: string, gateId: string, mode: string): Promise<Out<{ version: number; flowVersion: number }>> {
+/** The audited event for an override of a gate lock (owner decision 2026-11-19). */
+const flowOverrideEvent = (projectId: string, o: OverrideRecord): EventSpec => ({
+  type: "flow.override", category: "config", subject: { type: o.kind === "mode" ? "gaterule" : "gate", id: `${projectId}:${o.gate}` }, projectId,
+  before: { project: projectId, gate: o.gate, ...(o.station ? { station: o.station } : {}), [o.kind === "mode" ? "mode" : "enabled"]: o.before },
+  after: { project: projectId, gate: o.gate, ...(o.station ? { station: o.station } : {}), [o.kind === "mode" ? "mode" : "enabled"]: o.after, override: true, kind: o.kind, reason: o.reason },
+});
+
+export async function changeGateMode(tx: Tx, a: Actor, projectId: string, gateId: string, mode: string, reason?: string): Promise<Out<{ version: number; flowVersion: number }>> {
   await lockProject(tx, a.orgId, projectId, a.ifMatch);
   const { draft, project } = await loadDraft(tx, a.orgId, projectId);
-  const r = setGateMode(draft, gateId, mode);
-  const flowVersion = await persistDraft(tx, a.orgId, draft, a.id, `${r.gate.name} (${r.gate.label}) mode`);
+  const adm = await factoryAdminActor(tx, a);
+  const r = setGateMode(draft, gateId, mode, { regulated: !!project.regulated, admin: !!adm, reason, by: a.id, byName: adm?.name ?? a.name, at: a.now.getTime() });
+  const flowVersion = await persistDraft(tx, a.orgId, draft, a.id, `${r.gate.name} (${r.gate.label}) mode${r.override ? ` (override: ${r.override.reason})` : ""}`);
   const version = Number((await tx.query(`select version from projects where org_id = $1 and id = $2`, [a.orgId, projectId])).rows[0].version);
   return {
     msg: `${r.gate.name} (${r.gate.label}) is now ${modeText(mode)} on ${project.name}.`,
-    events: [evt("flow.gate", projectId, { type: "gaterule", id: `${projectId}:${gateId}` }, r.before, mode)],
+    events: [evt("flow.gate", projectId, { type: "gaterule", id: `${projectId}:${gateId}` }, r.before, mode), ...(r.override ? [flowOverrideEvent(projectId, r.override)] : [])],
     extra: { version, flowVersion }, changes: ["projects"], project: projectId,
   };
 }
@@ -315,20 +402,40 @@ export function addBayCmd(tx: Tx, a: Actor, projectId: string, body: z.infer<typ
 
 export function addClassCmd(tx: Tx, a: Actor, projectId: string, body: z.infer<typeof ClassBody>) {
   return flowCommand(tx, a, projectId, "Add class", (d, project) => {
-    const c = addClass(d, body.def as Parameters<typeof addClass>[1]);
+    const c = addClass(d, body.def as Parameters<typeof addClass>[1], { regulated: !!project.regulated });
     return { msg: `${c.name} added to ${project.name}.`, events: [evt("class.add", projectId, { type: "class", id: c.id }, undefined, c)], extra: { cls: c } };
   });
 }
 
 export function updateClassCmd(tx: Tx, a: Actor, projectId: string, classId: string, patch: z.infer<typeof ClassPatch>) {
-  return flowCommand(tx, a, projectId, "Edit class", async (d) => {
+  return flowCommand(tx, a, projectId, "Edit class", async (d, project) => {
     const open = await openWorkOrders(tx, a.orgId, projectId, { cls: classId });
-    const r = updateClass(d, classId, patch as Partial<WorkClass>, open);
+    const r = updateClass(d, classId, patch as Partial<WorkClass>, open, { regulated: !!project.regulated });
     return { msg: `${r.after.name} saved.`, events: [evt("class.edit", projectId, { type: "class", id: classId }, r.before, r.after)], extra: {} };
   });
 }
 
 /* ---------------------------------------------------------------- approvers -- */
+
+/**
+ * S-55: the escalation limit in force is the one saved. Re-arms the timers of the gates already waiting: a new limit measured from when each gate opened (it fires
+ * at once when already overdue), cancelled when the limit is 0. An instance that already escalated keeps its outcome.
+ */
+async function rearmEscalations(tx: Tx, orgId: string, projectId: string, gateId: string, hours: number): Promise<{ waiting: number; changed: number }> {
+  const open = (await tx.query<{ id: string; wo_id: string; opened_at: Date }>(
+    `select g.id, g.wo_id, g.opened_at from gate_instances g join work_orders w on w.org_id = g.org_id and w.id = g.wo_id
+      where g.org_id = $1 and w.project_id = $2 and g.gate_id = $3 and g.status = 'open' and coalesce(g.basis->>'escalated', 'false') <> 'true' order by g.id`, [orgId, projectId, gateId],
+  )).rows;
+  let changed = 0;
+  for (const g of open) {
+    await cancel(tx, { orgId, dedupeKey: `escalation:${g.id}` });
+    if (hours > 0) {
+      await schedule(tx, { orgId, kind: "flow.timer", fireAt: new Date(g.opened_at.getTime() + hours * 3_600_000), subject: g.id, dedupeKey: `escalation:${g.id}`, payload: { kind: "escalation", woId: g.wo_id, gateInstanceId: g.id } });
+      changed++;
+    }
+  }
+  return { waiting: open.length, changed };
+}
 
 export async function putApprovers(tx: Tx, a: Actor, projectId: string, gateId: string, rule: ApproverRule): Promise<Out<{ version: number; ruleVersion: number }>> {
   await lockProject(tx, a.orgId, projectId, a.ifMatch);
@@ -339,13 +446,25 @@ export async function putApprovers(tx: Tx, a: Actor, projectId: string, gateId: 
   const catalog = await readCatalog(tx, a.orgId);
   const ctx = await ruleContext(tx, a.orgId, projectId, catalog.roles);
   checkRule(gateId, cfg.mode ?? def.kind, rule, ctx, new Set(project.flow.classes.map((c) => c.id)), project.name);
+  // S-56: a fallback who cannot approve this gate would leave an escalation reaching nobody. Refused with the way forward.
+  if (rule.fallback) {
+    const st = await loadPolicyState(tx, a.orgId);
+    const fb = st.people.find((x) => x.id === rule.fallback);
+    if (!fb) throw invalid(`The fallback approver ${rule.fallback} does not exist.`);
+    const d = fb.status === "active" ? can(st, fb.id, def.action || "gate.approve", { project: projectId }) : null;
+    if (!d?.allowed) throw invalid(`${fb.name} cannot approve ${def.label} in ${project.name}${d ? `: ${d.reason}` : " (not an active person)"}. Pick a fallback who holds the right to approve gates there, or give ${fb.name} that role first.`);
+  }
   const before = project.approvers[gateId] ?? null;
   const ruleVersion = await publishRule(tx, a.orgId, projectId, gateId, rule, a.id);
   const version = await bumpProject(tx, a.orgId, projectId);
+  const rearmed = await rearmEscalations(tx, a.orgId, projectId, gateId, Number(rule.escalateH) || 0);
   // Non-blocking: a rule that fewer people can satisfy than it requires saves, and says so.
   const warning = ruleWarning((await readPeople(tx, a.orgId)) as never, project, rule, def.label);
+  // The per-class count override is part of the audited change: before and after always carry `classRequired` (empty when none), and the message names it.
+  const withCls = (r: ApproverRule | null) => (r ? { ...r, classRequired: r.classRequired ?? {} } : r);
+  const clsText = Object.entries(rule.classRequired ?? {}).map(([c, n]) => `${project.flow.classes.find((x) => x.id === c)?.name ?? c} ${n} (base ${rule.required})`).join(", ");
   return {
-    msg: `Saved approvers.${gateId}.${warning ? ` Warning: ${warning}` : ""}`, events: [evt("approvers.edit", projectId, { type: "gaterule", id: `${projectId}:${gateId}` }, jsonOf(before), jsonOf(rule))],
+    msg: `Saved approvers.${gateId}.${clsText ? ` Per-class approvals: ${clsText}.` : ""}${rearmed.waiting ? ` The escalation limit applies to ${rearmed.waiting} waiting work order${rearmed.waiting === 1 ? "" : "s"}.` : ""}${warning ? ` Warning: ${warning}` : ""}`, events: [evt("approvers.edit", projectId, { type: "gaterule", id: `${projectId}:${gateId}` }, jsonOf(withCls(before)), jsonOf(withCls(rule)))],
     extra: { version, ruleVersion, ...(warning ? { warning } : {}) }, changes: ["projects"], project: projectId,
   };
 }
@@ -375,32 +494,65 @@ export async function setMemberRole(tx: Tx, a: Actor, projectId: string, personI
   }
   const version = Number((await tx.query(`update people set version = version + 1, updated_at = now() where org_id = $1 and id = $2 returning version`, [org, personId])).rows[0].version);
   const after = add ? [...had, roleId] : had.filter((r) => r !== roleId);
+  // S-65: the last role on the project ends the person's place on its on-call list.
+  const pruned = add ? null : await pruneOncall(tx, org, projectId);
   return {
-    msg: `${add ? "Granted " : "Removed "}${role.name}${add ? " to " : " from "}${person.name} on ${project.name}.`,
-    events: [evt(add ? "role.grant" : "role.revoke", projectId, { type: "person", id: personId }, had.join(","), after.join(","), "access")],
+    msg: `${add ? "Granted " : "Removed "}${role.name}${add ? " to " : " from "}${person.name} on ${project.name}.${pruned?.note ?? ""}`,
+    events: [evt(add ? "role.grant" : "role.revoke", projectId, { type: "person", id: personId }, had.join(","), after.join(","), "access"), ...(pruned?.events ?? [])],
     extra: { version }, changes: ["people", "projects", "matrix"], project: projectId,
   };
 }
 
 /* ------------------------------------------------------------------ archive -- */
 
-export async function archiveProject(tx: Tx, a: Actor, projectId: string, body: z.infer<typeof ArchiveBody>): Promise<Out<{ version: number }>> {
+/** Work orders still in play in a project: what an archive holds in place (S-57). */
+const LIVE_WOS = `state not in ('done','killed','declined') and source not in ('eval','onboarding')`;
+const liveOrders = async (tx: Tx, org: string, projectId: string): Promise<number> =>
+  Number((await tx.query<{ n: string }>(`select count(*)::text n from work_orders where org_id = $1 and project_id = $2 and ${LIVE_WOS}`, [org, projectId])).rows[0]?.n ?? 0);
+
+export async function archiveProject(tx: Tx, a: Actor, projectId: string, body: z.infer<typeof ArchiveBody>): Promise<Out<{ version: number; held: number }>> {
   const row = await lockProject(tx, a.orgId, projectId, a.ifMatch);
   if (row.status === "archived") throw conflict(`${row.name} is already archived.`);
-  if (body.confirmText !== row.name) throw invalid(`Type the project name exactly: ${row.name}`);
+  const live = await liveOrders(tx, a.orgId, projectId);
+  const impact = live ? ` ${live} live work order${live === 1 ? " is" : "s are"} held in place (nothing new starts); unarchiving releases ${live === 1 ? "it" : "them"}.` : "";
+  if (body.confirmText !== row.name) throw invalid(`Type the project name exactly: ${row.name}.${impact}`);
   await tx.query(`update projects set status = 'archived', archived_at = now() where org_id = $1 and id = $2`, [a.orgId, projectId]);
   const version = await bumpProject(tx, a.orgId, projectId);
-  return { msg: `${row.name} archived.`, events: [evt("project.archive", projectId, { type: "project", id: projectId }, row.status, "archived")], extra: { version }, changes: ["projects", "me"], project: projectId };
+  const events: EventSpec[] = [evt("project.archive", projectId, { type: "project", id: projectId }, row.status, "archived")];
+  const jobs: NonNullable<Out["jobs"]> = [];
+  // S-57: live work orders are held with the existing hold mechanism (a project halt with cause `archive`), so no attempt, spend or gate decision continues in a read-only project.
+  if (live) {
+    await tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [`stop:${a.orgId}:project:${projectId}`]);
+    const have = await tx.query(`select 1 from stops where org_id = $1 and scope_type = 'project' and project_id = $2 and mode = 'halt' and lifted_at is null`, [a.orgId, projectId]);
+    if (!have.rowCount) {
+      const n = Number((await tx.query(`select count(*)::int + 1 as n from stops where org_id = $1 and starts_with(id, $2)`, [a.orgId, `project:${projectId}:`])).rows[0].n);
+      const stopId = `project:${projectId}:${n}`;
+      const reason = `${row.name} was archived with ${live} live work order${live === 1 ? "" : "s"}: held in place until it is unarchived.`;
+      await tx.query(`insert into stops (org_id, id, scope_type, project_id, mode, reason, cause, set_by, set_at) values ($1,$2,'project',$3,'halt',$4,'archive',$5,$6)`, [a.orgId, stopId, projectId, reason, a.id, a.now]);
+      events.push({ type: "stop.set", category: "kill", subject: { type: "project", id: projectId }, projectId, after: { stop: stopId, scope: "project", mode: "halt", cause: "archive", reason, held: live } });
+      jobs.push(job("stop.enforce", { stopId, scope: "project", targetId: projectId, mode: "halt" }, { dedupeKey: `stop.enforce:${stopId}:v1`, priority: 100 }));
+    }
+  }
+  return { msg: `${row.name} archived.${impact}`, events, ...(jobs.length ? { jobs } : {}), extra: { version, held: live }, changes: ["projects", "me", ...(live ? ["workOrders", "floor", "home", "stops"] : [])], project: projectId };
 }
 
-export async function unarchiveProject(tx: Tx, a: Actor, projectId: string): Promise<Out<{ version: number; status: string }>> {
+export async function unarchiveProject(tx: Tx, a: Actor, projectId: string): Promise<Out<{ version: number; status: string; released: number }>> {
   const row = await lockProject(tx, a.orgId, projectId, a.ifMatch);
   if (row.status !== "archived") throw conflict(`${row.name} is not archived.`);
   const repos = (await tx.query<{ onboarding_stage: string }>(`select onboarding_stage from repos where org_id = $1 and project_id = $2`, [a.orgId, projectId])).rows;
   const next = repos.length && repos.every((r) => r.onboarding_stage === "ready") ? "active" : repos.length ? "onboarding" : "new";
   await tx.query(`update projects set status = $3, archived_at = null where org_id = $1 and id = $2`, [a.orgId, projectId, next]);
   const version = await bumpProject(tx, a.orgId, projectId);
-  return { msg: `${row.name} is back (${next}).`, events: [evt("project.unarchive", projectId, { type: "project", id: projectId }, "archived", next)], extra: { version, status: next }, changes: ["projects", "me"], project: projectId };
+  const events: EventSpec[] = [evt("project.unarchive", projectId, { type: "project", id: projectId }, "archived", next)];
+  const jobs: NonNullable<Out["jobs"]> = [];
+  await tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [`stop:${a.orgId}:project:${projectId}`]);
+  const held = (await tx.query<{ id: string; version: number }>(`update stops set lifted_by = $3, lifted_at = $4, version = version + 1, updated_at = now() where org_id = $1 and scope_type = 'project' and project_id = $2 and mode = 'halt' and cause = 'archive' and lifted_at is null returning id, version`, [a.orgId, projectId, a.id, a.now])).rows;
+  const released = held.length ? await liveOrders(tx, a.orgId, projectId) : 0;
+  for (const h of held) {
+    events.push({ type: "resume", category: "kill", subject: { type: "project", id: projectId }, projectId, before: { stop: h.id }, after: { stop: h.id, scope: "project", text: "Unarchived: held work orders are released.", released } });
+    jobs.push(job("stop.enforce", { stopId: h.id, scope: "project", targetId: projectId, mode: "halt" }, { dedupeKey: `stop.enforce:${h.id}:v${h.version}`, priority: 100 }));
+  }
+  return { msg: `${row.name} is back (${next}).${released ? ` ${released} held work order${released === 1 ? " is" : "s are"} released.` : ""}`, events, ...(jobs.length ? { jobs } : {}), extra: { version, status: next, released }, changes: ["projects", "me", ...(held.length ? ["workOrders", "floor", "home", "stops"] : [])], project: projectId };
 }
 
 /* ---------------------------------------------------------------- templates -- */
@@ -441,7 +593,7 @@ export async function saveTemplate(tx: Tx, a: Actor, body: z.infer<typeof Templa
   const c = customOf(template as Template & { custom?: unknown });
   const n = customCount(c);
   return {
-    msg: `Template ${name} saved.${n ? ` Carries ${n} custom flow entr${n === 1 ? "y" : "ies"}: ${customText(c)}.` : ""}`,
+    msg: `Template ${name} saved.${"fromProject" in body ? " Approver rules (counts, escalation hours, conditions, fallback and separation of duties) are kept." : ""}${n ? ` Carries ${n} custom flow entr${n === 1 ? "y" : "ies"}: ${customText(c)}.` : ""}`,
     events: [{ type: "template.save", category: "config", subject: { type: "template", id }, after: `${name} ${from}`, projectId: null }],
     extra: { template }, changes: ["templates"], project: null,
   };
@@ -468,6 +620,7 @@ export async function updateTemplate(tx: Tx, a: Actor, id: string, patch: z.infe
   const pick = (b: Record<string, unknown>) => ({ name: undefined as unknown, stationsOff: b.stationsOff, gatesOff: b.gatesOff, classesSkip: b.classesSkip });
   const before = { ...pick(row.body), name: row.name };
   const nextBody = { ...row.body, ...JSON.parse(json(rest)) } as Record<string, unknown>;
+  if (rest.approverPreset !== undefined) delete nextBody.approvers; // choosing a preset replaces the rules saved from a project
   const version = Number(
     (await tx.query(`update templates set name = $3, description = $4, body = $5::jsonb, version = version + 1, updated_at = now() where org_id = $1 and id = $2 returning version`, [org, id, name?.trim() ?? row.name, desc ?? row.description, json(nextBody)])).rows[0].version,
   );
@@ -516,7 +669,7 @@ export async function createView(tx: Tx, a: Actor, body: z.infer<typeof ViewCrea
     throw e;
   }
   const view = (await listViews(tx, a.orgId, who)).find((v) => v.id === id)!;
-  return { msg: `View ${name} saved.`, events: [{ type: "view.save", category: "config", subject: { type: "saved_view", id }, after: name, projectId: null }], extra: { view }, changes: ["savedViews"], project: null };
+  return { msg: `View ${name} saved.`, events: [{ type: "view.save", category: "config", subject: { type: "saved_view", id }, after: name, projectId: null }], extra: { view }, changes: ["savedViews"], project: null, audience: [who] };
 }
 
 export async function updateView(tx: Tx, a: Actor, id: string, patch: z.infer<typeof ViewPatch>): Promise<Out<{ view: SavedViewOut }>> {
@@ -536,7 +689,7 @@ export async function updateView(tx: Tx, a: Actor, id: string, patch: z.infer<ty
   }
   const view = (await listViews(tx, a.orgId, who)).find((v) => v.id === id)!;
   const renamed = name !== row.name;
-  return { msg: renamed ? `View renamed to ${name}.` : `View ${name} updated.`, events: [{ type: "view.edit", category: "config", subject: { type: "saved_view", id }, before: row.name, after: name, projectId: null }], extra: { view }, changes: ["savedViews"], project: null };
+  return { msg: renamed ? `View renamed to ${name}.` : `View ${name} updated.`, events: [{ type: "view.edit", category: "config", subject: { type: "saved_view", id }, before: row.name, after: name, projectId: null }], extra: { view }, changes: ["savedViews"], project: null, audience: [who] };
 }
 
 export async function deleteView(tx: Tx, a: Actor, id: string): Promise<Out> {
@@ -545,7 +698,7 @@ export async function deleteView(tx: Tx, a: Actor, id: string): Promise<Out> {
   if (!row) throw notFound("No such saved view.");
   if (a.ifMatch !== null && a.ifMatch !== row.version) throw refuse("stale", "This changed since you loaded it. Reload and try again.");
   await tx.query(`delete from saved_views where org_id = $1 and id = $2`, [a.orgId, id]);
-  return { msg: `View ${row.name} deleted.`, events: [{ type: "view.delete", category: "config", subject: { type: "saved_view", id }, before: row.name, projectId: null }], changes: ["savedViews"], project: null };
+  return { msg: `View ${row.name} deleted.`, events: [{ type: "view.delete", category: "config", subject: { type: "saved_view", id }, before: row.name, projectId: null }], changes: ["savedViews"], project: null, audience: [who] };
 }
 
 export { parseConfigEdit };

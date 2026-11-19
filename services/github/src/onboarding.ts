@@ -50,16 +50,22 @@ const entropy = (s: string): number => {
 const SKIP_SCAN = /(^|\/)(node_modules|vendor|dist|build|\.git)\/|(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|go\.sum|Cargo\.lock|poetry\.lock|uv\.lock)$|\.(png|jpe?g|gif|ico|webp|pdf|zip|gz|tgz|jar|class|woff2?|ttf|eot|mp4|mov|bin|exe|so|dylib|svg|min\.js|map)$/i;
 
 /** Finds credential-shaped text in one file. Returns path, line and rule only. */
-export function scanText(path: string, text: string): { path: string; line: number; rule: string }[] {
+export function scanText(path: string, text: string, o: { longLines?: boolean } = {}): { path: string; line: number; rule: string }[] {
   const out: { path: string; line: number; rule: string }[] = [];
   const lines = text.split("\n");
   for (let i = 0; i < lines.length && out.length < 20; i++) {
-    const l = lines[i]!;
-    if (l.length > 2000) continue;
-    const hit = SECRET_RULES.find((r) => r.re.test(l));
-    if (hit) { out.push({ path, line: i + 1, rule: hit.rule }); continue; }
-    const m = ASSIGNED.exec(l);
-    if (m && entropy(m[1]!) >= 3.6 && !/example|placeholder|changeme|your[_-]/i.test(l)) out.push({ path, line: i + 1, rule: "assigned-secret" });
+    const whole = lines[i]!;
+    if (whole.length > 2000 && !o.longLines) continue;
+    // `longLines` is for text that goes to a model or is stored: a one-line file must not hide a credential. Chunks overlap so a match on the seam is still whole in one.
+    const parts: string[] = [];
+    if (whole.length <= 2000) parts.push(whole);
+    else for (let at = 0; at < whole.length; at += 1500) parts.push(whole.slice(at, at + 2000));
+    for (const l of parts) {
+      const hit = SECRET_RULES.find((r) => r.re.test(l));
+      if (hit) { out.push({ path, line: i + 1, rule: hit.rule }); break; }
+      const m = ASSIGNED.exec(l);
+      if (m && entropy(m[1]!) >= 3.6 && !/example|placeholder|changeme|your[_-]/i.test(l)) { out.push({ path, line: i + 1, rule: "assigned-secret" }); break; }
+    }
   }
   return out;
 }
@@ -145,6 +151,33 @@ export async function inspectRepo(d: OpDeps, repo: string, o: { scan?: boolean; 
     const protection = await readProtections(d, repo).catch(() => null);
     return { ok: true, ...base, protection };
   } catch (e) { throw gh(e); }
+}
+
+/* ------------------------------------------------------------------ read one file ---- */
+
+/** One read-only file read at a commit the session is already bound to. The repository comes from the session, never from the model. */
+export const FileBody = z.object({ repo: repoName, sha: z.string().regex(/^[0-9a-f]{40}$/), path: z.string().min(1).max(300) }).strict();
+
+/** Reads one blob at `sha` through the same installation token and `onboard_read` purpose the inspect uses. Binary or oversized files come back flagged, without content. */
+export async function readRepoFile(d: OpDeps, b: z.infer<typeof FileBody>, limits: InspectLimits = DEFAULT_LIMITS): Promise<Record<string, unknown>> {
+  const { owner, name } = splitRepo(b.repo);
+  try {
+    return await d.app.withRepo(b.repo, "onboard_read", async (c) => {
+      const req = rq(c.octokit);
+      const commit = (await req("GET /repos/{owner}/{repo}/git/commits/{commit_sha}", { owner, repo: name, commit_sha: b.sha })).data;
+      const tree = (await req("GET /repos/{owner}/{repo}/git/trees/{tree_sha}", { owner, repo: name, tree_sha: commit.tree.sha, recursive: "1" })).data;
+      const hit = (tree.tree as { path: string; type: string; sha: string; size?: number }[]).find((t) => t.type === "blob" && t.path === b.path);
+      if (!hit) throw new BrokerError(404, "no_such_file", `${b.path} is not a file in ${b.repo} at ${b.sha.slice(0, 7)}.`);
+      if ((hit.size ?? 0) > limits.maxFileBytes) return { ok: true, path: b.path, size: hit.size ?? 0, tooLarge: true, binary: false, content: null };
+      const r = (await req("GET /repos/{owner}/{repo}/git/blobs/{file_sha}", { owner, repo: name, file_sha: hit.sha })).data;
+      const buf = Buffer.from(r.content as string, (r.encoding as BufferEncoding) ?? "base64");
+      if (buf.includes(0)) return { ok: true, path: b.path, size: buf.length, tooLarge: false, binary: true, content: null };
+      return { ok: true, path: b.path, size: buf.length, tooLarge: false, binary: false, content: buf.toString("utf8") };
+    });
+  } catch (e) {
+    if (e instanceof BrokerError) throw e;
+    throw gh(e);
+  }
 }
 
 /* ------------------------------------------------------------------ the onboarding pull request ---- */

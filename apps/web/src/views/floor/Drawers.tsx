@@ -1,17 +1,25 @@
 /** Station and gate detail drawers of the floor (legacy floor.js openStation / openGate). They always show the live floor. */
+import { COL } from "../drawerCol";
+import { WoActions } from "../work/WoActions";
+import { RequestChangesBtn } from "../work/gate";
+import { GateDetail } from "../work/GateDetail";
+import { useOpenTraveler } from "../../shell/useTraveler";
 import { useState, type ReactNode } from "react";
-import { COMBINED_GATES, approvalText, fmt, gateDef, gateKind, gateKindText, gateLock, gateOffNote, type Gate } from "@gantry/domain";
-import { useAgents, useMcpServers, useSkills, useWorkOrder } from "../../api/queries";
+import { gateDef, gateKind } from "@gantry/domain";
+import { useAgents, useWorkOrder } from "../../api/queries";
 import { ops } from "../../api/ops";
 import type { WorkOrder } from "../../api/types";
-import { Btn, Chip, Who, type Decision } from "../../ui/primitives";
+import { Btn, Chip, Empty, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
-import { navigate } from "../../lib/router";
-import { canSeeRoute } from "../../lib/routes";
-import { useMe } from "../../api/queries";
-import { FloorCtx, WoToken, gateHaveNeed, gateOfStation, isLive, mcpFor, since, stationIdx, useFloorCtx, useFloorValue } from "./kit";
+import { hashFor } from "../../lib/router";
+import { classOf } from "../projects/kit";
+import { stName } from "../traveler/model";
+import { DecisionDialog } from "../work/gate";
+import { OVERRIDE_MIN, anywayLabel, overrideKindOf, overrideWhy } from "../work/override";
+import { raisedOpen } from "../conversations/model";
+import { FloorCtx, WoChip, isLive, stationIdx, useFloorCtx, useFloorValue, waitingGateId, type FWo } from "./kit";
 
 /** Provides the live floor to a drawer, which renders outside the floor view. */
 export function DrawerRoot({ projectId, children }: { projectId: string; children: ReactNode }) {
@@ -20,327 +28,296 @@ export function DrawerRoot({ projectId, children }: { projectId: string; childre
   return <FloorCtx.Provider value={value}>{children}</FloorCtx.Provider>;
 }
 
-const Head = ({ kicker, id, chip, title, close, label }: { kicker: string; id: ReactNode; chip?: ReactNode; title: string; close: () => void; label: string }) => (
-  <div className="drawer-head">
-    <div>
-      <div className="kicker">{kicker}</div>
-      <div className="drawer-id">{id}{chip}</div>
-      <h2 className="drawer-title">{title}</h2>
+/** Prototype drawer frame: eyebrow, title, sub-line, close; the body scrolls; an optional footer of links. */
+const Frame = ({ kicker, title, sub, close, label, children, footer }: { kicker: string; title: string; sub?: ReactNode; close: () => void; label: string; children: ReactNode; footer?: ReactNode }) => (
+  <div className="drawer-inner fl-drawer">
+    <div className="drawer-head">
+      <div>
+        <div className="kicker">{kicker}</div>
+        <h2 className="drawer-title">{title}</h2>
+        {sub ? <p className="drawer-desc">{sub}</p> : null}
+      </div>
+      <button type="button" className="icon-btn drawer-close" aria-label={label} onClick={close}>
+        <Icon name="x" />
+      </button>
     </div>
-    <button type="button" className="icon-btn drawer-close" aria-label={label} onClick={close}>
-      <Icon name="x" />
-    </button>
+    <div className="drawer-scroll" style={COL}>{children}</div>
+    {footer ? <div className="drawer-foot fl-drawer-foot">{footer}</div> : null}
   </div>
 );
 
-function ApproverSummary({ gid }: { gid: string }) {
-  const ctx = useFloorCtx();
-  const actor = useActors();
-  const g = gateDef(ctx.cat, gid) as Gate;
-  const rule = ctx.project.approvers[gid];
-  const kind = gateKind(ctx.cat, ctx.project, gid);
-  const roleName = (r: string): string => ctx.cat.roles.find((x) => x.id === r)?.name ?? r;
-  const line = <p className="small"><strong>{approvalText(g, kind, rule, roleName, (id) => actor(id).name)}</strong></p>;
-  if (kind === "auto") return <>{line}<p className="small">{`Passes when its checks pass: ${g.checks.join(", ")}.`}</p></>;
-  if (gid === "G0G1") return <>{line}<p className="small">The submitter confirms the brief. Line Leads and Project Admins may confirm any brief.</p></>;
-  if (!rule) return <p className="small muted">No approver rule set. Factory Admins can approve (break-glass).</p>;
-  const names = [...rule.roles.map((r) => ctx.cat.roles.find((x) => x.id === r)?.name ?? r), ...rule.people.map((p) => actor(p).name)];
+/** A work order as a row of the prototype list: record link, title, state chip. */
+const WoRow = ({ w, project, extra }: { w: FWo; project: string; extra?: ReactNode }) => (
+  <li data-wo={w.id}>
+    <a className="pri mono" href={hashFor("record", w.id, project)}>{w.id}</a>
+    <span className="grow trunc">{w.title}</span>
+    {extra ?? <WoChip w={w} />}
+  </li>
+);
+
+/** Work orders, filtered: the filter rides in the hash query (`#/p/payments/work-orders?station=build`), as the prototype's links do. */
+function WorkOrdersLink({ label, params, project, close }: { label: string; params: Record<string, string>; project: string; close: () => void }) {
+  const q = new URLSearchParams(params).toString();
   return (
-    <div className="fl-rule">
-      <p className="small">
-        <strong>{`${rule.required} approval${rule.required > 1 ? "s" : ""} from: `}</strong>
-        {names.join(", ") || "nobody listed"}
-      </p>
-      {kind === "mixed" ? <p className="small">{`Automatic checks first: ${g.checks.join(", ")}.`}</p> : null}
-      {rule.sod ? <p className="small">Separation of duties: the author cannot approve.</p> : null}
-      {rule.conditions.length ? (
-        <ul className="plain-list small">
-          {rule.conditions.map((c) => (
-            <li key={c.id}>
-              <Icon name="tag" /> {c.text}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {rule.escalateH ? <p className="small muted">{`Escalates after ${rule.escalateH}h${rule.fallback ? ` to ${actor(rule.fallback).name}` : " to the Project Admins"}.`}</p> : null}
-    </div>
+    <a className="btn" id="floor-drawer-wos" href={`${hashFor("work-orders", null, project)}?${q}`} onClick={close}>
+      {label}
+    </a>
   );
 }
 
+/** The prototype's fmtDate: day, month, hour and minute in UTC ("13 Nov 10:13"). */
+const createdText = (t: number): string => (t ? new Date(t).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }).replace(",", "") : "—");
+
 type Traveler = WorkOrder & { allowed?: { approve: (Decision & { gate: string; instance: string }) | null } };
 
-/** Approve and reject for one waiting work order. The decision comes from the server for this person (separation of duties and approver rules included). */
-function GateRowActions({ w, gid }: { w: WorkOrder; gid: string }) {
+/** Approve one waiting work order at a gate. The decision comes from the server for this person (separation of duties and approver rules included). */
+function ApproveBtn({ w, gid, label, primary, id, after }: { w: WorkOrder; gid: string; label: string; primary?: boolean; id: string; after?: () => void }) {
   const ui = useUI();
   const ctx = useFloorCtx();
   const t = useWorkOrder(w.id).data as Traveler | undefined;
   const lock: Decision | null = ctx.replay ? { allowed: false, reason: "Replay is showing the past. Go back to live to act.", needs: "" } : null;
-  const dec: Decision | null = lock ?? (t?.allowed?.approve && t.allowed.approve.gate === gid ? { allowed: t.allowed.approve.allowed, reason: t.allowed.approve.reason, needs: t.allowed.approve.needs } : null);
-  const g = gateDef(ctx.cat, gid) as Gate;
-  const brief = gid === "G0G1";
-  const done = (r: { ok: boolean; msg: string }) => ui.toast(r.msg, r.ok ? "ok" : "error");
+  const dec: Decision | null = lock ?? (!t ? { allowed: false, reason: "Checking what you may decide here.", needs: "" } : t.allowed?.approve && t.allowed.approve.gate === gid ? { allowed: t.allowed.approve.allowed, reason: t.allowed.approve.reason, needs: t.allowed.approve.needs, override: t.allowed.approve.override, overrideKind: t.allowed.approve.overrideKind } : null);
+  const anyway = overrideKindOf(dec);
+  const decide = async (note?: string) => {
+    const r = await ops.approveGate(w.id, gid, t?.allowed?.approve?.instance, undefined, undefined, note);
+    ui.toast(r.ok ? `${w.id} moved on` : r.msg, r.ok ? "ok" : "error", r.ok ? { label: "Undo", id: "floor-approve-undo", onClick: () => ui.toast("Undo is not available: an approved gate cannot be taken back from here.", "warn") } : undefined);
+    if (r.ok) after?.();
+    return r;
+  };
   return (
-    <span className="fl-gate-acts">
-      <Btn label={brief ? "Confirm brief" : gid === "G6" ? "Confirm release" : "Approve"} small kind="primary" icon="check" id={`floor-gapp-${w.id}`} guard={dec} onClick={async () => done(await ops.approveGate(w.id, gid))} />
-      <Btn
-        label={brief ? "Decline" : "Reject"}
-        small
-        icon="x"
-        id={`floor-grej-${w.id}`}
-        guard={dec}
-        onClick={() =>
-          ui.reasonDialog({
-            title: brief ? `Decline ${w.id}` : `Reject ${g.label} on ${w.id}`,
-            kicker: "Gate decision",
-            ok: brief ? "Decline" : "Reject",
-            kind: "danger",
-            min: 5,
-            placeholder: brief ? "Why will the factory not do this?" : "What must change before this passes?",
-            sub: brief ? "The work order moves to Declined." : "The station's agent reworks the step with your reason.",
-            onOk: async (v) => {
-              const r = await ops.rejectGate(w.id, gid, v);
-              if (r.ok) ui.toast(r.msg, "ok");
-              return r;
-            },
-          })
-        }
-      />
-    </span>
+    <Btn
+      label={anyway ? anywayLabel(gid) : label}
+      small={!primary}
+      kind="primary"
+      id={id}
+      guard={anyway ? null : dec}
+      onClick={() => {
+        if (!anyway) return void decide();
+        ui.open((close) => (
+          <DecisionDialog title={`${anywayLabel(gid)}: ${gid} for ${w.id}`} danger intro={`${w.id} is held at ${gid}. ${dec?.reason ?? ""}`} submit={anywayLabel(gid)} ovrWhy={overrideWhy(anyway)} field={{ label: "Reason", min: OVERRIDE_MIN, area: true }} onClose={close} onSubmit={(text) => decide(text)} />
+        ));
+      }}
+    />
   );
 }
 
-function TrustLink({ id }: { id: string }) {
-  const me = useMe();
-  const ui = useUI();
-  const blocked = me && !canSeeRoute("trust", me, {});
-  return <Btn label="Open the trust ladder" small icon="trust" id={id} disabledReason={blocked ? "Your role cannot open the trust ladder." : null} onClick={() => { ui.drawer.close(); navigate("trust"); }} />;
+/** Request changes at the gate: the pinned reject command, asked for with a reason. */
+function ChangesBtn({ w, gid }: { w: WorkOrder; gid: string }) {
+  const t = useWorkOrder(w.id).data as Traveler | undefined;
+  const ctx = useFloorCtx();
+  const a = t?.allowed?.approve;
+  const dec: Decision | null = ctx.replay ? { allowed: false, reason: "Replay is showing the past. Go back to live to act.", needs: "" } : !t ? { allowed: false, reason: "Checking what you may decide here.", needs: "" } : a && a.gate === gid ? { allowed: a.allowed, reason: a.reason, needs: a.needs } : null;
+  return <RequestChangesBtn wo={w.id} gate={gid} label={gid} instance={a?.instance} guard={dec} id={`floor-gchg-${w.id}`} small />;
 }
 
-export function GateDrawer({ gid, close, onStation }: { gid: string; close: () => void; onStation: (sid: string) => void }) {
+/** One work order waiting at a gate: its approvals so far ("1 of 1 approvals"), Approve, and the approver rule with what is still open. */
+function WaitingRow({ w, gid, project, close }: { w: WorkOrder; gid: string; project: string; close: () => void }) {
+  const [more, setMore] = useState(false);
+  const prog = (useWorkOrder(w.id).data as { gateProgress?: Record<string, { have: number; need: number }> } | undefined)?.gateProgress?.[gid];
+  return (
+    <li key={w.id} data-wo={w.id} className="fl-waiting" style={{ flexWrap: "wrap" }}>
+      <a className="pri mono" href={hashFor("record", w.id, project)}>{w.id}</a>
+      <span className="grow trunc">{w.title}</span>
+      {prog ? <span className="small muted num" id={`floor-gcount-${w.id}`}>{`${prog.have} of ${prog.need} approvals`}</span> : null}
+      <Btn label={more ? "Hide rule" : "Who may approve"} small id={`floor-grule-${w.id}`} aria-expanded={more} onClick={() => setMore((x) => !x)} />
+      <ApproveBtn w={w} gid={gid} label="Approve" id={`floor-gapp-${w.id}`} after={close} />
+      {gid === "G0G1" ? null : <ChangesBtn w={w} gid={gid} />}
+      {more ? <div className="fl-waiting-more" style={{ flexBasis: "100%" }}><GateDetail woId={w.id} gate={gid} project={project} onNavigate={close} /></div> : null}
+    </li>
+  );
+}
+
+export function GateDrawer({ gid, close }: { gid: string; close: () => void }) {
   const ctx = useFloorCtx();
-  const ui = useUI();
   const g = gateDef(ctx.cat, gid);
   if (!g) return null;
   const p = ctx.project;
   const after = ctx.cat.stations.find((s) => s.id === g.after);
-  const atIdx = stationIdx(ctx.cat, g.after);
-  const here = ctx.wos.filter((w) => isLive(w) && w.gates?.[gid] && w.station === atIdx);
-  const waiting = here.filter((w) => w.gates[gid]?.status === "waiting" && !w.bay);
-  const failing = here.filter((w) => w.gates[gid]?.status === "failed");
-  const off = !p.flow.gates[gid]?.enabled && gid !== "G0G1";
+  const waiting = ctx.wos.filter((w) => isLive(w) && !w.bay && w.state === "waiting" && waitingGateId(ctx, w) === gid);
   const kind = gateKind(ctx.cat, p, gid);
-  const recent: Array<{ w: WorkOrder; at: number; by?: string | undefined; text: string; via?: string | undefined; mode: string }> = [];
-  for (const w of ctx.wos) {
-    const gs = w.gates?.[gid];
-    if (!gs) continue;
-    for (const a of gs.approvals) recent.push({ w, at: a.at, by: a.by, text: "approved", via: a.via, mode: "human" });
-    for (const a of gs.rejections) recent.push({ w, at: a.at, by: a.by, text: `rejected: ${a.reason}`, mode: "human" });
-    if (gs.decision?.mode === "trust") recent.push({ w, at: gs.decision.at, text: gs.decision.reason || `passed under trust at L${gs.decision.trust}`, mode: "trust" });
-  }
-  recent.sort((a, b) => b.at - a.at);
+  const checks = g.checks?.length ? g.checks.join(", ") : "Person decides";
   return (
-    <div className="drawer-inner">
-      <Head
-        kicker={`Gate · after ${after?.no ?? ""} ${after?.name ?? g.after}`}
-        id={
-          <>
-            <span className="fl-dgate" aria-hidden="true" />
-            <span className="mono big-id">{g.label}</span>
-          </>
-        }
-        chip={<Chip text={gateKindText(kind)} />}
-        title={g.name}
-        close={close}
-        label="Close gate details"
-      />
-      <div className="drawer-scroll">
-        {off ? (
-          <div className="callout">
-            <Icon name="alert" />
-            <span>{`${g.name} (${g.label}) is off in ${p.name}. ${gateOffNote}`}</span>
-          </div>
-        ) : null}
-        <p className="drawer-desc">{g.purpose}</p>
-        {COMBINED_GATES[gid] ? <p className="small muted">{`${g.label}: ${COMBINED_GATES[gid]}`}</p> : null}
-        {gateLock(g, p).locked ? <p className="small muted"><Icon name="lock" />{` Always on. ${gateLock(g, p).reason}`}</p> : null}
-        <h3 className="sub-h">Approvals needed</h3>
-        <ApproverSummary gid={gid} />
-        {kind !== "auto" && gid !== "G0G1" ? (
-          <div className="fl-trust">
-            <h3 className="sub-h">{`Trust in force at ${g.name}`}</h3>
-            <p className="small muted">Trust levels per work class decide whether a person approves here or the gate passes on its checks. They are set on the Trust ladder.</p>
-            <TrustLink id="floor-gate-trust-link" />
-          </div>
-        ) : null}
-        <h3 className="sub-h">{`Waiting here (${waiting.length})`}</h3>
+    <Frame kicker={`${g.label} · GATE`} title={g.name} sub={g.purpose} close={close} label="Close gate details">
+      <div className="fl-drawer-body">
+        <dl className="kv" id="floor-gate-kv">
+          <dt>Kind</dt>
+          <dd><Chip text={kind === "auto" ? "auto" : kind === "mixed" ? "mixed" : "human"} cls={kind === "auto" ? "info" : "warn"} /></dd>
+          <dt>After station</dt>
+          <dd>{after?.name ?? g.after}</dd>
+          <dt>Checks</dt>
+          <dd>{checks}</dd>
+        </dl>
+        <h3 className="sub-h">Waiting now</h3>
         {waiting.length ? (
-          <ul className="fl-gate-list">
-            {waiting.map((w) => {
-              const hn = gateHaveNeed(ctx, w, gid);
-              return (
-                <li key={w.id}>
-                  <WoToken w={w} compact idPrefix="floor-gtok-" />
-                  <div className="small">{kind === "auto" ? "Checks running" : `${hn.have} of ${hn.need} approvals · waiting ${fmt.dur(Math.max(0, ctx.now - since(w)))}`}</div>
-                  {kind === "auto" ? null : <GateRowActions w={w} gid={gid} />}
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <p className="muted small">{`Nothing is waiting at ${g.name} (${g.label}).`}</p>
-        )}
-        {failing.length ? <h3 className="sub-h">{`Failing (${failing.length})`}</h3> : null}
-        {failing.length ? (
-          <ul className="fl-gate-list">
-            {failing.map((w) => (
-              <li key={w.id}>
-                <WoToken w={w} compact idPrefix="floor-gftok-" />
-                <div className="small">{w.failReason || w.bayReason || "Check failed"}</div>
-                {w.state === "failed" ? (
-                  <Btn
-                    label={`Retry ${ctx.cat.stations[w.station]?.name ?? ""}`}
-                    small
-                    icon="refresh"
-                    id={`floor-gretry-${w.id}`}
-                    disabledReason={ctx.replay ? "Replay is showing the past. Go back to live to act." : null}
-                    onClick={async () => {
-                      const r = await ops.retry(w.id);
-                      ui.toast(r.msg, r.ok ? "ok" : "error");
-                    }}
-                  />
-                ) : null}
-              </li>
+          <ul className="list fl-bordered" id="floor-gate-waiting">
+            {waiting.map((w) => (
+              <WaitingRow key={w.id} w={w} gid={gid} project={p.id} close={close} />
             ))}
           </ul>
-        ) : null}
-        <h3 className="sub-h">Recent decisions</h3>
-        {recent.length ? (
-          <ol className="history">
-            {recent.slice(0, 8).map((x, i) => (
-              <li key={`${x.w.id}-${x.at}-${i}`} className={x.mode === "trust" ? "fl-dec-trust" : undefined}>
-                <span className="mono muted">{fmt.iso(x.at)}</span>
-                {x.by ? (
-                  <Who id={x.by} />
-                ) : (
-                  <span className="fl-trust-tag">
-                    <Icon name="trust" />
-                    trust
-                  </span>
-                )}
-                <span className="mono">{x.w.id}</span>
-                <span>{x.text + (x.via && x.via !== "web" ? ` via ${x.via}` : "")}</span>
-              </li>
-            ))}
-          </ol>
         ) : (
-          <p className="muted small">No decisions recorded yet.</p>
+          <Empty title="Gate is open" text="No work orders are waiting here." />
         )}
-        <p className="footnote">
-          <button type="button" className="linkish" onClick={() => onStation(g.after)}>
-            {`Open ${after?.name ?? g.after}`}
-          </button>
-        </p>
       </div>
-    </div>
+    </Frame>
   );
 }
 
-const kv = (k: string, v: ReactNode) => (
-  <div key={k}>
-    <dt>{k}</dt>
-    <dd>{v}</dd>
-  </div>
-);
-
-export function StationDrawer({ sid, close, onGate }: { sid: string; close: () => void; onGate: (gid: string) => void }) {
+export function StationDrawer({ sid, close }: { sid: string; close: () => void }) {
   const ctx = useFloorCtx();
   const agents = useAgents().data;
-  const skills = useSkills().data;
-  const servers = useMcpServers().data;
   const st = ctx.cat.stations.find((s) => s.id === sid);
   if (!st) return null;
   const p = ctx.project;
-  const conf = p.flow.stations[sid];
   const i = stationIdx(ctx.cat, sid);
   const ag = agents?.find((a) => a.id === st.agent);
   const here = ctx.wos.filter((w) => w.station === i && isLive(w) && !w.bay);
-  const g = gateOfStation(ctx.cat, p, sid);
-  const durs: number[] = [];
-  for (const w of ctx.wos) for (const e of w.history) if (e.station === sid && e.endedAt) durs.push(e.endedAt - e.startedAt);
-  const avg = durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : 0;
-  const sk = (ag?.skills ?? []).map((id) => {
-    const x = skills?.find((s) => s.id === id);
-    return x ? `${x.name} ${x.version}` : id;
-  });
   const model = p.regulated && sid !== "intake" ? "bedrock-claude-sonnet-5-5" : (ag?.overrides?.[p.id]?.model ?? ag?.model ?? "none");
-  const mcps = mcpFor(p, sid, servers);
   return (
-    <div className="drawer-inner">
-      <Head
-        kicker={`Station · ${p.name}`}
-        id={
-          <>
-            <span className="mono big-id">{st.no}</span>
-            {conf?.enabled ? <Chip text={`${here.length} / ${conf.wip} WIP`} /> : <Chip text="off in this project" />}
-          </>
-        }
-        title={st.name}
-        close={close}
-        label="Close station details"
-      />
-      <div className="drawer-scroll">
+    <Frame
+      kicker={`${st.no} · STATION`}
+      title={st.name}
+      sub={st.purpose}
+      close={close}
+      label="Close station details"
+      footer={<WorkOrdersLink label="Work orders here" params={{ station: sid }} project={p.id} close={close} />}
+    >
+      <div className="fl-drawer-body">
         {ctx.replay ? (
           <div className="callout callout-warn">
             <Icon name="replay" />
             <span>Replay is on. This drawer shows the station as it is now.</span>
           </div>
         ) : null}
-        <p className="drawer-desc">{st.purpose}</p>
-        <dl className="titleblock tb-drawer">
-          {kv("Agent", ag ? `${ag.name} ${ag.version}` : st.agent)}
-          {kv("Model", model)}
-          {kv("Autonomy", ag?.autonomy ?? "gate")}
-          {kv("Average time", fmt.dur(avg))}
-          {kv("WIP limit", String(conf?.wip ?? 0))}
-          {kv("In progress", String(here.length))}
-          {sid === "build" ? kv("Coding slots", `${ctx.floor.slots.used} of ${p.flow.slots} busy`) : kv("Gate after", g ? `${g.name} · ${g.label}` : "none")}
-          {kv("MCP servers", String(mcps.length))}
+        <dl className="kv" id="floor-station-kv">
+          <dt>Agent</dt>
+          <dd>{ag ? <a href={hashFor("agents", ag.id, p.id)}>{ag.name}</a> : st.agent}</dd>
+          <dt>Model</dt>
+          <dd>{model}</dd>
+          <dt>Autonomy</dt>
+          <dd>{ag?.autonomy ?? "gate"}</dd>
+          <dt>In station</dt>
+          <dd>{`${here.length} work order${here.length === 1 ? "" : "s"}`}</dd>
         </dl>
-        <div className="fl-trust">
-          <h3 className="sub-h">{`Trust for ${ag?.name ?? "the agent"} in this project`}</h3>
-          <p className="small muted">{g && gateKind(ctx.cat, p, g.id) !== "auto" && g.id !== "G0G1" ? `Applies at ${g.label}, the gate that judges this station's work.` : "No human gate judges this station's work, so trust does not change who approves here."}</p>
-          <TrustLink id="floor-st-trust-link" />
+        {here.length ? (
+          <ul className="list fl-bordered" id="floor-station-wos">
+            {here.map((w) => <WoRow key={w.id} w={w} project={p.id} />)}
+          </ul>
+        ) : (
+          <Empty title="Nothing in this station" text="Work orders appear here as they arrive." />
+        )}
+      </div>
+    </Frame>
+  );
+}
+
+/** Why this work order's conversation needs a person, from its open station question or its parked bay reason; null when nothing waits. */
+export function convWaiting(w: FWo, cat: Parameters<typeof stName>[0]): string | null {
+  const r = w.conv ? raisedOpen(w)[0] : undefined;
+  if (r) return `${stName(cat, r.station)} is waiting for you`;
+  if (w.bay === "person") return w.bayReason || "Waiting for you";
+  return null;
+}
+
+/** A work order tag opened from the line: the prototype's compact drawer (chips, facts, progress, diff, PR) with Approve, Conversation, Open record and Traveler. */
+export function WoDrawer({ woId, close }: { woId: string; close: () => void }) {
+  const ctx = useFloorCtx();
+  const actor = useActors();
+  const openTraveler = useOpenTraveler();
+  const w: FWo | undefined = ctx.wos.find((x) => x.id === woId);
+  if (!w) return null;
+  const p = ctx.project;
+  const gid = isLive(w) && !w.bay && w.state === "waiting" ? waitingGateId(ctx, w) : null;
+  const repoName = ctx.repos.find((r) => r.id === w.repo)?.name ?? "";
+  const waiting = convWaiting(w, ctx.cat);
+  return (
+    <Frame kicker={w.id} title={w.title} sub={`${p.name} · ${repoName}`} close={close} label="Close work order details"
+      footer={
+        <>
+          {gid ? <ApproveBtn w={w} gid={gid} label={`Approve ${gid}`} primary id="floor-wo-approve" after={close} /> : null}
+          <WoActions wo={w.id} project={p.id} repo={w.repo} idPrefix="floor-wo" small={false} />
+          {waiting ? <span className="small muted" id="floor-wo-conv-why" style={{ flexBasis: "100%", order: 1 }}>{waiting}</span> : null}
+          <Btn label="Traveler" id="floor-wo-traveler" onClick={() => { close(); openTraveler(w.id); }} />
+        </>
+      }
+    >
+      <div className="fl-drawer-body">
+        <div className="row">
+          <WoChip w={w} />
+          <Chip text={classOf(ctx.cat, p, w.cls).name} cls="ghost" />
+          <Chip text={w.priority} cls="plain" />
         </div>
-        <h3 className="sub-h">Skills</h3>
-        {sk.length ? (
-          <ul className="plain-list mono small">
-            {sk.map((s) => (
-              <li key={s}>{s}</li>
+        <dl className="kv" id="floor-wo-kv">
+          <dt>Station</dt>
+          <dd>{w.bay ? ctx.cat.bays.find((b) => b.id === w.bay)?.name ?? w.bay : ctx.cat.stations[w.station]?.name ?? ""}</dd>
+          <dt>Requested by</dt>
+          <dd>{actor(w.requestedBy).name}</dd>
+          <dt>Created</dt>
+          <dd>{createdText(w.createdAt)}</dd>
+          <dt>Progress</dt>
+          <dd><div style={{ width: 160 }}><div className="meter" role="meter" aria-label="Progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(w.progress)}><i style={{ width: `${Math.max(0, Math.min(1, w.progress / 100)) * 100}%` }} /></div></div></dd>
+          <dt>Diff</dt>
+          <dd>{w.diff ? `+${w.diff.plus} −${w.diff.minus} in ${w.diff.files} file${w.diff.files === 1 ? "" : "s"}` : "—"}</dd>
+          <dt>PR</dt>
+          <dd>{w.pr ? `#${w.pr.number} ${w.pr.state}` : "—"}</dd>
+        </dl>
+        {w.blockReason ? <div className="callout bad"><b>Blocked</b>{w.blockReason}</div> : null}
+        {w.failReason ? <div className="callout bad"><b>Failed</b>{w.failReason}</div> : null}
+      </div>
+    </Frame>
+  );
+}
+
+
+/** A side bay (all of it, or only what one station parked): why each work order is there and how long, each opening its drawer. */
+export function BayDrawer({ bayId, sid, close, onWo }: { bayId: string; sid: string; close: () => void; onWo: (id: string) => void }) {
+  const ctx = useFloorCtx();
+  const bay = ctx.cat.bays.find((b) => b.id === bayId);
+  if (!bay) return null;
+  const idx = sid ? stationIdx(ctx.cat, sid) : -1;
+  const list = ctx.wos.filter((w) => w.bay === bayId && w.state !== "killed" && w.state !== "done" && (idx < 0 || w.station === idx));
+  const st = sid ? ctx.cat.stations.find((s) => s.id === sid) : null;
+  return (
+    <Frame kicker={`${st ? `${st.no} · ` : ""}SIDE BAY`} title={bay.name} sub={bay.desc} close={close} label="Close bay details">
+      <div className="fl-drawer-body">
+        {list.length ? (
+          <ul className="list fl-bordered" id="floor-bay-list">
+            {list.map((w) => (
+              <li key={w.id} data-wo={w.id} className="fl-waiting">
+                <a className="pri mono" href={hashFor("record", w.id, ctx.project.id)} onClick={(e) => { e.preventDefault(); onWo(w.id); }}>{w.id}</a>
+                <span className="grow trunc">{w.title}</span>
+                <span className="small muted">{convWaiting(w, ctx.cat) ?? (w.bayReason || ctx.cat.stations[w.station]?.name || "")}</span>
+              </li>
             ))}
           </ul>
         ) : (
-          <p className="muted small">No skills attached.</p>
+          <Empty title="Bay is empty" text="Nothing is parked here." />
         )}
-        <h3 className="sub-h">Instructions</h3>
-        <p className="small">{ag?.instructions ?? ""}</p>
-        {p.overlay ? <p className="small muted">{`Project overlay: ${p.overlay}`}</p> : null}
-        {mcps.length ? <p className="small">{`Tools: ${mcps.map((m) => m.name).join(", ")}.`}</p> : null}
-        {g ? <h3 className="sub-h">{`Gate after: ${g.label} ${g.name}`}</h3> : null}
-        {g ? <ApproverSummary gid={g.id} /> : null}
-        {g ? <Btn label={`Open ${g.label} details`} small icon="diamond" id={`floor-st-gate-${g.id}`} onClick={() => onGate(g.id)} /> : null}
-        <h3 className="sub-h">{`Work here (${here.length})`}</h3>
-        {here.length ? (
-          <div className="fl-tokgrid">
-            {here.map((w) => (
-              <WoToken key={w.id} w={w} idPrefix="floor-stok-" />
-            ))}
-          </div>
-        ) : (
-          <p className="muted small">{`Nothing at ${st.name} right now.`}</p>
-        )}
-        <p className="footnote">Change agents, skills and instructions on the Agents screen; WIP limits and gates in Project config.</p>
       </div>
-    </div>
+    </Frame>
+  );
+}
+
+/** OUT: the work orders that cleared the last gate (prototype "Released" drawer). */
+export function ReleasedDrawer({ close }: { close: () => void }) {
+  const ctx = useFloorCtx();
+  const done = ctx.wos.filter((w) => w.state === "done" && !w.split).sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0));
+  return (
+    <Frame
+      kicker="OUT · TERMINUS"
+      title="Released"
+      sub="Work orders that cleared the last gate."
+      close={close}
+      label="Close released work orders"
+      footer={<WorkOrdersLink label="Work orders" params={{ state: "done" }} project={ctx.project.id} close={close} />}
+    >
+      {done.length ? (
+        <ul className="list fl-bordered" id="floor-released">
+          {done.slice(0, 12).map((w) => <WoRow key={w.id} w={w} project={ctx.project.id} extra={<span className="chip ok">done</span>} />)}
+        </ul>
+      ) : (
+        <Empty title="Nothing released yet" text="Released work orders collect here." />
+      )}
+    </Frame>
   );
 }
 
@@ -354,7 +331,31 @@ export function useDrawers(projectId: string | null) {
       if (!projectId) return;
       ui.drawer.open(`station:${sid}`, (close) => (
         <DrawerRoot projectId={projectId}>
-          <StationDrawer sid={sid} close={close} onGate={api.gate} />
+          <StationDrawer sid={sid} close={close} />
+        </DrawerRoot>
+      ));
+    },
+    out: (): void => {
+      if (!projectId) return;
+      ui.drawer.open("out", (close) => (
+        <DrawerRoot projectId={projectId}>
+          <ReleasedDrawer close={close} />
+        </DrawerRoot>
+      ));
+    },
+    wo: (woId: string): void => {
+      if (!projectId) return;
+      ui.drawer.open(`floorwo:${woId}`, (close) => (
+        <DrawerRoot projectId={projectId}>
+          <WoDrawer woId={woId} close={close} />
+        </DrawerRoot>
+      ));
+    },
+    bay: (bayId: string, sid = ""): void => {
+      if (!projectId) return;
+      ui.drawer.open(`bay:${sid}:${bayId}`, (close) => (
+        <DrawerRoot projectId={projectId}>
+          <BayDrawer bayId={bayId} sid={sid} close={close} onWo={(id) => { close(); api.wo(id); }} />
         </DrawerRoot>
       ));
     },
@@ -362,7 +363,7 @@ export function useDrawers(projectId: string | null) {
       if (!projectId) return;
       ui.drawer.open(`gate:${gid}`, (close) => (
         <DrawerRoot projectId={projectId}>
-          <GateDrawer gid={gid} close={close} onStation={api.station} />
+          <GateDrawer gid={gid} close={close} />
         </DrawerRoot>
       ));
     },

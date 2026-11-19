@@ -12,36 +12,47 @@ afterEach(() => {
 });
 
 const open = async () => {
-  fireEvent.click(await screen.findByRole("button", { name: /Show change windows and freezes/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Line control/ }));
 };
 const withApi = (denied: string[], meOver: Record<string, unknown> = {}) => {
   mockApi({ "GET /api/v1/policies": () => ({ body: [] }), "GET /api/v1/freezes": () => ({ body: [] }) }, { denied, me: meOver });
   mount(<StatusCluster />);
 };
 
-describe("status chip popover", () => {
-  it("offers Kill factory to a person who may, and opens the shared kill dialog", async () => {
+describe("status chip: Line control menu", () => {
+  it("lists Halt line and Emergency stop, and opens the shared kill dialog", async () => {
     withApi([]);
     await open();
-    const kill = await screen.findByRole("button", { name: "Kill factory…" });
-    fireEvent.click(kill);
-    expect(await screen.findByText("Kill the whole factory")).toBeTruthy();
+    expect(await screen.findByRole("menuitem", { name: /Halt line/ })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Emergency stop/ }));
+    expect(await screen.findByText("Emergency stop the factory")).toBeTruthy();
   });
 
-  it("offers nothing destructive to a person who may not (Auditor, Engineer)", async () => {
-    withApi(["kill.factory", "restore.factory"]);
+  it("locks the stop entries for a person who may not, rather than hiding the menu", async () => {
+    withApi(["kill.factory", "restore.factory", "line.halt"]);
     await open();
-    await screen.findByText("Release windows");
-    await waitFor(() => expect(document.getElementById("sp-stop")).toBeNull());
-    expect(screen.queryByRole("button", { name: /kill|restore/i })).toBeNull();
+    const stop = await screen.findByRole("menuitem", { name: /Emergency stop/ });
+    await waitFor(() => expect(stop.getAttribute("aria-disabled")).toBe("true"));
   });
 
-  it("when the factory is killed, offers Restore with the approvals so far", async () => {
-    withApi([], { factory: { killed: { by: "p-omar", at: Date.now(), reason: "Leak", mode: "hold", restoreApprovals: [{ by: "p-omar", at: Date.now() }] } } });
+  it("when the factory is killed, the chip reads Stopped and the menu offers Restore factory", async () => {
+    withApi([], { factory: { killed: { by: "p-omar", at: Date.now(), reason: "Leak", mode: "hold" } } });
+    expect(await screen.findByText("Stopped")).toBeTruthy();
     await open();
-    expect(await screen.findByText("1 restore approval so far.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Approve restore…" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Kill factory/ })).toBeNull();
+    expect(await screen.findByRole("menuitem", { name: /Restore factory/ })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: /Emergency stop/ })).toBeNull();
+  });
+});
+
+describe("status chip on a killed project (T-39)", () => {
+  it("offers Restore project and no Halt line or per-repo pause", async () => {
+    const killed = { id: "payments", name: "Payments Platform", key: "PAY", status: "active", halted: null, killed: { by: "p-asha", at: Date.now(), reason: "test", mode: "hold" } };
+    withApi([], { projects: [killed] });
+    expect(await screen.findByText("Killed")).toBeTruthy();
+    await open();
+    expect(await screen.findByRole("menuitem", { name: /Restore project/ })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: /Halt line/ })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /^Pause / })).toBeNull();
   });
 });
 
@@ -52,7 +63,7 @@ describe("Ctrl K palette", () => {
   it("lists Kill factory… and the project kill for people who may", async () => {
     mockApi();
     palette();
-    fireEvent.change(await screen.findByRole("combobox", { name: "Search commands" }), { target: { value: "kill" } });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: "kill" } });
     await waitFor(() => expect(labels()).toContain("Kill factory…"));
     expect(labels().some((l) => /^Kill Payments Platform…$/.test(l))).toBe(true);
   });
@@ -60,7 +71,7 @@ describe("Ctrl K palette", () => {
   it("does not list kill or restore commands to people who may not", async () => {
     mockApi({}, { denied: ["kill.factory", "kill.project", "restore.factory", "restore.project"] });
     palette();
-    fireEvent.change(await screen.findByRole("combobox", { name: "Search commands" }), { target: { value: "kill" } });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: "kill" } });
     await waitFor(() => expect(document.querySelector("#palette-list")).toBeTruthy());
     await new Promise((r) => setTimeout(r, 50));
     expect(labels().filter((l) => /^(Kill|Restore)/.test(l))).toEqual([]);
@@ -69,7 +80,7 @@ describe("Ctrl K palette", () => {
   it("lists Restore factory… while the factory is killed", async () => {
     mockApi({}, { me: { factory: { killed: { by: "p-omar", at: 1, reason: "Leak", mode: "hold" } } } });
     palette();
-    fireEvent.change(await screen.findByRole("combobox", { name: "Search commands" }), { target: { value: "restore" } });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: "restore" } });
     await waitFor(() => expect(labels()).toContain("Restore factory…"));
   });
 });

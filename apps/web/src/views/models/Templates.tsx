@@ -2,6 +2,7 @@
  * Add a vendor from a template (spec 10.4 Vendor templates): pick a template, fill in only what that vendor needs, connect. The server lists the
  * vendor's models with those credentials and stores them with the vendor; the last step shows what it found, with a switch for each.
  */
+import { useCommand } from "../../ui/async";
 import { useState } from "react";
 import type { VendorField, VendorTemplate } from "@gantry/domain";
 import { ops } from "../../api/ops";
@@ -25,6 +26,10 @@ export function AddVendorDialog({ close, onAdded }: { close: () => void; onAdded
   return <Picker close={close} pick={(t) => setStep({ kind: "form", t })} manual={() => setStep({ kind: "manual" })} />;
 }
 
+/** Product copy, not agent voice: the server's tagline for the generic endpoint does not say "local", so the card carries a small hint. */
+const mentionsLocal = (t: VendorTemplate): boolean => /\b(local|self-hosted)\b/i.test(t.tagline);
+export const localHint = (t: VendorTemplate): string => (t.id === "openai-compatible" && !mentionsLocal(t) ? "Local or self-hosted models (Ollama, vLLM)" : "");
+
 function Picker({ close, pick, manual }: { close: () => void; pick: (t: VendorTemplate) => void; manual: () => void }) {
   const perm = dec(useCan("model.edit"));
   const q = useVendorTemplates();
@@ -41,7 +46,8 @@ function Picker({ close, pick, manual }: { close: () => void; pick: (t: VendorTe
               <button key={t.id} type="button" role="listitem" id={`vt-pick-${t.id}`} className="vt-card" disabled={!perm.allowed} onClick={() => pick(t)}>
                 <span className="vt-name">{t.name}</span>
                 <span className="small muted">{t.tagline}</span>
-                <span className="small muted">{t.auth}</span>
+                <span className="vt-needs small muted"><span className="vt-needs-k">Needs</span> {t.auth}</span>
+                {localHint(t) ? <span className="vt-local small" data-testid="vt-local">{localHint(t)}</span> : null}
               </button>
             ))}
           </div>
@@ -62,13 +68,14 @@ function FieldInput({ f, value, set, off }: { f: VendorField; value: string; set
 }
 
 function TemplateForm({ t, close, back, done }: { t: VendorTemplate; close: () => void; back: () => void; done: (r: Result) => void }) {
-  const ui = useUI();
   const perm = dec(useCan("model.edit"));
   const [name, setName] = useState("");
   const [values, setValues] = useState<Record<string, string>>(() => initial(t));
   const [retention, setRetention] = useState("standard");
   const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
+  /** Refusals are shown inline in the dialog, so the command only toasts success. */
+  const connect = useCommand((body: Parameters<typeof ops.addVendorFromTemplate>[0]) => ops.addVendorFromTemplate(body), { toastFail: false });
+  const busy = connect.busy;
   const off = !perm.allowed || busy;
 
   const submit = async () => {
@@ -79,13 +86,11 @@ function TemplateForm({ t, close, back, done }: { t: VendorTemplate; close: () =
       if (v && f.type === "url" && !/^https:\/\/\S+$/.test(v)) return setErr(`${f.label} must start with https://`);
     }
     setErr("");
-    setBusy(true);
     const fields = Object.fromEntries(Object.entries(values).filter(([, v]) => v.trim() !== "").map(([k, v]) => [k, v.trim()]));
-    const r = await ops.addVendorFromTemplate({ template: t.id, ...(name.trim() ? { name: name.trim() } : {}), fields, retention });
-    setBusy(false);
+    const r = await connect.run({ template: t.id, ...(name.trim() ? { name: name.trim() } : {}), fields, retention });
+    if (!r) return;
     if (!r.ok) return setErr(r.msg);
     const x = r as unknown as { vendor?: { id: string }; discovery?: { models?: Found[]; warnings?: string[] } };
-    ui.toast(r.msg, "ok");
     done({ vendorId: x.vendor?.id ?? "", msg: r.msg, models: x.discovery?.models ?? [], warnings: x.discovery?.warnings ?? [], template: t });
   };
 

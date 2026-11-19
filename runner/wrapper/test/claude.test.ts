@@ -1,8 +1,9 @@
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { buildClaudeInvocation, composeSystemPrompt, createClaudeAdapter, extractStructuredOutput, parseStreamLine, usageFromResult } from "../src/adapters/claude.js";
+import { buildClaudeInvocation, cacheEnv, excludeCacheFromGit, builtinTools, toolAllowed, composeSystemPrompt, createClaudeAdapter, extractStructuredOutput, parseStreamLine, usageFromResult } from "../src/adapters/claude.js";
 import { EdgeClient } from "../src/edge.js";
 import { EXIT, runWrapper } from "../src/main.js";
 import { RunSpec } from "../src/spec.js";
@@ -10,6 +11,7 @@ import { startFakeEdge, type FakeEdge } from "./helpers.js";
 
 const TOKEN = "run-token-abcdef123456";
 const env = { edgeUrl: "http://gantry-edge:8443", runToken: TOKEN, runId: "r1", workspace: "/workspace" };
+const RELAY = "http://127.0.0.1:45678";
 const spec = RunSpec.parse({
   adapter: "claude",
   station: "build",
@@ -23,7 +25,7 @@ const spec = RunSpec.parse({
 });
 
 describe("claude invocation (flags unverified against a live CLI)", () => {
-  const inv = buildClaudeInvocation(spec, env, { PATH: "/usr/bin", HTTPS_PROXY: "http://gantry-edge:8444", GANTRY_RUN_TOKEN: TOKEN, SECRET: "x" });
+  const inv = buildClaudeInvocation(spec, env, RELAY, { PATH: "/usr/bin", HTTPS_PROXY: "http://gantry-edge:8444", GANTRY_RUN_TOKEN: TOKEN, SECRET: "x" });
   const flag = (f: string) => inv.args[inv.args.indexOf(f) + 1];
 
   it("prevents repo-local settings, hooks and MCP config from loading", () => {
@@ -36,20 +38,51 @@ describe("claude invocation (flags unverified against a live CLI)", () => {
     expect(inv.env.HOME).toMatch(/home$/);
   });
 
-  it("points the harness at the edge's model gateway with the run token only", () => {
-    expect(inv.env.ANTHROPIC_BASE_URL).toBe("http://gantry-edge:8443/model");
-    expect(inv.env.ANTHROPIC_AUTH_TOKEN).toBe(TOKEN);
-    expect(inv.env.NO_PROXY).toBe("gantry-edge");
-    expect(inv.env.HTTPS_PROXY).toBe("http://gantry-edge:8444");
+  it("keeps git able to commit, with hooks off, and still holds no token", () => {
+    expect(inv.env.GIT_AUTHOR_NAME).toBeTruthy();
+    expect(inv.env.GIT_COMMITTER_EMAIL).toMatch(/@/);
+    expect(inv.env.GIT_CONFIG_KEY_0).toBe("core.hooksPath");
+    expect(inv.env.GIT_CONFIG_VALUE_0).toBe("/dev/null");
+    expect(JSON.stringify(inv.env)).not.toContain(TOKEN);
+  });
+  it("points the harness at the loopback relay, and no secret is in its environment, its MCP config or the station tools' environment", () => {
+    expect(inv.env.ANTHROPIC_BASE_URL).toBe(`${RELAY}/model`);
+    expect(inv.env.NO_PROXY).toBe("127.0.0.1,localhost");
+    expect(inv.env.HTTPS_PROXY).toBe(RELAY);
+    const everything = JSON.stringify([inv.env, inv.mcpConfig, inv.args]);
+    expect(everything).not.toContain(TOKEN);
+    expect(everything).not.toContain("gantry-edge:8444");
+    expect(JSON.stringify(inv.mcpConfig)).not.toMatch(/authorization|bearer/i);
+    expect((inv.mcpConfig.mcpServers.docs as { url: string }).url).toBe(`${RELAY}/mcp/docs`);
+    // the only credential-named variable is the placeholder the harness needs in order to start
+    for (const [k, v] of Object.entries(inv.env)) if (/token|secret|password|key|auth/i.test(k) && !/^GIT_(AUTHOR|CONFIG_KEY)/.test(k)) expect(v, k).toBe("relay");
     expect(inv.env).not.toHaveProperty("SECRET");
     expect(inv.env).not.toHaveProperty("GANTRY_RUN_TOKEN");
     expect(inv.env).not.toHaveProperty("ANTHROPIC_API_KEY");
   });
 
+  it("never hands the model an unrestricted shell; the inner sandbox is off because there is nothing left to scrub", () => {
+    const wide = buildClaudeInvocation(RunSpec.parse({ adapter: "claude", station: "build", model: "m", toolAllowList: ["Read", "Bash", "Bash(*)"] }), env, RELAY, { PATH: "/usr/bin" });
+    const allowed = wide.args[wide.args.indexOf("--allowedTools") + 1]!.split(",");
+    expect(allowed).not.toContain("Bash");
+    expect(allowed).not.toContain("Bash(*)");
+    expect(allowed).toContain("Bash(npm test:*)");
+    expect(inv.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("0");
+  });
+
+  it("hands the harness whatever turn limit the spec carries, so a raised limit (an agent's 500, a one-off retry) is what it stops at", () => {
+    const spec = RunSpec.parse({ adapter: "claude", station: "build", model: "m", limits: { turns: 500, wallClockSeconds: 14400, costUsd: 12.5 } });
+    const big = buildClaudeInvocation(spec, env, RELAY, { PATH: "/usr/bin" });
+    expect(big.args[big.args.indexOf("--max-turns") + 1]).toBe("500");
+    expect(spec.limits).toEqual({ turns: 500, wallClockSeconds: 14400, costUsd: 12.5 });
+  });
+
   it("passes limits, model, tools and composed instructions explicitly", () => {
     expect(flag("--max-turns")).toBe("12");
     expect(flag("--model")).toBe("claude-sonnet-4-5-20250929");
-    expect(flag("--allowedTools")).toBe("Read,Edit,Bash(npm test:*)");
+    expect(flag("--allowedTools")).toBe("Read,Edit,Bash(npm test:*),mcp__gantry__write_document,mcp__gantry__ask,mcp__gantry__assume,mcp__gantry__propose_research_plan,mcp__gantry__web_fetch,mcp__gantry__spawn_scouts,mcp__gantry__object");
+    expect(inv.mcpConfig.mcpServers.gantry).toMatchObject({ type: "stdio" });
+    expect(flag("--append-system-prompt")).toContain("write_document");
     const sys = flag("--append-system-prompt")!;
     expect(sys).toContain("Base rules.");
     expect(sys.indexOf("Base rules.")).toBeLessThan(sys.indexOf("## Skill: git"));
@@ -57,9 +90,29 @@ describe("claude invocation (flags unverified against a live CLI)", () => {
     expect(flag("--output-format")).toBe("stream-json");
   });
 
-  it("gives MCP servers the run token as a header, in a file rather than argv", () => {
+  it("restricts the built-in tools to the allow-list (not only auto-approves them)", () => {
+    expect(flag("--tools")).toBe("Read,Edit,Bash");
+    const off = flag("--disallowedTools")!.split(",");
+    expect(off).toEqual(expect.arrayContaining(["Agent", "Workflow", "WebFetch", "WebSearch", "Write", "NotebookEdit"]));
+    expect(off).not.toContain("Read");
+    expect(off).not.toContain("Bash");
+    const reviewer = buildClaudeInvocation(RunSpec.parse({ ...spec, toolAllowList: ["Read", "Glob", "Grep"] }), env, RELAY, {});
+    expect(reviewer.args[reviewer.args.indexOf("--tools") + 1]).toBe("Read,Glob,Grep");
+    expect(reviewer.args[reviewer.args.indexOf("--disallowedTools") + 1]).toContain("Bash");
+    const none = buildClaudeInvocation(RunSpec.parse({ ...spec, toolAllowList: [] }), env, RELAY, {});
+    expect(none.args[none.args.indexOf("--tools") + 1]).toBe("");
+  });
+
+  it("knows which tool calls an allow-list permits", () => {
+    expect(builtinTools(["Read", "Bash(npm test:*)", "mcp__docs__search"])).toEqual(["Read", "Bash"]);
+    expect(toolAllowed("Read", ["Read"])).toBe(true);
+    expect(toolAllowed("Bash", ["Read", "Glob", "Grep"])).toBe(false);
+    expect(toolAllowed("mcp__gantry__ask", ["Read"])).toBe(true);
+  });
+
+  it("points MCP servers at the relay, with no credential in the file or argv", () => {
     expect(JSON.stringify(inv.args)).not.toContain(TOKEN);
-    expect(inv.mcpConfig.mcpServers.docs).toMatchObject({ type: "http", url: "http://gantry-edge:8443/mcp/docs", headers: { authorization: `Bearer ${TOKEN}` } });
+    expect(inv.mcpConfig.mcpServers.docs).toEqual({ type: "http", url: `${RELAY}/mcp/docs` });
     expect(inv.stdin).toContain("Station: build");
   });
 });
@@ -148,9 +201,59 @@ describe("process handling with a stand-in harness executable", () => {
     expect(cps[1].turn).toBe(2);
     const seen = JSON.parse(await readFile(out, "utf8"));
     expect(seen.stdin).toContain("Station: spec");
-    expect(seen.base).toBe(`${edge!.url}/model`);
+    expect(seen.base).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/model$/);
     expect(seen.cwd).toBe(dir);
     expect(seen.argv).toContain("--strict-mcp-config");
+  });
+
+  it("the harness and a tool subprocess never see the run token, and the wrapper still calls the edge with it through the relay", async () => {
+    const out = join(dir, "seen.json");
+    const bin = await fake(`
+      import { writeFileSync } from "node:fs";
+      import { execFileSync } from "node:child_process";
+      // what a Bash tool call would run: the harness's environment, inherited by the subprocess
+      const toolEnv = execFileSync("env", { encoding: "utf8" });
+      const r = await fetch(process.env.ANTHROPIC_BASE_URL + "/v1/messages", { method: "POST", headers: { "x-api-key": "model-key" } });
+      const refused = await fetch(process.env.ANTHROPIC_BASE_URL.replace("/model", "/run/v1/spec"));
+      writeFileSync(${JSON.stringify(out)}, JSON.stringify({ own: JSON.stringify(process.env), toolEnv, modelStatus: r.status, otherStatus: refused.status }));
+      console.log(JSON.stringify({ type: "result", subtype: "success", result: "{\\"a\\":1}" }));
+    `);
+    const { calls } = await run(bin);
+    const seen = JSON.parse(await readFile(out, "utf8"));
+    expect(seen.own).not.toContain(TOKEN);
+    expect(seen.toolEnv).not.toContain(TOKEN);
+    expect(seen.toolEnv).not.toMatch(/GANTRY_RUN_TOKEN/);
+    expect(seen.modelStatus).toBe(200);
+    expect(seen.otherStatus).toBe(403);
+    const model = calls.find((c) => c.path === "/model/v1/messages")!;
+    expect(model.auth).toBe(`Bearer ${TOKEN}`);
+    expect(calls.at(-1)!.auth).toBe(`Bearer ${TOKEN}`);
+    expect(calls.at(-1)!.body).toMatchObject({ status: "succeeded" });
+  });
+
+  it("refuses a tool call outside the allow-list: stops the harness, records the call, fails the run with the reason", async () => {
+    const bin = await fake(`
+      const emit = (o) => console.log(JSON.stringify(o));
+      emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Read", input: { file_path: "a" } }] } });
+      emit({ type: "user", message: { content: [{ type: "tool_result" }] } });
+      emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "t2", name: "Bash", input: { command: "ls" } }] } });
+      setInterval(() => undefined, 1000);
+    `);
+    const { code, calls } = await run(bin, { toolAllowList: ["Read", "Glob", "Grep"] });
+    expect(code).toBe(EXIT.delivered);
+    expect(calls.at(-1)!.body).toMatchObject({ status: "failed", error: { code: "tool_not_allowed", msg: expect.stringContaining("Bash") } });
+    const transcript = calls.filter((c) => c.path === "/run/v1/checkpoint").map((c) => JSON.stringify(c.body)).join("");
+    expect(transcript.length).toBeGreaterThan(0);
+  });
+
+  it("lets listed built-ins and MCP tools through", async () => {
+    const bin = await fake(`
+      const emit = (o) => console.log(JSON.stringify(o));
+      emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }, { type: "tool_use", id: "t2", name: "mcp__gantry__ask", input: {} }] } });
+      emit({ type: "result", subtype: "success", is_error: false, result: "{\\"a\\":1}", usage: { input_tokens: 1, output_tokens: 1 } });
+    `);
+    const { calls } = await run(bin, { toolAllowList: ["Read"] });
+    expect(calls.at(-1)!.body).toMatchObject({ status: "succeeded", output: { a: 1 } });
   });
 
   it("fails when the harness exits without a result", async () => {
@@ -184,5 +287,32 @@ describe("process handling with a stand-in harness executable", () => {
   it("reports a missing harness binary", async () => {
     const { calls } = await run("/nonexistent/claude");
     expect(calls.at(-1)!.body).toMatchObject({ status: "failed", error: { code: "harness_unavailable" } });
+  });
+});
+
+describe("package caches live on the workspace volume, not the /tmp tmpfs", () => {
+  it("puts UV_CACHE_DIR and the pip, npm and XDG caches under a dot-directory of the workspace", () => {
+    const inv = buildClaudeInvocation(spec, env, RELAY, { PATH: "/usr/bin", UV_CACHE_DIR: "/tmp/uv-cache" });
+    expect(inv.env.UV_CACHE_DIR).toBe("/workspace/.gantry-cache/uv");
+    expect(inv.env.PIP_CACHE_DIR).toBe("/workspace/.gantry-cache/pip");
+    expect(inv.env.XDG_CACHE_HOME).toBe("/workspace/.gantry-cache/xdg");
+    expect(inv.env.npm_config_cache).toBe("/workspace/.gantry-cache/npm");
+    for (const v of Object.values(cacheEnv("/workspace"))) expect(v.startsWith("/workspace/.gantry-cache/")).toBe(true);
+    expect(inv.env.HOME).not.toContain("/workspace");
+  });
+
+  it("keeps the cache out of commits: git add -A and commit -a skip it", async () => {
+    const ws = await mkdtemp(join(tmpdir(), "gantry-cache-"));
+    const g = (...a: string[]) => execFileSync("git", ["-C", ws, ...a], { encoding: "utf8" });
+    g("init", "-q", "--template=");
+    await writeFile(join(ws, "a.txt"), "a");
+    await excludeCacheFromGit(ws);
+    await excludeCacheFromGit(ws); // idempotent
+    expect((await readFile(join(ws, ".git/info/exclude"), "utf8")).match(/\.gantry-cache/g)).toHaveLength(1);
+    await mkdir(join(ws, ".gantry-cache/uv"), { recursive: true });
+    await writeFile(join(ws, ".gantry-cache/uv/blob"), "x");
+    g("add", "-A");
+    expect(g("ls-files").trim().split("\n")).toEqual(["a.txt"]);
+    expect((await stat(join(ws, ".gantry-cache/uv/blob"))).isFile()).toBe(true);
   });
 });

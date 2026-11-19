@@ -1,0 +1,63 @@
+# New advisories appear after an image shipped. Every day, the images of the release production runs now (the last healthy deploy's manifest)
+# are scanned again; a fixable high or critical fails the run, so the owner is told by the usual failed-run notification.
+name: Rescan
+
+on:
+  schedule:
+    - cron: "15 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rescan
+  cancel-in-progress: true
+
+jobs:
+  rescan:
+    name: Rescan ${{ matrix.name }}
+    # Off until continuous delivery is switched on (repository variable GANTRY_CD_ENABLED=true): there is no live release to rescan before that.
+    if: ${{ vars.GANTRY_CD_ENABLED == 'true' && !github.event.repository.fork }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [api, worker, migrate, launcher, edge, github, web, runner, keycloak, backup]
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # What production runs: the manifest the last healthy deploy recorded (deploy.yml, step "Record the live release"). A release that
+      # was rolled back or never approved is not scanned here, and a release only staged is not "live".
+      - name: The live release manifest
+        id: m
+        env:
+          NAME: ${{ matrix.name }}
+        run: |
+          # The newest successful deploy run that recorded a live release (a run whose jobs were all skipped recorded none).
+          found=""
+          for run_id in $(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy.yml --status success --limit 20 --json databaseId --jq '.[].databaseId'); do
+            if gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name live-release --dir manifest 2>/dev/null; then found=1; break; fi
+          done
+          if [ -z "$found" ]; then echo "::notice title=Nothing is live::no healthy production deploy has recorded a live release yet, so there is nothing to rescan"; exit 0; fi
+          echo "image=$(jq -r --arg n "$NAME" '.images[$n] | .ref + "@" + .digest' manifest/release.json)" >>"$GITHUB_OUTPUT"
+      - if: steps.m.outputs.image != ''
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.m.outputs.image != ''
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          grype-version: v0.122.1
+          image: ${{ steps.m.outputs.image }}
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table

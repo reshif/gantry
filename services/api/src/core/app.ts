@@ -10,15 +10,23 @@ import { ApiSettingsCache } from "../areas/apikeys/config.js";
 import { gateApiKey, logApiRequest, noteRejectedKey } from "../areas/apikeys/gate.js";
 import { authenticateApiKey } from "./auth/apikeys.js";
 import { authenticateService } from "./auth/service.js";
+import { mfaRefusal } from "./auth/mfa.js";
 import { csrfFor, findSession, revokeSessions, touchSession } from "./auth/sessions.js";
+import { sessionMayPassAllowList } from "./auth/ip-recovery.js";
 import type { Config } from "./config.js";
 import type { Gantry, Principal } from "./context.js";
 import { safeEqual } from "./crypto.js";
 import { installErrorHandler } from "./errors.js";
+import { enforceWriteGate } from "./write-gate.js";
 import { createOidcAdapter, type OidcAdapter } from "./oidc.js";
+import { bodyHasNul, hasNul } from "./nul.js";
+import type { IdpAdmin } from "./auth/idp-admin.js";
+import { canonicalPath } from "./paths.js";
+import { pinVia } from "./command.js";
 import { readOrg } from "./read/index.js";
 import { loadPolicyState } from "./read/state.js";
 import { ipAllowed, SecurityCache } from "./security.js";
+import { registerMetrics } from "./metrics.js";
 import { Hub } from "./stream.js";
 
 export interface BuildOptions {
@@ -27,12 +35,18 @@ export interface BuildOptions {
   /** Resolved org uuid (see bootstrapOrg). */
   orgId: string;
   oidc?: OidcAdapter;
+  /** The identity provider's admin API (the scoped service account): enrolment links, authenticator resets, the per-person factor status. Null/absent: those say so. */
+  idpAdmin?: IdpAdmin | null;
   logger?: boolean | object;
   /** Requests per minute per client (default 600). */
   rateLimitMax?: number;
   heartbeatMs?: number;
   /** How often open streams re-check their session (default 60 s). */
   sweepMs?: number;
+  /** Bearer tokens that may scrape /metrics from outside the internal network (default: the metrics_token secret, when present). */
+  metricsTokens?: readonly (string | null)[];
+  /** Where the backup service writes its status files (default GANTRY_BACKUPS_DIR, else /backups). */
+  backupsDir?: string;
   /** Registers the product routes (default: ./routes/index). Tests pass their own. */
   routes?: (app: FastifyInstance) => Promise<void> | void;
 }
@@ -52,6 +66,19 @@ export async function publicConfig(app: FastifyInstance): Promise<{ demoAccounts
   return { demoAccounts: g.config.demoAccounts, githubLogin: !!sec.value.githubLogin && !!g.oidc.githubIdp, ...(org ? { orgName: org.name } : {}), ...(demoAccountList ? { demoAccountList } : {}) };
 }
 
+/** A URL as it may be logged: the path only. Every query is credential-bearing or attacker-chosen (names may be percent-encoded), so none is kept. */
+export function logUrl(url: string | undefined): string | undefined {
+  if (!url) return url;
+  const i = url.indexOf("?");
+  return i < 0 ? url : `${url.slice(0, i)}?[redacted]`;
+}
+
+/** The request as it is logged. Headers are left out on purpose (credential headers such as x-run-token, x-api-key and webhook signatures); the fields mirror Fastify's default serializer. */
+export function logReq(r: { method?: string; url?: string; ip?: string; headers?: Record<string, unknown>; socket?: { remotePort?: number } }): Record<string, unknown> {
+  const v = r.headers?.["accept-version"];
+  return { method: r.method, url: logUrl(r.url), version: typeof v === "string" ? v : undefined, host: r.headers?.host, remoteAddress: r.ip, remotePort: r.socket?.remotePort };
+}
+
 /**
  * The Fastify app: request id, rate limit, error mapping, authentication (session cookie + CSRF, API-key bearer, service tokens),
  * the live-update hub and the product routes. Stateless: every replica serves any request.
@@ -59,7 +86,12 @@ export async function publicConfig(app: FastifyInstance): Promise<{ demoAccounts
 export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
   const { pool, config, orgId } = o;
   const app = Fastify({
-    logger: o.logger ?? { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.authorization", "req.headers.cookie", "res.headers['set-cookie']"] },
+    logger: o.logger ?? {
+      level: process.env.LOG_LEVEL ?? "info",
+      redact: ["req.headers.authorization", "req.headers.cookie", "req.headers['x-csrf-token']", "res.headers['set-cookie']"],
+      // Sign-in links carry credentials in the query (invite token, OIDC code and state, id_token_hint), so the log keeps the path only.
+      serializers: { req: (r: { method?: string; url?: string; host?: string; remoteAddress?: string; remotePort?: number; headers?: unknown }) => ({ method: r.method, url: logUrl(r.url), host: r.host, remoteAddress: r.remoteAddress, remotePort: r.remotePort, headers: r.headers }) },
+    },
     trustProxy: config.trustProxy,
     genReqId: (req) => {
       const h = req.headers["x-request-id"];
@@ -82,8 +114,10 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
 
   const security = new SecurityCache(pool, orgId);
   const hub = new Hub(pool, orgId, {
-    async refresh(s) {
-      const st = await loadPolicyState(pool, orgId);
+    async refresh(s, batch) {
+      let load = batch.get("policy") as ReturnType<typeof loadPolicyState> | undefined;
+      if (!load) batch.set("policy", (load = loadPolicyState(pool, orgId)));
+      const st = await load;
       const person = st.people.find((p) => p.id === s.personId);
       if (!person || person.status !== "active") return null;
       if (s.sessionId) {
@@ -99,7 +133,7 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
     },
   }, o.sweepMs);
   const oidc = o.oidc ?? createOidcAdapter(config.oidc);
-  const gantry: Gantry = { pool, config, orgId, hub, oidc, security, apiSettings: new ApiSettingsCache(pool, orgId), heartbeatMs: o.heartbeatMs ?? 15_000 };
+  const gantry: Gantry = { pool, config, orgId, hub, oidc, idpAdmin: o.idpAdmin ?? null, security, apiSettings: new ApiSettingsCache(pool, orgId), heartbeatMs: o.heartbeatMs ?? 15_000 };
   app.decorate("gantry", gantry);
   app.decorateRequest("gx", undefined as never);
 
@@ -107,19 +141,33 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
     global: true,
     max: o.rateLimitMax ?? 600,
     timeWindow: "1 minute",
-    allowList: (req) => req.url === "/healthz" || req.url.startsWith("/api/v1/stream") || req.url.startsWith("/internal/v1/"),
+    allowList: (req) => {
+      const path = canonicalPath(req.url) ?? "";
+      return path === "/healthz" || path === "/metrics" || path.startsWith("/internal/v1/");
+    },
     keyGenerator: (req) => req.ip,
   });
 
   app.addHook("onRequest", async (req, reply) => {
     req.gx = { orgId, principal: null, session: null, ip: req.ip, requestId: req.id, channel: "web", reply };
-    const path = req.url.split("?")[0] ?? "";
+    const path = canonicalPath(req.url);
+    if (path === null || hasNul(req.url)) return void (await reply.code(400).send({ ok: false, msg: "Malformed request path." }));
     if (path.startsWith("/internal/v1/")) return authInternal(req, reply);
     if (path.startsWith("/api/v1/")) {
       await authApi(app, req, reply);
       if (!reply.sent) await enforceReadGate(req, reply);
     }
   });
+
+  // S-69: Postgres refuses U+0000 in text, so a NUL in a JSON body would surface as a 500. Refuse it at the door, once, for every route.
+  app.addHook("preValidation", async (req, reply) => {
+    if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body) && bodyHasNul(req.body)) return void (await reply.code(400).send({ ok: false, msg: "Text cannot contain a NUL character." }));
+  });
+
+  // The audit channel comes from the transport: a client-sent `via` is pinned to what the caller may claim.
+  app.addHook("preHandler", async (req) => pinVia(req));
+  // Authorisation before validation: a write route's declared rights are checked before its handler reads anything (core/write-gate.ts).
+  app.addHook("preHandler", enforceWriteGate);
 
   app.addHook("onResponse", logApiRequest);
 
@@ -138,6 +186,8 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
       return reply.code(503).send({ ok: false, msg: "database unavailable" });
     }
   });
+
+  await registerMetrics(app, { pool, orgId, backupsDir: o.backupsDir ?? process.env.GANTRY_BACKUPS_DIR ?? "/backups", ...(o.metricsTokens ? { tokens: o.metricsTokens } : {}) });
 
   await (o.routes ? o.routes(app) : (await import("../routes/index.js")).registerRoutes(app));
 
@@ -160,6 +210,15 @@ async function authInternal(req: FastifyRequest, reply: import("fastify").Fastif
   req.gx.channel = "system";
 }
 
+/** A session made by the operator's one-time recovery sign-in passes the allow-list from that same address for a short time, so the admin can confirm the address. */
+async function recoverySessionPasses(app: FastifyInstance, req: FastifyRequest, idleMin: number): Promise<boolean> {
+  const g = app.gantry;
+  const token = req.cookies[g.config.sessionCookie];
+  if (!token) return false;
+  const s = await findSession(g.pool, g.config.secrets.sessionKey, g.orgId, token, idleMin).catch(() => null);
+  return !!s && (await sessionMayPassAllowList(g.pool, g.orgId, s.id, req.ip).catch(() => false));
+}
+
 async function authApi(app: FastifyInstance, req: FastifyRequest, reply: import("fastify").FastifyReply): Promise<void> {
   const g = app.gantry;
   const unauth = async (msg = "Sign in to continue.", clear = false): Promise<void> => {
@@ -167,8 +226,8 @@ async function authApi(app: FastifyInstance, req: FastifyRequest, reply: import(
     await reply.code(401).send({ ok: false, msg, config: await publicConfig(app).catch(() => ({ demoAccounts: g.config.demoAccounts, githubLogin: false })) });
   };
   const sec = (await g.security.get()).value;
-  if (!ipAllowed(req.ip, sec.ipAllow)) {
-    await reply.code(403).send({ ok: false, msg: "This network address is not on the allow-list.", rule: { kind: "invariant", id: "IP-ALLOW", name: "IP allow-list" } });
+  if (!ipAllowed(req.ip, sec.ipAllow) && !(await recoverySessionPasses(app, req, sec.idleMin))) {
+    await reply.code(403).send({ ok: false, msg: "This network address is not on the allow-list. Ask a Factory Admin; if every admin is locked out, the operator can open a one-time recovery on the server (deploy/README.md, Operations).", rule: { kind: "invariant", id: "IP-ALLOW", name: "IP allow-list" } });
     return;
   }
   const auth = String(req.headers.authorization ?? "");
@@ -191,6 +250,13 @@ async function authApi(app: FastifyInstance, req: FastifyRequest, reply: import(
     await revokeSessions(g.pool, g.orgId, s.personId, null, "system").catch(() => undefined);
     return unauth("This account is not active.", true);
   }
+  // Everyone's session must come from a sign-in with a second factor (S-121). Checked on every request, not only at sign-in, so a session made before
+  // the rule (or while it was waived) cannot linger. People only: API keys and run/service tokens never reach this code (they are not people), and the
+  // allow-list recovery CLI opens a window that still ends in a normal sign-in. The 401 says what to do; the session is kept so the guided screen can reach /me.
+  if (!s.secondFactor && !g.config.adminMfaOptional) {
+    await reply.code(401).send({ ...mfaRefusal, config: await publicConfig(app).catch(() => ({ demoAccounts: g.config.demoAccounts, githubLogin: false })) });
+    return;
+  }
   // Mutating requests from a browser must carry the session-bound CSRF token, and an Origin (when sent) must be ours.
   if (!SAFE.has(req.method)) {
     const sent = req.headers["x-csrf-token"];
@@ -204,7 +270,8 @@ async function authApi(app: FastifyInstance, req: FastifyRequest, reply: import(
       return;
     }
   }
-  void touchSession(g.pool, g.orgId, s).catch(() => undefined);
+  // Only a person's own activity keeps a session from going idle: the app marks its timed polling and the live stream as background.
+  if (req.headers["x-gantry-background"] !== "1" && !req.url.startsWith("/api/v1/stream")) void touchSession(g.pool, g.orgId, s).catch(() => undefined);
   req.gx.principal = { kind: "person", id: s.personId, name: s.personName, sessionId: s.id };
   req.gx.session = { id: s.id, personId: s.personId, method: s.method, authTime: s.authTime, createdAt: s.createdAt, expiresAt: s.expiresAt };
 }

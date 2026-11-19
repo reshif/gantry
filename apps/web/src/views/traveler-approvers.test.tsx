@@ -38,7 +38,7 @@ const approvers = (over: Record<string, unknown> = {}) => ({
 
 describe("Gate approver transparency", () => {
   it("shows the rule in plain words, progress, the eligible people and a warning when the gate cannot pass; the locked Approve says why inline; Approve as override uses the ordinary approve call", async () => {
-    const path = `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/approve`;
+    const path = `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}:1`)}/approve`;
     const calls = await show({
       [`GET /api/v1/work-orders/${W.id}`]: () => ({ body: travelerOf(W, {}, { approve: deny("Separation of duties: the author cannot approve.", "Someone other than the author") }) }),
       [`GET /api/v1/work-orders/${W.id}/gates/${gate}/approvers`]: () => ({ body: approvers() }),
@@ -52,14 +52,61 @@ describe("Gate approver transparency", () => {
     expect(document.getElementById("trv-approve-why")!.textContent).toMatch(/Separation of duties/);
     expect(screen.getByRole("button", { name: "Edit rule" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Grant a role" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Approve as override" }));
+    expect(screen.getByText(/Factory Admins are eligible approvers like anyone else\. Asha Raman wrote this work order/)).toBeTruthy();
+    expect(screen.queryByText(/may approve as an override/)).toBeNull();
+    // 1 person can approve but the gate enforces 2: "Pass with override" asks for a reason first, then sends it with the ordinary approve call
+    fireEvent.click(screen.getByRole("button", { name: "Pass with override" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pass with override" }));
+    expect(posts(calls, path)).toHaveLength(0);
+    expect(await screen.findByText("Give a reason of at least 5 characters.")).toBeTruthy();
+    fireEvent.change(document.getElementById("apr-override-reason")!, { target: { value: "Only one approver on leave-free rota" } });
+    fireEvent.click(document.getElementById("apr-override-go")!);
     await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
+    expect(posts(calls, path)[0]!.body).toMatchObject({ reason: "Only one approver on leave-free rota" });
+  });
+
+  it("lists an eligible Factory Admin as a normal approver and shows no override line when none is needed", async () => {
+    await show({ [`GET /api/v1/work-orders/${W.id}/gates/${gate}/approvers`]: () => ({ body: approvers({ eligible: [{ id: "p-asha", name: "Asha Raman", why: "Factory Admin may approve any gate.", away: false, oncall: false }], overrides: [], satisfiable: true, warning: null, viewerCanOverride: false }) }) });
+    expect(await screen.findByText("Asha Raman")).toBeTruthy();
+    expect(document.getElementById("apr-warning")).toBeNull();
+    expect(screen.queryByText(/override with a reason/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Approve as override" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pass with override" })).toBeNull();
+  });
+
+  it("says when the work order's class has its own count instead of the gate's base", async () => {
+    await show({ [`GET /api/v1/work-orders/${W.id}/gates/${gate}/approvers`]: () => ({ body: approvers({ rule: { text: "Needs 1 approval from Line Lead", required: 1, base: 2, classOverride: 1, sod: true, roles: [], people: [], conditions: [] }, progress: { have: 0, need: 1, approvals: [], unmet: [], onlyRequester: false } }) }) });
+    expect(await screen.findByText("This work order's class needs 1 instead of the gate's base 2.")).toBeTruthy();
+    expect(screen.getByText("0/1")).toBeTruthy();
   });
 
   it("Edit rule opens Project config on that gate's approvers", async () => {
     await show({ [`GET /api/v1/work-orders/${W.id}/gates/${gate}/approvers`]: () => ({ body: approvers() }) });
     fireEvent.click(await screen.findByRole("button", { name: "Edit rule" }));
     await waitFor(() => expect(window.location.hash).toMatch(new RegExp(`project-config/approvers%2F${gate}$`)));
+  });
+});
+
+describe("Open items before approving", () => {
+  const dlg = (assumptions: unknown[], objections: unknown[]) => ({ [`GET /api/v1/work-orders/${W.id}/dialogue`]: () => ({ body: { questions: [], assumptions, objections } }) });
+  const apr = { [`GET /api/v1/work-orders/${W.id}/gates/${gate}/approvers`]: () => ({ body: approvers() }) };
+  it("lists open objections and assumptions in the drawer, and the link opens the work-order conversation", async () => {
+    await show({ ...apr, ...dlg([{ id: "a1", status: "open", impact: "high" }], [{ id: "o1", status: "open" }, { id: "o2", status: "upheld" }]) });
+    const note = await waitFor(() => { const n = document.getElementById("gate-notes"); expect(n).toBeTruthy(); return n!; });
+    expect(note.textContent).toContain("1 objection not decided");
+    expect(note.textContent).toContain("1 assumption not confirmed (some high impact)");
+    fireEvent.click(screen.getByRole("button", { name: "1 objection not decided" }));
+    await waitFor(() => expect(window.location.hash).toMatch(new RegExp(`conversations/${encodeURIComponent(W.id)}`)));
+  });
+  it("shows nothing when nothing is open, or when the read fails", async () => {
+    await show({ ...apr, ...dlg([{ id: "a1", status: "confirmed", impact: "low" }], []) });
+    await screen.findByText(/Needs 2 approvals/);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(document.getElementById("gate-notes")).toBeNull();
+    cleanup();
+    await show({ ...apr, [`GET /api/v1/work-orders/${W.id}/dialogue`]: () => ({ status: 500, body: { error: "x" } }) });
+    await screen.findByText(/Needs 2 approvals/);
+    expect(document.getElementById("gate-notes")).toBeNull();
   });
 });
 

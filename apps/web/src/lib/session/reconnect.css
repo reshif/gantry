@@ -1,0 +1,10 @@
+.reconnect-banner {
+  /* top of the viewport under the bar, clear of bottom controls and the mobile home indicator */
+  position: fixed; left: 50%; top: calc(56px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: var(--z-banner);
+  display: flex; align-items: center; gap: var(--s3); max-width: calc(100vw - 2 * var(--s4));
+  padding: var(--s2) var(--s3); border: 1px solid var(--wait); border-radius: var(--r2);
+  background: var(--wait-soft); color: var(--ink); font-size: var(--t-sm); box-shadow: var(--shadow-2);
+}
+.error-fallback { max-width: 520px; margin: var(--s5, 24px) auto; padding: var(--s4, 16px); text-align: center; }
+.error-fallback .error-id { color: var(--muted); font-size: var(--t-sm); }
+.error-fallback .error-detail { text-align: left; overflow: auto; font-size: var(--t-sm); color: var(--muted); }

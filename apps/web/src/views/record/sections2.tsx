@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { fmt, flowOf, gateDef, gateExplain, gateKindText, routeGates, type Gate } from "@gantry/domain";
 import { Icon } from "../../ui/Icon";
-import { Btn, Segmented } from "../../ui/primitives";
+import { Btn, Panel, Segmented } from "../../ui/primitives";
 import { useOpenTraveler } from "../../shell/useTraveler";
 import { GateDiamond, classOf, roleName } from "../projects/kit";
 import { stName, plural, type RecEvent, toRecEvent, bayLabel } from "../traveler/model";
@@ -117,14 +117,14 @@ export function Changes({ c }: { c: Ctx }) {
   const name = useName();
   const ch = useChangesRead(wo.id).data;
   const [group, setGroup] = useState<"file" | "commit">("file");
-  const planFiles = (wo.files ?? []) as RecFile[];
   const files: RecFile[] = useMemo(() => {
+    const planFiles = (wo.files ?? []) as RecFile[];
     const real = ch?.files ?? rec.code.files;
     const byPath = new Map(planFiles.map((f) => [f.path, f]));
     const out: RecFile[] = real.map((f) => ({ ...(byPath.get(f.path) ?? {}), ...f }) as RecFile);
     for (const f of planFiles) if (!out.some((x) => x.path === f.path)) out.push(f);
     return out;
-  }, [ch, rec.code.files, planFiles]);
+  }, [ch, rec.code.files, wo.files]);
   const commits = ch?.commits ?? rec.code.commits.map((x) => ({ sha: x.sha, message: x.message, author: x.author, at: ms(x.at), files: [] as Array<{ path: string; status: string; plus: number; minus: number }> }));
   if (!files.length && !commits.length) return <None text={wo.criteria ? "Nothing planned yet. Plan lists the files before Build." : "No changes yet. Files appear once Build pushes a branch."} />;
   const plus = sum(files, "plus");
@@ -155,7 +155,7 @@ export function Changes({ c }: { c: Ctx }) {
           </div>
           <div className="small muted">{`${cm.author ? name(cm.author) : "unknown"} · ${when(cm.at)}`}</div>
           <ul className="rec-tree rec-tree-flat">
-            {cm.files.map((p) => {
+            {(cm.files ?? []).map((p) => {
               const f = files.find((x) => x.path === p.path);
               return f ? <FileRow key={p.path} f={f} c={c} k={`${pre}c${cm.sha}-`} /> : <li key={p.path} className="mono small">{p.path}</li>;
             })}
@@ -166,6 +166,79 @@ export function Changes({ c }: { c: Ctx }) {
   ) : (
     <None text="No commits yet. Files below are planned; Build commits them." />
   );
+  const guard = (
+    <>
+      {g ? (
+        <div className={`rec-guard${g.over ? " is-over" : ""}`}>
+          <div className="small">
+            <strong>Change size </strong>
+            <span className="mono">{`${g.size} of ${g.maxDiff} lines`}</span>
+            {g.over ? (
+              <span className="chip chip-block">
+                <Icon name="alert" />
+                over the guardrail
+              </span>
+            ) : (
+              <span className="muted"> within the Builder&apos;s guardrail</span>
+            )}
+          </div>
+          <div className="rec-guard-bar">
+            <GuardBar value={g.size} max={g.maxDiff} />
+          </div>
+          {g.protectedTouched.length ? (
+            <div className="small rec-prot-line">
+              <Icon name="lock" /> Protected paths touched: <span className="mono">{g.protectedTouched.join(", ")}</span>
+            </div>
+          ) : (
+            <div className="small muted">No protected paths touched.</div>
+          )}
+        </div>
+      ) : null}
+    </>
+  );
+  const group_ui = (
+    <>
+      {committed ? <Segmented name={`${pre}group`} label="Group changes" items={[{ id: "file", label: "By file" }, { id: "commit", label: "By commit" }]} value={group} onChange={(v) => setGroup(v as "file" | "commit")} /> : null}
+      {group === "commit" && committed ? byCommit : byFile}
+      {ch && ch.patches.length ? <p className="small muted">{`${plural(ch.patches.length, "patch", "patches")} stored by content hash (${ch.patches.map((p) => p.ref.slice(0, 15)).join(", ")}).`}</p> : null}
+    </>
+  );
+  if (c.page) {
+    const steps = wo.plan || [];
+    return (
+      <div className="dz-chg">
+        <Panel>
+          <div className="dz-counts">
+            <div><b>{files.length}</b><span>files</span></div>
+            <div><b className="num-ok">{`+${plus}`}</b><span>added</span></div>
+            <div><b className="num-bad">{`−${minus}`}</b><span>removed</span></div>
+            <div><b>{commits.length}</b><span>commits</span></div>
+          </div>
+          <div className="dz-prov"><Prov kind="system" text={committed ? "Counts from the repository" : "Planned by the Planner agent, not yet in the repository"} /></div>
+          {guard}
+        </Panel>
+        {steps.length ? (
+          <Panel title="Plan" tools={<span className="muted small">{plural(steps.length, "step")}</span>}>
+            <ol className="dz-plan">
+              {steps.map((st) => (
+                <li key={st.id}>
+                  <b>{st.text}</b>
+                  <div className="muted small mono">{st.files.join(", ")}</div>
+                  <div className="dz-acs">{st.ac.map((x) => <span key={x} className="chip mono">{x}</span>)}</div>
+                </li>
+              ))}
+            </ol>
+          </Panel>
+        ) : null}
+        <div className="dz-chgbar">
+          {committed ? <Segmented name={`${pre}group`} label="Group changes" items={[{ id: "file", label: "By file" }, { id: "commit", label: "By commit" }]} value={group} onChange={(v) => setGroup(v as "file" | "commit")} /> : null}
+          <span className="muted small">Open a file to preview its diff.</span>
+        </div>
+        <Panel flush>{group === "commit" && committed ? <div className="dz-treebox">{byCommit}</div> : <div className="dz-treebox">{byFile}</div>}</Panel>
+        {ch && ch.patches.length ? <p className="small muted">{`${plural(ch.patches.length, "patch", "patches")} stored by content hash (${ch.patches.map((p) => p.ref.slice(0, 15)).join(", ")}).`}</p> : null}
+      </div>
+    );
+  }
   return (
     <div>
       <div className="rec-subhead">
@@ -199,35 +272,8 @@ export function Changes({ c }: { c: Ctx }) {
           </ol>
         </Fold>
       ) : null}
-      {g ? (
-        <div className={`rec-guard${g.over ? " is-over" : ""}`}>
-          <div className="small">
-            <strong>Change size </strong>
-            <span className="mono">{`${g.size} of ${g.maxDiff} lines`}</span>
-            {g.over ? (
-              <span className="chip chip-block">
-                <Icon name="alert" />
-                over the guardrail
-              </span>
-            ) : (
-              <span className="muted"> within the Builder&apos;s guardrail</span>
-            )}
-          </div>
-          <div className="rec-guard-bar">
-            <GuardBar value={g.size} max={g.maxDiff} />
-          </div>
-          {g.protectedTouched.length ? (
-            <div className="small rec-prot-line">
-              <Icon name="lock" /> Protected paths touched: <span className="mono">{g.protectedTouched.join(", ")}</span>
-            </div>
-          ) : (
-            <div className="small muted">No protected paths touched.</div>
-          )}
-        </div>
-      ) : null}
-      {committed ? <Segmented name={`${pre}group`} label="Group changes" items={[{ id: "file", label: "By file" }, { id: "commit", label: "By commit" }]} value={group} onChange={(v) => setGroup(v as "file" | "commit")} /> : null}
-      {group === "commit" && committed ? byCommit : byFile}
-      {ch && ch.patches.length ? <p className="small muted">{`${plural(ch.patches.length, "patch", "patches")} stored by content hash (${ch.patches.map((p) => p.ref.slice(0, 15)).join(", ")}).`}</p> : null}
+      {guard}
+      {group_ui}
     </div>
   );
 }

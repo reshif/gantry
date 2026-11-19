@@ -7,7 +7,7 @@ This file is the shared contract for everyone building Gantry: people and agents
 | Decision | Choice |
 | --- | --- |
 | D1 language | TypeScript on Node 22 for every service; React 19 for the frontend |
-| Frontend | Faithful port of `legacy/` (vanilla JS) to React + TypeScript + Vite. The same screens, routes, CSS and behaviour, with data from the real API |
+| Frontend | React + TypeScript + Vite in `apps/web`, built to the Blueprint design (`docs/ui/design-system.md`), with data from the real API. It began as a port of `legacy/`; screens, routes and styles have since been redesigned |
 | External systems | GitHub App, model vendors and Slack are built against their real APIs. Keys are added later; until then those paths are marked **unverified** |
 | Simulation | None in the shipped product. `legacy/js/sim.js` is reference only. No fake ticks, no fake agents. The stub runtime adapter (spec 10.1) is a real, deterministic adapter used for tests and for stations without a model key |
 
@@ -24,7 +24,7 @@ services/edge/          @gantry/edge      Model gateway :8443, MCP gateway, forw
 services/github/        @gantry/github    GitHub App broker :9200
 runner/                 gantry-runner     Runner base image + wrapper (harness launcher, heartbeat, checkpoint)
 deploy/                 compose.yml, Caddyfile, Keycloak realm, secrets generator
-legacy/                 The original frontend. Read it, do not edit it
+legacy/                 The original vanilla-JS prototype: reference for API shapes only. Do not edit it
 ```
 
 `gantry-migrate` is the `@gantry/db` package's `migrate` entry built as its own image. `gantry-worker` is built from the api's code tree with its own entry (spec 3.2: same code, different command), so shared server code lives in `services/api/src/` and the worker imports it through the `@gantry/api` workspace export `@gantry/api/core`.
@@ -42,7 +42,7 @@ legacy/                 The original frontend. Read it, do not edit it
 | GitHub (broker only) | `@octokit/app`, `@octokit/rest` |
 | Logging | `pino` (Fastify's logger). Never log secrets |
 | Tests | `vitest`. DB tests run against a real Postgres (`GANTRY_TEST_DATABASE_URL`) |
-| Frontend | `react` 19, `react-dom`, `react-router` 7 (hash routes, matching legacy `#name`), `@tanstack/react-query` 5, `vite` 7 |
+| Frontend | `react` 19, `react-dom`, a custom hash router (no `react-router`, AGENTS.md F-20), `@tanstack/react-query` 5, `vite` 7 |
 
 ## TypeScript
 
@@ -53,7 +53,7 @@ legacy/                 The original frontend. Read it, do not edit it
 
 ## The API contract
 
-The frontend contract is the legacy app itself: `G.store` slices and `G.ops.*` functions in `legacy/js/`. Spec section 8 maps each op to an endpoint.
+The API contract started from the legacy app: `G.store` slices and `G.ops.*` functions in `legacy/js/`. Spec section 8 maps each op to an endpoint.
 
 - **Reads return the legacy shapes.** A `GET` returns objects with the same field names as the matching `G.store` slice (`workOrders`, `projects`, `people`, ...), so the React port reads the same fields the legacy views read. Shared shapes are TypeScript types in `@gantry/domain` (`src/types.ts`), used by both the API and the web app.
 - **Commands return `{ ok, msg, ...extra }`.** Refusals: 403 permission, 409 conflict, stale version or stopped scope, 422 validation; body `{ ok: false, msg, rule?, needs? }`.
@@ -106,7 +106,10 @@ It opens a transaction, runs `can()` (a denial is audited in its own transaction
 | `vendor_keys.json` | edge |
 | `github_app.pem`, `github_app.json` | github |
 | `minio_root_password` | minio, api, worker, edge |
-| `keycloak_admin_password`, `oidc_client_secret` | keycloak; api |
+| `keycloak_admin_password` | keycloak only (the API never gets the master-admin password) |
+| `oidc_client_secret` | keycloak; api |
+| `idp_admin_client_secret` | keycloak (realm import); api (the scoped `gantry-admin` service account: manage-users in the gantry realm) |
+| `bootstrap_admin_password` | api (written by the owner, never generated; the first Factory Admin's initial password, with `GANTRY_BOOTSTRAP_ADMIN_USERNAME`) |
 
 ## Ports and hostnames (compose service names)
 
@@ -127,7 +130,7 @@ Caddy routes: `/api/*`, `/auth/*`, `/hooks/*` → api; `/idp/*` → keycloak; `/
 
 ## Environment variables (non-secret config only)
 
-`GANTRY_ORG_ID`, `GANTRY_PUBLIC_URL` (`https://localhost`), `DATABASE_HOST`, `DATABASE_NAME`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `S3_ENDPOINT`, `S3_BUCKET`, `EDGE_URL`, `GITHUB_BROKER_URL`, `LAUNCHER_URL`, `SMTP_HOST`, `SMTP_PORT`, `GANTRY_DEV_DEMO_ACCOUNTS` (`true` shows the seeded Keycloak users on the sign-in screen).
+`GANTRY_ORG_ID`, `GANTRY_PUBLIC_URL` (`https://localhost`), `DATABASE_HOST`, `DATABASE_NAME`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `S3_ENDPOINT`, `S3_BUCKET`, `EDGE_URL`, `GITHUB_BROKER_URL`, `LAUNCHER_URL`, `SMTP_HOST`, `SMTP_PORT`, `GANTRY_DEV_SEED` (`true` loads the demo organisation and, on localhost, lists its users on the sign-in screen).
 
 ## Verification
 

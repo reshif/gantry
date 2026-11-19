@@ -1,7 +1,7 @@
 /** Board and list views of the floor, with the shared filter bar (legacy floor.js board, list and filterBar). */
-import { useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
-import { WO_STATES, bayDef, classesOf, flowOf, fmt, gateTitle, woTotals } from "@gantry/domain";
-import { Avatar, Btn, Empty, Field, Select, StateChip } from "../../ui/primitives";
+import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
+import { WO_STATES, classesOf, flowOf, fmt, gateTitle } from "@gantry/domain";
+import { Avatar, Btn, Field, Select } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { updatePrefs, usePrefs } from "../../lib/prefs";
@@ -61,6 +61,41 @@ export function FilterBar({ withSwim }: { withSwim?: boolean }) {
 }
 
 /* ---------- board ---------- */
+
+/** Names of the board columns cut off on each side of the scroll area, so the board can say what is out of view. */
+function useOffscreenCols(ref: React.RefObject<HTMLDivElement | null>, deps: unknown[]) {
+  const [off, setOff] = useState<{ left: string[]; right: string[] }>({ left: [], right: [] });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const box = el.getBoundingClientRect();
+      const left: string[] = [];
+      const right: string[] = [];
+      el.querySelectorAll<HTMLElement>(".fl-lane:first-child .fl-lane-cols > .fl-col").forEach((c) => {
+        const r = c.getBoundingClientRect();
+        const name = c.querySelector(".fl-col-name")?.textContent ?? "";
+        if (!name || !r.width) return;
+        if (r.right > box.right + 2 && r.left + r.width / 2 > box.right) right.push(name);
+        else if (r.left < box.left - 2 && r.right - r.width / 2 < box.left) left.push(name);
+      });
+      setOff((o) => (o.left.join() === left.join() && o.right.join() === right.join() ? o : { left, right }));
+    };
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      ro?.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+  return off;
+}
+
+/** The nearest hidden column by name, then a count: "Verify and 7 more". The full list is in the tooltip. */
+const namesText = (n: string[], nearest: string) => (n.length === 1 ? nearest : `${nearest} and ${n.length - 1} more`);
 
 function Card({ w, onGrip }: { w: FWo; onGrip: (e: RPointerEvent<HTMLElement>, w: FWo) => void }) {
   const ctx = useFloorCtx();
@@ -145,6 +180,8 @@ export function Board() {
   const list = applyFilters(wos.filter((w) => w.state !== "done"));
   const swim = prefs.boardSwim || "none";
   const collapsed = !!prefs.collapsedBays;
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const off = useOffscreenCols(scrollRef, [collapsed, swim, p.id, list.length]);
   const fl = flowOf(cat, p);
   const lanes: Array<{ id: string; label: string | null; items: FWo[] }> =
     swim === "repo" ? ctx.repos.map((r) => ({ id: r.id, label: r.name, items: list.filter((w) => w.repo === r.id) }))
@@ -302,17 +339,36 @@ export function Board() {
       </div>
     );
   };
+  const scrollBoard = (dir: 1 | -1) => {
+    const el = scrollRef.current;
+    if (el) el.scrollBy({ left: dir * Math.max(196, el.clientWidth - 196), behavior: "smooth" });
+  };
   return (
     <div className="fl-boardwrap">
       <FilterBar withSwim />
       <div className="fl-board-tools">
         <p className="muted small">{ctx.replay ? `Board as it was at ${fmt.stamp(ctx.replay.at)}. Moves are locked in replay. ${list.length} work orders shown.` : `Drag a card by its grip or body, or use its Move button. Refused moves say why. ${list.length} work orders shown.`}</p>
+        <div className="fl-board-nav">
+          {off.left.length ? (
+            <button type="button" className="fl-more fl-more-l" id="floor-more-left" onClick={() => scrollBoard(-1)} aria-label={`Scroll back to ${off.left.join(", ")}`} title={off.left.join(", ")}>
+              <Icon name="back" />
+              <span>{namesText(off.left, off.left[off.left.length - 1]!)}</span>
+            </button>
+          ) : null}
+          {off.right.length ? (
+            <button type="button" className="fl-more fl-more-r" id="floor-more-right" onClick={() => scrollBoard(1)} aria-label={`Scroll on to ${off.right.join(", ")}`} title={off.right.join(", ")}>
+              <span>{namesText(off.right, off.right[0]!)}</span>
+              <Icon name="chevron" />
+            </button>
+          ) : null}
         <button type="button" className="btn btn-ghost btn-sm" id="floor-bays-toggle" aria-expanded={collapsed ? "false" : "true"} onClick={() => updatePrefs((x) => ({ collapsedBays: !x.collapsedBays }))}>
           <Icon name={collapsed ? "chevron" : "back"} />
           <span>{collapsed ? "Show bays" : "Collapse bays"}</span>
         </button>
+        </div>
       </div>
-      <div className="fl-board-scroll" data-keep-scroll="floor-board">
+      <div className={`fl-board-frame${off.left.length ? " more-l" : ""}${off.right.length ? " more-r" : ""}`}>
+      <div className="fl-board-scroll" data-keep-scroll="floor-board" ref={scrollRef}>
         <div className={`fl-board${collapsed ? " bays-collapsed" : ""}`} style={{ "--cols": cols.length + (collapsed ? 0 : bayCols.length) } as React.CSSProperties}>
           {lanes.map((lane) => (
             <div key={lane.id} className="fl-lane">
@@ -343,109 +399,7 @@ export function Board() {
           ))}
         </div>
       </div>
-    </div>
-  );
-}
-
-/* ---------- list ---------- */
-
-type SortKey = "id" | "title" | "cls" | "repo" | "where" | "state" | "prio" | "age" | "cost";
-
-export function ListView() {
-  const ctx = useFloorCtx();
-  const open = useOpenTraveler();
-  const actor = useActors();
-  const [sort, setSort] = useState<{ k: SortKey; dir: 1 | -1 }>({ k: "where", dir: 1 });
-  const { cat, project: p } = ctx;
-  const applyFilters = useApplyFilters();
-  const rows = applyFilters(ctx.wos).slice();
-  const fl = flowOf(cat, p);
-  const bayIds = fl.bays.map((b) => b.id);
-  const order = fl.stations.map((x) => x.id);
-  const key = (w: FWo): string | number =>
-    ({
-      id: w.id, title: w.title.toLowerCase(), cls: w.cls, repo: w.repo,
-      where: w.state === "done" ? 1000 : w.bay ? 500 + bayIds.indexOf(w.bay) : order.indexOf(cat.stations[w.station]?.id ?? ""),
-      state: w.state, prio: w.priority, age: since(w), cost: woTotals(w).cost,
-    })[sort.k];
-  rows.sort((a, b) => {
-    const x = key(a);
-    const y = key(b);
-    return (x < y ? -1 : x > y ? 1 : 0) * sort.dir;
-  });
-  const th = (k: SortKey, label: string, num?: boolean) => {
-    const on = sort.k === k;
-    return (
-      <th className={num ? "num" : undefined} aria-sort={on ? (sort.dir > 0 ? "ascending" : "descending") : "none"} scope="col">
-        <button type="button" className="th-sort" id={`floor-sort-${k}`} onClick={() => setSort({ k, dir: on ? (sort.dir === 1 ? -1 : 1) : 1 })}>
-          {label}
-          {on ? <Icon name={sort.dir > 0 ? "up" : "down"} /> : null}
-        </button>
-      </th>
-    );
-  };
-  const whereText = (w: FWo) => (w.bay ? (bayDef(cat, w.bay)?.name ?? w.bay) : `${cat.stations[w.station]?.no ?? ""} ${cat.stations[w.station]?.name ?? ""}`);
-  return (
-    <div className="fl-listwrap">
-      <FilterBar />
-      <div className="table-scroll" data-keep-scroll="floor-list">
-        <table className="table table-compact fl-table">
-          <caption className="sr">{`Work orders in ${p.name}`}</caption>
-          <thead>
-            <tr>
-              {th("id", "ID")}
-              {th("title", "Title")}
-              {th("cls", "Class")}
-              {th("repo", "Repo")}
-              {th("where", "Station or bay")}
-              {th("state", "State")}
-              <th scope="col">Gate</th>
-              <th scope="col">Agent</th>
-              {th("prio", "Priority")}
-              {th("age", "Here for", true)}
-              {th("cost", "Cost", true)}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length ? (
-              rows.map((w) => {
-                const gt = gateText(ctx, w);
-                const ag = assigneeOf(w);
-                return (
-                  <tr key={w.id} className={`fl-tr-${w.state}`}>
-                    <td>
-                      <button type="button" className="linkish mono" id={`floor-row-${w.id}`} onClick={() => open(w.id)}>
-                        {w.id}
-                      </button>
-                    </td>
-                    <td className="fl-td-title">{w.title}</td>
-                    <td>
-                      <ClassChip cls={classOf(cat, p, w.cls)} small />
-                    </td>
-                    <td className="mono small">{repoName(ctx.repos, w.repo)}</td>
-                    <td>{whereText(w)}</td>
-                    <td>
-                      <StateChip state={w.state} />
-                    </td>
-                    <td>{w.state === "done" ? <span className="muted">{w.split ? "split" : "shipped"}</span> : <span className={`fl-gt fl-gt-${gt.c}`}>{gt.t}</span>}</td>
-                    <td className="small">{ag ? actor(ag).name.replace(" (agent)", "") : "none"}</td>
-                    <td className="mono">{w.priority}</td>
-                    <td className="num mono">{w.state === "done" ? "done" : fmt.dur(Math.max(0, ctx.now - since(w)))}</td>
-                    <td className="num mono">{fmt.money(woTotals(w).cost)}</td>
-                  </tr>
-                );
-              })
-            ) : (
-              <tr>
-                <td colSpan={11}>
-                  <Empty title="No work orders match" text={`Clear the filters to see everything in ${p.name}.`} />
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
       </div>
     </div>
   );
 }
-

@@ -6,16 +6,19 @@
 import type { Tx } from "@gantry/db";
 import type { Actor, CommandResult } from "../../core/command.js";
 import { Refusal, conflict, invalid } from "../../core/errors.js";
-import { readSecurity } from "../../core/read/index.js";
+import { holdsFactoryAdmin } from "../../core/auth/mfa.js";
+import { factoryAdmins } from "@gantry/domain";
+import { readPeople, readSecurity } from "../../core/read/index.js";
+import { overBudget, overText, type Over } from "../workorders/budget-state.js";
 import { apiStopId, scopeToApi, stopAction, type ScopeType, type StopTarget } from "./targets.js";
 
 type Cmd = CommandResult<Record<string, unknown>>;
 
 export interface StopRow {
-  id: string; scope_type: ScopeType; project_id: string | null; repo_id: string | null; wo_id: string | null; mode: "halt" | "kill"; reason: string; in_flight: string | null; set_by: string; set_at: Date; version: number; fencing: string;
+  id: string; scope_type: ScopeType; project_id: string | null; repo_id: string | null; wo_id: string | null; mode: "halt" | "kill"; reason: string; cause: string; in_flight: string | null; set_by: string; set_at: Date; version: number; fencing: string;
 }
 
-const COLS = `id, scope_type, project_id, repo_id, wo_id, mode, reason, in_flight, set_by, set_at, version, fencing::text`;
+const COLS = `id, scope_type, project_id, repo_id, wo_id, mode, reason, cause, in_flight, set_by, set_at, version, fencing::text`;
 
 /** The active stop of a scope and mode, locked. */
 export async function activeStop(tx: Pick<Tx, "query">, orgId: string, t: Pick<StopTarget, "scope" | "target">, mode: "halt" | "kill", lock = false): Promise<StopRow | null> {
@@ -86,7 +89,7 @@ export async function setStop(tx: Tx, a: Actor, t: StopTarget, b: SetInput): Pro
 }
 
 /** Resume a halted scope (andon release). Lifting an outer stop never lifts an inner one: only this scope's own halt row is lifted. */
-export async function resumeStop(tx: Tx, a: Actor, t: StopTarget, o: { reason?: string } = {}): Promise<Cmd> {
+export async function resumeStop(tx: Tx, a: Actor, t: StopTarget, o: { reason?: string; budgetChecked?: boolean } = {}): Promise<Cmd> {
   const label = t.scope === "factory" ? "the factory" : t.name;
   await tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [`stop:${a.orgId}:${t.scope}:${t.target ?? ""}`]);
   const halt = await activeStop(tx, a.orgId, t, "halt", true);
@@ -94,14 +97,39 @@ export async function resumeStop(tx: Tx, a: Actor, t: StopTarget, o: { reason?: 
     if (await activeStop(tx, a.orgId, t, "kill")) throw conflict(`${label} is killed, not halted. Restore it instead.`);
     throw conflict(`${label} is not halted.`);
   }
+  // A budget halt is not lifted while the work order is still over the cap that caused it: the next run would be denied with no halt and nothing on the order saying why. Raising the
+  // cap lifts it (budgetChecked: the caller has just done that). A Factory Admin can resume it anyway, with a reason, and the override is in the audit.
+  let override: string | null = null;
+  if (halt.cause === "budget" && t.scope === "wo" && t.target && !o.budgetChecked) {
+    const over = await overBudgetSafe(tx, a.orgId, t.target);
+    if (over.length) {
+      const text = over.map(overText).join(" and ");
+      if (!a.personId || !(await holdsFactoryAdmin(tx, a.orgId, a.personId))) throw conflict(`${label} is still over budget, raise the cap first: ${text}. A Factory Admin can resume it anyway, with a reason.`);
+      if ((o.reason ?? "").trim().length < 5) throw conflict(`${label} is still over budget: ${text}. As Factory Admin you can resume it anyway: give a reason of at least 5 characters; it is recorded in the audit.`);
+      override = text;
+    }
+  }
   await lift(tx, a, halt);
   return {
-    msg: `${label} resumed.`,
-    events: [{ type: "resume", category: "kill", subject: { type: t.scope === "wo" ? "wo" : t.scope, id: t.target ?? "factory" }, projectId: t.project, woId: t.wo, occurredAt: a.now, before: { stop: halt.id }, after: payload(t, { text: o.reason ?? "", stop: halt.id, apiId: apiStopId(t.scope, t.target) }) }],
-    extra: { stop: halt.id, apiId: apiStopId(t.scope, t.target), version: halt.version + 1 },
+    msg: override ? `${label} resumed over budget (Factory Admin override): ${override}.` : `${label} resumed.`,
+    events: [{ type: "resume", category: "kill", subject: { type: t.scope === "wo" ? "wo" : t.scope, id: t.target ?? "factory" }, projectId: t.project, woId: t.wo, occurredAt: a.now, before: { stop: halt.id }, after: payload(t, { text: o.reason ?? "", stop: halt.id, apiId: apiStopId(t.scope, t.target), ...(override ? { override: true, overBudget: override } : {}) }) }],
+    extra: { stop: halt.id, apiId: apiStopId(t.scope, t.target), version: halt.version + 1, ...(override ? { override: true } : {}) },
     changes: ["stops", "factory", "projects", "repos", "workOrders", "floor", "home"],
     project: t.project,
   };
+}
+
+/** The caps the work order is over; when the budget tables cannot be read the answer is "none", so a resume (a stop control, I7) never fails because they did. */
+async function overBudgetSafe(tx: Tx, orgId: string, woId: string): Promise<Over[]> {
+  await tx.query("savepoint wo_budget");
+  try {
+    const r = await overBudget(tx, orgId, woId);
+    await tx.query("release savepoint wo_budget");
+    return r;
+  } catch {
+    await tx.query("rollback to savepoint wo_budget");
+    return [];
+  }
 }
 
 async function lift(tx: Tx, a: Actor, s: StopRow): Promise<void> {
@@ -131,6 +159,19 @@ export async function restoreStop(tx: Tx, a: Actor, t: StopTarget, reason: strin
     } catch {
       // Unreadable settings must not weaken the control: keep the strict default.
     }
+    // Owner decision 2026-11-19: with only ONE active Factory Admin, nobody can be the second approver, so that admin restores alone with a reason, audited as an override.
+    // With two or more, the two-person approval stays exactly as it is.
+    const soleAdmin = needsTwo && (await readPeople(tx, a.orgId).then((ps) => { const fa = factoryAdmins(ps); return fa.length === 1 && fa[0]!.id === a.personId; }).catch(() => false));
+    if (soleAdmin) {
+      await lift(tx, a, kill);
+      return {
+        msg: "The factory was restored by its only Factory Admin (override, recorded with your reason).",
+        events: [{ type: "restore", category: "kill", subject, outcome: "ok", occurredAt: a.now, before: { stop: kill.id }, after: payload(t, { text: reason.trim(), stop: kill.id, apiId: apiStopId(t.scope, t.target), override: true, soleAdmin: true }) }],
+        extra: { stop: kill.id, apiId: apiStopId(t.scope, t.target), pending: false, override: true, version: kill.version + 1 },
+        changes: ["stops", "factory", "projects", "repos", "workOrders", "floor", "home"],
+        project: t.project,
+      };
+    }
     if (needsTwo) {
       const prior = await tx.query<{ approver: string }>(`select approver from restore_approvals where org_id = $1 and stop_id = $2`, [a.orgId, kill.id]);
       if (prior.rows.some((r) => r.approver === a.id)) throw conflict("You already approved the restore. A second Factory Admin must approve.");
@@ -147,7 +188,7 @@ export async function restoreStop(tx: Tx, a: Actor, t: StopTarget, reason: strin
   }
   await lift(tx, a, kill);
   return {
-    msg: `${label} restored.${t.scope !== "wo" && kill.in_flight === "cancel" ? " Work orders killed with 'cancel' stay killed until restored one by one." : ""}`,
+    msg: `${label} restored.${t.scope !== "wo" && kill.in_flight === "cancel" ? " The work orders it killed come back from where they were." : ""}`,
     events: [{ type: "restore", category: "kill", subject, projectId: t.project, woId: t.wo, occurredAt: a.now, before: { stop: kill.id }, after: payload(t, { text: reason.trim(), stop: kill.id, apiId: apiStopId(t.scope, t.target) }) }],
     extra: { stop: kill.id, apiId: apiStopId(t.scope, t.target), pending: false, version: kill.version + 1 },
     changes: ["stops", "factory", "projects", "repos", "workOrders", "floor", "home"],

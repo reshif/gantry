@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { demoAccountsAllowed } from "../src/core/config.js";
 import { demoAccountList, summariseRoles } from "../src/areas/access/demo.js";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 
@@ -89,5 +90,38 @@ d("publicConfig demo list", () => {
     } finally {
       await t.close();
     }
+  });
+});
+
+describe("the demo sign-in list follows the seed (GANTRY_DEV_SEED) and only on this machine", () => {
+  it("is off when the demo organisation is not seeded, on any URL", () => {
+    expect(demoAccountsAllowed(false, "https://localhost")).toBe(false);
+    expect(demoAccountsAllowed(false, "https://gantry.example.com")).toBe(false);
+  });
+  it("is on for a seeded local stack", () => {
+    expect(demoAccountsAllowed(true, "https://localhost")).toBe(true);
+    expect(demoAccountsAllowed(true, "http://127.0.0.1:8000")).toBe(true);
+  });
+  it("is off for a seeded stack on a public URL (seeding still works, the list is never published)", () => {
+    expect(demoAccountsAllowed(true, "https://gantry.example.com")).toBe(false);
+  });
+  it("the removed GANTRY_DEV_DEMO_ACCOUNTS switch is no longer read by the config", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/core/config.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/env\.GANTRY_DEV_DEMO_ACCOUNTS/);
+    expect(src).toMatch(/demoAccountsAllowed\(env\.GANTRY_DEV_SEED === "true"/);
+  });
+});
+
+d("publicConfig with the switch off", () => {
+  let t: TestApp;
+  beforeAll(async () => {
+    t = await startApp({ config: { demoAccounts: false } });
+  });
+  afterAll(() => t.close());
+  it("an unauthenticated 401 carries no demo flag and no account list", async () => {
+    const c = await sign(t);
+    expect(c.demoAccounts).toBe(false);
+    expect(c.demoAccountList).toBeUndefined();
   });
 });

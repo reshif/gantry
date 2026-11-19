@@ -1,0 +1,7 @@
+
+.cx .health.h-failing, .health.h-failing { color: var(--block); border-color: var(--block); background: var(--block-soft); }
+.cx .table td.num, .cx .mono { font-variant-numeric: tabular-nums; }
+.cx .outcome { white-space: nowrap; }
+.panel-body.flush > .filterbar { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+@media (max-width: 640px) { .panel-body.flush > .filterbar { padding: 10px 12px; } .filterbar .searchbox { flex: 1 1 100%; } .filterbar .searchbox .input { width: 100%; } }
+.cx .fbar .field { margin-bottom: 0; }

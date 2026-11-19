@@ -34,7 +34,7 @@ d("learning loop (spec 8.7, 13.4)", () => {
     return id;
   };
   const refresh = async (who = ASHA) => post("/api/v1/learning/findings/refresh", {}, who);
-  const switchOn = async () => (await w.call(ASHA, "PUT", "/api/v1/learning/switch", { on: true, reason: "Trying the loop" })).body;
+  const _switchOn = async () => (await w.call(ASHA, "PUT", "/api/v1/learning/switch", { on: true, reason: "Trying the loop" })).body;
   const skillText = async (id: string) => (await get("/api/v1/skills")).find((s: any) => s.id === id);
   const draftSkill = async (finding: string, after: string, who = ASHA, over: Record<string, unknown> = {}) =>
     post("/api/v1/learning/proposals", { finding, kind: "skill", title: "Spec writing: add a rollback section", expected: "Fewer rollback send-backs", change: { skill: "sk-testdesign", after }, metric: { target: 0 }, windowDays: 7, ...over }, who, key());
@@ -59,12 +59,12 @@ d("learning loop (spec 8.7, 13.4)", () => {
       expect(r0.body).toMatchObject({ ok: true, created: 0 }); // one signal does not repeat
       const b = await record([now - 4 * DAY, now - 3 * DAY]);
       const r1 = await refresh();
-      // the seeded intake conversations carry misses of their own: they group too (a second finding)
-      expect(r1.body).toMatchObject({ created: 2, updated: 0, open: 2 });
+      // Intake no longer asks a fixed questionnaire, so it carries no canned-question misses of its own: only the send-backs group.
+      expect(r1.body).toMatchObject({ created: 1, updated: 0, open: 1 });
       const f = (await get("/api/v1/learning/findings")).find((x: any) => x.signal === "sendback");
       fid = f.id;
       expect(f).toMatchObject({ signal: "sendback", agent: "ag-build", project: "payments", status: "open", count: 2 });
-      expect((await get("/api/v1/learning/findings")).find((x: any) => x.signal === "miss")).toMatchObject({ agent: "ag-intake", project: "payments" });
+      expect((await get("/api/v1/learning/findings")).find((x: any) => x.signal === "miss")).toBeUndefined();
       expect(f.title).toContain("Missing a rollback note");
       expect([...f.evidence].sort()).toEqual([a, b].sort());
       const again = await refresh();
@@ -175,6 +175,9 @@ d("learning loop (spec 8.7, 13.4)", () => {
     });
     it("applies through the ordinary skill command when someone else accepts, audited twice, with a baseline and a rollback path", async () => {
       const before = await skillText("sk-testdesign");
+      const floor = async () => (await q(`select version, live_version from agents where id = 'ag-build'`, []))[0];
+      const bv = (await q(`select count(*)::int n from agent_versions where agent_id = 'ag-build'`, []))[0].n;
+      const live0 = await floor();
       const r = await post("/api/v1/learning/proposals/LP-1/accept", { note: "Looks right" }, OMAR);
       expect(r.status, JSON.stringify(r.body)).toBe(200);
       expect(r.body.msg).toMatch(/^LP-1 applied\./);
@@ -190,6 +193,13 @@ d("learning loop (spec 8.7, 13.4)", () => {
       expect(edit.actor).toBe(OMAR);
       expect(apply).toMatchObject({ actor: OMAR, subject: { type: "learning", id: "LP-1" }, after: { status: "accepted", result: expect.stringContaining("saved as") } });
       expect(edit.command_id).toBe(apply.command_id);
+      // the approved change reaches runs only as a candidate: one new version, the floor unchanged
+      expect((await q(`select count(*)::int n from agent_versions where agent_id = 'ag-build'`, []))[0].n).toBe(bv + 1);
+      expect((await floor()).live_version).toBe(live0.live_version);
+      const cand = (await q(`select body, published_by from agent_versions where agent_id = 'ag-build' order by version desc limit 1`, []))[0];
+      expect(cand.body).toMatchObject({ rc: true, source: { type: "skill.edit", skill: "sk-testdesign", by: OMAR } });
+      expect(cand.body.skillVersions["sk-testdesign"]).toBe(after.versions.length);
+      expect((await w.events("agent.version")).pop()!.after).toMatchObject({ trigger: "skill.edit", skill: "sk-testdesign" });
     });
     it("is refused the second time, and when the proposal is stale", async () => {
       expect((await post("/api/v1/learning/proposals/LP-1/accept", {}, OMAR)).status).toBe(409);

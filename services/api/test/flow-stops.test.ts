@@ -30,6 +30,19 @@ d("stop controls", () => {
     expect((await active()).length).toBe(0);
   });
 
+  it("a project-level andon right halts its own project, never the whole factory; a Factory Admin halts and resumes the factory", async () => {
+    const r = await stop("p-tomas", { scope: "factory", mode: "halt", reason: "Engineer tries the factory" });
+    expect(r.status).toBe(403);
+    expect((await w.events("halt.factory.denied")).length).toBe(1);
+    expect((await active()).length).toBe(0);
+    const h = await stop("p-asha", { scope: "factory", mode: "halt", reason: "Admin halts the factory" });
+    expect(h.status).toBe(200);
+    expect((await lift("p-tomas", "factory:")).status).toBe(403);
+    expect((await w.events("resume.factory.denied")).length).toBe(1);
+    expect((await lift("p-asha", "factory:")).status).toBe(200);
+    expect((await active()).length).toBe(0);
+  });
+
   it("validates reasons and confirmations, and refuses a stale resume", async () => {
     expect((await stop("p-meera", { scope: "project", id: "payments", mode: "halt", reason: "no" })).status).toBe(422);
     expect((await stop("p-asha", { scope: "project", id: "payments", mode: "kill", reason: "Security incident", confirmText: "payments" })).status).toBe(422);

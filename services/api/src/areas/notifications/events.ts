@@ -52,6 +52,9 @@ export function notifyEventFor(e: EventLike): NotifyMapping | null {
       return ok && a.bay === "sechold" ? mk("security.hold") : null;
     case "halt":
       return ok ? mk("andon") : null;
+    case "resume":
+      // A lifted halt is announced on the halt's own routes (S-37): people are told the line started again, not only that it stopped.
+      return ok ? mk("andon") : null;
     case "kill":
       return ok ? mk("kill") : null;
     case "restore":
@@ -66,6 +69,8 @@ export function notifyEventFor(e: EventLike): NotifyMapping | null {
       return mk("onboarding.pr");
     case "delivery.failed":
       return mk("delivery.failed");
+    case "wo.mention":
+      return ok ? mk("mention") : null;
     default:
       break;
   }

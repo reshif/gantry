@@ -64,7 +64,7 @@ describe("wrapper against an HTTP edge", () => {
   it("returns the stub output verbatim when the spec supplies one", async () => {
     edge = await startFakeEdge({ adapter: "stub", station: "intake", stub: { output: { class: "bug" } } }, TOKEN);
     await runWrapper({ env: mkEnv(edge.url), edge: new EdgeClient(mkEnv(edge.url)), log: () => undefined, onSignal: () => () => undefined });
-    expect(edge.calls.at(-1)!.body.output).toEqual({ class: "bug" });
+    expect(edge.calls.at(-1)!.body.output).toMatchObject({ class: "bug", documents: ["intake.md"] });
   });
 
   it("reports a failure the spec asks for", async () => {

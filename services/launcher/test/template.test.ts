@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { BIG_HOST } from "./host.js";
 import { runnerContainerOptions, startRunSchema, networkOptions, names } from "../src/template.js";
 import { blockCount, firstFreeBlock, formatCidr, parseCidr } from "../src/cidr.js";
 
-const cfgR = loadConfig({ RUNNER_VARIANTS: "base=gantry-runner:dev,node=gantry-runner:node", EDGE_URL: "http://gantry-edge:8443" });
+const cfgR = loadConfig({ RUNNER_VARIANTS: "base=gantry-runner:dev,node=gantry-runner:node", EDGE_URL: "http://gantry-edge:8443" }, BIG_HOST);
 if (!cfgR.ok) throw new Error(cfgR.error.msg);
 const cfg = cfgR.value;
 const input = { runId: "r1", workspaceRef: "repo/acme@abc123", variant: "base", runToken: "tok_0123456789abcdef" };
@@ -46,10 +47,11 @@ describe("runner template (spec 4.1)", () => {
     expect(h.Mounts).toEqual([{ Type: "volume", Source: "ws-r1", Target: "/workspace", ReadOnly: false }]);
   });
 
-  it("passes exactly four environment variables", () => {
+  it("passes exactly four environment variables, none of them secret", () => {
     const keys = (o.Env ?? []).map((e) => e.split("=")[0]).sort();
-    expect(keys).toEqual(["EDGE_URL", "GANTRY_RUN_ID", "GANTRY_RUN_TOKEN", "HTTPS_PROXY"]);
-    expect(o.Env?.find((e) => e.startsWith("HTTPS_PROXY="))).toMatch(/^HTTPS_PROXY=http:\/\/run:[^@]+@gantry-edge:8444$/);
+    expect(keys).toEqual(["EDGE_URL", "GANTRY_RUN_ID", "GANTRY_WORKSPACE_MAX_MB", "HTTPS_PROXY"]);
+    expect(o.Env?.find((e) => e.startsWith("HTTPS_PROXY="))).toMatch(/^HTTPS_PROXY=http:\/\/gantry-edge:8444$/);
+    expect(JSON.stringify(o)).not.toContain(input.runToken);
     expect(o.Env).toContain("EDGE_URL=http://gantry-edge:8443");
   });
 
@@ -94,11 +96,11 @@ describe("start-run request schema", () => {
 
 describe("config", () => {
   it("refuses a concurrency cap above the pool capacity", () => {
-    const r = loadConfig({ RUN_SUBNET_POOL: "10.213.0.0/24", RUN_SUBNET_PREFIX: "28", MAX_CONCURRENT_RUNS: "17" });
+    const r = loadConfig({ RUN_SUBNET_POOL: "10.213.0.0/24", RUN_SUBNET_PREFIX: "28", MAX_CONCURRENT_RUNS: "17" }, BIG_HOST);
     expect(r.ok).toBe(false);
   });
   it("refuses a malformed variant list", () => {
-    expect(loadConfig({ RUNNER_VARIANTS: "base" }).ok).toBe(false);
+    expect(loadConfig({ RUNNER_VARIANTS: "base" }, BIG_HOST).ok).toBe(false);
   });
 });
 

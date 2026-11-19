@@ -50,7 +50,7 @@ export const floorRead = (over: Record<string, unknown> = {}) => ({
 });
 
 /** Installs a mocked fetch. Handlers are matched on "METHOD /path" first, so tests override only what they care about. `denied` are actions can() refuses. */
-export function mockApi(extra: Record<string, Handler> = {}, o: { denied?: string[]; me?: Record<string, unknown> } = {}) {
+export function mockApi(extra: Record<string, Handler> = {}, o: { denied?: string[]; me?: Record<string, unknown>; override?: string[] } = {}) {
   const calls: Call[] = [];
   const base: Record<string, Handler> = {
     "GET /api/v1/me": () => ({ body: me(o.me) }),
@@ -83,7 +83,7 @@ export function mockApi(extra: Record<string, Handler> = {}, o: { denied?: strin
       calls.push(call);
       if (u.pathname === "/api/v1/can") {
         const checks = (body as { checks: Array<{ action: string }> }).checks;
-        return new Response(JSON.stringify({ results: checks.map((c) => (o.denied?.includes(c.action) ? { allowed: false, reason: "No role holds it.", needs: "Factory Admin", rule: { id: "MATRIX" } } : { allowed: true, reason: "", needs: "" })) }));
+        return new Response(JSON.stringify({ results: checks.map((c) => (o.override?.includes(c.action) ? { allowed: true, reason: "", needs: "", override: true, overrideReason: "required" } : o.denied?.includes(c.action) ? { allowed: false, reason: "No role holds it.", needs: "Factory Admin", rule: { id: "MATRIX" } } : { allowed: true, reason: "", needs: "" })) }));
       }
       const h = extra[`${method} ${u.pathname}`] ?? base[`${method} ${u.pathname}`];
       const r = h?.(call) ?? { status: 404, body: { ok: false, msg: `no mock ${method} ${u.pathname}` } };

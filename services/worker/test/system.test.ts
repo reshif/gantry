@@ -185,6 +185,10 @@ d("worker process loops", () => {
     for (let i = 0; i < 100 && w.launcher.runs.size === 0; i++) await sleep(50);
     expect(w.launcher.runs.size).toBe(1);
     expect(existsSync(w.deps.cfg.heartbeatFile)).toBe(true);
+    for (let i = 0; i < 100 && !(await w.q(`select 1 from worker_heartbeats`)).length; i++) await sleep(50);
+    expect((await w.q(`select worker_id from worker_heartbeats`))[0].worker_id).toBe(w.deps.workerId);
+    for (let i = 0; i < 100 && (await w.q(`select launcher_ok from worker_heartbeats`))[0].launcher_ok === null; i++) await sleep(50);
+    expect((await w.q(`select launcher_ok from worker_heartbeats`))[0].launcher_ok).toBe(true);
     // The scheduler also ran: a sweep job exists for the org.
     for (let i = 0; i < 100 && !(await w.jobs("reaper.sweep")).length; i++) await sleep(50);
     expect((await w.jobs("reaper.sweep")).length).toBe(1);

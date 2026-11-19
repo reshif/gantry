@@ -1,118 +1,184 @@
-/* Gantry design tokens. Light palette in bare :root, dark redefined twice
-   (system preference unless forced light, and explicit data-theme="dark"). */
+/* Gantry design tokens (shadcn-style neutrals, Tremor-style data cards, indigo accent).
+   Light palette in bare :root, dark redefined twice (system preference unless forced light, and explicit data-theme="dark").
+   Older token names (--ink, --muted, --line-strong, --r1 ...) keep working: they are the primary names; the short
+   preview names (--fg, --ok ...) are aliases. Do not redefine --panel or --muted with a different meaning. */
+/* Self-hosted variable fonts (SIL OFL, licences in src/assets/fonts). Latin subset; other scripts fall back to the system stack.
+   No third-party request, so nothing render-blocks on an external origin. */
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("../assets/fonts/inter-latin-wght-normal.woff2") format("woff2-variations"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 300 700; font-display: swap; src: url("../assets/fonts/space-grotesk-latin-wght-normal.woff2") format("woff2-variations"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 100 800; font-display: swap; src: url("../assets/fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2-variations"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+
+/* BLUEPRINT tokens, from the prototype (design-3-blueprint/css/app.css). Light is the paper drawing, dark is the blueprint. */
 :root {
   color-scheme: light;
-  --f-display: "Barlow Condensed", "Roboto Condensed", "Arial Narrow", sans-serif;
-  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font:"Space Grotesk",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --bg:#e5e9f0;
+  --grid:rgba(14,40,92,.055);
+  --grid2:rgba(14,40,92,.11);
+  --surface:#f7f8fa;
+  --surface2:#eceff5;
+  --sunk:#dfe5ef;
+  --ink:#0a1a38;
+  --ink2:#3f5278;
+  --ink3:#52668c;
+  --line:#8fa0bd;
+  --line2:#13295c;
+  --accent:#0a5d86;
+  --accent-ink:#ffffff;
+  --accent-soft:#dfe8ee;
+  --ok:#12703a;
+  --ok-bg:#e0eae7;
+  --warn:#9a5700;
+  --warn-bg:#eee8e1;
+  --bad:#c0202e;
+  --bad-bg:#f3e7ea;
+  --plate:rgba(16,34,58,.16);
+  --focus:#0a5d86;
+  --scrim:rgba(16,34,58,.45);
+  --r:3px;
+  --gut:16px;
 
-  /* type scale */
-  --t-xs: 11px; --t-sm: 12px; --t-md: 13px; --t-base: 14px; --t-lg: 16px;
-  --t-xl: 20px; --t-2xl: 28px; --t-3xl: 40px;
-
-  /* spacing */
+  --f-body: var(--font); --f-display: var(--font); --f-ui: var(--font); --f-mono: var(--mono);
+  --t-xs: 11px; --t-sm: 12.5px; --t-md: 13px; --t-base: 14px; --t-lg: 15px; --t-xl: 18px; --t-2xl: 22px; --t-3xl: 28px; --t-title: 21px; --t-label: 10.5px; --t-panel: 16px;
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
-  --r1: 3px; --r2: 5px;
-
-  /* neutrals, biased toward the cobalt accent */
-  --bg: #e9edf2;
-  --surface: #ffffff;
-  --panel: #f5f7fa;
-  --sunk: #e2e7ee;
-  --ink: #121a24;
-  --ink-2: #364352;
-  --muted: #5f6c7b;
-  --faint: #8b97a5;
-  --line: #d3dae3;
-  --line-strong: #a9b4c1;
-  --grid: rgba(43, 84, 201, 0.07);
-
-  --accent: #2b54c9;
-  --accent-hover: #2246ad;
-  --accent-ink: #ffffff;
-  --accent-soft: #e2e9fa;
-  --accent-line: #9fb3ea;
-
-  /* semantic states: each also has a distinct glyph */
-  --run: #0a7480;      --run-soft: #dcf0f1;
-  --wait: #9c5a00;     --wait-soft: #fbeed6;
-  --block: #bf2f28;    --block-soft: #fbe2df;
-  --fail: #a02b6b;     --fail-soft: #f6e0ec;
-  --done: #2c7638;     --done-soft: #dff0e1;
-  --halt-stripe: rgba(191, 47, 40, 0.10);
-
-  /* work classes: categorical, each chip also carries its name */
-  --cls-feature: #2b54c9; --cls-bug: #b2462c; --cls-hotfix: #c2185b; --cls-epic: #6b3fa0; --cls-chore: #5f6c7b;
-  --cls-refactor: #00796b; --cls-security: #a31515; --cls-docs: #4e7a1e; --cls-spike: #8a6100;
-  --kill: #7a0d0d; --kill-soft: #f3d9d9; --gate: #b26a00; --gate-soft: #fdecc8;
-  --shadow-1: 0 1px 2px rgba(18, 26, 36, 0.08);
-  --shadow-2: 0 10px 30px rgba(18, 26, 36, 0.18), 0 2px 6px rgba(18, 26, 36, 0.10);
-  --scrim: rgba(14, 20, 28, 0.42);
-  --focus: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+  --r1: 3px; --r2: 3px; --r3: 3px; --r-sm: 3px;
+  --control-h: 30px;
+  --z-banner: 130;
+  --panel: var(--surface2); --ink-2: var(--ink2); --muted: var(--ink3); --faint: var(--ink3);
+  --line-strong: var(--line2); --accent-hover: var(--accent); --accent-line: var(--accent);
+  --run: var(--accent); --run-soft: var(--accent-soft);
+  --wait: var(--warn); --wait-soft: var(--warn-bg);
+  --block: var(--bad); --block-soft: var(--bad-bg);
+  --fail: var(--bad); --fail-soft: var(--bad-bg);
+  --done: var(--ok); --done-soft: var(--ok-bg);
+  --halt-stripe: color-mix(in srgb, var(--bad) 12%, transparent);
+  --kill: var(--bad); --kill-soft: var(--bad-bg); --gate: var(--warn); --gate-soft: var(--warn-bg);
+  --cls-feature: var(--accent); --cls-bug: var(--bad); --cls-hotfix: var(--bad); --cls-epic: var(--ink2); --cls-chore: var(--ink3);
+  --cls-refactor: var(--ok); --cls-security: var(--bad); --cls-docs: var(--ok); --cls-spike: var(--warn);
+  --shadow-1: 2px 2px 0 var(--plate); --shadow-2: 4px 4px 0 var(--plate); --shadow: var(--shadow-1);
+  --fg: var(--ink); --fg-2: var(--ink2); --fg-3: var(--ink3); --line-2: var(--line2);
+  --ok-soft: var(--ok-bg); --warn-soft: var(--warn-bg); --bad-soft: var(--bad-bg); --info: var(--accent); --info-soft: var(--accent-soft);
+  --idle: var(--line2);
+  --surface-2: var(--surface2); --paper-2: var(--sunk); --hover: color-mix(in srgb, var(--ink) 6%, transparent);
+  --c-bad: var(--bad); --danger: var(--bad); --text: var(--ink);
+  --topbar-h: 52px;
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); --focus-outline: 2px solid transparent;
+  --z-sticky: 10; --z-nav-scrim: 105; --z-nav: 110; --z-drawer: 120; --z-popover-shield: 150; --z-popover: 160; --z-modal: 200; --z-toast: 300; --z-tooltip: 400; --z-drag: 1000;
+  --dur-fast: 120ms; --dur-base: 180ms; --dur-slow: 280ms; --ease: cubic-bezier(0.2, 0, 0, 1);
+  --target-min: 24px; --target-coarse: 44px;
+  --station:#ffffff;
+  --station-head:#e3e9f3;
+  --split:#5d4aa8;
+  --split-soft:#e9e8f3;
+  --on-warn:#1c1200;
+  --warn-solid:#f4b429;
+  --hatch:rgba(192,32,46,.5);
+  --control-line:#52678f;
 }
-
+[data-scope="light"] { color-scheme: light; background: var(--bg); color: var(--ink); padding: 16px; border: 1px solid var(--line2); }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #0d1218;
-    --surface: #141b23;
-    --panel: #18212b;
-    --sunk: #0f151c;
-    --ink: #e4e9ef;
-    --ink-2: #b9c3ce;
-    --muted: #8a97a6;
-    --faint: #66737f;
-    --line: #26313d;
-    --line-strong: #3a4756;
-    --grid: rgba(125, 155, 255, 0.06);
-    --accent: #7f9cff;
-    --accent-hover: #9bb2ff;
-    --accent-ink: #0a1022;
-    --accent-soft: #1b2645;
-    --accent-line: #3d518c;
-    --run: #4cc4cb;   --run-soft: #10302f;
-    --wait: #e6a94a;  --wait-soft: #33260f;
-    --block: #ff6f62; --block-soft: #3a1714;
-    --fail: #ea7bb8;  --fail-soft: #3a1529;
-    --done: #6cc77a;  --done-soft: #142e19;
-    --halt-stripe: rgba(255, 111, 98, 0.10);
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-2: 0 14px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
-    --cls-feature: #8fa8ff; --cls-bug: #f08a6c; --cls-hotfix: #f06292; --cls-epic: #b794f4; --cls-chore: #9aa6b4;
-    --cls-refactor: #4dd0c1; --cls-security: #ff7a7a; --cls-docs: #9ccc65; --cls-spike: #e6b44a;
-    --kill: #ff5a5a; --kill-soft: #3d0f12; --gate: #f0a63a; --gate-soft: #3a2a0c;
-    --scrim: rgba(0, 0, 0, 0.55);
-  }
+    --bg:#050f1e;
+    --grid:rgba(120,170,255,.045);
+    --grid2:rgba(120,170,255,.10);
+    --surface:#081a33;
+    --surface2:#0b2040;
+    --sunk:#04101f;
+    --ink:#e0ebff;
+    --ink2:#a8bfe2;
+    --ink3:#86a1cc;
+    --line:#3a69ad;
+    --line2:#6aa6ec;
+    --accent:#46d6ff;
+    --accent-ink:#04203f;
+    --accent-soft:#113651;
+    --ok:#46e08a;
+    --ok-bg:#103440;
+    --warn:#ffb224;
+    --warn-bg:#2b2f31;
+    --bad:#ff6a76;
+    --bad-bg:#2b253c;
+    --plate:rgba(2,10,30,.65);
+    --focus:#46d6ff;
+    --scrim:rgba(2,10,30,.65);
+  --station:#0a1e3e;
+  --station-head:#123059;
+  --split:#b8a6f0;
+  --split-soft:#222f4f;
+  --on-warn:#1c1200;
+  --warn-solid:#ffb224;
+  --hatch:rgba(255,106,118,.55);
+  --control-line:#3a69ad;
 }
-
+}
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0d1218;
-  --surface: #141b23;
-  --panel: #18212b;
-  --sunk: #0f151c;
-  --ink: #e4e9ef;
-  --ink-2: #b9c3ce;
-  --muted: #8a97a6;
-  --faint: #66737f;
-  --line: #26313d;
-  --line-strong: #3a4756;
-  --grid: rgba(125, 155, 255, 0.06);
-  --accent: #7f9cff;
-  --accent-hover: #9bb2ff;
-  --accent-ink: #0a1022;
-  --accent-soft: #1b2645;
-  --accent-line: #3d518c;
-  --run: #4cc4cb;   --run-soft: #10302f;
-  --wait: #e6a94a;  --wait-soft: #33260f;
-  --block: #ff6f62; --block-soft: #3a1714;
-  --fail: #ea7bb8;  --fail-soft: #3a1529;
-  --done: #6cc77a;  --done-soft: #142e19;
-  --halt-stripe: rgba(255, 111, 98, 0.10);
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-2: 0 14px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
-  --cls-feature: #8fa8ff; --cls-bug: #f08a6c; --cls-hotfix: #f06292; --cls-epic: #b794f4; --cls-chore: #9aa6b4;
-  --cls-refactor: #4dd0c1; --cls-security: #ff7a7a; --cls-docs: #9ccc65; --cls-spike: #e6b44a;
-  --kill: #ff5a5a; --kill-soft: #3d0f12; --gate: #f0a63a; --gate-soft: #3a2a0c;
-  --scrim: rgba(0, 0, 0, 0.55);
+  --bg:#050f1e;
+  --grid:rgba(120,170,255,.045);
+  --grid2:rgba(120,170,255,.10);
+  --surface:#081a33;
+  --surface2:#0b2040;
+  --sunk:#04101f;
+  --ink:#e0ebff;
+  --ink2:#a8bfe2;
+  --ink3:#86a1cc;
+  --line:#3a69ad;
+  --line2:#6aa6ec;
+  --accent:#46d6ff;
+  --accent-ink:#04203f;
+  --accent-soft:#113651;
+  --ok:#46e08a;
+  --ok-bg:#103440;
+  --warn:#ffb224;
+  --warn-bg:#2b2f31;
+  --bad:#ff6a76;
+  --bad-bg:#2b253c;
+  --plate:rgba(2,10,30,.65);
+  --focus:#46d6ff;
+  --scrim:rgba(2,10,30,.65);
+  --station:#0a1e3e;
+  --station-head:#123059;
+  --split:#b8a6f0;
+  --split-soft:#222f4f;
+  --on-warn:#1c1200;
+  --warn-solid:#ffb224;
+  --hatch:rgba(255,106,118,.55);
+  --control-line:#3a69ad;
+}
+[data-scope="dark"] {
+  color-scheme: dark;
+  --bg:#050f1e;
+  --grid:rgba(120,170,255,.045);
+  --grid2:rgba(120,170,255,.10);
+  --surface:#081a33;
+  --surface2:#0b2040;
+  --sunk:#04101f;
+  --ink:#e0ebff;
+  --ink2:#a8bfe2;
+  --ink3:#86a1cc;
+  --line:#3a69ad;
+  --line2:#6aa6ec;
+  --accent:#46d6ff;
+  --accent-ink:#04203f;
+  --accent-soft:#113651;
+  --ok:#46e08a;
+  --ok-bg:#103440;
+  --warn:#ffb224;
+  --warn-bg:#2b2f31;
+  --bad:#ff6a76;
+  --bad-bg:#2b253c;
+  --plate:rgba(2,10,30,.65);
+  --focus:#46d6ff;
+  --scrim:rgba(2,10,30,.65);
+  background: var(--bg); color: var(--ink); padding: 16px; border: 1px solid var(--line2);
+  --station:#0a1e3e;
+  --station-head:#123059;
+  --split:#b8a6f0;
+  --split-soft:#222f4f;
+  --on-warn:#1c1200;
+  --warn-solid:#ffb224;
+  --hatch:rgba(255,106,118,.55);
+  --control-line:#3a69ad;
 }

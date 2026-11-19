@@ -305,10 +305,16 @@ d("the onboarding session", () => {
       const entry = async (who: string) => ((await call(who, "GET", "/api/v1/home")).body.approvals as any[] ?? []).find((a) => a.repo === r.id && a.note);
       expect(await entry(lena)).toMatchObject({ repo: r.id, note: expect.stringMatching(/A check failed on PR #24/) });
       expect(await entry("p-arjun")).toBeUndefined();
+      // a Release Manager is involved but can only merge: a red check is not theirs to act on, green checks are
+      const proj = (await t.db.admin.query(`select project_id from repos where id = $1`, [r.id])).rows[0].project_id;
+      await t.db.admin.query(`insert into role_assignments (org_id, id, person_id, role_id, scope_type, project_id, granted_by) values ($1,'ra-rm-test','p-arjun','release_manager','project',$2,'p-asha')`, [t.orgId, proj]);
+      expect(await entry("p-arjun")).toBeUndefined();
       expect((await call(lena, "POST", url(r.id, "/seen"))).status).toBe(200);
       expect(await entry(lena)).toBeUndefined();
       await observe(r.id, [{ name: "ci/test", status: "completed", conclusion: "success" }]);
       expect(await entry(lena)).toMatchObject({ note: expect.stringMatching(/all passed/) });
+      expect(await entry("p-arjun")).toMatchObject({ note: expect.stringMatching(/all passed/) });
+      await t.db.admin.query(`update role_assignments set revoked_at = now() where id = 'ra-rm-test'`);
     });
 
     it("an assessment, a merge elsewhere and verification each post once", async () => {

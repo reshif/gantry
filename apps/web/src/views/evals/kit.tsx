@@ -7,9 +7,11 @@ import { DAY, fmt, type Agent, type EvalRun, type Suite } from "@gantry/domain";
 import { useAgents, useAllSuiteRuns, useEvalsFactory, useScorecards, useSkills, useSuites, useVendors } from "../../api/queries";
 import type { AgentRow, AgentVersionRow } from "../agents/kit";
 import { Icon } from "../../ui/Icon";
+import { navigateTab } from "../tabparam";
 
-export type EvalsTab = "agents" | "suites" | "factory";
-export const evalsUi = { tab: "agents" as EvalsTab, agent: null as string | null, suite: null as string | null, run: null as string | null, a: null as string | null, b: null as string | null, runVersion: null as string | null, runModel: null as string | null, repeats: 1 };
+export type EvalsTab = "cards" | "suites" | "factory";
+/** `tab` is what another screen asked for (focus); the screen turns it into the URL (`#evals/suites`) once. `detail` opens the suite drawer on arrival. */
+export const evalsUi = { tab: "cards" as EvalsTab, detail: false, agent: null as string | null, suite: null as string | null, run: null as string | null, a: null as string | null, b: null as string | null, runVersion: null as string | null, runModel: null as string | null, repeats: 1 };
 let tick = 0;
 const listeners = new Set<() => void>();
 export const rerender = (): void => {
@@ -21,6 +23,7 @@ export const useEvalsUi = (): number => useSyncExternalStore((l) => (listeners.a
 /** Other screens (agents) open a suite here. */
 export function evalsFocus(o: { agent?: string; suite?: string; version?: string }): void {
   evalsUi.tab = "suites";
+  evalsUi.detail = true;
   if (o.agent) evalsUi.agent = o.agent;
   if (o.suite) {
     evalsUi.suite = o.suite;
@@ -30,6 +33,11 @@ export function evalsFocus(o: { agent?: string; suite?: string; version?: string
   }
   evalsUi.runVersion = o.version ?? null;
   rerender();
+}
+/** Open a suite (and its agent) on the Suites tab. */
+export function evalsGoSuite(suite: string | null | undefined, agent?: string): void {
+  evalsFocus({ ...(agent ? { agent } : {}), ...(suite ? { suite } : {}) });
+  navigateTab("evals", "suites");
 }
 
 export type RunRow = EvalRun;
@@ -44,10 +52,13 @@ export interface EvalsData {
   skills: NonNullable<ReturnType<typeof useSkills>["data"]>;
   models: Array<{ value: string; label: string }>;
   pending: boolean;
+  /** The page's primary reads (agents, suites, runs, scorecards) as one query for `Async`: data once all have loaded, the first failure otherwise. */
+  q: { data: true | undefined; error: Error | null; isPending: boolean; isError: boolean; refetch: () => Promise<unknown> };
 }
 
 export function useEvalsData(): EvalsData {
-  const agents = (useAgents().data ?? []) as unknown as AgentRow[];
+  const agentsQ = useAgents();
+  const agents = (agentsQ.data ?? []) as unknown as AgentRow[];
   const suitesQ = useSuites();
   const suites = suitesQ.data ?? [];
   const runQ = useAllSuiteRuns();
@@ -61,6 +72,7 @@ export function useEvalsData(): EvalsData {
   return {
     agents, suites, runs, runsOf: (id) => runs.filter((r) => r.suite === id), scorecards: sc.data ?? {}, extra: fx.data, skills, models,
     pending: suitesQ.isPending || sc.isPending || runQ.isPending,
+    q: combine([agentsQ, suitesQ, runQ, sc]),
   };
 }
 
@@ -141,3 +153,16 @@ export function ScoreN({ r, short }: { r: Pick<RunRow, "score" | "count" | "pass
 
 export const asAgent = (a: AgentRow): Agent => a as unknown as Agent;
 export type { ReactNode };
+
+type QLike = { data: unknown; error: Error | null; isPending: boolean; isError: boolean; refetch: () => Promise<unknown> };
+function combine(qs: QLike[]): EvalsData["q"] {
+  const failed = qs.find((x) => x.isError && x.data === undefined);
+  const ready = qs.every((x) => x.data !== undefined);
+  return {
+    data: ready ? true : undefined,
+    error: failed?.error ?? null,
+    isPending: !ready && !failed,
+    isError: !!failed,
+    refetch: () => Promise.all(qs.filter((x) => x.isError).map((x) => x.refetch())),
+  };
+}

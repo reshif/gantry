@@ -1,14 +1,16 @@
 /** Work-order reads (spec 8.4): the list, the traveler, conversations, the floor with replay, the record and its export, and the changes. All rows are mapped to the legacy shapes the web already reads. */
 import { createHash } from "node:crypto";
 import {
-  can, completeness, criteriaFor, effectiveStop, gateDecision, gateProgress, moveCheck, route, routeGates, stateAt, summaryText, woTotals,
+  can, completeness, isFactoryAdmin, criteriaFor, type Verification, effectiveStop, gateDecision, gateProgress, moveCheck, route, wipLimit, routeGates, stateAt, summaryText, woTotals,
   type Decision, type EventEntry, type FlowState, type MoveCheck, type Project, type WorkOrder,
 } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { loadFlowState } from "../../core/read/state.js";
 import { ms, obj } from "../../core/read/rows.js";
+import { parsePin } from "../agents/context-pin.js";
 import { projectEvents } from "../audit/read.js";
-import { coveringStop, type CoveringStop } from "./engine.js";
+import { countWip, coveringStop, type CoveringStop } from "./engine.js";
+import { readProject } from "../projects/store.js";
 import { buildWorkOrders, loadFlow, readWoRow, stateWithPinned, type Data } from "./model.js";
 
 /* ------------------------------------------------------------------------- list */
@@ -55,7 +57,7 @@ export async function listWorkOrders(db: Queryable, orgId: string, projectId: st
   const built = await buildWorkOrders(db, orgId, st.catalog, st.projects, { ids, light: true });
   const order = new Map(ids.map((id, i) => [id, i]));
   built.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-  return { items: built, next: rows.length > limit ? Buffer.from(String(offset + limit)).toString("base64url") : null, total };
+  return { items: await attachWaits(db, orgId, built), next: rows.length > limit ? Buffer.from(String(offset + limit)).toString("base64url") : null, total };
 }
 
 /* ------------------------------------------------------------------------- traveler */
@@ -63,9 +65,42 @@ export async function listWorkOrders(db: Queryable, orgId: string, projectId: st
 export interface Traveler {
   wo: WorkOrder & { version: number };
   progress: Record<string, ReturnType<typeof gateProgress>>;
-  allowed: { approve: (Decision & { gate: string; instance: string }) | null; moves: Record<string, MoveCheck>; can: Record<string, Decision> };
+  allowed: { approve: (Decision & { gate: string; instance: string }) | null; moves: Record<string, MoveCheck>; can: Record<string, Decision>; wipOverride: { allowed: boolean; reason: string } };
   stop: CoveringStop | null;
   route: string[];
+  /** Why the work order's run is not running yet, or was stopped by the host (R1): "Waiting for a run slot (n queued)", "Waiting: host disk low", "Host disk critically low". */
+  wait: RunWait | null;
+}
+
+export interface RunWait { label: string; reason: string | null; since: string | null; kind: "slot" | "disk" | "disk_critical" }
+
+/** The wait label of each listed work order whose latest run is waiting or was stopped for host disk (label and kind only: the card shows it, the figures stay off it). */
+export async function attachWaits<T extends { id: string }>(db: Queryable, orgId: string, wos: T[]): Promise<Array<T & { wait?: { label: string; kind: RunWait["kind"] } }>> {
+  if (!wos.length) return wos;
+  const { rows } = await db.query<{ wo_id: string; label: string | null; blocker: string | null; ended: boolean }>(
+    `select distinct on (wo_id) wo_id, data->'dispatchWait'->>'label' as label, data->'blocker'->>'code' as blocker, ended_at is not null as ended from runs where org_id = $1 and wo_id = any($2::text[]) order by wo_id, created_at desc`,
+    [orgId, wos.map((w) => w.id)],
+  );
+  const by = new Map<string, { label: string; kind: RunWait["kind"] }>();
+  for (const r of rows) {
+    if (r.blocker === "host_disk_critical") by.set(r.wo_id, { label: "Host disk critically low", kind: "disk_critical" });
+    else if (r.label && !r.ended) by.set(r.wo_id, { label: r.label, kind: /disk/i.test(r.label) ? "disk" : "slot" });
+  }
+  return wos.map((w) => (by.has(w.id) ? { ...w, wait: by.get(w.id)! } : w));
+}
+
+/** The work order's latest run that is waiting for the launcher, or was stopped for a critically low host disk. */
+export async function readRunWait(db: Queryable, orgId: string, woId: string): Promise<RunWait | null> {
+  const r = (await db.query<{ wait: { label?: string; reason?: string; since?: string } | null; blocker: { code?: string; label?: string } | null; ended: boolean }>(
+    `select data->'dispatchWait' as wait, data->'blocker' as blocker, ended_at is not null as ended from runs where org_id = $1 and wo_id = $2 order by created_at desc limit 1`, [orgId, woId],
+  )).rows[0];
+  if (!r) return null;
+  if (r.blocker?.code === "host_disk_critical") return { label: r.blocker.label ?? "Host disk critically low", reason: null, since: null, kind: "disk_critical" };
+  if (!r.wait || r.ended) return null;
+  const label = r.wait.label ?? "Waiting to start";
+  const disk = /disk/i.test(label);
+  // The reason of a disk wait carries the host's free-disk figures: those stay in the Home item for audit.view holders, not on the order.
+  return { label, reason: disk ? null : (r.wait.reason ?? null), since: r.wait.since ?? null, kind: disk ? "disk" : "slot" };
 }
 
 const ACTIONS = { answer: "wo.answer", classify: "wo.classify", decline: "wo.decline", park: "wo.park", sendback: "wo.sendback", reassign: "wo.reassign", move: "wo.move", confirm: "brief.confirm", summary: "wo.answer" } as const;
@@ -94,7 +129,12 @@ export async function readTraveler(db: Queryable, orgId: string, viewer: string 
     const d = gateDecision(st, viewer, wo, waiting[0], now);
     approve = { ...d, gate: waiting[0], instance: inst?.id ?? `${woId}:${waiting[0]}` };
   }
-  return { wo: { ...wo, version: row.version }, progress, allowed: { approve, moves, can: cans }, stop, route: route(st.catalog, project, wo.cls) };
+  // Pushing a waiting order past a full station is the Factory Admin's override (the server decides, the browser only shows the button).
+  // The counts shown are today's, not those from when it began to wait.
+  if (wo.wipWait) wo.wipWait = { ...wo.wipWait, live: await countWip(db, orgId, wo.project, wo.wipWait.station), limit: wipLimit(await readProject(db, orgId, wo.project), wo.wipWait.station) };
+  const wipOverride = !wo.wipWait ? { allowed: false, reason: "This work order is not waiting for a full station." } : stop ? { allowed: false, reason: `${stop.reason || "Stopped"} (${stop.scope} ${stop.mode === "halt" ? "halted" : "killed"})` }
+    : !viewer || !isFactoryAdmin(st, viewer) ? { allowed: false, reason: "Only a Factory Admin can move a work order past a station's WIP limit." } : { allowed: true, reason: "As Factory Admin you can move it in anyway, with a reason." };
+  return { wo: { ...wo, version: row.version }, progress, allowed: { approve, moves, can: cans, wipOverride }, stop, route: route(st.catalog, project, wo.cls), wait: await readRunWait(db, orgId, woId) };
 }
 
 /* ------------------------------------------------------------------------- conversations */
@@ -147,7 +187,7 @@ export async function readFloor(db: Queryable, orgId: string, projectId: string,
   const slots = { used, total: project.flow.slots, holders: slotRows.filter((s) => s.state === "held").map((s) => ({ slot: Number(s.id.split(":").pop()), wo: s.wo_id })) };
   const queue = wos.filter((w) => w.bay === "queue" && !w.heldByKill).sort((a, b) => (a.priority < b.priority ? -1 : a.priority > b.priority ? 1 : (a.bayAt ?? 0) - (b.bayAt ?? 0))).map((w) => w.id);
   const top = stops.slice().sort((a, b) => (a.mode === b.mode ? 0 : a.mode === "kill" ? -1 : 1))[0] ?? null;
-  const live = { project, workOrders: wos, flowVersion, slots, gates, queue, stop: top, stops, at: null as number | null };
+  const live = { project, workOrders: await attachWaits(db, orgId, wos), flowVersion, slots, gates, queue, stop: top, stops, at: null as number | null };
   if (!at || at >= now) return live;
 
   // Replay: positions from the traveler history and the event log (domain `stateAt`), the rest as it was recorded.
@@ -168,6 +208,34 @@ export async function readFloor(db: Queryable, orgId: string, projectId: string,
 const sha = (s: string): string => createHash("sha256").update(s).digest("hex");
 const iso = (d: Date | null | undefined): string | null => (d ? new Date(d).toISOString() : null);
 
+interface RunContextRow { seed?: { commit?: string; source?: string; why?: string } | null; unavailable?: boolean | null; unavailableReason?: string | null; commit?: string | null; hash?: string | null; proposed?: Array<{ path: string; status: string }> | null; drift?: boolean | null; pin?: string | null }
+
+/**
+ * What instructions the work order runs on (S-143, S-145): the context pin written at its first dispatch (layer versions, guidelines, agent and skill versions), every
+ * recorded re-pin, and per run which commit the workspace was seeded at and why, whether the repository's convention files could be read, what the branch proposed to
+ * change in them, and whether the prompt moved after dispatch. A run whose conventions were not read, or whose prompt drifted, is a notice for a person.
+ */
+function contextOf(rawPin: unknown, runs: Array<{ id: string; attempt_id: string; ctx: RunContextRow }>, attempts: Array<{ id: string; station: string }>, events: Array<{ seq: string; occurred_at: Date; type: string; actor: string; after: unknown; subject?: unknown }>) {
+  const pin = parsePin(rawPin);
+  const station = (attempt: string): string => attempts.find((a) => a.id === attempt)?.station ?? "";
+  const perRun = runs.map((r) => ({
+    run: r.id, station: station(r.attempt_id), contextPin: r.ctx.pin ?? null,
+    seed: r.ctx.seed ? { commit: r.ctx.seed.commit ?? null, source: r.ctx.seed.source ?? null, why: r.ctx.seed.why ?? null } : null,
+    conventions: r.ctx.unavailable ? { state: "unavailable" as const, reason: r.ctx.unavailableReason ?? null } : r.ctx.commit ? { state: "read" as const, commit: r.ctx.commit, hash: r.ctx.hash ?? null } : { state: "none" as const },
+    proposedChanges: (r.ctx.proposed ?? []).map((f) => ({ path: f.path, status: f.status })),
+    promptDrift: r.ctx.drift === true,
+  }));
+  const notices = perRun.flatMap((r) => [
+    ...(r.conventions.state === "unavailable" ? [{ kind: "conventions_unavailable" as const, run: r.run, station: r.station, text: `The repository's convention files could not be read for the ${r.station} run${r.conventions.reason ? ` (${r.conventions.reason})` : ""}. The agent was told so.` }] : []),
+    ...(r.promptDrift ? [{ kind: "prompt_drift" as const, run: r.run, station: r.station, text: `The prompt of the ${r.station} run changed after it was dispatched: what it ran with is not what was recorded at dispatch.` }] : []),
+  ]);
+  return {
+    pin: pin ? { id: pin.id, pinnedAt: pin.pinnedAt, base: pin.base, project: pin.project, guidelines: pin.guidelines ? { hash: pin.guidelines.hash, commit: pin.guidelines.commit } : null, agents: Object.fromEntries(Object.entries(pin.agents).map(([k, v]) => [k, { version: v.version, skills: v.skills }])) } : null,
+    repins: events.filter((e) => e.type === "wo.context.repin").map((e) => ({ seq: Number(e.seq), at: iso(e.occurred_at), by: e.actor, detail: e.after })),
+    runs: perRun, notices,
+  };
+}
+
 /** The record of a work order (spec 8.4, 13.1): request verbatim, classification, brief versions, journey, every gate instance with votes and the decision with its pinned versions, send-backs, bay stays, attempts and results, code and outcomes. */
 export async function readRecord(db: Queryable, orgId: string, woId: string) {
   const row = await readWoRow(db, orgId, woId);
@@ -179,14 +247,15 @@ export async function readRecord(db: Queryable, orgId: string, woId: string) {
   const [instances, votes, decisions, attempts, results, stays, runs, events, request, prs, commits] = await Promise.all([
     q<{ id: string; gate_id: string; station: string | null; status: string; closed_reason: string | null; flow_version: number; rule_version: number | null; policy_version: number | null; head_sha: string | null; basis: Data; opened_at: Date; closed_at: Date | null }>(
       `select id, gate_id, station, status, closed_reason, flow_version, rule_version, policy_version, head_sha, basis, opened_at, closed_at from gate_instances where org_id = $1 and wo_id = $2 order by opened_at, id`),
-    q<{ gate_instance_id: string; voter: string; vote: string; comment: string; at: Date; via: string; role_id: string | null }>(
-      `select v.gate_instance_id, v.voter, v.vote, v.comment, v.at, v.via, v.role_id from gate_votes v join gate_instances g on g.org_id = v.org_id and g.id = v.gate_instance_id where v.org_id = $1 and g.wo_id = $2 order by v.at, v.id`),
+    q<{ gate_instance_id: string; voter: string; vote: string; comment: string; at: Date; via: string; role_id: string | null; for_person: string | null }>(
+      `select v.gate_instance_id, v.voter, v.vote, v.comment, v.at, v.via, v.role_id, v.for_person from gate_votes v join gate_instances g on g.org_id = v.org_id and g.id = v.gate_instance_id where v.org_id = $1 and g.wo_id = $2 order by v.at, v.id`),
     q<Record<string, unknown>>(`select gate_instance_id, decision, decided_by, rule, flow_version, gate_rule_version, policy_version, trust_level, role_assignment_id, tuple_id, agent_version, skill_versions, instruction_hash, model_id, commit_sha, detail, at from gate_decisions where org_id = $1 and wo_id = $2 order by at, id`),
     q<{ id: string; station: string; visit: number; fencing: string; state: string; outcome: string | null; started_at: Date | null; ended_at: Date | null; tuple_id: string | null; data: Data }>(
       `select id, station, visit, fencing::text, state, outcome, started_at, ended_at, tuple_id, data from attempts where org_id = $1 and wo_id = $2 order by created_at, id`),
     q<{ id: string; attempt_id: string; station: string; outcome: string; summary: string; created_at: Date; body: Data }>(`select id, attempt_id, station, outcome, summary, created_at, body from station_results where org_id = $1 and wo_id = $2 order by created_at, id`),
     q<{ bay: string; reason: string; entered_by: string | null; entered_at: Date; left_at: Date | null }>(`select bay, reason, entered_by, entered_at, left_at from bay_stays where org_id = $1 and wo_id = $2 order by entered_at`),
-    q<{ id: string; attempt_id: string; state: string; model_id: string | null; created_at: Date }>(`select id, attempt_id, state, model_id, created_at from runs where org_id = $1 and wo_id = $2 order by created_at`),
+    q<{ id: string; attempt_id: string; state: string; model_id: string | null; created_at: Date; ctx: RunContextRow }>(
+      `select id, attempt_id, state, model_id, created_at, jsonb_build_object('seed', data->'seed', 'unavailable', data->'repoContext'->'unavailable', 'unavailableReason', data->'repoContext'->'unavailableReason', 'commit', data->'repoContext'->'commit', 'hash', data->'repoContext'->'hash', 'proposed', data->'repoContextProposed'->'files', 'drift', data->'promptDrift', 'pin', data->'contextPin'->'id') as ctx from runs where org_id = $1 and wo_id = $2 order by created_at`),
     q<{ seq: string; occurred_at: Date; type: string; actor: string; outcome: string; after: unknown; subject: unknown; project_id: string | null; wo_id: string | null }>(
       `select seq::text, occurred_at, type, actor, outcome, after, subject, project_id, wo_id from events where org_id = $1 and wo_id = $2 and outcome <> 'denied' order by occurred_at, seq limit 2000`),
     q<{ original_text: string; submitted_by: string | null; via: string; created_at: Date }>(`select original_text, submitted_by, via, created_at from requests where org_id = $1 and wo_id = $2`),
@@ -197,13 +266,13 @@ export async function readRecord(db: Queryable, orgId: string, woId: string) {
   const gates = instances.map((i) => ({
     id: i.id, gate: i.gate_id, station: i.station, status: i.status, closedReason: i.closed_reason, headSha: i.head_sha, openedAt: iso(i.opened_at), closedAt: iso(i.closed_at),
     pinned: { flowVersion: i.flow_version, ruleVersion: i.rule_version, policyVersion: i.policy_version }, basis: i.basis,
-    votes: votes.filter((v) => v.gate_instance_id === i.id).map((v) => ({ by: v.voter, vote: v.vote, comment: v.comment, at: iso(v.at), via: v.via, role: v.role_id })),
+    votes: votes.filter((v) => v.gate_instance_id === i.id).map((v) => ({ by: v.voter, vote: v.vote, comment: v.comment, at: iso(v.at), via: v.via, role: v.role_id, ...(v.for_person ? { forPerson: v.for_person } : {}) })),
     decision: decisions.find((d) => d.gate_instance_id === i.id) ?? null,
   }));
   const totals = woTotals(wo);
   const full = {
     ...wo,
-    criteria: criteriaFor(wo),
+    criteria: criteriaFor(wo, (wo as { verification?: Verification }).verification ?? null),
   } as WorkOrder;
   const summary = { generated: summaryText({ ...st, integrationTypes: [], integrationInstances: [] }, full), written: (row.data.recordSummary as { text: string; by: string; at: number } | undefined) ?? null };
   const record = {
@@ -212,10 +281,12 @@ export async function readRecord(db: Queryable, orgId: string, woId: string) {
     classification: { predicted: wo.clsSuggested, final: wo.cls, confidence: wo.clsConfidence, rationale: wo.clsRationale, requested: wo.requestedCls, overridden: wo.clsOverridden },
     route: route(st.catalog, project, wo.cls), flowVersion: row.flowVersion,
     clarification: wo.conv.messages, briefVersions: wo.briefVersions ?? [], brief: wo.brief, criteria: full.criteria,
-    journey: wo.history, gates, sendbacks: wo.sendbacks ?? [], bayStays: stays.map((s) => ({ bay: s.bay, reason: s.reason, by: s.entered_by, from: iso(s.entered_at), to: iso(s.left_at) })),
+    journey: wo.history, gates, review: row.data.review ?? null, sendbacks: wo.sendbacks ?? [], bayStays: stays.map((s) => ({ bay: s.bay, reason: s.reason, by: s.entered_by, from: iso(s.entered_at), to: iso(s.left_at) })),
     attempts: attempts.map((a) => ({ id: a.id, station: a.station, visit: a.visit, fencing: Number(a.fencing), state: a.state, outcome: a.outcome, startedAt: iso(a.started_at), endedAt: iso(a.ended_at), tuple: a.tuple_id, agent: a.data.agent ?? null })),
     results: results.map((r) => ({ id: r.id, attempt: r.attempt_id, station: r.station, outcome: r.outcome, summary: r.summary, at: iso(r.created_at), output: obj(r.body).output ?? null })),
     runs: runs.map((r) => ({ id: r.id, attempt: r.attempt_id, state: r.state, model: r.model_id, at: iso(r.created_at) })),
+    context: contextOf(row.data.contextPin, runs, attempts, events),
+    wait: await readRunWait(db, orgId, woId),
     code: { pullRequests: prs.map((p) => ({ number: p.number, state: p.state, draft: p.draft, headSha: p.head_sha, title: p.title, url: p.url, mergedAt: iso(p.merged_at) })), commits: commits.map((c) => ({ sha: c.sha, message: c.message, author: c.author, at: iso(c.committed_at) })), files: wo.files ?? [], diff: wo.diff, tests: wo.tests },
     outcomes: wo.outcomes ?? [], totals, completeness: completeness(full), summary,
     events: events.map((e) => ({ seq: Number(e.seq), at: iso(e.occurred_at), type: e.type, by: e.actor, outcome: e.outcome, detail: e.after })),

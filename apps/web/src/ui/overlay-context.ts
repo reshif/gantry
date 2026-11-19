@@ -3,6 +3,12 @@ import type { Decision } from "./primitives";
 
 export type ToastKind = "info" | "ok" | "warn" | "error";
 
+export interface ToastAction {
+  label: string;
+  id?: string;
+  onClick: () => void;
+}
+
 export interface DialogAction {
   label: string;
   kind?: string;
@@ -22,6 +28,8 @@ export interface DialogOpts {
   wide?: boolean;
   /** Extra class on the dialog panel (e.g. "dlg-palette"). */
   cls?: string;
+  /** True while the body holds unsaved input: Escape, scrim and close ask before discarding. */
+  dirty?: boolean;
   body: ReactNode | ((close: () => void) => ReactNode);
   actions?: DialogAction[];
   onClose?: () => void;
@@ -29,15 +37,22 @@ export interface DialogOpts {
 
 export interface MenuItem {
   label?: string;
+  /** A mono section heading in the list (no action). */
+  head?: string;
+  /** Marks the current choice with a check. */
+  sel?: boolean;
   icon?: string;
   hint?: string;
+  /** "danger" or "andon" marks a destructive or stopping item. */
+  kind?: string;
   sep?: boolean;
   guard?: Decision | null | undefined;
   onClick?: () => void;
 }
 
 export interface UIApi {
-  toast(text: string, kind?: ToastKind): void;
+  /** A short notice. An action (e.g. Undo) keeps it up longer and runs once when pressed. */
+  toast(text: string, kind?: ToastKind, action?: ToastAction): void;
   /** Push a custom modal onto the dialog stack. */
   open(render: (close: () => void) => ReactNode): { close: () => void };
   dialog(o: DialogOpts): { close: () => void };
@@ -45,7 +60,8 @@ export interface UIApi {
   closeTopDialog(): boolean;
   closeAllDialogs(): void;
   drawer: {
-    open(key: string, render: (close: () => void) => ReactNode): void;
+    /** `onClose` runs when the person closes it (X, Esc, scrim), not when a route change does: use it to take the drawer out of the URL. */
+    open(key: string, render: (close: () => void) => ReactNode, onClose?: () => void): void;
     close(): void;
     isOpen(key?: string): boolean;
   };

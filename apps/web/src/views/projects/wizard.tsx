@@ -1,10 +1,11 @@
 /** New project wizard (legacy projects.js openWizard): template, name and owner, repos, approvers, notifications, review. */
-import { useState } from "react";
+import { getQueryClient, qk } from "../../api/keys";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fmt, gateExplain, route as domainRoute, type ApproverRule, type Catalog } from "@gantry/domain";
 import { api, get } from "../../api/client";
 import { ops } from "../../api/ops";
-import { getQueryClient } from "../../api/keys";
+import { DRAFT_PREFIX } from "../../api/drafts";
 import { useCan } from "../../api/can";
 import { useMe, usePeople, useTemplates } from "../../api/queries";
 import { Dialog } from "../../ui/Overlay";
@@ -23,7 +24,7 @@ const PRESET: Record<string, string> = {
 const idFor = (n: string) => n.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 export function useProjectPresets(): Presets | null {
-  return useQuery({ queryKey: ["templates", "presets"], queryFn: () => get<Presets>(api("project-presets")), staleTime: 60_000 }).data ?? null;
+  return useQuery({ queryKey: qk.presets(), queryFn: () => get<Presets>(api("project-presets")), staleTime: 60_000 }).data ?? null;
 }
 
 interface Wz {
@@ -44,6 +45,26 @@ interface Wz {
   err: string | null;
 }
 
+const draftKey = (personId: string): string => `${DRAFT_PREFIX}new-project.${personId}`;
+/** What this person typed last time they closed the wizard, for this browser tab only. Anything malformed is ignored. */
+function readDraft(personId: string): Partial<Wz> | null {
+  try {
+    const o = JSON.parse(sessionStorage.getItem(draftKey(personId)) ?? "null") as Partial<Wz> | null;
+    if (!o || typeof o !== "object" || typeof o.name !== "string") return null;
+    return o;
+  } catch {
+    return null;
+  }
+}
+const writeDraft = (personId: string, w: Wz | null): void => {
+  try {
+    if (w) sessionStorage.setItem(draftKey(personId), JSON.stringify({ ...w, err: null }));
+    else sessionStorage.removeItem(draftKey(personId));
+  } catch {
+    /* storage blocked: the draft just is not kept */
+  }
+};
+
 export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | undefined; projects: PView[]; close: () => void }) {
   const ui = useUI();
   const me = useMe();
@@ -54,10 +75,31 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
   const presets = useProjectPresets();
   const d = useCan("project.create");
   const first = tpls.find((t) => t.id === tplId) ?? tpls[0];
-  const [wz, setWz] = useState<Wz>(() => ({
-    step: 0, tpl: first?.id ?? "", name: "", key: "", desc: "", owner: me?.person.id ?? "", teams: [], budget: 2000, repos: {}, extraRepo: "",
-    approverPreset: first?.approverPreset ?? "standard", fallback: "", notifyPreset: first?.notify ?? "standard", routesOff: {}, err: null,
-  }));
+  const [wz, setWz] = useState<Wz>(() => {
+    const fresh: Wz = {
+      step: 0, tpl: first?.id ?? "", name: "", key: "", desc: "", owner: me?.person.id ?? "", teams: [], budget: 2000, repos: {}, extraRepo: "",
+      approverPreset: first?.approverPreset ?? "standard", fallback: "", notifyPreset: first?.notify ?? "standard", routesOff: {}, err: null,
+    };
+    const saved = me ? readDraft(me.person.id) : null;
+    if (!saved) return fresh;
+    // Typed text always comes back. A template picked on purpose (Use on a template card) keeps its own template and presets
+    // and opens on the first step; otherwise the person lands on the step they left, never on the review of a stale preset.
+    const typed = { name: saved.name, key: saved.key, desc: saved.desc, owner: saved.owner, teams: saved.teams, budget: saved.budget, repos: saved.repos, extraRepo: saved.extraRepo };
+    const own = tplId ? {} : { tpl: tpls.some((t) => t.id === saved.tpl) ? saved.tpl : fresh.tpl, approverPreset: saved.approverPreset, notifyPreset: saved.notifyPreset, fallback: saved.fallback, routesOff: saved.routesOff, step: Math.min(saved.step ?? 0, STEPS.length - 2) };
+    return { ...fresh, ...typed, ...own, err: null } as Wz;
+  });
+  const pid = me?.person.id ?? "";
+  useEffect(() => { if (pid) writeDraft(pid, wz); }, [pid, wz]);
+  // Drop what no longer resolves: an owner who is gone or deactivated, teams that no longer exist.
+  const peopleLoaded = people.length > 0;
+  const teamsLoaded = teams.length > 0;
+  useEffect(() => {
+    setWz((x) => {
+      const owner = peopleLoaded && !people.some((p) => p.id === x.owner && p.status === "active") ? (me?.person.id ?? "") : x.owner;
+      const keep = teamsLoaded ? x.teams.filter((t) => teams.some((r) => r.id === t)) : x.teams;
+      return owner === x.owner && keep.length === x.teams.length ? x : { ...x, owner, teams: keep };
+    });
+  }, [peopleLoaded, teamsLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
   const [busy, setBusy] = useState(false);
   if (!cat || !first || !presets) return <Dialog title="New project" kicker="Projects · from a template" wide body={<p className="muted small">Loading…</p>} onClose={close} actions={[{ label: "Cancel", id: "prj-wz-cancel" }]} />;
   const T = tpls.find((t) => t.id === wz.tpl) ?? first;
@@ -97,7 +139,7 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
       if (e) return upd({ err: e, step: i });
     }
     setBusy(true);
-    const r = await ops.createProject({ name: wz.name.trim(), key: wz.key || null, templateId: wz.tpl, owner: wz.owner, teams: wz.teams, desc: wz.desc.trim() || null, budget: wz.budget || 1000, approvers: approvers(), notifications: routes() });
+    const r = await ops.createProject({ name: wz.name.trim(), key: wz.key || null, templateId: wz.tpl, owner: wz.owner, teams: wz.teams, desc: wz.desc.trim() || null, budget: wz.budget, approvers: approvers(), notifications: routes() });
     if (!r.ok) {
       setBusy(false);
       return upd({ err: r.msg });
@@ -106,14 +148,15 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
     const custom = (r as unknown as { custom?: { failed: string[] } }).custom ?? { failed: [] };
     const failedRepos: string[] = [];
     for (const [name, team] of Object.entries(wz.repos)) {
-      const c = await ops.connectRepo(project.id, name, team || wz.teams[0] || "platform");
+      const c = await ops.connectRepo(project.id, name, team || wz.teams[0] || null);
       if (!c.ok) failedRepos.push(`${name}: ${c.msg}`);
     }
     const n = Object.keys(wz.repos).length - failedRepos.length;
     ui.toast(`${r.msg} ${n} repo${n === 1 ? "" : "s"} onboarding.${failedRepos.length ? ` Not connected: ${failedRepos.join("; ")}.` : ""}`, custom.failed.length || failedRepos.length ? "warn" : "ok");
+    writeDraft(pid, null);
     close();
     // the shell keeps the stored project to one in `me`: wait until `me` lists the new project before switching to it
-    await getQueryClient()?.refetchQueries({ queryKey: ["me"] });
+    await getQueryClient()?.refetchQueries({ queryKey: qk.me() });
     goProject(project.id, "project-config");
   };
 
@@ -121,6 +164,8 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
   const step = STEPS[wz.step]![0];
   if (step === "template") {
     body = (
+      <>
+      <p className="hint">What you type is kept if you close this window.</p>
       <div className="radio-cards prj-wz-tpls" role="radiogroup" aria-label="Template">
         {tpls.map((t) => {
           const id = `prj-wz-tpl-${t.id}`;
@@ -130,11 +175,12 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
               <span className="rc-t">{t.name}</span>
               <span className="rc-d">{t.desc}</span>
               <TplBelt cat={cat} t={t} />
-              <span className="rc-d mono">{`${t.slots} slot${t.slots > 1 ? "s" : ""} · ${t.approverPreset} approvers`}</span>
+              <span className="rc-d">{`${t.slots} slot${t.slots > 1 ? "s" : ""} · ${t.approverPreset.charAt(0).toUpperCase()}${t.approverPreset.slice(1)} approvers`}</span>
             </label>
           );
         })}
       </div>
+      </>
     );
   } else if (step === "basics") {
     const keyHint = (idFor(wz.name).replace(/-/g, "").slice(0, 3) || "KEY").toUpperCase();
@@ -147,7 +193,7 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
         <Field label="Description" htmlFor="prj-wz-desc"><input id="prj-wz-desc" className="input" value={wz.desc} placeholder="What this project builds" onChange={(e) => upd({ desc: e.target.value })} /></Field>
         <div className="form-row">
           <Field label="Owner" htmlFor="prj-wz-owner" hint="Becomes Project Admin unless they hold a factory role."><Select id="prj-wz-owner" options={active.map((x) => ({ value: x.id, label: `${x.name} · ${x.title}` }))} value={wz.owner} onChange={(v) => upd({ owner: v })} /></Field>
-          <Field label="Monthly budget (USD)" htmlFor="prj-wz-budget"><input id="prj-wz-budget" type="number" min={100} className="input mono" value={String(wz.budget)} onChange={(e) => upd({ budget: parseInt(e.target.value, 10) || 0 })} /></Field>
+          <Field label="Monthly budget (USD)" htmlFor="prj-wz-budget" hint={wz.budget === 0 ? "0 means no cap." : undefined}><input id="prj-wz-budget" type="number" min={0} max={10000000} step="any" className="input mono" value={String(wz.budget)} onChange={(e) => upd({ budget: Math.min(10_000_000, Math.max(0, parseFloat(e.target.value) || 0)) })} /></Field>
         </div>
         <Field label="Owning teams" htmlFor="prj-wz-team-add" hint="A project can have more than one owning team.">
           <Select id="prj-wz-team-add" options={[{ value: "", label: "Add an owning team" }, ...teams.filter((t) => !wz.teams.includes(t.id)).map((t) => ({ value: t.id, label: t.name }))]} value="" onChange={(v) => { if (v) { upd({ teams: [...wz.teams, v] }); focus("prj-wz-team-add"); } }} />
@@ -171,8 +217,8 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
       <div className="form-grid">
         <p className="small muted">Each repo is connected through the source-control integration and starts onboarding: the Onboarding agent assesses it and opens a PR. Work orders can target a repo once it is Ready. You can also add repos later.</p>
         <div className="inline-form">
-          <Field label="Repo" htmlFor="prj-wz-repo-add"><input id="prj-wz-repo-add" className="input mono" value={wz.extraRepo} placeholder="acme/new-service" onChange={(e) => upd({ extraRepo: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const n = wz.extraRepo.trim(); if (n) upd({ repos: { ...wz.repos, [n]: wz.teams[0] || "platform" }, extraRepo: "" }); } }} /></Field>
-          <Btn small icon="plus" id="prj-wz-repo-go" label="Add repo" onClick={() => { const n = wz.extraRepo.trim(); if (!n) return; upd({ repos: { ...wz.repos, [n]: wz.teams[0] || "platform" }, extraRepo: "" }); focus("prj-wz-repo-add"); }} />
+          <Field label="Repo" htmlFor="prj-wz-repo-add"><input id="prj-wz-repo-add" className="input mono" value={wz.extraRepo} placeholder="acme/new-service" onChange={(e) => upd({ extraRepo: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const n = wz.extraRepo.trim(); if (n) upd({ repos: { ...wz.repos, [n]: wz.teams[0] || "" }, extraRepo: "" }); } }} /></Field>
+          <Btn small icon="plus" id="prj-wz-repo-go" label="Add repo" onClick={() => { const n = wz.extraRepo.trim(); if (!n) return; upd({ repos: { ...wz.repos, [n]: wz.teams[0] || "" }, extraRepo: "" }); focus("prj-wz-repo-add"); }} />
         </div>
         {picked.length ? (
           <ul className="plain-list prj-wz-repos">

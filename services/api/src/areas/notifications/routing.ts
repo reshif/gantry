@@ -77,12 +77,53 @@ export function resolveDest(insts: InstInfo[], d: Dest, project: string | null, 
   return { ok: true, inst, transport, target: d.target };
 }
 
-/** Email recipients: addresses as written, or a role keyword (submitter, approvers, project admins) resolved against people and role assignments. */
-export async function resolveRecipients(db: Queryable, orgId: string, target: string, ctx: { project: string | null; woId: string | null; gateId: string | null }): Promise<string[]> {
+const FACTORY_ADMINS = `select distinct p.id, p.email from people p join effective_role_assignments ra on ra.org_id = p.org_id and ra.person_id = p.id
+       where p.org_id = $1 and p.status = 'active' and p.email <> '' and ra.role_id = 'factory_admin' and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now()) order by p.email`;
+
+export interface OnCall { ids: string[]; emails: string[]; /** The project's list had nobody active and present, so these are the Factory Admins. */ fallback: boolean; /** Every Factory Admin was away, so they were paged anyway. */ allAway: boolean }
+
+const isAway = (away: { from?: number; to?: number } | null | undefined, ms: number): boolean => !!away && typeof away.from === "number" && typeof away.to === "number" && away.from <= ms && ms <= away.to;
+
+/** Active Factory Admins with an email address (the fallback for an empty on-call list, and the last line for kill and restore). */
+export async function factoryAdmins(db: Queryable, orgId: string): Promise<Array<{ id: string; email: string }>> {
+  return (await db.query<{ id: string; email: string }>(FACTORY_ADMINS, [orgId])).rows;
+}
+
+/** The Factory Admins to page: those present first; only when every one of them is away are they all paged anyway (`allAway`). */
+export async function adminsToPage(db: Queryable, orgId: string, at: Date = new Date()): Promise<{ ids: string[]; emails: string[]; allAway: boolean }> {
+  const rows = (await db.query<{ id: string; email: string; away: { from?: number; to?: number } | null }>(
+    `select a.id, a.email, p.away from (${FACTORY_ADMINS}) a join people p on p.org_id = $1 and p.id = a.id`, [orgId],
+  )).rows;
+  const present = rows.filter((r) => !isAway(r.away, at.getTime()));
+  const use = present.length ? present : rows;
+  return { ids: use.map((r) => r.id), emails: [...new Set(use.map((r) => r.email.toLowerCase()))], allAway: !present.length && rows.length > 0 };
+}
+
+/**
+ * The people to page for a project: its on-call list (projects.config.oncall) minus anyone deactivated, without an email address or away right now (their away window
+ * covers `at`). When that leaves nobody, the Factory Admins who are present are the fallback (all of them when every admin is away: somebody has to be told).
+ * `fallback = false` returns only the on-call people (the factory-wide page adds the admins itself).
+ */
+export async function resolveOnCall(db: Queryable, orgId: string, project: string | null, at: Date = new Date(), fallback = true): Promise<OnCall> {
+  const list = project ? (await db.query<{ oncall: unknown }>(`select config -> 'oncall' as oncall from projects where org_id = $1 and id = $2`, [orgId, project])).rows[0]?.oncall : null;
+  const ids = Array.isArray(list) ? list.filter((x): x is string => typeof x === "string") : [];
+  const rows = ids.length ? (await db.query<{ id: string; email: string; away: { from?: number; to?: number } | null }>(`select id, email, away from people where org_id = $1 and id = any($2) and status = 'active' and email <> ''`, [orgId, ids])).rows : [];
+  const present = rows.filter((r) => !isAway(r.away, at.getTime()));
+  if (present.length) return { ids: present.map((r) => r.id), emails: [...new Set(present.map((r) => r.email.toLowerCase()))], fallback: false, allAway: false };
+  if (!fallback) return { ids: [], emails: [], fallback: false, allAway: false };
+  const admins = await adminsToPage(db, orgId, at);
+  return { ids: admins.ids, emails: admins.emails, fallback: true, allAway: admins.allAway };
+}
+
+/** Email recipients: addresses as written, or a role keyword (submitter, approvers, on-call, project admins) resolved against people and role assignments. */
+export async function resolveRecipients(db: Queryable, orgId: string, target: string, ctx: { project: string | null; woId: string | null; gateId: string | null; mentioned?: string | null }, skipped: Array<{ address: string; reason: string }> = []): Promise<string[]> {
   const out = new Set<string>();
   for (const tok of target.split(/[,;]+/).map((s) => s.trim()).filter(Boolean)) {
     if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(tok)) {
-      out.add(tok.toLowerCase());
+      // A typed address that belongs to a deactivated person gets nothing (S-36); an address nobody owns is an outside recipient and stays.
+      const owners = (await db.query<{ status: string }>(`select status from people where org_id = $1 and lower(email) = lower($2)`, [orgId, tok])).rows;
+      if (owners.length && !owners.some((o) => o.status !== "deactivated")) skipped.push({ address: tok.toLowerCase(), reason: "recipient deactivated" });
+      else out.add(tok.toLowerCase());
       continue;
     }
     const kw = tok.toLowerCase();
@@ -102,6 +143,11 @@ export async function resolveRecipients(db: Queryable, orgId: string, target: st
         `select distinct p.email from people p where p.org_id = $1 and p.status = 'active' and (p.id = any($3) or exists (select 1 from effective_role_assignments ra where ra.org_id = p.org_id and ra.person_id = p.id and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now()) and ra.role_id = any($2) and (ra.project_id is null or ra.project_id = $4)))`,
         [orgId, roles, people, ctx.project],
       )).rows) if (r.email) out.add(r.email.toLowerCase());
+    } else if (kw === "mentioned" && ctx.mentioned) {
+      const r = (await db.query<{ email: string }>(`select email from people where org_id = $1 and id = $2 and status = 'active'`, [orgId, ctx.mentioned])).rows[0];
+      if (r?.email) out.add(r.email.toLowerCase());
+    } else if (kw === "on-call" || kw === "on call" || kw === "oncall") {
+      for (const e of (await resolveOnCall(db, orgId, ctx.project)).emails) out.add(e);
     } else if (kw === "project admins" || kw === "project admin") {
       for (const r of (await db.query<{ email: string }>(
         `select distinct p.email from people p join effective_role_assignments ra on ra.org_id = p.org_id and ra.person_id = p.id where p.org_id = $1 and p.status = 'active' and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now()) and ra.role_id in ('project_admin','factory_admin') and (ra.project_id is null or ra.project_id = $2)`,

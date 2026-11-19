@@ -1,12 +1,12 @@
 /**
- * Demo accounts for the sign-in screen. Shown only when the API says demoAccounts is on (GANTRY_DEV_DEMO_ACCOUNTS, backed by the
+ * Demo accounts for the sign-in screen. Shown only when the API says demoAccounts is on (GANTRY_DEV_SEED on a local stack, backed by the
  * local identity provider's users). The server sends `config.demoAccountList`, built from the live org: each account's roles are what
  * that person actually holds (own grants and team grants), or "No roles yet".
  *
  * This fallback is used only when the server sends no list. It names the identity provider's users (email = id without "p-" + @acme.dev)
  * and claims nothing about their permissions, because those depend on what has been granted in People & teams.
  */
-import type { DemoAccount } from "../api/types";
+import type { DemoAccount } from "../api/types.js";
 
 const USERS: ReadonlyArray<readonly [string, string]> = [
   ["asha", "Asha Raman"], ["daniel", "Daniel Okafor"], ["meera", "Meera Iyer"], ["tomas", "Tomás Ferreira"], ["priya", "Priya Nair"],

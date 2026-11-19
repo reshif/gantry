@@ -1,4 +1,6 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -77,11 +79,14 @@ function mount() {
 }
 const ok = (extra: object = {}) => ({ body: { ok: true, msg: "Done.", ...extra } });
 const patches = (calls: Call[]) => calls.filter((c) => c.method === "PATCH");
+/** A server's own page is a route (#mcp/<id>) with its tab in ?tab=. */
+const openSrv = (id: string, tab = "overview") => { window.location.hash = `#mcp/${id}`; window.history.replaceState(null, "", `/?tab=${tab}${window.location.hash}`); };
 
 beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
+  window.history.replaceState(null, "", "/");
 });
 afterEach(() => {
   cleanup();
@@ -89,51 +94,106 @@ afterEach(() => {
 });
 
 describe("MCP servers screen", () => {
-  it("lists the registry with health, tool counts, sensitivity and the scope line, and shows the first server's detail", async () => {
+  it("says Not visible to you when the registry read is refused, instead of No MCP servers yet", async () => {
+    setup({ "GET /api/v1/mcp/servers": () => ({ status: 403, body: { ok: false, msg: "Needs Factory Admin to see MCP servers." } }) });
+    mount();
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+    expect(screen.getByText("Needs Factory Admin to see MCP servers.")).toBeTruthy();
+    expect(screen.queryByText("No MCP servers yet")).toBeNull();
+  });
+
+  it("maps a 'down' health to the failing tone", async () => {
+    const { Health } = await import("./mcp/kit");
+    const { container } = render(<Health st="down" />);
+    expect(container.querySelector(".tone-block")).toBeTruthy();
+  });
+
+  it("keeps Disabled out of the Healthy filter and counts a disabled server as not healthy", async () => {
     setup();
     mount();
-    expect((await screen.findAllByText("Docs wiki")).length).toBeGreaterThan(0);
+    await byId("mcp-row-mcp-chg-0001");
+    expect(document.getElementById("mcp-stats")!.textContent).toMatch(/Healthy1/);
+    fireEvent.change(document.getElementById("mcp-f-health")!, { target: { value: "healthy" } });
+    expect(document.getElementById("mcp-row-mcp-chg-0001")).toBeNull();
+    expect(document.getElementById("mcp-row-mcp-docs-1a2b")).toBeTruthy();
+    fireEvent.change(document.getElementById("mcp-f-health")!, { target: { value: "disabled" } });
+    expect(document.getElementById("mcp-row-mcp-chg-0001")).toBeTruthy();
+    expect(document.getElementById("mcp-row-mcp-docs-1a2b")).toBeNull();
+  });
+
+  it("lists the registry with health, tool counts, sensitivity and the writes chip, linking each server to its own page", async () => {
+    setup();
+    mount();
     const row = await byId("mcp-row-mcp-docs-1a2b");
-    expect(row.textContent).toContain("http · https://mcp.example.net/mcp");
-    expect(row.textContent).toContain("Bearer token");
-    expect(row.textContent).toContain("1 projects · all repos · 1 agents · 1 stations · all classes");
-    expect(row.textContent).toContain("2 R · 1 W");
-    expect(row.textContent).toContain("1 denied");
-    expect(within(row).getByText("internal").className).toContain("mcp-sens-internal");
+    expect(row.textContent).toContain("https://mcp.example.net/mcp");
+    expect(row.textContent).toContain("2/3");
+    expect(Array.from(row.querySelectorAll(".chip.ok")).map((c) => c.textContent)).toContain("gated"); // the Writes column is gated or open, from the server's write gate
+    expect(row.textContent).toContain("internal");
     expect((await byId("mcp-row-mcp-chg-0001")).textContent).toContain("disabled");
-    // header meta
-    const head = document.querySelector(".titleblock")!.textContent!;
+    expect((await byId("mcp-open-mcp-docs-1a2b")).getAttribute("href")).toBe("#mcp/mcp-docs-1a2b");
+    const head = document.getElementById("mcp-stats")!.textContent!;
     expect(head).toContain("Servers2");
-    expect(head).toContain("Write tools2");
-    expect(head).toContain("Calls 24h2");
-    // detail: transport, protocol revision, masked credential, tools, write-gate shown on and locked
-    expect(document.querySelector(".mcp-tb")!.textContent).toContain("2025-06-18");
-    expect(document.querySelector(".mcp-tb")!.textContent).toContain("mcp-upstream-••••••••6789");
-    expect(document.querySelectorAll(".mcp-tools tbody tr")).toHaveLength(3);
+    expect(head).toContain("gated"); // the prototype's sub: how many calls waited at a gate
+    expect(head).toContain("Calls logged");
+    expect(document.getElementById("mcp-add")!.textContent).toBe("Register server");
+    expect(document.getElementById("mcp-tab-registry")).toBeTruthy();
+    expect(document.getElementById("mcp-tab-usage")).toBeTruthy();
+  });
+
+  it("a server's page has a breadcrumb, the URL, five tabs, and a kv list with the write gate on and locked", async () => {
+    setup();
+    openSrv("mcp-docs-1a2b");
+    mount();
+    expect((await screen.findAllByText("Docs wiki")).length).toBeGreaterThan(0);
+    for (const t of ["overview", "tools", "scope", "check", "calls"]) expect(document.getElementById(`mcp-dtab-${t}`), t).toBeTruthy();
+    expect(document.querySelector("nav.kicker")!.textContent).toContain("MCP servers");
+    expect(document.body.textContent).toContain("https://mcp.example.net/mcp");
+    const kv = (await byId("mcp-server")).textContent!;
+    expect(kv).not.toContain("2025-06-18"); // protocol revision and last discovery are not on the overview
+    expect(kv).toContain("mcp-upstream-••••••••6789");
     const wg = document.getElementById("mcp-writegate") as HTMLInputElement;
     expect(wg.checked).toBe(true);
-    expect(wg.getAttribute("aria-disabled")).toBe("true");
-    expect(wg.getAttribute("data-reason")).toMatch(/always need a station pre-authorisation/);
+    expect(wg.getAttribute("aria-disabled")).toBeNull(); // it toggles as in the prototype; the rail stays on and the toast says why
+    fireEvent.click(wg);
+    expect(await screen.findByText(/always need a station pre-authorisation/)).toBeTruthy();
+    expect((document.getElementById("mcp-writegate") as HTMLInputElement).checked).toBe(true);
+    for (const id of ["mcp-enabled", "mcp-remove", "mcp-recheck", "mcp-sens"]) expect(document.getElementById(id), id).toBeNull();
+    expect(document.body.textContent).toContain("Writes need approval");
+  });
+
+  it("an unknown server id says it does not exist", async () => {
+    setup();
+    openSrv("mcp-nope");
+    mount();
+    expect(await screen.findByText("That server does not exist.")).toBeTruthy();
   });
 
   it("shows the admin-set class next to the server's hint, and sets a tool's class and allow rule through PATCH with the version", async () => {
     const calls = setup({ "PATCH /api/v1/mcp/servers/mcp-docs-1a2b": () => ok({ server: DOCS }) });
+    openSrv("mcp-docs-1a2b", "tools");
     mount();
+    await byId("mcp-tool-0");
+    expect(document.querySelector("#mcp-tools select")).toBeNull(); // the Tools tab is switches and Read only / Writes data
+    fireEvent.click(await byId("mcp-dtab-scope"));
+    fireEvent.click(await byId("mcp-sc-edit"));
     const sel = (await byId("mcp-tool-class-2")) as HTMLSelectElement;
     expect(sel.value).toBe("read");
-    expect(sel.closest("td")!.textContent).toContain("server suggests write");
+    expect(sel.closest(".switch-row")!.textContent).toContain("server suggests write");
     fireEvent.change(sel, { target: { value: "write" } });
     await waitFor(() => expect(patches(calls)).toHaveLength(1));
     expect(patches(calls)[0]).toMatchObject({ path: "/api/v1/mcp/servers/mcp-docs-1a2b", body: { tools: [{ name: "list_pages", write: true }] }, headers: { "if-match": "4" } });
+    fireEvent.click(await byId("mcp-dtab-tools"));
     fireEvent.click(await byId("mcp-tool-1"));
     await waitFor(() => expect(patches(calls)).toHaveLength(2));
     expect(patches(calls)[1]!.body).toEqual({ tools: [{ name: "update_page", allowed: true }] });
-    expect(await screen.findByText("update_page allowed.")).toBeTruthy();
+    expect(await screen.findByText("update_page allowed")).toBeTruthy();
   });
 
   it("saves the scope as one PATCH, keeps Save disabled with a reason until something changes, and Revert restores the draft", async () => {
     const calls = setup({ "PATCH /api/v1/mcp/servers/mcp-docs-1a2b": () => ok({ server: DOCS }) });
+    openSrv("mcp-docs-1a2b", "scope");
     mount();
+    fireEvent.click(await byId("mcp-sc-edit"));
     const save = await byId("mcp-sc-save");
     expect(save.getAttribute("aria-disabled")).toBe("true");
     expect(save.getAttribute("data-reason")).toBe("No changes to save.");
@@ -153,48 +213,57 @@ describe("MCP servers screen", () => {
     expect(await screen.findByText("Scope saved for Docs wiki.")).toBeTruthy();
   });
 
-  it("access check: asks the API with the chosen agent, project, repo, station, class and tool and shows its decision and rule", async () => {
+  it("access check: only the form until Check access is pressed, then asks the API with the chosen agent and tool and shows the decision", async () => {
     let q: URLSearchParams | null = null;
     const calls = setup({ "GET /api/v1/mcp/access-check": (url) => { q = new URL(url, "http://x").searchParams; return { body: { allowed: false, reason: "Not available at 06 Verify.", rule: "station scope" } }; } });
+    openSrv("mcp-docs-1a2b", "check");
     mount();
     const res = await byId("mcp-chk-result");
+    expect(res.textContent).toBe("");
+    expect(document.getElementById("mcp-chk-more")).toBeNull();
+    expect(calls.filter((c) => c.path === "/api/v1/mcp/access-check")).toHaveLength(0);
+    fireEvent.click(await byId("mcp-chk-run"));
     await waitFor(() => expect(res.textContent).toContain("Denied"));
     expect(res.textContent).toContain("Not available at 06 Verify.");
-    expect(res.textContent).toContain("station scope");
-    expect(res.className).toContain("is-denied");
+    expect(res.querySelector(".callout.bad")).toBeTruthy();
     expect(Object.fromEntries(q!.entries())).toMatchObject({ server: "mcp-docs-1a2b", tool: "search", agent: "ag-build", project: "payments" });
-    fireEvent.change(await byId("mcp-chk-agent"), { target: { value: "ag-review" } });
-    fireEvent.change(await byId("mcp-chk-repo"), { target: { value: "payments-api" } });
-    await waitFor(() => expect(Object.fromEntries(q!.entries())).toMatchObject({ agent: "ag-review", repo: "payments-api" }));
-    expect(calls.filter((c) => c.path === "/api/v1/mcp/access-check").length).toBeGreaterThan(1);
   });
 
   it("a locked caller sees every control disabled with the reason, and nothing is sent", async () => {
     const calls = setup({}, ["mcp.edit"]);
+    openSrv("mcp-docs-1a2b");
     mount();
     expect(await screen.findByText(/Read-only for you: mcp server settings/i)).toBeTruthy();
-    for (const id of ["mcp-add", "mcp-sc-save", "mcp-remove", "mcp-recheck"]) {
-      const b = await byId(id);
-      expect(b.getAttribute("aria-disabled"), id).toBe("true");
-      expect(b.getAttribute("data-reason"), id).toMatch(/Needs Factory Admin/);
-    }
+    expect(document.getElementById("mcp-remove")).toBeNull();
+    fireEvent.click(await byId("mcp-dtab-tools"));
     expect((await byId("mcp-tool-0")).getAttribute("aria-disabled")).toBe("true");
-    expect((document.getElementById("mcp-sens") as HTMLSelectElement).disabled).toBe(true);
-    fireEvent.click(await byId("mcp-remove"));
-    expect(document.getElementById("mcp-remove-go")).toBeNull();
+    fireEvent.click(await byId("mcp-dtab-scope"));
+    expect((await byId("mcp-sc-edit")).getAttribute("aria-disabled")).toBe("true");
     expect(calls.filter((c) => c.method !== "GET" && c.path !== "/api/v1/can")).toHaveLength(0);
+  });
+
+  it("Register server is locked with the reason for a caller without mcp.edit", async () => {
+    setup({}, ["mcp.edit"]);
+    mount();
+    const b = await byId("mcp-add");
+    await waitFor(() => expect(b.getAttribute("aria-disabled")).toBe("true"));
+    expect(b.getAttribute("data-reason")).toMatch(/Needs Factory Admin/);
   });
 
   it("a server disabled by a changed definition says so, marks the tool, cannot just be switched on, and re-approval posts /approve with the version", async () => {
     const calls = setup({ "POST /api/v1/mcp/servers/mcp-chg-0001/approve": () => ok({ server: { ...CHANGED, enabled: true } }) });
+    openSrv("mcp-chg-0001", "overview");
     mount();
-    fireEvent.click(await byId("mcp-open-mcp-chg-0001"));
     const note = await byId("mcp-disabled-note");
     expect(note.textContent).toContain("Definition of search changed");
-    expect(document.querySelector(".mcp-tools tbody")!.textContent).toContain("changed");
-    const en = document.getElementById("mcp-enabled") as HTMLInputElement;
+    fireEvent.click(await byId("mcp-dtab-tools"));
+    expect((await byId("mcp-tools")).textContent).toContain("changed");
+    fireEvent.click(await byId("mcp-dtab-scope"));
+    fireEvent.click(await byId("mcp-sc-edit"));
+    const en = (await byId("mcp-enabled")) as HTMLInputElement;
     expect(en.checked).toBe(false);
     expect(en.getAttribute("data-reason")).toMatch(/Re-approve/);
+    fireEvent.click(await byId("mcp-dtab-overview"));
     fireEvent.click(await byId("mcp-approve"));
     fireEvent.click(await byId("mcp-approve-go"));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/approve"))).toBe(true));
@@ -203,60 +272,49 @@ describe("MCP servers screen", () => {
 
   it("Check again rediscovers through the edge and reports what it found", async () => {
     const calls = setup({ "POST /api/v1/mcp/servers/mcp-docs-1a2b/discover": () => ok({ msg: "Docs wiki answered with 3 tools.", server: DOCS }) });
+    openSrv("mcp-docs-1a2b", "scope");
     mount();
+    fireEvent.click(await byId("mcp-sc-edit"));
     fireEvent.click(await byId("mcp-recheck"));
     expect(await screen.findByText("Docs wiki answered with 3 tools.")).toBeTruthy();
     expect(calls.find((c) => c.path.endsWith("/discover"))!.headers["if-match"]).toBe("4");
   });
 
-  it("Add: discovery lists the server's real tools (write ones start denied, class is the admin's to set), and Add posts the choices with an idempotency key", async () => {
+  it("Add is the prototype's Name, URL, Transport form (plus sensitivity); Register discovers the tools, asks for auth only when discovery fails, and posts the discovered tools", async () => {
     let disc: any = null;
+    let n = 0;
     const calls = setup({
-      "POST /api/v1/mcp/discover": (_u, init) => { disc = JSON.parse(String(init!.body)); return ok({ msg: "Found 2 tools. Write tools start denied.", tools: [{ name: "get_issue", write: false, allowed: true, hint: "read" }, { name: "create_issue", write: true, allowed: false, hint: "write" }], protocolRevision: "2025-06-18" }); },
+      "POST /api/v1/mcp/discover": (_u, init) => { disc = JSON.parse(String(init!.body)); n += 1; return n === 1 ? ok({ msg: "Could not list tools: the server answered 401.", tools: [] }) : ok({ msg: "Found 2 tools. Write tools start denied.", tools: [{ name: "get_issue", write: false, allowed: true, hint: "read" }, { name: "create_issue", write: true, allowed: false, hint: "write" }], protocolRevision: "2025-06-18" }); },
       "POST /api/v1/mcp/servers": () => ok({ msg: "Tracker added. Scope it to projects, repos and agents before use.", server: { ...DOCS, id: "mcp-tracker-ffff", name: "Tracker" } }),
     });
     mount();
     fireEvent.click(await byId("mcp-add"));
+    expect(document.getElementById("mcp-add-auth")).toBeNull();
+    expect(document.getElementById("mcp-add-discover")).toBeNull();
+    fireEvent.click(await byId("mcp-add-go"));
+    expect(await screen.findByText("Name is required.")).toBeTruthy();
+    expect(screen.getByText("URL is required.")).toBeTruthy(); // both at once
     fireEvent.change(await byId("mcp-add-name"), { target: { value: "Tracker" } });
     fireEvent.change(await byId("mcp-add-url"), { target: { value: "https://tracker.example.net/mcp" } });
-    // add before discovery
     fireEvent.click(await byId("mcp-add-go"));
-    expect((await byId("mcp-add-err")).textContent).toMatch(/enter the secret/i);
+    await waitFor(() => expect(document.getElementById("mcp-add-err")!.textContent).toMatch(/401/));
+    fireEvent.change(await byId("mcp-add-secret"), { target: { value: "tok" } });
+    fireEvent.change(await byId("mcp-add-auth"), { target: { value: "bearer" } });
     fireEvent.change(await byId("mcp-add-secret"), { target: { value: "tok-123456" } });
     fireEvent.click(await byId("mcp-add-go"));
-    await waitFor(() => expect(document.getElementById("mcp-add-err")!.textContent).toBe("Discover tools before adding the server."));
-    fireEvent.click(await byId("mcp-add-discover"));
-    await byId("mcp-add-tool-1");
-    expect(disc).toEqual({ name: "Tracker", transport: "http", url: "https://tracker.example.net/mcp", authMode: "bearer", secret: "tok-123456" });
-    expect((document.getElementById("mcp-add-tool-0") as HTMLInputElement).checked).toBe(true);
-    expect((document.getElementById("mcp-add-tool-1") as HTMLInputElement).checked).toBe(false);
-    expect((document.getElementById("mcp-add-class-1") as HTMLSelectElement).value).toBe("write");
-    // the admin sets create_issue to read despite the server's hint, and allows it
-    fireEvent.change(document.getElementById("mcp-add-class-1")!, { target: { value: "read" } });
-    expect(document.getElementById("mcp-add-class-1")!.closest("li")!.textContent).toContain("server suggests write");
-    fireEvent.click(document.getElementById("mcp-add-tool-1")!);
-    fireEvent.click(await byId("mcp-add-go"));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/mcp/servers")).toBe(true));
+    expect(disc).toEqual({ name: "Tracker", transport: "http", url: "https://tracker.example.net/mcp", authMode: "bearer", secret: "tok-123456" });
     const add = calls.find((c) => c.method === "POST" && c.path === "/api/v1/mcp/servers")!;
-    expect(add.body).toMatchObject({ name: "Tracker", transport: "http", url: "https://tracker.example.net/mcp", authMode: "bearer", secret: "tok-123456", sensitivity: "internal", tools: [{ name: "get_issue", write: false, allowed: true }, { name: "create_issue", write: false, allowed: true }] });
+    expect(add.body).toMatchObject({ name: "Tracker", transport: "http", url: "https://tracker.example.net/mcp", authMode: "bearer", secret: "tok-123456", sensitivity: "internal", tools: [{ name: "get_issue", write: false, allowed: true }, { name: "create_issue", write: true, allowed: false }] });
     expect(add.headers["idempotency-key"]).toBeTruthy();
-    expect(await screen.findByText(/Tracker added/)).toBeTruthy();
-  });
-
-  it("Add: a discovery failure shows the reason, and changing the address drops the discovered list", async () => {
-    setup({ "POST /api/v1/mcp/discover": () => ok({ msg: "Could not list tools: Could not reach the server: connect ECONNREFUSED", tools: [] }) });
-    mount();
-    fireEvent.click(await byId("mcp-add"));
-    fireEvent.change(await byId("mcp-add-name"), { target: { value: "Tracker" } });
-    fireEvent.change(await byId("mcp-add-url"), { target: { value: "https://tracker.example.net/mcp" } });
-    fireEvent.click(await byId("mcp-add-discover"));
-    expect(await screen.findByText(/ECONNREFUSED/)).toBeTruthy();
-    expect(document.getElementById("mcp-add-tool-0")).toBeNull();
+    expect(await screen.findByText("Server registered")).toBeTruthy();
   });
 
   it("Remove: names the agents and projects that lose it, then DELETEs with the version", async () => {
     const calls = setup({ "DELETE /api/v1/mcp/servers/mcp-docs-1a2b": () => ok({ msg: "Docs wiki removed." }) });
+    openSrv("mcp-docs-1a2b", "scope");
     mount();
+    fireEvent.click(await byId("mcp-sc-edit"));
     fireEvent.click(await byId("mcp-remove"));
     const go = await byId("mcp-remove-go");
     const dlg = go.closest("[role=dialog], .dialog, .dlg")!;
@@ -267,34 +325,81 @@ describe("MCP servers screen", () => {
     expect(calls.find((c) => c.method === "DELETE")!.headers["if-match"]).toBe("4");
   });
 
-  it("Usage log: filters by server, agent, project and outcome, charts calls per server, labels removed servers and real outcomes", async () => {
+  it("Usage log: Recent tool calls panel with Outcome and Server filters, relative times, raw server ids, latency, sortable", async () => {
     setup();
     mount();
     fireEvent.click(await byId("mcp-tab-usage"));
-    const rows = () => document.querySelectorAll(".mcp-usage tbody tr");
+    const panel = await byId("mcp-usage-panel");
+    expect(panel.textContent).toContain("Recent tool calls");
+    const rows = () => document.querySelectorAll("#mcpu tbody tr");
     await waitFor(() => expect(rows()).toHaveLength(3));
-    expect(document.querySelector(".mcp-usage")!.textContent).toContain("mcp-gone (removed)");
-    expect(document.querySelector(".mcp-usage")!.textContent).toContain("✓ ok");
-    expect(document.querySelector(".mcp-usage")!.textContent).toContain("⊘ denied");
-    expect(document.querySelector(".mcp-usage")!.textContent).toContain("✕ error");
-    expect(document.querySelectorAll(".mcp-bar")).toHaveLength(2);
-    fireEvent.change(await byId("mcp-f-outcome"), { target: { value: "denied" } });
+    expect(panel.textContent).toContain("mcp-gone");
+    // outcome tones follow the prototype: ok green, gated amber, anything else red
+    const chip = (w: string) => Array.from(panel.querySelectorAll(".chip")).find((c) => c.textContent === w)!;
+    expect(chip("ok").className).toContain("ok");
+    expect(chip("denied").className).toContain("bad");
+    expect(panel.textContent).toContain("ago");
+    expect(panel.textContent).toContain("Latency");
+    expect(document.getElementById("mcpu-table-sort-at") ?? panel.querySelector("th button")).toBeTruthy();
+    fireEvent.change(await byId("mcpu-f-outcome"), { target: { value: "denied" } });
     expect(rows()).toHaveLength(1);
     expect(rows()[0]!.textContent).toContain("update_page");
     expect(rows()[0]!.textContent).toContain("Build agent");
-    expect(rows()[0]!.textContent).toContain("PAY");
-    fireEvent.change(await byId("mcp-f-outcome"), { target: { value: "all" } });
-    fireEvent.change(await byId("mcp-f-project"), { target: { value: "risk" } });
-    expect(rows()).toHaveLength(1);
-    fireEvent.change(await byId("mcp-f-project"), { target: { value: "all" } });
-    fireEvent.change(await byId("mcp-f-server"), { target: { value: "mcp-docs-1a2b" } });
+    expect(rows()[0]!.textContent).toContain("Payments Platform");
+    fireEvent.change(await byId("mcpu-f-outcome"), { target: { value: "" } });
+    fireEvent.change(await byId("mcpu-f-server"), { target: { value: "mcp-docs-1a2b" } });
     expect(rows()).toHaveLength(2);
   });
 
   it("with no servers it says so and offers Add", async () => {
     setup({ "GET /api/v1/mcp/servers": () => ({ body: [] }) });
     mount();
-    expect(await screen.findByText("No servers")).toBeTruthy();
+    expect(await screen.findByText("No MCP servers yet")).toBeTruthy();
     expect(await byId("mcp-add")).toBeTruthy();
+  });
+
+  it("a server whose address changed shows Needs re-approval in the list and on its page, with the way forward, and cannot be switched on", async () => {
+    const NEEDS = { ...DOCS, id: "mcp-new-0002", name: "Wiki two", enabled: false, disabledReason: null, needsReapproval: true, version: 5 };
+    const calls = setup({
+      "GET /api/v1/mcp/servers": () => ({ body: [DOCS, NEEDS] }),
+      "POST /api/v1/mcp/servers/mcp-new-0002/discover": () => ok({ msg: "Wiki two answered with 3 tools.", server: NEEDS }),
+    });
+    mount();
+    const row = await byId("mcp-row-mcp-new-0002");
+    expect(row.textContent).toContain("needs re-approval");
+    expect(document.getElementById("mcp-row-mcp-docs-1a2b")!.textContent).not.toContain("needs re-approval");
+    cleanup();
+    openSrv("mcp-new-0002", "overview");
+    mount();
+    const note = await byId("mcp-reapproval-note");
+    expect(note.textContent).toContain("Needs re-approval");
+    expect(note.textContent).toContain("Discover its tools and approve them before switching it on");
+    expect(document.getElementById("mcp-disabled-note")).toBeNull();
+    // The note wraps (F-11): the text takes its own row and the buttons sit in a wrapping row, so nothing runs past the panel at 320 px.
+    expect(note.querySelector(".mcp-reapproval-why")).toBeTruthy();
+    expect(note.querySelector(".mcp-reapproval-actions #mcp-reapproval-approve")).toBeTruthy();
+    expect(readFileSync(resolve(__dirname, "../styles/views/mcp.css"), "utf8")).toMatch(/#mcp-reapproval-note\s*\{\s*flex-wrap:\s*wrap/);
+    fireEvent.click(await byId("mcp-reapproval-discover"));
+    await waitFor(() => expect(calls.some((c) => c.path.endsWith("/mcp-new-0002/discover"))).toBe(true));
+    fireEvent.click(await byId("mcp-dtab-scope"));
+    fireEvent.click(await byId("mcp-sc-edit"));
+    const en = (await byId("mcp-enabled")) as HTMLInputElement;
+    expect(en.checked).toBe(false);
+    expect(en.getAttribute("data-reason")).toMatch(/Needs re-approval.*Discover its tools/);
+    fireEvent.click(en);
+    expect(patches(calls)).toHaveLength(0);
+  });
+
+  it("a failed repo read says so with Try again, instead of an empty repo list", async () => {
+    let fail = true;
+    setup({ "GET /api/v1/projects/payments/repos": () => (fail ? { status: 500, body: { ok: false, msg: "Repo store is down." } } : { body: REPOS }) });
+    openSrv("mcp-docs-1a2b", "overview");
+    mount();
+    const note = await byId("repos-read");
+    expect(note.textContent).toContain("Couldn't load every repo");
+    expect(note.textContent).toContain("Repo store is down.");
+    fail = false;
+    fireEvent.click(await byId("repos-read-retry"));
+    await waitFor(() => expect(document.getElementById("repos-read")).toBeNull());
   });
 });

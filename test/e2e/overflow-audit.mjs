@@ -1,13 +1,15 @@
 // TEST ONLY: browser audit of overflow/scroll problems across every nav screen, project page and overlay (dialogs, drawers, popovers, menus, palette).
 // Read-only: every non-GET /api request is aborted (except POST /api/v1/can, the read-only permission check), so nothing is created, approved, killed or sent. Usage: node overflow-audit.mjs <WxH> [user] [outDir]
 import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { SHOTS, ensureDir } from "./paths.mjs";
 import { session, close, sleep } from "./lib4.mjs";
 import { devSeed } from "../../packages/domain/dist/seed.js";
 import { route as routeOf, routeGates } from "../../packages/domain/dist/flow.js";
 
 const [W, H] = (process.argv[2] ?? "1366x768").split("x").map(Number);
 const USER = process.argv[3] ?? "asha";
-const OUT = process.argv[4] ?? "/tmp/claude-1000/-home-reshif-Downloads-gantry/8507a376-ec43-4ce1-a90c-9c34611957a7/scratchpad/overflow";
+const OUT = process.argv[4] ?? ensureDir(join(SHOTS, "overflow"));
 const PROJECT = "nautobot-jobs";
 mkdirSync(OUT, { recursive: true });
 const DENY = /sign out|log out|switch user/i;
@@ -89,7 +91,7 @@ await page.route(`**/api/v1/projects/${PROJECT}/floor*`, (route) => patchJson(ro
 await page.route(new RegExp(`/api/v1/projects/${PROJECT}/work-orders(\\?.*)?$`), (route) => { const u = new URL(route.request().url()); const st = u.searchParams.get("state"); const items = wosFor().filter((w) => !st || st === "all" || (st === "open" ? !["done", "killed"].includes(w.state) : w.state === st)); return route.fulfill({ json: { items: items.slice(0, Number(u.searchParams.get("limit") ?? 60)), next: null, total: items.length } }); });
 await page.route(/\/api\/v1\/work-orders\/WO-[0-9]+$/, (route) => { const id = route.request().url().split("/").pop(); const w = wosFor().find((x) => x.id === id); return w ? route.fulfill({ json: w }) : route.continue(); });
 // AUDIT_BREAK=1 re-creates the original bug (a % max-height, no scrolling) to prove the audit can see it.
-if (process.env.AUDIT_BREAK) await page.addInitScript(() => { const add = () => { const st = document.createElement("style"); st.textContent = ".dlg{max-height:none!important}.dlg-body{overflow:visible!important}.dlg-wrap{overflow:visible!important}.drawer{overflow:hidden!important}"; document.head.appendChild(st); }; document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", add) : add(); });
+if (process.env.AUDIT_BREAK) await page.addInitScript(() => { const add = () => { const st = document.createElement("style"); st.textContent = ".dlg{max-height:none!important}.dlg-body{overflow:visible!important}.dlg-wrap{overflow:visible!important}.drawer{overflow:hidden!important}"; document.head.appendChild(st); }; if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", add); else add(); });
 page.on("pageerror", (e) => console.log(`   PAGEERROR ${String(e.message).slice(0, 200)}`));
 page.on("dialog", (d) => d.dismiss().catch(() => {}));
 const vpName = `${W}x${H}`;
@@ -112,12 +114,11 @@ await page.goto(`https://localhost/#/p/${PROJECT}/floor`); await sleep(2500);
 const navHrefs = await page.$$eval("#nav a.nav-link", (as) => as.map((a) => a.getAttribute("href")));
 const pages = [...new Set([...FACTORY.map((i) => `#${i}`), ...PROJ.map((i) => `#/p/${PROJECT}/${i}`), ...navHrefs])];
 // extra routes not in the nav
-const wo = await s.api("GET", `/api/v1/work-orders?limit=1`).catch(() => null);
+await s.api("GET", `/api/v1/work-orders?limit=1`).catch(() => null);
 const woId = MOCK_WOS.find((w) => w.state === "running")?.id ?? MOCK_WOS[0]?.id;
 if (woId) pages.push(`#/p/${PROJECT}/record/${woId}`, `#/p/${PROJECT}/traveler/${woId}`);
 console.log(`${vpName}: ${pages.length} pages`, woId ? `wo ${woId}` : "");
 
-const shellSeen = new Set();
 const MAIN = '#main button:visible, #main [role=button]:visible, #main [aria-haspopup]:visible, #main summary:visible, #main tbody tr:visible, #main [tabindex="0"]:visible';
 const SHELL = '#topbar button:visible, #nav button:visible, .stop-banner button:visible';
 const LIMITS = [[/^WO-#/, 3], [/Open audit entry/, 2], [/^(Remove|Move) /, 2], [/^(Open|Edit|Delete|Invite|Put)/, 3]];

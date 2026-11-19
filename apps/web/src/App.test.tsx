@@ -37,10 +37,11 @@ function mockApi(routes: Record<string, (url: string, init?: RequestInit) => { s
 
 class FakeES {
   static instances: FakeES[] = [];
-  onopen = null;
+  onopen: ((ev: Event) => unknown) | null = null;
   onerror = null;
   constructor(public url: string) {
     FakeES.instances.push(this);
+    setTimeout(() => this.onopen?.(new Event("open")), 0);
   }
   addEventListener() {}
   close() {}
@@ -63,10 +64,20 @@ describe("signed out", () => {
   it("shows the sign-in screen with SSO and GitHub, and no demo accounts by default", async () => {
     mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "Sign in.", config: { demoAccounts: false } } }) });
     render(<App />);
-    await screen.findByText("Continue with SSO");
-    expect(screen.getByText("Continue with GitHub")).toBeTruthy();
+    await screen.findByText("Continue with Okta SSO");
+    expect(screen.queryByText("Continue with GitHub")).toBeNull(); // only when Security settings turn it on
     expect(screen.queryByText(/Demo accounts/)).toBeNull();
-    expect(document.querySelector(".auth-belt li")).toBeTruthy(); // stations from the catalogue
+    expect((screen.getByLabelText("Password") as HTMLInputElement).disabled).toBe(false);
+    expect(document.querySelector("svg.brand-mark circle")).toBeTruthy();
+    expect(screen.getByLabelText("Work email")).toBeTruthy();
+  });
+
+  it("shows the guided two-step screen when the server says a person has no second factor (MFA is for everyone)", async () => {
+    mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "Everyone signs in with two steps.", needs: "mfa_setup", config: { demoAccounts: false } } }) });
+    render(<App />);
+    await screen.findByText("Two-step sign-in is required");
+    expect(document.getElementById("auth-mfa-go")).toBeTruthy();
+    expect(screen.queryByText("Continue with GitHub")).toBeNull();
   });
 
   it("lists demo accounts only when config.demoAccounts is on, each linking with login_hint", async () => {
@@ -102,13 +113,22 @@ describe("signed out", () => {
   });
 
   it("SSO and GitHub buttons go to /auth/login with the method", async () => {
+    mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "x", config: { demoAccounts: false, githubLogin: true } } }) });
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign, hash: "", search: "" });
+    render(<App />);
+    fireEvent.click(await screen.findByText("Continue with GitHub"));
+    expect(assign.mock.calls).toEqual([["/auth/login?method=github"]]);
+  });
+
+  it("the Sign in form sends the work email to the identity provider as a login hint", async () => {
     mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "x" } }) });
     const assign = vi.fn();
     vi.stubGlobal("location", { ...window.location, assign, hash: "", search: "" });
     render(<App />);
-    fireEvent.click(await screen.findByText("Continue with SSO"));
-    fireEvent.click(screen.getByText("Continue with GitHub"));
-    expect(assign.mock.calls).toEqual([["/auth/login?method=sso"], ["/auth/login?method=github"]]);
+    fireEvent.change(await screen.findByLabelText("Work email"), { target: { value: "asha@acme.dev" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(assign.mock.calls).toEqual([["/auth/login?login_hint=asha%40acme.dev"]]);
   });
 });
 
@@ -117,27 +137,28 @@ describe("signed in", () => {
     mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [], badges: { conversations: { n: 3, label: "3 conversations waiting for you" } } } }) });
     window.location.hash = "#floor";
     render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
-    expect(Array.from(nav.querySelectorAll(".nav-group-name")).map((e) => e.textContent)).toEqual(["Overview", "Project", "Agents", "Connect", "Govern"]);
+    const nav = await screen.findByRole("navigation", { name: "Primary" });
+    expect(Array.from(nav.querySelectorAll(".nav h3")).map((e) => e.textContent)).toEqual(["Overview", "Project line", "Agents", "Connect", "Govern"]);
     expect(within(nav).getByText("Access")).toBeTruthy();
     expect(within(nav).queryByText("Work order record")).toBeNull(); // nav:false
-    expect(await screen.findByText("The floor could not be loaded")).toBeTruthy();
+    expect(await screen.findByText("Couldn't load the floor")).toBeTruthy(); // the shared failed state (ui/async)
     expect(within(nav).getByText("Floor").closest("a")?.getAttribute("aria-current")).toBe("page");
-    await waitFor(() => expect(within(nav).getByTitle("3 conversations waiting for you").textContent).toBe("3"));
-    expect(document.title).toBe("Floor · Payments Platform · Gantry Software Factory");
+    await waitFor(() => expect(within(nav).getAllByTitle("3 conversations waiting for you")[0]?.textContent).toBe("3"));
+    expect(document.title).toBe("Floor · Gantry Blueprint");
     expect(window.location.hash).toBe("#/p/payments/floor");
     expect(FakeES.instances[0]?.url).toBe("/api/v1/stream");
   });
 
-  it("hides routes the roles do not allow and falls back to home with a notice", async () => {
+  it("hides routes the roles do not allow and says so on the page asked for", async () => {
     mockApi({ "/api/v1/me": () => ({ body: meBody({ roles: [{ role: "engineer", scope: "payments" }] }) }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
     window.location.hash = "#security";
     render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
+    const nav = await screen.findByRole("navigation", { name: "Primary" });
     expect(within(nav).queryByText("Security")).toBeNull();
     expect(within(nav).queryByText("Agents")).toBeNull();
-    expect(await screen.findByText("You do not have access to Security.")).toBeTruthy();
-    expect(within(nav).getByText("Home").closest("a")?.getAttribute("aria-current")).toBe("page");
+    expect(await screen.findByText("No access to this sheet")).toBeTruthy();
+    expect(window.location.hash).toBe("#security");
+    expect(within(nav).getByText("Home").closest("a")?.getAttribute("aria-current")).toBeNull();
   });
 
   it("shows the factory kill banner from me.factory", async () => {
@@ -147,56 +168,17 @@ describe("signed in", () => {
       "/api/v1/people": () => ({ body: [person([])] }),
     });
     render(<App />);
-    expect((await screen.findByText("FACTORY KILLED")).closest(".stop-banner")?.className).toContain("is-kill");
-    expect(document.getElementById("sysbanner")?.hasAttribute("hidden")).toBe(false);
+    expect((await screen.findByText("Factory emergency stop is active.")).closest(".banner")?.className).toContain("is-kill");
   });
 
   const homeApi = () => mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
-  const headers = (nav: HTMLElement) => Array.from(nav.querySelectorAll<HTMLButtonElement>(".nav-group-btn"));
-
-  it("starts with every nav group collapsed, opens one at a time and collapses after a link", async () => {
-    sessionStorage.clear();
-    homeApi();
-    window.location.hash = "#home";
-    render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
-    expect(headers(nav).every((h) => h.getAttribute("aria-expanded") === "false")).toBe(true);
-    const [overview, , agents] = headers(nav) as [HTMLButtonElement, HTMLButtonElement, HTMLButtonElement];
-    fireEvent.click(agents);
-    expect(agents.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(overview);
-    expect(overview.getAttribute("aria-expanded")).toBe("true");
-    expect(agents.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(overview);
-    expect(overview.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(agents);
-    fireEvent.click(within(nav).getByText("Skills"));
-    await waitFor(() => expect(window.location.hash).toBe("#skills"));
-    expect(headers(nav).every((h) => h.getAttribute("aria-expanded") === "false")).toBe(true);
-  });
-
-  it("marks the group of the current page and moves between headers with arrow keys", async () => {
-    sessionStorage.clear();
-    homeApi();
-    window.location.hash = "#/p/payments/floor";
-    render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
-    const hs = headers(nav);
-    await waitFor(() => expect(headers(nav).filter((h) => h.dataset.activeGroup === "true").map((h) => h.id)).toEqual(["navg-project-btn"]));
-    expect(hs.every((h) => h.getAttribute("aria-expanded") === "false")).toBe(true);
-    hs[0]!.focus();
-    fireEvent.keyDown(hs[0]!, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(hs[1]);
-    fireEvent.keyDown(hs[1]!, { key: "End" });
-    expect(document.activeElement).toBe(hs[hs.length - 1]);
-  });
 
   it("puts the one project switcher in the top bar after the logo, none in the sidebar", async () => {
     sessionStorage.clear();
     homeApi();
     window.location.hash = "#home";
     render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
+    const nav = await screen.findByRole("navigation", { name: "Primary" });
     const top = document.querySelector("#topbar") as HTMLElement;
     expect(top.querySelector("select")).toBeNull();
     expect(screen.queryByLabelText("Current project")).toBeNull();
@@ -204,60 +186,25 @@ describe("signed in", () => {
     expect(nav.querySelector("#project-switcher")).toBeNull();
     const sw = top.querySelector("#project-switcher") as HTMLElement;
     expect(sw).toBeTruthy();
-    expect(top.querySelector(".brand")?.compareDocumentPosition(sw)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(nav.querySelector(".brand")).toBeTruthy(); // the mark and name live on the sidebar sheet
     expect(within(nav).queryByText("All projects")).toBeNull();
-    expect(nav.querySelector("#navg-project-btn")?.textContent).not.toContain("Payments");
     act(() => { window.location.hash = "#/p/payments/floor"; });
     await waitFor(() => expect(top.querySelector("#project-switcher")?.textContent).toContain("Payments Platform"));
-    expect(document.querySelector("#crumb")?.textContent).toBe("Floor"); // page path only, no project name
   });
 
   it("keeps the top bar calm: no demo pill, compact status, avatar-only user, Search field", async () => {
     mockApi({ "/api/v1/me": () => ({ body: meBody({ demo: true }) }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
     window.location.hash = "#home";
     render(<App />);
-    await screen.findByRole("navigation", { name: "Main" });
+    await screen.findByRole("navigation", { name: "Primary" });
     const top = document.querySelector("#topbar") as HTMLElement;
     expect(top.textContent).not.toContain("Demo accounts on");
-    expect(top.querySelector(".dev-dot")).toBeTruthy();
-    expect(top.querySelector("#status-cluster")?.textContent).toBe("Running");
+    // the non-production marker rides on the account button, reachable via its title
+    const acct = top.querySelector("#user-menu") as HTMLElement;
+    expect(acct.title).toContain("non-production");
+    await waitFor(() => expect(top.querySelector("#status-cluster")?.textContent).toBe("Live"));
     expect(top.querySelector(".user-name")).toBeNull();
-    expect(top.querySelector(".palette-label")?.textContent).toBe("Search");
-  });
-
-  it("icon rail shows only the five group buttons; a group opens a flyout of its items; one toggle", async () => {
-    sessionStorage.clear();
-    homeApi();
-    window.location.hash = "#/p/payments/floor";
-    updatePrefs({ navRail: true });
-    render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
-    expect(nav.querySelector("#nav-rail-toggle")).toBeNull();
-    expect(nav.querySelectorAll("a.nav-link").length).toBe(0);
-    const hs = Array.from(nav.querySelectorAll<HTMLButtonElement>(".nav-group-btn"));
-    expect(hs.map((h) => h.getAttribute("aria-label"))).toEqual(["Overview", "Project", "Agents", "Connect", "Govern"]);
-    expect(hs.filter((h) => h.dataset.activeGroup === "true").map((h) => h.id)).toEqual(["navg-project-btn"]);
-    expect(hs.every((h) => h.getAttribute("aria-haspopup") === "menu")).toBe(true);
-    fireEvent.click(hs[2]!);
-    expect(hs[2]!.getAttribute("aria-expanded")).toBe("true");
-    const menu = await screen.findByRole("menu", { name: "Agents" });
-    expect(within(menu).getAllByRole("menuitem").map((e) => e.textContent)).toContain("Skills");
-    // the single toggle is the top-bar menu button
-    fireEvent.click(screen.getByLabelText("Toggle navigation"));
-    expect(getPrefs().navRail).toBe(false);
-  });
-
-  it("disables the PROJECT group and asks to choose a project when none is selected", async () => {
-    sessionStorage.clear();
-    homeApi();
-    window.location.hash = "#home";
-    render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
-    expect(document.querySelector("#project-switcher")?.textContent).toBe("Choose a project");
-    const h = nav.querySelector("#navg-project-btn") as HTMLButtonElement;
-    expect(h.getAttribute("aria-disabled")).toBe("true");
-    fireEvent.click(h);
-    expect(h.getAttribute("aria-expanded")).toBe("false");
+    expect(top.querySelector(".palette-label")?.textContent).toBe("Search or jump to…");
   });
 
   it("switches project from the sidebar switcher and keeps the page", async () => {
@@ -271,13 +218,10 @@ describe("signed in", () => {
       return el!;
     });
     fireEvent.click(sw);
-    expect((await screen.findByText("All projects (portfolio)")).getAttribute("href")).toBe("#projects");
-    const search = await screen.findByLabelText("Find a project");
-    fireEvent.change(search, { target: { value: "ris" } });
-    const link = await screen.findByRole("link", { name: "risk" });
-    expect(link.getAttribute("href")).toBe("#/p/risk/work-orders");
-    fireEvent.click(link);
-    act(() => { window.location.hash = "#/p/risk/work-orders"; });
+    // a prototype menu: PROJECT LINE heading, All projects, then one entry per project
+    expect((await screen.findAllByText("Project line")).length).toBeGreaterThan(0);
+    expect(await screen.findByRole("menuitem", { name: /All projects/ })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("menuitem", { name: /risk/ }));
     await waitFor(() => expect(getPrefs().project).toBe("risk"));
   });
 
@@ -305,11 +249,11 @@ describe("signed in", () => {
   it("opens the command palette with Ctrl+K and runs a view", async () => {
     mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
     render(<App />);
-    await screen.findByRole("navigation", { name: "Main" });
+    await screen.findByRole("navigation", { name: "Primary" });
     act(() => {
       fireEvent.keyDown(document, { key: "k", ctrlKey: true });
     });
-    const input = await screen.findByRole("combobox", { name: "Search commands" });
+    const input = await screen.findByRole("combobox", { name: "Command palette" });
     fireEvent.change(input, { target: { value: "people" } });
     const opt = await waitFor(() => {
       const el = document.querySelector("#palette-list .pal-label");

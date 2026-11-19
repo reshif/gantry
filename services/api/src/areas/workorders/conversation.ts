@@ -20,7 +20,7 @@ async function insertMessages(tx: Tx, orgId: string, woId: string, msgs: ConvMes
     await tx.query(
       `insert into messages (org_id, id, conversation_id, author, author_kind, kind, body, data) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
        on conflict (org_id, id) do nothing`,
-      [orgId, msgId(woId, i), convIdOf(woId), m.from, authorKind(m.from), m.qid ? "question" : "text", m.text, JSON.stringify({ at: m.at, ...(m.qid ? { qid: m.qid } : {}), ...(m.chips ? { chips: m.chips } : {}) })],
+      [orgId, msgId(woId, i), convIdOf(woId), m.from, authorKind(m.from), m.qid ? "question" : "text", m.text, JSON.stringify({ at: m.at, ...(m.qid ? { qid: m.qid } : {}), ...(m.chips ? { chips: m.chips } : {}), ...(m.scripted ? { scripted: true } : {}) })],
     );
   }
 }
@@ -43,7 +43,8 @@ export async function replaceConversation(fx: Fx, woId: string, conv: Conversati
 }
 
 export async function closeConversation(fx: Fx, woId: string): Promise<void> {
-  await fx.tx.query(`update conversations set status = 'closed', updated_at = now() where org_id = $1 and id = $2`, [fx.orgId, convIdOf(woId)]);
+  // Nobody is awaited any more once the brief is confirmed or the request declined.
+  await fx.tx.query(`update conversations set status = 'closed', data = jsonb_set(data, '{awaiting}', '"nobody"'::jsonb), updated_at = now() where org_id = $1 and id = $2`, [fx.orgId, convIdOf(woId)]);
 }
 
 /** Appends one message after the existing ones (confirm-brief, answers returned to a station). */

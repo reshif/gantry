@@ -56,6 +56,8 @@ export const CONTENT_FILES: readonly RegExp[] = [
   /^(\.github\/|docs\/)?CODEOWNERS$/, /^AGENTS\.md$/, /^\.gantry\/factory\.ya?ml$/, /^package\.json$/, /^Makefile$/, /^go\.mod$/, /^pyproject\.toml$/, /^pytest\.ini$/, /^tox\.ini$/, /^setup\.cfg$/,
   /^Cargo\.toml$/, /^pom\.xml$/, /^build\.gradle(\.kts)?$/, /^\.tool-versions$/, /^\.nvmrc$/, /^\.node-version$/, /^\.python-version$/, /^rust-toolchain(\.toml)?$/, /^requirements[^/]*\.txt$/,
   /^\.github\/workflows\/[^/]+\.ya?ml$/, /^docker-compose[^/]*\.ya?ml$/, /^compose[^/]*\.ya?ml$/,
+  // What a person would read first to understand the repository. Read only; the Intake agent reads them (read_file) to write a brief that fits the code.
+  /^(docs\/)?README(\.(md|markdown|rst|txt))?$/i, /^CONTRIBUTING(\.(md|markdown|rst|txt))?$/i,
 ];
 export const wantsContent = (path: string): boolean => CONTENT_FILES.some((r) => r.test(path));
 
@@ -138,7 +140,7 @@ export function parseCodeowners(src: string): { rules: OwnerRule[]; invalid: { l
     const parts = line.split(/\s+/);
     const pattern = parts[0]!;
     const owners = parts.slice(1);
-    if (pattern.startsWith("!") || /[\[\]]/.test(pattern)) return void invalid.push({ line: i + 1, text: raw.trim(), why: "GitHub does not support this pattern syntax in CODEOWNERS" });
+    if (pattern.startsWith("!") || /[[\]]/.test(pattern)) return void invalid.push({ line: i + 1, text: raw.trim(), why: "GitHub does not support this pattern syntax in CODEOWNERS" });
     const bad = owners.find((o) => !/^@[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)?$/.test(o) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(o));
     if (bad) return void invalid.push({ line: i + 1, text: raw.trim(), why: `"${bad}" is not a user, team or email` });
     rules.push({ pattern, owners, line: i + 1 });
@@ -532,7 +534,7 @@ export function judgeProtections(f: RepoFacts, requiredChecks: string[]): Readin
   const ruleOk = !!pr && !missingCi.length;
   const ruleWhy = !active.length ? "No active ruleset on the default branch." : !pr ? "No active ruleset requires a pull request with at least one approval and code-owner review." : `Required checks missing from the ruleset: ${missingCi.join(", ")}.`;
   return [
-    { id: "installation", label: L("installation"), ok: !!inst && inst.targetType === "Organization" && !lacking.length, detail: !inst ? "The installation could not be read." : inst.targetType !== "Organization" ? `The App is installed on a ${inst.targetType ?? "unknown"} account, not an organisation. Gantry expects an organisation-level install (spec 11.3), so that org owners control the App and the branch ruleset. For a personal repository this is not a safety problem: move the repository to an organisation and install the App there, or have a person with authority record "Ready by exception" with the reason (the Onboarding Agent can propose it).` : lacking.length ? `Missing permissions: ${lacking.join(", ")}.` : "Installed at organisation level with the expected permissions." },
+    { id: "installation", label: L("installation"), ok: !!inst && inst.targetType === "Organization" && !lacking.length, detail: !inst ? "The installation could not be read." : inst.targetType !== "Organization" ? `The App is installed on a ${inst.targetType ?? "unknown"} account, not an organisation. Gantry expects an organisation-level install, so that org owners control the App and the branch ruleset. For a personal repository this is not a safety problem: move the repository to an organisation and install the App there, or have a person with authority record "Ready by exception" with the reason (the Onboarding Agent can propose it).` : lacking.length ? `Missing permissions: ${lacking.join(", ")}.` : "Installed at organisation level with the expected permissions." },
     { id: "ruleset", label: L("ruleset"), ok: ruleOk, detail: ruleOk ? `Ruleset "${pr!.name}" is active.` : ruleWhy },
     { id: "gantry_check", label: L("gantry_check"), ok: p.requiresGantryCheck && p.gantryCheckPinned, detail: !p.requiresGantryCheck ? "No active ruleset requires the Gantry check." : !p.gantryCheckPinned ? "The Gantry check is required but not pinned to the Gantry App." : "The Gantry check is required and pinned." },
     { id: "bypass", label: L("bypass"), ok: !p.appOnBypassList, detail: p.appOnBypassList ? "The Gantry App is on a bypass list. Remove it: Gantry must never be able to bypass the rules." : "The App is on no bypass list." },

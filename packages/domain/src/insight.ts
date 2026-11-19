@@ -464,6 +464,8 @@ export interface WaitingGate {
   gate: string;
   since: number;
   eligible: string[];
+  /** The eligible people the rule reaches, without Factory Admins (who can always approve and are the standing fallback): "sole approver" counts these. */
+  named: string[];
   glass: string[];
   trustNote: string | null;
 }
@@ -491,7 +493,8 @@ export function workloadSummary(state: InsightState, o: { ids: string[]; days?: 
         if (/break-glass/.test(d.reason)) glass.push(p.id);
         else elig.push(p.id);
       }
-      gates.push({ wo: w, gate: k, since: gs.waitingSince || w.createdAt, eligible: elig, glass, trustNote: gs.trustNote || null });
+      const isFA = (id: string): boolean => (people.find((x) => x.id === id)?.roles ?? []).some((g) => g.role === "factory_admin" && g.scope === "factory");
+      gates.push({ wo: w, gate: k, since: gs.waitingSince || w.createdAt, eligible: elig, named: elig.filter((id) => !isFA(id)), glass, trustNote: gs.trustNote || null });
     }
   }
   const rows = people
@@ -500,7 +503,7 @@ export function workloadSummary(state: InsightState, o: { ids: string[]; days?: 
       const appr = mine.filter((a) => a.kind !== "answer");
       const waits = appr.map((a) => a.waitMin).filter((x): x is number => x != null);
       const waiting = gates.filter((g) => g.eligible.includes(p.id));
-      const sole = waiting.filter((g) => g.eligible.length === 1);
+      const sole = waiting.filter((g) => g.named.length === 1 && g.named[0] === p.id);
       const glass = gates.filter((g) => g.glass.includes(p.id)).length;
       const inProj = p.roles.some((g) => g.scope === "factory" || inIds(g.scope));
       return {

@@ -9,7 +9,7 @@ const api = new ApiClient(cfg);
 const store = cfg.s3 ? new S3ObjectStore(cfg.s3) : new NoObjectStore();
 const gw = buildGateway({ cfg, api, store });
 if (!cfg.s3) gw.app.log.warn("no object storage configured: traces are dropped and checkpoints are refused");
-const proxy = buildProxy({ cfg, api, logger: gw.app.log });
+const proxy = buildProxy({ cfg, api, logger: gw.app.log, guard: gw.guard });
 
 await gw.app.listen({ host: "0.0.0.0", port: cfg.modelPort });
 await new Promise<void>((resolve) => proxy.server.listen(cfg.proxyPort, "0.0.0.0", resolve));

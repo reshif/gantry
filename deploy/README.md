@@ -2,6 +2,8 @@
 
 Everything runs in one Docker Compose project plus per-run containers that `gantry-launcher` creates on demand (spec section 3). Requirements: Docker Engine with Compose v2.24+, `openssl`, `curl`.
 
+This page is the local development stack. For a server, use the production profile: [PRODUCTION.md](PRODUCTION.md).
+
 ## Start
 
 ```bash
@@ -18,7 +20,7 @@ Open https://localhost. Caddy signs a certificate from its local CA; either acce
 docker compose -f deploy/compose.yml cp ingress:/data/caddy/pki/authorities/local/root.crt ./gantry-local-root.crt
 ```
 
-Sign in with a seeded demo account, for example `asha` / `gantry-dev` (all 15 people from the legacy seed exist; the username is the email prefix and the `gantry_id` claim is the legacy id such as `p-asha`). **The demo accounts and the shared password are for local development only.** Mail sent by the stack appears at https://localhost/mail/. Keycloak's admin console is at https://localhost/idp/ (`admin`, password in `deploy/secrets/keycloak_admin_password`).
+Sign in with a seeded demo account, for example `asha` / `gantry-dev` (all 15 people from the legacy seed exist; the username is the email prefix and the `gantry_id` claim is the legacy id such as `p-asha`). **The demo accounts and the shared password are for local development only, and MFA is required for everyone: a demo person has no authenticator yet, so with `GANTRY_DEV_SEED=true` either opt in to the waiver on this throwaway stack (`GANTRY_DEV_ADMIN_MFA_OPTIONAL=true` in `deploy/.env`, off by default and refused off localhost) or enrol each person from the one-time link Keycloak mails to Mailpit.** Mail sent by the stack appears at https://localhost/mail/ (development profile only, see below). Keycloak's admin console is at http://localhost:8081/idp/admin/ on the host itself (`admin`, password in `deploy/secrets/keycloak_admin_password`); it is not served on the public site.
 
 Stop and wipe: `docker compose -f deploy/compose.yml down -v`.
 
@@ -32,17 +34,46 @@ Stop and wipe: `docker compose -f deploy/compose.yml down -v`.
 | `egress` | yes | edge, github |
 | `run-<id>` (internal, per run) | no | one runner plus the edge |
 
-Ingress routes: `/api/*`, `/auth/*`, `/hooks/*` to `gantry-api:8000` (no buffering, so server-sent events stream); `/idp/*` to Keycloak `:8081`; `/mail/*` to Mailpit `:8025`; everything else to `gantry-web:8080`.
+Ingress routes: `/api/*`, `/auth/*`, `/hooks/*` to `gantry-api:8000` (no buffering, so server-sent events stream); `/idp/realms/gantry/*` and `/idp/resources/*` to Keycloak `:8081`; any other `/idp/*` path (the admin console, the admin REST API, the `master` realm) answers 404; everything else to `gantry-web:8080`.
 
-Every Gantry container is read-only with a `/tmp` tmpfs, `cap_drop: ALL`, `no-new-privileges`, uid 10001, a restart policy of `unless-stopped` and a healthcheck. Third-party images get what they can take: Postgres runs as uid 70, MinIO and Mailpit as 10001, and Keycloak keeps a writable root filesystem because `start-dev` rebuilds at boot (use an optimized image in production). The worker has no HTTP port and relies on the HEALTHCHECK in its own Dockerfile.
+`GANTRY_INGRESS_PROFILE` picks the development routes from `caddy/profiles/`. The default is `prod`, which adds nothing: no `/mail`, no `/v3`. `dev` is an explicit opt-in that adds `/mail/*` (Mailpit `:8025`, which holds every invite link and notification mail) and the `/v3` design preview. **To keep Mailpit at `/mail/` and the preview at `/v3/` on a local or preview stack, set `GANTRY_INGRESS_PROFILE=dev`** in the environment `docker compose` runs with (an exported variable, or the compose env file you already use) before the next `up`; recreate only the `ingress` service for it to take effect (`docker compose -p gantry up -d ingress`). Never set it on a stack that binds beyond loopback. The demo accounts are separately tied to a localhost URL (`core/config.ts`).
+
+### Back-channel logout (sessions end with the identity)
+
+The API serves `POST /auth/backchannel-logout` (OIDC Back-Channel Logout 1.0). Keycloak posts a signed logout token there when a user signs out at Keycloak, is disabled, or has sessions revoked; the API verifies it (signature, issuer, audience, age, event) and revokes the matching Gantry sessions. The realm files set the client's `backchannel.logout.url` to `http://gantry-api:8000/auth/backchannel-logout` (container to container, never through the ingress) with session required. A realm that already exists is not re-imported, so on a running stack set it by hand once: Keycloak admin console, realm `gantry`, client `gantry-web`, Settings, Logout settings, "Backchannel logout URL" `http://gantry-api:8000/auth/backchannel-logout`, "Backchannel logout session required" on.
+
+### Vendor LAN ranges (on-prem models)
+
+The model gateway (edge) refuses vendor endpoints that are loopback, link-local (metadata), on a Gantry network or private, resolving the name on every call. An on-prem vendor on a private address needs its range listed: Security setting `vendorLanRanges` (IPv4 CIDR inside 10/8, 192.168/16 or 100.64/10), set by a Factory Admin with a fresh sign-in and audited. `EDGE_ALLOW_PRIVATE_UPSTREAMS=true` turns the edge guard off for a development stack.
+
+What is never openable (`CONTROL_CIDRS` in `packages/domain/src/netguard.ts`): the pinned compose networks (control 10.89.17.0/24, front 172.18, dockerapi 172.19, egress 172.20, launch 172.22, wsapi 172.23, all /16) and Docker's whole default pool **172.16.0.0/12** (per-run networks and docker0 come from it). A range that overlaps any of them is refused when saved, so:
+- **172.16.0.0/12 is not a LAN range.** A model host on a 172.16-172.31 address stops working at the edge and cannot be listed.
+- **10.0.0.0/8 is refused** because it covers 10.89.17.0/24. List the real range instead, for example `10.0.0.0/16`.
+- Compose service names (`gantry-*`, `postgres`, `minio`, `keycloak`, `mailpit`, ...) are never a vendor host.
+
+Pinning the compose subnets matches what the existing stack already uses; on a stack created before the pin, `docker compose up` sees a changed network definition and recreates the networks (and the containers on them), so apply it in a maintenance window.
+
+**If your model host really is on 172.16-31:** move Docker's pool away from the corporate LAN, then narrow `CONTROL_CIDRS` to match.
+1. Pick a pool the LAN does not use, for example `10.200.0.0/16` split into /24 (it must not overlap the LAN or 10.89.17.0/24).
+2. On the Docker host, edit `/etc/docker/daemon.json`: `{ "default-address-pools": [ { "base": "10.200.0.0/16", "size": 24 } ] }`.
+3. Stop the stack (`docker compose -p gantry down`), restart the daemon (`systemctl restart docker`), remove the old gantry networks if `down` left any, and change the `ipam` subnets in `deploy/compose.yml` (front, dockerapi, egress, launch, wsapi) to blocks inside the new pool.
+4. In `packages/domain/src/netguard.ts` replace `172.16.0.0/12` and the old 172.x /16 entries in `CONTROL_CIDRS` with the new pool and the new subnets, rebuild and redeploy the API and edge.
+5. Then list the model host's 172.x range in Security.
+Do this only with the owner's agreement: it changes the networks of every container.
+
+### Keycloak admin console
+
+The ingress serves the admin console on a second listener published as `127.0.0.1:8081` only. From another machine, tunnel to it: `ssh -L 8081:127.0.0.1:8081 <host>`, then open http://localhost:8081/idp/admin/. `KC_HOSTNAME_ADMIN` points Keycloak's admin links at this address.
+
+Every Gantry container is read-only with a `/tmp` tmpfs, `cap_drop: ALL`, `no-new-privileges`, uid 10001, a restart policy of `unless-stopped` and a healthcheck. Third-party images get what they can take: Postgres runs as uid 70, MinIO and Mailpit as 10001, and Keycloak keeps a writable root filesystem because `start-dev` rebuilds at boot (the production profile runs an optimized build, read-only). The worker has no HTTP port and relies on the HEALTHCHECK in its own Dockerfile.
 
 ## Run networks and the address pool
 
-Docker's default pools allow only a few dozen bridge networks. The launcher therefore gives each run an explicit `/28` taken from a dedicated range, `10.213.0.0/16` by default (`RUN_SUBNET_POOL`), capped at `MAX_CONCURRENT_RUNS` (32). Keep that range free on the host: do not use it for a VPN, a LAN or Docker's own `default-address-pools` in `/etc/docker/daemon.json`. Compose's own networks come from Docker's defaults, which do not overlap it. The launcher also checks every existing network's subnet before choosing one.
+Docker's default pools allow only a few dozen bridge networks. The launcher therefore gives each run an explicit `/28` taken from a dedicated range, `10.213.0.0/16` by default (`RUN_SUBNET_POOL`), capped at `MAX_CONCURRENT_RUNS` (unset by default: derived from the host's memory and CPUs at launcher start, at most 32; see "Sandbox hardening"). Keep that range free on the host: do not use it for a VPN, a LAN or Docker's own `default-address-pools` in `/etc/docker/daemon.json`. Compose's own networks come from Docker's defaults, which do not overlap it. The launcher also checks every existing network's subnet before choosing one.
 
 ## Launcher
 
-`gantry-launcher` listens on `launch` only and needs the Docker socket, which is root-equivalent on the host (spec 5.5; rootless Docker narrows it). `DOCKER_GID` must be the socket's group id (`stat -c %g /var/run/docker.sock`; Docker Desktop on macOS usually needs `0`; for a non-default socket set `DOCKER_SOCKET`). API, authenticated with `launcher_token`:
+`gantry-launcher` listens on `launch` and holds no Docker socket. Every Docker call goes to `gantry-sockproxy` over the internal `dockerapi` network. The proxy containers (`gantry-sockproxy` for the launcher, `gantry-sockproxy-ws` for the GitHub broker's workspace helper) are the only containers with the socket, which is root-equivalent on the host (spec 5.5; rootless Docker narrows it further). It lets through only the launcher's own calls (`services/launcher/src/sockpolicy.ts`), only on containers, networks and volumes carrying the `gantry.managed-by=gantry-launcher` label. It accepts a container create only when it matches the fixed runner template: an allow-listed image, its own `run-<id>` network and `ws-<id>` volume, a read-only root, all capabilities dropped, `no-new-privileges`, and no privileged mode, binds, devices, host namespaces, published ports or other runtimes. It refuses exec, build, image pulls and everything else with a 403 and logs the reason. `DOCKER_GID` must be the socket's group id (`stat -c %g /var/run/docker.sock`; Docker Desktop on macOS usually needs `0`; for a non-default socket set `DOCKER_SOCKET`). API, authenticated with `launcher_token`:
 
 | Call | Effect |
 | --- | --- |
@@ -54,18 +85,97 @@ Seeding order (spec 4.3): the launcher does not clone. Call `POST /v1/runs` with
 
 ## Configuration
 
-Non-secret settings come from environment variables in `compose.yml`; override them in your shell or a `deploy/.env` file: `GANTRY_ORG_ID`, `GANTRY_ORG_NAME`, `GANTRY_DEV_DEMO_ACCOUNTS`, `GANTRY_DEV_SEED`, `GANTRY_BOOTSTRAP_ADMIN_EMAIL`, `OIDC_GITHUB_IDP_ALIAS`, `RUNNER_VARIANTS`, `RUN_SUBNET_POOL`, `MAX_CONCURRENT_RUNS`, `DOCKER_GID`, `DOCKER_SOCKET`, `GANTRY_SECRETS_DIR`, `MINIO_IMAGE`, `KEYCLOAK_IMAGE`. Set `COMPOSE_PROJECT_NAME` (or `-p`) to run a second copy; the launcher finds the edge through the compose project label.
+Non-secret settings come from environment variables in `compose.yml`; override them in your shell or a `deploy/.env` file: `GANTRY_ORG_ID`, `GANTRY_ORG_NAME`, `GANTRY_DEV_SEED`, `GANTRY_BOOTSTRAP_ADMIN_USERNAME`, `GANTRY_BOOTSTRAP_ADMIN_EMAIL` (where the bootstrap admin's one-time enrolment link goes), `OIDC_GITHUB_IDP_ALIAS`, `RUNNER_VARIANTS`, `RUN_SUBNET_POOL`, `MAX_CONCURRENT_RUNS`, `DOCKER_GID`, `DOCKER_SOCKET`, `GANTRY_SECRETS_DIR`, `MINIO_IMAGE`, `KEYCLOAK_IMAGE`, `GANTRY_HOSTNAME`, `GANTRY_TLS`, `GANTRY_IMAGE_PREFIX`, `GANTRY_VERSION`, and the `GANTRY_BACKUP_*` settings (PRODUCTION.md). Set `COMPOSE_PROJECT_NAME` (or `-p`) to run a second copy; the launcher finds the edge through the compose project label.
+
+## Sandbox hardening
+
+Limits and host settings the run sandbox relies on (findings S-90 to S-102 of the sandbox review).
+
+**Workspace size (S-90).** Each run's `/workspace` is capped at `WORKSPACE_MAX_MB` (default 10240). The wrapper inside the run measures it every 5 seconds and, over the cap, stops the run with the failure `workspace_over_limit` ("workspace over N GB"). For a hard cap set `WORKSPACE_BACKING=tmpfs`: the launcher then creates the volume as a size-limited tmpfs (`type=tmpfs`, `o=size=<n>m,uid=10001,gid=10001,mode=0755`; the socket proxy allows exactly that shape and nothing else). A tmpfs workspace is memory, charged to the run's own memory limit, so use it only where RAM allows (ext4 has no per-volume quota without special mount options). The default is `disk`.
+
+**Free-disk floor (S-90).** The launcher refuses to start a new run when the host's free disk is under `MIN_FREE_DISK_GB` (default 20). It measures the filesystem of the read-only `diskprobe` volume, which is the one run volumes, Postgres and MinIO share; the dispatch is deferred with the reason "host free disk is X GB, under the Y GB floor". Alert on host disk as well (node exporter or equivalent); the guard does not replace an alert.
+
+**Concurrency against the host (S-93).** At start the launcher compares `MAX_CONCURRENT_RUNS` x `RUNNER_MEMORY_MB` with the host's memory minus `CONTROL_PLANE_MEMORY_MB` (default 4096), times `RUN_MEMORY_OVERCOMMIT_RATIO` (default 1.5), and the CPUs likewise (`RUN_CPU_OVERCOMMIT_RATIO`, default 2). With `MAX_CONCURRENT_RUNS` unset it picks the largest value that fits (a 14 GiB, 12 CPU host gets 3). A value that does not fit is refused at start with the numbers in the log. The control-plane services carry `mem_limit`, `mem_reservation`, `pids_limit` and a negative `oom_score_adj` in `compose.yml` (production values stay in `compose.prod.yml`).
+
+**Per-source caps at the edge (S-92, S-102).** `EDGE_SOURCE_MAX_CONNECTIONS` (128 per listener), `EDGE_SOURCE_REQUESTS_PER_MINUTE` (1200) and `EDGE_TOKEN_FAILURES_PER_MINUTE` (20) bound what one run (one source address) can do; over a cap the edge answers 429 and logs `edge source over its cap`. `EDGE_RUN_SUBNET` must be a valid CIDR (the edge refuses to start otherwise) and must contain the launcher's `RUN_SUBNET_POOL` (the launcher refuses to start otherwise); compose derives both from `RUN_SUBNET_POOL`.
+
+**Continuous disk monitor (G-S8).** The launcher reads host free disk every `DISK_CHECK_SECONDS` (5), not only when a run starts. Under `MIN_FREE_DISK_GB` it admits no new run (dispatches wait: the order shows "Waiting: host disk low"). Under `DISK_HARD_FLOOR_GB` (default half the floor) it stops the run whose workspace grew fastest (it reads volume sizes from the Docker `system/df` call, which the socket proxy now allows; sizes are tracked every tick when free space is under twice the floor, once a minute otherwise) with its workspace kept as evidence for an hour. The worker's reaper reads the launcher's `criticalStops` and ends that run's attempt with the blocker "Host disk critically low", which the order's traveler and record show and the Inbox lists for people who may view the audit. A new run also needs free space of at least the floor plus (workspaces held + 1) x `WORKSPACE_MAX_MB`. The wrapper's own measure counts files that were deleted while still open (it sums the blocks of every open descriptor under `/workspace`) and stops the run when a measurement fails three times in a row. With `WORKSPACE_BACKING=tmpfs` the size must fit inside `RUNNER_MEMORY_MB`; a larger size is refused at start.
+
+**Waiting is not failing (G-S3).** When the launcher has no run slot, or the disk is under its floor, the dispatch waits, for as long as it takes, and never fails the attempt or spends its retry budget. The traveler and Record (`wait` field) show "Waiting for a run slot (n queued)" or "Waiting: host disk low"; the Home attention list raises an item for a disk wait at once and for a slot wait after 10 minutes, for people who hold `audit.view` factory-wide (Factory Admins, Auditor). `WORKER_MAX_DISPATCH_DEFERRALS` is no longer used by dispatch. Alert on a dispatch that has waited a long time. The run's wall clock starts when its runner starts, not while it waits.
+
+**Guarantee level (R2).** Without `WORKSPACE_BACKING=tmpfs` or the fixed-size filesystem below, the workspace cap is best-effort: the wrapper's measure (tree plus deleted-but-open files) can be evaded by a process that makes itself non-dumpable or hides its descriptors from `/proc`, and a fast writer overshoots between checks. Only a size-limited tmpfs or a fixed-size filesystem is a hard guarantee.
+
+**Production-grade hard cap: a fixed-size filesystem for run volumes.** The measure above is a guard with a delay; a hard cap needs the kernel. ext4 has no per-directory quota without special mount options, so give run volumes a filesystem of their own, of fixed size, and keep Postgres and MinIO off it. Run these on the host with the stack stopped, after a backup, and try them on a test host first (`/srv/gantry` and 200G are examples):
+
+```bash
+docker compose -f deploy/compose.yml down
+# 1. Postgres and MinIO leave the Docker volume area: copy them to /srv/gantry and bind-mount them (compose: pgdata and objdata as bind mounts of these paths).
+sudo mkdir -p /srv/gantry/pgdata /srv/gantry/objdata
+sudo rsync -aHAX /var/lib/docker/volumes/gantry_pgdata/_data/ /srv/gantry/pgdata/
+sudo rsync -aHAX /var/lib/docker/volumes/gantry_objdata/_data/ /srv/gantry/objdata/
+# 2. A fixed-size sparse image, formatted ext4 with no reserved blocks, mounted over Docker's volume directory.
+sudo systemctl stop docker docker.socket
+sudo mkdir -p /var/lib/docker/volumes.old && sudo rsync -aHAX /var/lib/docker/volumes/ /var/lib/docker/volumes.old/
+sudo truncate -s 200G /var/lib/gantry-runs.img
+sudo mkfs.ext4 -F -m 0 -L gantry-runs /var/lib/gantry-runs.img
+echo '/var/lib/gantry-runs.img /var/lib/docker/volumes ext4 loop,nosuid,nodev,noatime 0 2' | sudo tee -a /etc/fstab
+sudo mount /var/lib/docker/volumes
+sudo rsync -aHAX /var/lib/docker/volumes.old/ /var/lib/docker/volumes/
+sudo systemctl start docker
+```
+
+A run that fills this filesystem gets ENOSPC inside it and stops; the host disk, Postgres and MinIO are unaffected. With XFS the same is done with a project quota (`mount -o prjquota`, `xfs_quota -x -c 'project -s -p <dir> <id>' -c 'limit -p bsoft=10g bhard=10g <id>' /var/lib/docker/volumes`), set per `ws-*` directory by a host-side job. Point `DISK_PROBE_PATH` at the same filesystem (the `diskprobe` volume does, since it lives under the mount).
+
+**What the git front does and does not do (G-S6).** The agent's shell finds `/opt/gantry-wrapper/bin/git` first. It runs only status, diff, log, show, add, commit, rev-parse, ls-files, rm, mv, restore and branch, only on `/workspace/.git` with the work tree `/workspace` (a `.git` file, a symlink or `core.worktree` pointing elsewhere is refused), only when the repository config holds nothing but the keys a seeded repository has (`user.*`, basic `core.*`, `remote.*.url` and `fetch`, `branch.*`), and with every caller-set `GIT_CONFIG_*` dropped. Edit, Write and NotebookEdit are denied on `.git`, `**/.git`, `**/gitdir`, `.gitattributes` and `.gitmodules`. **This does not make the shell safe.** A "may run tests" agent runs arbitrary code by design (`npm test`, `pytest`, `go test` run whatever the repository says, can call `/usr/bin/git` directly and can write `.git/config`); the container is the boundary for that, not the front. The front only narrows what an agent that may write the branch but not run tests can do.
+
+**Host settings to apply (not done by compose).**
+
+* S-99 `ptrace_scope`: the run token lives in the wrapper's memory, protected from tool processes of the same uid only by Yama. Require `kernel.yama.ptrace_scope` of 1 or higher: `echo 'kernel.yama.ptrace_scope = 1' | sudo tee /etc/sysctl.d/60-gantry-yama.conf && sudo sysctl --system`, and verify with `cat /proc/sys/kernel/yama/ptrace_scope`. A host without Yama is not supported.
+* S-97 host services: a run's internal network still reaches the host through the bridge address. Bind every host service to `127.0.0.1` (sshd `ListenAddress`, dev servers, node exporter `--web.listen-address=127.0.0.1:9100`), check with `ss -ltn` (only `127.0.0.x` and `::1`), and drop run traffic to the host: `sudo iptables -I DOCKER-USER -s 10.213.0.0/16 -d <host addresses> -j DROP` for each non-loopback host address (or an equivalent `INPUT` rule for `10.213.0.0/16`), adjusted if `RUN_SUBNET_POOL` differs. Repeat for IPv6 if enabled.
+* S-98 edge forwarding: compose sets `net.ipv4.ip_forward=0` on `gantry-edge`. Confirm with `docker exec <edge> cat /proc/sys/net/ipv4/ip_forward` (0) after a deploy.
+* S-100 cost and turns: set a per-run or project cost ceiling for every project (without one a run spends until its wall clock); `--max-turns` is a harness flag only. Not fixed in code yet.
+* S-101 egress hosts: `DEFAULT_RUN_HOSTS` gives every station GitHub, npm, yarn, Go, crates, Maven and RubyGems; a station that builds nothing does not need them. Trim per project. Per-station defaults are not implemented yet.
 
 ## Keycloak realm
 
-`keycloak/realm-gantry.json` is imported at start (`start-dev --import-realm`). The confidential client `gantry-web` uses the authorization-code flow with PKCE `S256` required and redirect URI `https://localhost/auth/callback`; direct password grants are off. Its secret is `${GANTRY_OIDC_CLIENT_SECRET}` in the JSON: the container's entrypoint reads `/run/secrets/oidc_client_secret` into that variable inside the container just before starting Keycloak, and Keycloak substitutes it during import (nothing is passed through compose environment). Tokens carry `gantry_id`, `gantry_title`, `acr` and `auth_time`. For step-up (spec 14.1) the API requests `prompt=login` (or `max_age=0`) and checks `auth_time`; Keycloak does not issue `amr` without extensions, and no second factor is configured locally. The issuer is `https://localhost/idp/realms/gantry`; because `localhost` inside a container is the container itself, the API reaches Keycloak at `OIDC_INTERNAL_URL=http://keycloak:8081/idp/realms/gantry` (Keycloak runs with `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true`, so discovery fetched there advertises internal back-channel URLs and the public issuer).
+`keycloak/realm-gantry.json` is imported at start (`start-dev --import-realm`). The confidential client `gantry-web` uses the authorization-code flow with PKCE `S256` required and redirect URI `https://localhost/auth/callback`; direct password grants are off. Its secret is `${GANTRY_OIDC_CLIENT_SECRET}` in the JSON: the container's entrypoint reads `/run/secrets/oidc_client_secret` into that variable inside the container just before starting Keycloak, and Keycloak substitutes it during import (nothing is passed through compose environment). Tokens carry `gantry_id`, `gantry_title`, `acr` and `auth_time`. For step-up (spec 14.1) the API requests `prompt=login` (or `max_age=0`) and checks `auth_time`; MFA is required for everyone (the realm's `gantry-browser` flow: password, then an authenticator app, security key or recovery code the person already has; a person with none is refused and enrols only from a one-time admin-issued link; checked by the API from `acr`/`amr`). `GANTRY_DEV_ADMIN_MFA_OPTIONAL=true` is an explicit dev opt-in that waives it, false by default.yml), see PRODUCTION.md. The issuer is `https://localhost/idp/realms/gantry`; because `localhost` inside a container is the container itself, the API reaches Keycloak at `OIDC_INTERNAL_URL=http://keycloak:8081/idp/realms/gantry` (Keycloak runs with `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true`, so discovery fetched there advertises internal back-channel URLs and the public issuer).
+
+People can't change their own email address or username in Keycloak's account console: in the realm's user profile, both are editable by admins only. Gantry links a person by their verified email the first time they sign in, so a self-edited address could otherwise claim someone else's Gantry account. An invited person is claimed only through the invite email's link, which carries a one-time token (valid 14 days, single use).
+
+`--import-realm` skips a realm that already exists, so an existing install picks up realm changes only by hand. For the user-profile change above, put the profile from `realm-gantry.json` (component `UserProfileProvider`) through the admin API on the loopback admin port: `PUT http://localhost:8081/idp/admin/realms/gantry/users/profile`.
 
 ## Image sources
 
-Docker Hub rate-limits anonymous pulls; retry or set `KEYCLOAK_IMAGE` / `MINIO_IMAGE` to a mirror. MinIO's default is the Quay image `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`.
+Every third-party image is pinned by version and digest in `compose.yml` and the Dockerfiles; Dependabot proposes updates. Gantry's own images are `gantry-<name>:dev` when built locally and `${GANTRY_IMAGE_PREFIX}gantry-<name>:${GANTRY_VERSION}` for a release. Docker Hub rate-limits anonymous pulls; retry or set `KEYCLOAK_IMAGE` / `MINIO_IMAGE` to a mirror. MinIO no longer publishes images, so the default is the community build `pgsty/minio` of the same server.
+
+Backups and the restore drill run locally too: `docker compose -f deploy/compose.yml --profile backup run --rm gantry-backup now`, then `... gantry-backup drill` (PRODUCTION.md, "Backups").
 
 ### First sign-in and demo data
 
-A new install starts with an empty organisation: built-in roles, the default role matrix and security settings, and nobody signed in. Set `GANTRY_BOOTSTRAP_ADMIN_EMAIL` to the address of the first administrator; the first sign-in with that email (while the org has no Factory Admin) becomes Factory Admin. People are otherwise created on first sign-in with no roles until an admin grants some.
+A new install starts with an empty organisation: built-in roles, the default role matrix and security settings, and nobody signed in. The first administrator is a username and an initial password you set: put `GANTRY_BOOTSTRAP_ADMIN_USERNAME` in `deploy/.env` and write the initial password into the file `deploy/secrets/bootstrap_admin_password` (at least 12 characters, not a default; `generate.sh` leaves it empty and never generates it). While the org has no Factory Admin, the API creates that user in the Keycloak `gantry` realm with a temporary password and the required actions to change it and set up an authenticator app (TOTP); the first sign-in by that user becomes Factory Admin, with the same second-factor requirement as every Factory Admin. A weak or missing password is refused and logged, and nothing is created. Once a Factory Admin exists, the settings do nothing and a changed secret never resets the account. `GANTRY_BOOTSTRAP_ADMIN_EMAIL` (first verified sign-in with that email) still works but is deprecated. People are otherwise created on first sign-in with no roles until an admin grants some.
 
-`GANTRY_DEV_SEED=true` loads the legacy demo organisation (20 people, 12 projects, 23 repos, policies and freezes) once, on the first start of an organisation that does not exist yet. It is for development and demos; the demo IP allow-list is not loaded. Combine it with `GANTRY_DEV_DEMO_ACCOUNTS=true` to show the seeded Keycloak users on the sign-in screen (password `gantry-dev`).
+`GANTRY_DEV_SEED=true` loads the legacy demo organisation (20 people, 12 projects, 23 repos, policies and freezes) once, on the first start of an organisation that does not exist yet. It is for development and demos; the demo IP allow-list is not loaded. On a local stack (public URL on this machine) it also lists the seeded Keycloak users on the sign-in screen (password `gantry-dev`); without the seed there is no demo list. Keycloak imports the demo users (`deploy/keycloak/realm-gantry.json`) only when `GANTRY_DEV_SEED=true`; otherwise it imports `realm-gantry.empty.json`, the same realm with no users, and the first account is the bootstrap admin.
+
+## Operations
+
+### A Factory Admin locked out by the IP allow-list
+
+If the IP allow-list is on and the only Factory Admin is away from an allowed network, nothing in the app can help: the list is checked before sign-in. The operator, on the server host (never through the web or the API), can open a one-time recovery for that admin:
+
+```
+docker compose -f deploy/compose.yml exec gantry-api node dist/cli/allowlist-recovery.js --person <person id> --minutes 30
+```
+
+- It records a window for that admin's NEXT sign-in from any address. The window is used once and expires after 30 minutes by default (`--minutes`, 60 at most). It lets nobody else in, and it does not change the allow-list.
+- The admin still signs in with their second factor, and every step-up applies as usual. The session that sign-in creates may use the API from that one address for 30 minutes, which is time enough to confirm in the app whether the address joins the allow-list (`POST /api/v1/security/recovery/confirm`, step-up required; `GET /api/v1/security/recovery` says what is waiting). Without that confirmation the allow-list stays as it was.
+- The command refuses a person who is not an active Factory Admin, and an allow-list that is empty. A second run replaces the admin's earlier unused window.
+- Audited: `auth.allowlist_recovery.opened` (actor `operator`), `auth.allowlist_recovery.used` (the admin, with the address) and `auth.allowlist_recovery.address_added` or `.address_declined`, all in Audit under Auth.
+- No HTTP route opens a window. Nobody without shell access to the server host can use it.
+
+## MFA rollout runbook
+
+MFA is required for everyone. To switch an existing install, follow "MFA rollout runbook (an existing install)" in [PRODUCTION.md](PRODUCTION.md). In short:
+1. check the first Factory Admin (and a second one) has an authenticator in the Keycloak console; 2. set the realm's mail server and create `deploy/secrets/idp_admin_client_secret`;
+3. run `deploy/keycloak/apply-mfa-realm.mjs ... --smtp-test-to <address>` once (it refuses to switch the flow unless a test mail is sent; `--dry-run` first);
+4. deploy the API and web together, then sign the first admin out and in once; 5. send enrolment links from People > Reset authenticator and confirm one works;
+6. rollback: bind the built-in `browser` flow in the console. A compromise of the API or of the service-account secret can plant a factor (it is detected and emailed, not prevented): see PRODUCTION.md.

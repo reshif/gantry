@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import type { Tx } from "@gantry/db";
 import type { z } from "zod";
 import type { Actor, CommandResult } from "../../core/command.js";
-import { conflict, invalid, notFound } from "../../core/errors.js";
+import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
 import type { AddBody, PatchBody, GrantBody } from "./schemas.js";
 import type { DiscoveredTool, Discovery } from "./edge-client.js";
 import { sealSecret } from "./secret.js";
@@ -31,6 +31,8 @@ export function checkUrl(url: string): string {
   return u.toString();
 }
 
+// The upstream MCP credential is issued by the third-party server, not chosen by Gantry, and is only ever sent to it (never used to verify a delivery to
+// us), so it keeps a small minimum: a longer one would reject real tokens. Signing secrets that Gantry verifies with are held to 32+ (integrations).
 export function checkAuth(mode: "none" | "bearer" | "header", header: string | null | undefined, secret: string | null | undefined): { header: string | null } {
   if (mode !== "none" && (!secret || secret.length < 6)) throw invalid(`Enter the secret for ${mode === "bearer" ? "the bearer token" : "the API key"} (6 characters or more).`);
   if (mode === "none" && secret) throw invalid("Auth is None, so there is no secret to store.");
@@ -164,11 +166,15 @@ export async function patchServer(tx: Tx, a: Actor, dataKey: Buffer | null, id: 
     enabled = false;
     reason = "The address changed. Discover its tools again and re-approve them before it is used.";
     put("health", "unknown");
+    if (!r.address_unapproved) put("address_unapproved", true);
   }
   if (b.enabled !== undefined && !reapprove) {
-    if (b.enabled && !r.enabled && r.disabled_reason) throw conflict(`${r.name} is disabled: ${r.disabled_reason} Re-approve it instead.`);
+    if (b.enabled && !r.enabled && (r.address_unapproved || r.disabled_reason)) {
+      throw conflict(`${r.name} is disabled: ${r.disabled_reason ?? "its address changed."} Discover its tools and approve them again (Re-approve) before switching it on.`);
+    }
     enabled = b.enabled;
-    if (!b.enabled) reason = null;
+    // The mark of an unapproved address, and its reason, survive a switch-off: only approving clears them.
+    if (!b.enabled && !r.address_unapproved) reason = null;
   }
   if (enabled !== r.enabled || reason !== r.disabled_reason) { put("enabled", enabled); put("disabled_reason", reason); if (!changed.includes("enabled")) changed.push("enabled"); after.enabled = enabled; }
 
@@ -270,6 +276,7 @@ export async function applyDiscovery(tx: Tx, a: Actor, id: string, found: Discov
     if (!changedTools.length && !r.disabled_reason) throw conflict(`${r.name} has no changed definitions to approve.`);
     enabled = true;
     reason = null;
+    if (r.address_unapproved) await tx.query(`update mcp_servers set address_unapproved = false where org_id = $1 and id = $2`, [a.orgId, id]);
   } else if (changedTools.length && r.enabled) {
     enabled = false;
     reason = `Definition of ${changedTools.join(", ")} changed`;
@@ -293,9 +300,21 @@ export async function grantWrites(tx: Tx, a: Actor, b: z.infer<typeof GrantBody>
     `select id, station, data from attempts where org_id = $1 and wo_id = $2 and state in ('queued','running') order by fencing desc limit 1 for update`, [a.orgId, b.wo],
   )).rows[0];
   if (!att) throw conflict(`${b.wo} has no attempt in progress to pre-authorise.`);
+  // Separation of duties: the person who asked for the work does not also pre-authorise what writes to outside systems for it.
+  const requester = (await tx.query<{ submitter: string | null }>(`select submitter from work_orders where org_id = $1 and id = $2`, [a.orgId, b.wo])).rows[0]?.submitter ?? null;
+  // Break-glass for a Factory Admin who is the requester (a lone admin is never stuck): a reason of at least 5 characters, audited with override: true.
+  const selfGrant = !!requester && (requester === a.personId || requester === a.id);
+  const overrideReason = b.reason && b.reason.trim().length >= 5 ? b.reason.trim() : "";
+  if (selfGrant && !overrideReason) {
+    throw refuse("denied", `${b.wo} was requested by you. Another approver pre-authorises its write tools. As Factory Admin you can pre-authorise anyway: give a reason of at least 5 characters; it is recorded in the audit.`, { needs: "override_reason", overrideKind: "self_grant" });
+  }
+  // A whole-server grant is flagged in the ledger so a reviewer can find it.
+  const wildcard = b.tools.filter((g) => g.endsWith("/*"));
   for (const g of b.tools) {
     const [server, tool] = g.split("/", 2) as [string, string];
-    if (!(await tx.query(`select 1 from mcp_servers where org_id = $1 and id = $2`, [a.orgId, server])).rowCount) throw invalid(`There is no MCP server ${server}.`);
+    const srv = (await tx.query<{ enabled: boolean }>(`select enabled from mcp_servers where org_id = $1 and id = $2`, [a.orgId, server])).rows[0];
+    if (!srv) throw invalid(`There is no MCP server ${server}.`);
+    if (tool === "*" && !srv.enabled) throw invalid(`${server} is switched off: a whole-server grant needs it on.`);
     if (tool !== "*") {
       const t = (await tx.query<{ tool_class: string }>(`select tool_class from mcp_tools where org_id = $1 and server_id = $2 and name = $3`, [a.orgId, server, tool])).rows[0];
       if (!t) throw invalid(`${server} has no tool ${tool}.`);
@@ -307,7 +326,7 @@ export async function grantWrites(tx: Tx, a: Actor, b: z.infer<typeof GrantBody>
   await tx.query(`update attempts set data = jsonb_set(data, '{writeGrants}', $3::jsonb), updated_at = now() where org_id = $1 and id = $2`, [a.orgId, att.id, json(next)]);
   return {
     msg: `Write tools pre-authorised for ${b.wo} at ${att.station}: ${b.tools.join(", ")}.`, changes: ["mcp"], project: null,
-    events: [{ type: "mcp.grant", category: cat, subject: { type: "attempt", id: att.id }, woId: b.wo, after: { attempt: att.id, station: att.station, grants: b.tools } }],
+    events: [{ type: "mcp.grant", category: cat, subject: { type: "attempt", id: att.id }, woId: b.wo, after: { attempt: att.id, station: att.station, grants: b.tools, ...(wildcard.length ? { wildcard } : {}), ...(selfGrant ? { override: true, reason: overrideReason, requester: true } : {}) } }],
     extra: { attempt: att.id, station: att.station, grants: next },
   };
 }

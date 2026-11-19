@@ -7,6 +7,8 @@
  * person at click time, the gate must be named for chat on that connection and never a release, hotfix, security hold or risk-tagged change, and the gate
  * instance on the card must still be the open one (a stale click is refused). The vote is stored with channel, chat user id, person and instance id.
  */
+import { bodyHasNul } from "../../core/nul.js";
+import { hookDenials } from "../../core/denial-sampler.js";
 import { createHash } from "node:crypto";
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { appendEvent, withTx } from "@gantry/db";
@@ -89,7 +91,8 @@ export const slackHookRoutes: FastifyPluginAsync = async (app) => {
       else if (c.reason === "missing" && worst !== "stale") worst = "missing";
     }
     if (!matched) {
-      await audit("slack.hook.denied", "denied", worst === "stale" ? "HOOK-STALE" : "HOOK-SIG", worst === "stale" ? "The request is outside the five-minute window." : worst === "missing" ? "The signature header is missing." : "The signature does not match.", req);
+      const smp = hookDenials.sample("slack", req.ip);
+      if (smp.audit) await audit("slack.hook.denied", "denied", worst === "stale" ? "HOOK-STALE" : "HOOK-SIG", worst === "stale" ? "The request is outside the five-minute window." : worst === "missing" ? "The signature header is missing." : "The signature does not match.", req, smp.suppressed ? { suppressed: smp.suppressed } : {});
       return res.code(401).send({ ok: false, msg: worst === "stale" ? "Stale request." : "Invalid signature." });
     }
 
@@ -105,6 +108,8 @@ export const slackHookRoutes: FastifyPluginAsync = async (app) => {
         return res.code(400).send({ ok: false, msg: "The body is not valid JSON." });
       }
     }
+    // G-A4: a NUL in a signed body is a 400, not a database error.
+    if (bodyHasNul(json) || (form && [...form].some(([k, v]) => k.includes("\u0000") || v.includes("\u0000")))) return res.code(400).send({ ok: false, msg: "Text cannot contain a NUL character." });
     if (json?.type === "url_verification" && typeof json.challenge === "string") return res.send({ challenge: json.challenge });
 
     // Replay: the same signed request again creates nothing new. Slack's trigger id when it has one, else the body hash.
@@ -174,6 +179,7 @@ export const slackHookRoutes: FastifyPluginAsync = async (app) => {
     const gi = parseGateId(v.instance);
     const wo = (await g.pool.query<{ project_id: string }>(`select project_id from work_orders where org_id = $1 and id = $2`, [g.orgId, gi.woId])).rows[0];
     if (!wo) return respond("That work order no longer exists.");
+    if (gi.n === null) return respond("This card does not name the exact request, so it cannot be approved here. Open it in Gantry.");
     // The chat policy first, so the reason a person reads is the real one (a release or a hotfix is never approved from chat), then again under the lock inside the command.
     const chatPolicy = async (db: import("@gantry/db").Queryable): Promise<ReturnType<typeof chatApprovalFor> | null> => {
       const w = (await loadFlow(db, g.orgId, { ids: [gi.woId] })).workOrders[0];
@@ -187,6 +193,7 @@ export const slackHookRoutes: FastifyPluginAsync = async (app) => {
     }
     // The click is a command by the linked person, through the same pipeline: decision point at click time, audited denials, one transaction.
     (req.gx as { principal: unknown }).principal = { kind: "person", id: who.personId, name: who.name, sessionId: `slack:${p.team?.id ?? "-"}:${user}` };
+    (req.gx as { channel: string }).channel = "slack"; // set by the signature-checked hook; trustedVia() honours only this
     (req as { body: unknown }).body = { via: "slack" };
     const catalog = await readCatalog(g.pool, g.orgId);
     try {

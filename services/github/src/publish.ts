@@ -11,11 +11,12 @@
 import { mkdtemp, rm, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { pathMatches } from "@gantry/domain";
 import type { ApiClient } from "./api.js";
 import type { GithubConfig } from "./config.js";
 import { BrokerError } from "./errors.js";
-import { git, gitText, GitError } from "./git.js";
-import { GithubApp, splitRepo, toApiError, type RepoClient } from "./github.js";
+import { git, GitError } from "./git.js";
+import { GithubApp, splitRepo, toApiError } from "./github.js";
 import { VOLUME_NAME, type WorkspaceStore } from "./workspace.js";
 
 export const PublishBody = z.object({
@@ -32,6 +33,8 @@ export const PublishBody = z.object({
   title: z.string().min(1).max(250).optional(),
   body: z.string().max(60000).optional(),
   draft: z.boolean().optional(),
+  /** Paths the agent must never modify (its guardrails). A commit that touches one is refused before anything is written to GitHub. */
+  denyPaths: z.array(z.string().min(1).max(300)).max(200).optional(),
 }).strict();
 export type PublishBody = z.infer<typeof PublishBody>;
 
@@ -155,6 +158,14 @@ export async function publishWorkspace(d: PublishDeps, b: PublishBody): Promise<
       prev = sha;
     }
 
+    // Guardrails in code, not prose: a change to a path the agent was forbidden to touch is never published, whatever the agent was told or talked into.
+    if (b.denyPaths?.length) {
+      for (const lc of commits) {
+        const bad = lc.changes.find((ch) => b.denyPaths!.some((pat) => pathMatches(ch.path, pat)));
+        if (bad) throw new BrokerError(422, "guardrail_breach", `${bad.path} is on the agent's forbidden paths (commit ${lc.sha.slice(0, 7)}); nothing was published.`, { path: bad.path });
+      }
+    }
+
     // Symlinks and submodules are not published: a symlink could point anywhere once checked out, and a submodule pins code the broker never reviewed.
     for (const lc of commits) {
       const bad = lc.changes.find((ch) => ch.status !== "D" && (ch.newMode === "120000" || ch.newMode === "160000"));
@@ -164,7 +175,7 @@ export async function publishWorkspace(d: PublishDeps, b: PublishBody): Promise<
     // 4 and 5. Publish through the API of GitHub with an installation token scoped to this one repository.
     return await d.app.withRepo(b.repo, "publish", async (c) => {
       const gh = async <T>(fn: () => Promise<T>): Promise<T> => { try { return await fn(); } catch (e) { throw gh_err(e); } };
-      const req = c.octokit.request.bind(c.octokit) as (route: string, p?: Record<string, unknown>) => Promise<{ data: Record<string, any>; status: number }>;
+      const req = c.octokit.request.bind(c.octokit) as (route: string, p?: Record<string, unknown>) => Promise<{ data: Record<string, any>; status: number }>; // eslint-disable-line @typescript-eslint/no-explicit-any
       const tipRef = await gh(async () => { try { return (await req("GET /repos/{owner}/{repo}/git/ref/{ref}", { owner, repo: name, ref: `heads/${b.branch}` })).data; } catch (e) { if ((e as { status?: number }).status === 404) return null; throw e; } });
       const tip: string | null = tipRef ? (tipRef.object.sha as string) : null;
 
@@ -209,9 +220,9 @@ export async function publishWorkspace(d: PublishDeps, b: PublishBody): Promise<
 
       // Pull request: open or update.
       const baseBranch = b.baseBranch ?? ((await gh(() => req("GET /repos/{owner}/{repo}", { owner, repo: name }))).data.default_branch as string);
-      const open = (await gh(() => req("GET /repos/{owner}/{repo}/pulls", { owner, repo: name, head: `${owner}:${b.branch}`, state: "open" }))).data as unknown as Record<string, any>[];
+      const open = (await gh(() => req("GET /repos/{owner}/{repo}/pulls", { owner, repo: name, head: `${owner}:${b.branch}`, state: "open" }))).data as unknown as Record<string, any>[]; // eslint-disable-line @typescript-eslint/no-explicit-any
       const title = b.title ?? `${woId}: ${commits[0]!.message.split("\n")[0]!.slice(0, 200)}`;
-      let pr: Record<string, any>;
+      let pr: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
       let createdPr = false;
       if (open[0]) {
         pr = open[0];
@@ -245,7 +256,7 @@ export async function publishWorkspace(d: PublishDeps, b: PublishBody): Promise<
 const gh_err = (e: unknown): Error => (e instanceof BrokerError ? e : (() => { const a = toApiError(e); return new BrokerError(a.status === 403 || a.status === 429 ? 429 : a.status === 404 ? 404 : a.status === 422 || a.status === 409 ? 409 : 502, "github", a.message); })());
 
 /** Walks `commits.length` GitHub commits back from `tip` and returns the pairs when each one's tree equals the local commit's tree; otherwise an empty list. */
-async function remoteChainMatches(req: (route: string, p?: Record<string, unknown>) => Promise<{ data: Record<string, any> }>, owner: string, repo: string, tip: string, local: LocalCommit[]): Promise<{ localSha: string; sha: string; tree: string }[]> {
+async function remoteChainMatches(req: (route: string, p?: Record<string, unknown>) => Promise<{ data: Record<string, any> }>, owner: string, repo: string, tip: string, local: LocalCommit[]): Promise<{ localSha: string; sha: string; tree: string }[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const out: { localSha: string; sha: string; tree: string }[] = [];
   let sha = tip;
   for (let i = local.length - 1; i >= 0; i--) {
@@ -258,7 +269,7 @@ async function remoteChainMatches(req: (route: string, p?: Record<string, unknow
   return out;
 }
 
-export function prFact(pr: Record<string, any>): Record<string, unknown> {
+export function prFact(pr: Record<string, any>): Record<string, unknown> { // eslint-disable-line @typescript-eslint/no-explicit-any
   return {
     number: pr.number, githubId: pr.id ?? null, title: String(pr.title ?? ""), state: pr.merged_at || pr.merged ? "merged" : pr.state === "closed" ? "closed" : "open", draft: pr.draft === true,
     headSha: pr.head?.sha ?? null, baseBranch: pr.base?.ref ?? null, headBranch: pr.head?.ref ?? null, url: pr.html_url ?? null, mergedAt: pr.merged_at ?? null,

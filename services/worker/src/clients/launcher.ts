@@ -30,6 +30,8 @@ export interface LauncherClient {
   start(r: StartRun): Promise<StartOutcome>;
   stop(runId: string, o: { keepWorkspace: boolean }): Promise<StopOutcome>;
   list(): Promise<LauncherRun[]>;
+  /** Runs the launcher stopped for a critically low host disk (R1). */
+  criticalStops(): Promise<Array<{ runId: string; at: number }>>;
 }
 
 export function launcherClient(base: string, token: string, fetchImpl?: typeof fetch): LauncherClient {
@@ -55,6 +57,11 @@ export function launcherClient(base: string, token: string, fetchImpl?: typeof f
       const res = await call("GET", "/v1/runs");
       if (res.status !== 200) return failFor("launcher list-runs", res);
       return ((res.body as { runs?: LauncherRun[] }).runs ?? []).map((r) => ({ ...r }));
+    },
+    async criticalStops() {
+      const res = await call("GET", "/v1/runs");
+      if (res.status !== 200) return failFor("launcher list-runs", res);
+      return ((res.body as { criticalStops?: Array<{ runId: string; at: number }> }).criticalStops ?? []).filter((x) => typeof x.runId === "string");
     },
   };
 }

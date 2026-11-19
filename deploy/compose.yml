@@ -3,6 +3,9 @@
 #   export DOCKER_GID=$(stat -c %g /var/run/docker.sock)
 #   docker compose -f deploy/compose.yml up -d --build
 # Build contexts are the repository root; Dockerfile paths follow docs/BUILD.md.
+# Images: Gantry's own are ${GANTRY_IMAGE_PREFIX}gantry-<name>:${GANTRY_VERSION} (local builds: gantry-<name>:dev; a release:
+# GANTRY_IMAGE_PREFIX=ghcr.io/<owner>/ GANTRY_VERSION=1.2.3, signed in CI). Third-party images are pinned by digest.
+# Production: add -f deploy/compose.prod.yml (deploy/PRODUCTION.md).
 name: gantry
 
 # ---- hardening applied to every Gantry container (spec 3.6) -------------------------------------------------------
@@ -17,9 +20,18 @@ x-hardened: &hardened
   restart: unless-stopped
 
 # Non-secret configuration shared by the services that talk to the database and object storage.
+# Room for the control plane (S-93): a burst of runs must not push these out of memory. Generous ceilings (each service uses well under 100 MB
+# idle), a reservation the kernel honours under pressure, and a negative oom score so the kernel picks a run before it picks one of these.
+# Override per service with GANTRY_<NAME>_MEMORY. The launcher refuses a MAX_CONCURRENT_RUNS that would not fit beside them (CONTROL_PLANE_MEMORY_MB).
+x-control: &control
+  mem_limit: 1g
+  mem_reservation: 128m
+  pids_limit: 512
+  oom_score_adj: -300
+
 x-data-env: &data-env
   GANTRY_ORG_ID: ${GANTRY_ORG_ID:-acme}
-  GANTRY_PUBLIC_URL: https://localhost
+  GANTRY_PUBLIC_URL: https://${GANTRY_HOSTNAME:-localhost}
   DATABASE_HOST: postgres
   DATABASE_NAME: gantry
   S3_ENDPOINT: http://minio:9000
@@ -36,21 +48,33 @@ services:
   # ---- ingress: the only published port, bound to loopback ------------------------------------------------------
   ingress:
     <<: *hardened
-    image: caddy:2-alpine
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
     # Caddy listens unprivileged on 8443 inside the container; the host side is 127.0.0.1:443 only.
     ports:
       - "127.0.0.1:443:8443"
+      # Keycloak admin console, host loopback only (never the public site). Reach it remotely with an SSH tunnel.
+      - "127.0.0.1:8081:8081"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/profiles:/etc/caddy/profiles:ro
       - caddydata:/data
+    environment:
+      # prod (the default) serves no development routes. dev is an explicit opt-in: it serves the Mailpit inbox at /mail (every invite and
+      # notification mail, with tokens) and the /v3 preview. Set GANTRY_INGRESS_PROFILE=dev on a local stack only (deploy/README.md).
+      GANTRY_INGRESS_PROFILE: ${GANTRY_INGRESS_PROFILE:-prod}
+      GANTRY_HOSTNAME: ${GANTRY_HOSTNAME:-localhost}
+      GANTRY_TLS: ${GANTRY_TLS:-internal}
     # Caddy writes its local CA and config under XDG_*; both are on the writable volume or tmpfs.
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
       - /config:rw,noexec,nosuid,nodev,size=8m,uid=10001,gid=10001
     healthcheck:
       <<: *http-check
-      test: ["CMD", "wget", "--no-check-certificate", "-q", "-O", "/dev/null", "https://localhost:8443/healthz"]
-    networks: [front, control]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8079/healthz"]
+    networks:
+      front: {}
+      # A fixed address: the API trusts X-Forwarded-For from this one peer only (GANTRY_TRUST_PROXY), not from every container on the network.
+      control: { ipv4_address: 10.89.17.2 }
     depends_on:
       volume-init: { condition: service_completed_successfully }
       gantry-web: { condition: service_healthy }
@@ -61,19 +85,19 @@ services:
   gantry-web:
     <<: *hardened
     build: { context: .., dockerfile: apps/web/Dockerfile }
-    image: gantry-web:dev
+    image: ${GANTRY_IMAGE_PREFIX:-}gantry-web:${GANTRY_VERSION:-dev}
     healthcheck:
       <<: *http-check
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
     networks: [control]
 
   gantry-api:
-    <<: *hardened
+    <<: [*hardened, *control]
     build: { context: .., dockerfile: services/api/Dockerfile }
-    image: gantry-api:dev
+    image: ${GANTRY_IMAGE_PREFIX:-}gantry-api:${GANTRY_VERSION:-dev}
     environment:
       <<: *data-env
-      OIDC_ISSUER: https://localhost/idp/realms/gantry
+      OIDC_ISSUER: https://${GANTRY_HOSTNAME:-localhost}/idp/realms/gantry
       # Server-side calls reach Keycloak directly; the issuer above is what tokens carry and browsers use.
       OIDC_INTERNAL_URL: http://keycloak:8081/idp/realms/gantry
       OIDC_CLIENT_ID: gantry-web
@@ -83,17 +107,36 @@ services:
       SMTP_PORT: "1025"
       # Connection tests for chat and webhook integrations leave through the edge allow-list, like deliveries do.
       GANTRY_EGRESS_PROXY: http://gantry-edge:8444
-      GANTRY_DEV_DEMO_ACCOUNTS: ${GANTRY_DEV_DEMO_ACCOUNTS:-true}
-      # Off by default: the org starts empty and the first sign-in with GANTRY_BOOTSTRAP_ADMIN_EMAIL becomes Factory Admin.
+      # Off by default: when true, the sign-in page lists every person's name, email and roles. Local development only (refused unless the public URL is localhost).
+      GANTRY_AUDIT_ANCHOR_FILE: /anchors/audit-anchors.jsonl
+      # EVERYONE signs in with a second factor (an authenticator app, a security key or a recovery code at the identity provider; the API checks acr/amr
+      # on every request). The seeded demo users are password-only until they enrol through the one-time link an administrator issues (mail lands in
+      # mailpit). The waiver (GANTRY_DEV_ADMIN_MFA_OPTIONAL=true) only relaxes Gantry's own check: once the realm's browser flow is the two-step one, a password-only login is refused at Keycloak first. Off by default; the API refuses to start
+      # with it on when the public URL is not localhost, and compose.prod.yml forces it off.
+      GANTRY_DEV_ADMIN_MFA_OPTIONAL: ${GANTRY_DEV_ADMIN_MFA_OPTIONAL:-false}
+      # Off by default: the org starts empty. The first Factory Admin is the identity-provider user GANTRY_BOOTSTRAP_ADMIN_USERNAME, created by the
+      # API with the initial password the owner wrote to the bootstrap_admin_password secret (temporary). The identity provider refuses a sign-in without a second factor,
+      # so the first enrolment is a one-time link emailed to GANTRY_BOOTSTRAP_ADMIN_EMAIL (set both; a restart sends a new link while no Factory Admin exists).
       # GANTRY_DEV_SEED=true loads the legacy demo data (people, projects, repos, policies) once, for development and demos only.
       GANTRY_DEV_SEED: ${GANTRY_DEV_SEED:-false}
+      GANTRY_BOOTSTRAP_ADMIN_USERNAME: ${GANTRY_BOOTSTRAP_ADMIN_USERNAME:-}
+      # Deprecated alternative: the first verified sign-in with this email becomes Factory Admin. Prefer the username above.
       GANTRY_BOOTSTRAP_ADMIN_EMAIL: ${GANTRY_BOOTSTRAP_ADMIN_EMAIL:-}
       GANTRY_ORG_NAME: ${GANTRY_ORG_NAME:-Gantry}
       # Alias of a GitHub identity provider configured in Keycloak; empty = GitHub sign-in is refused with a clear message.
       OIDC_GITHUB_IDP_ALIAS: ${OIDC_GITHUB_IDP_ALIAS:-}
-    secrets: [db_password, session_key, data_key, edge_token, github_token, minio_root_password, oidc_client_secret]
+      # Only the ingress (Caddy, fixed address on the control network) may state the client address; other containers cannot forge it.
+      GANTRY_TRUST_PROXY: 10.89.17.2
+    # The backup service writes last-backup.json and last-drill.json to this small status volume; the API only reads them (System health).
+    # It never mounts the volume that holds the database dumps.
+    volumes:
+      - backupstatus:/backups:ro
+      # Signed checkpoints of the audit chain head, on a volume the database never sees (GANTRY_AUDIT_ANCHOR_FILE).
+      - auditanchors:/anchors
+    secrets: [db_password, session_key, data_key, edge_token, github_token, minio_root_password, oidc_client_secret, bootstrap_admin_password, idp_admin_client_secret]
     depends_on:
       gantry-migrate: { condition: service_completed_successfully }
+      volume-init: { condition: service_completed_successfully }
       minio: { condition: service_healthy }
     healthcheck:
       <<: *http-check
@@ -101,9 +144,9 @@ services:
     networks: [control]
 
   gantry-worker:
-    <<: *hardened
+    <<: [*hardened, *control]
     build: { context: .., dockerfile: services/worker/Dockerfile }
-    image: gantry-worker:dev
+    image: ${GANTRY_IMAGE_PREFIX:-}gantry-worker:${GANTRY_VERSION:-dev}
     environment:
       <<: *data-env
       EDGE_URL: http://gantry-edge:8443
@@ -125,7 +168,7 @@ services:
   gantry-migrate:
     <<: *hardened
     build: { context: .., dockerfile: packages/db/Dockerfile }
-    image: gantry-migrate:dev
+    image: ${GANTRY_IMAGE_PREFIX:-}gantry-migrate:${GANTRY_VERSION:-dev}
     restart: "no"
     environment:
       DATABASE_HOST: postgres
@@ -135,35 +178,96 @@ services:
       postgres: { condition: service_healthy }
     networks: [control]
 
-  gantry-launcher:
-    <<: *hardened
-    build: { context: .., dockerfile: services/launcher/Dockerfile }
-    image: gantry-launcher:dev
+  # The only container with the host's Docker socket. It lets through only the launcher's own calls, on resources the
+  # launcher owns, and container/network/volume creates that match the runner template (services/launcher/src/sockpolicy.ts).
+  gantry-sockproxy:
+    <<: [*hardened, *control]
+    image: ${GANTRY_IMAGE_PREFIX:-}gantry-launcher:${GANTRY_VERSION:-dev}
+    command: ["node", "dist/sockproxy.js"]
     # The Docker socket is group-owned by the host's docker group. Set DOCKER_GID to `stat -c %g /var/run/docker.sock`.
     group_add: ["${DOCKER_GID:-999}"]
     environment:
+      SOCKPROXY_PORT: "2375"
+      RUNNER_VARIANTS: ${RUNNER_VARIANTS:-base=${GANTRY_IMAGE_PREFIX:-}gantry-runner:${GANTRY_VERSION:-dev}}
+      EDGE_COMPOSE_SERVICE: gantry-edge
+      EDGE_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-gantry}
+      # The ceiling the proxy allows for a size-limited workspace volume (S-90); the same value the launcher uses.
+      WORKSPACE_MAX_MB: ${WORKSPACE_MAX_MB:-10240}
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2375/_ping').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks: [dockerapi]
+
+  # The workspace profile of the same proxy, for gantry-github only: it allows the broker's never-started helper container (fixed image,
+  # no network, one ws-<id> volume), its archive calls and its removal, and nothing else (sockpolicy.ts routeWorkspace). The broker
+  # no longer mounts the Docker socket. deploy/ci/compose-socket.mjs fails CI if any other service does.
+  gantry-sockproxy-ws:
+    <<: [*hardened, *control]
+    image: ${GANTRY_IMAGE_PREFIX:-}gantry-launcher:${GANTRY_VERSION:-dev}
+    command: ["node", "dist/sockproxy.js"]
+    group_add: ["${DOCKER_GID:-999}"]
+    environment:
+      SOCKPROXY_PROFILE: workspace
+      SOCKPROXY_PORT: "2376"
+      GITHUB_HELPER_IMAGE: ${GANTRY_IMAGE_PREFIX:-}gantry-github:${GANTRY_VERSION:-dev}
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2376/_ping').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks: [wsapi]
+
+  gantry-launcher:
+    <<: [*hardened, *control]
+    build: { context: .., dockerfile: services/launcher/Dockerfile }
+    image: ${GANTRY_IMAGE_PREFIX:-}gantry-launcher:${GANTRY_VERSION:-dev}
+    # No Docker socket here: every Docker call goes through gantry-sockproxy.
+    environment:
+      DOCKER_PROXY_URL: http://gantry-sockproxy:2375
       LAUNCHER_PORT: "9100"
-      RUNNER_VARIANTS: ${RUNNER_VARIANTS:-base=gantry-runner:dev}
+      RUNNER_VARIANTS: ${RUNNER_VARIANTS:-base=${GANTRY_IMAGE_PREFIX:-}gantry-runner:${GANTRY_VERSION:-dev}}
       # Dedicated pool for run networks (/28 each). Keep it clear of every other network on this host. See deploy/README.md.
       RUN_SUBNET_POOL: ${RUN_SUBNET_POOL:-10.213.0.0/16}
       RUN_SUBNET_PREFIX: "28"
-      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-32}
+      # Unset: derived from this host's memory and CPUs at start (S-93). Set: refused if it would overcommit (see deploy/README.md, "Sandbox hardening").
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-}
+      RUN_MEMORY_OVERCOMMIT_RATIO: ${RUN_MEMORY_OVERCOMMIT_RATIO:-1.5}
+      CONTROL_PLANE_MEMORY_MB: ${CONTROL_PLANE_MEMORY_MB:-4096}
+      # Each run's /workspace: capped at this size. WORKSPACE_BACKING=tmpfs makes it a hard, size-limited volume (RAM-backed); disk (default) is
+      # measured by the wrapper and the run is stopped when over (S-90).
+      WORKSPACE_MAX_MB: ${WORKSPACE_MAX_MB:-10240}
+      WORKSPACE_BACKING: ${WORKSPACE_BACKING:-disk}
+      # No new run starts when the host disk (the filesystem of the diskprobe volume, which is the one the run volumes, Postgres and MinIO share) has less free than this.
+      DISK_PROBE_PATH: /diskprobe
+      MIN_FREE_DISK_GB: ${MIN_FREE_DISK_GB:-20}
+      # Must agree with the edge's: the launcher refuses to start when its pool is not inside it (S-102).
+      EDGE_RUN_SUBNET: ${RUN_SUBNET_POOL:-10.213.0.0/16}
       EDGE_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-gantry}
       EDGE_COMPOSE_SERVICE: gantry-edge
       EDGE_URL: http://gantry-edge:8443
       RUNNER_PROXY_URL: http://gantry-edge:8444
     secrets: [launcher_token]
     volumes:
-      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - diskprobe:/diskprobe:ro
     healthcheck:
       <<: *http-check
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9100/healthz"]
-    networks: [launch]
+    depends_on:
+      gantry-sockproxy: { condition: service_healthy }
+    networks: [launch, dockerapi]
 
   gantry-edge:
     <<: *hardened
     build: { context: .., dockerfile: services/edge/Dockerfile }
-    image: gantry-edge:dev
+    image: ${GANTRY_IMAGE_PREFIX:-}gantry-edge:${GANTRY_VERSION:-dev}
     environment:
       GANTRY_API_URL: http://gantry-api:8000
       S3_ENDPOINT: http://minio:9000
@@ -173,6 +277,16 @@ services:
       # Must match the launcher's RUN_SUBNET_POOL: a caller from this range must present its run token to the proxy.
       EDGE_RUN_SUBNET: ${RUN_SUBNET_POOL:-10.213.0.0/16}
     secrets: [data_key, edge_token, vendor_keys.json, minio_root_password]
+    # The edge is shared by every run and the model gateway: bound what one run's traffic can take (the per-run caps are in proxy.ts).
+    mem_limit: ${GANTRY_EDGE_MEMORY:-768m}
+    mem_reservation: 128m
+    pids_limit: 512
+    oom_score_adj: -300
+    # The edge serves each run from its own interface and must never forward between run networks, the control network and the egress network (S-98).
+    sysctls:
+      net.ipv4.ip_forward: "0"
+    ulimits:
+      nofile: { soft: 8192, hard: 8192 }
     depends_on:
       gantry-api: { condition: service_healthy }
     healthcheck:
@@ -182,28 +296,29 @@ services:
     networks: [control, egress]
 
   gantry-github:
-    <<: *hardened
+    <<: [*hardened, *control]
     build: { context: .., dockerfile: services/github/Dockerfile }
-    image: gantry-github:dev
-    # The broker seeds and reads ws-<id> volumes through the Docker API (services/github/src/workspace.ts); the socket is root-equivalent (spec 5.5).
-    group_add: ["${DOCKER_GID:-999}"]
+    image: ${GANTRY_IMAGE_PREFIX:-}gantry-github:${GANTRY_VERSION:-dev}
+    # The broker seeds and reads ws-<id> volumes through the Docker API (services/github/src/workspace.ts). It holds no Docker socket (it is
+    # root-equivalent, and this process parses repository data an agent controls and holds the App key): it reaches the narrow workspace
+    # profile of the socket proxy instead.
     environment:
       GANTRY_API_URL: http://gantry-api:8000
       GANTRY_ORG_ID: ${GANTRY_ORG_ID:-acme}
-      GITHUB_HELPER_IMAGE: gantry-github:dev
+      GITHUB_HELPER_IMAGE: ${GANTRY_IMAGE_PREFIX:-}gantry-github:${GANTRY_VERSION:-dev}
+      DOCKER_PROXY_URL: http://gantry-sockproxy-ws:2376
     secrets: [data_key, github_token, github_app.pem, github_app.json]
-    volumes:
-      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     depends_on:
       gantry-api: { condition: service_healthy }
+      gantry-sockproxy-ws: { condition: service_healthy }
     healthcheck:
       <<: *http-check
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9200/healthz"]
-    networks: [control, egress]
+    networks: [control, egress, wsapi]
 
   # ---- pulled images --------------------------------------------------------------------------------------------
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17.12-alpine@sha256:d3244e8ce3f165ee3c93d9c4a4b1d0fe48b3a89e2287b717fdcbbde92d405065
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
@@ -211,6 +326,10 @@ services:
       - no-new-privileges:true
     # uid 70 is the image's postgres user; a new pgdata volume inherits that ownership from the image.
     user: "70:70"
+    mem_limit: ${GANTRY_POSTGRES_MEMORY:-2g}
+    mem_reservation: 512m
+    pids_limit: 512
+    oom_score_adj: -500
     environment:
       POSTGRES_USER: gantry_owner
       POSTGRES_DB: gantry
@@ -231,13 +350,18 @@ services:
     networks: [control]
 
   minio:
-    image: ${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z}
+    # MinIO no longer publishes images; this is the community build of the same server (pgsty/minio). Set MINIO_IMAGE to use another.
+    image: ${MINIO_IMAGE:-pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372}
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
     user: "10001:10001"
+    mem_limit: ${GANTRY_MINIO_MEMORY:-1g}
+    mem_reservation: 128m
+    pids_limit: 512
+    oom_score_adj: -300
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: gantry
@@ -260,7 +384,7 @@ services:
     networks: [control]
 
   keycloak:
-    image: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.4}
+    image: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.4.7@sha256:9409c59bdfb65dbffa20b11e6f18b8abb9281d480c7ca402f51ed3d5977e6007}
     restart: unless-stopped
     # start-dev rebuilds Quarkus augmentation at boot, so the root filesystem stays writable for this one container.
     # A production deployment builds an optimized image and sets read_only.
@@ -275,21 +399,35 @@ services:
       - |
         export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(cat /run/secrets/keycloak_admin_password)"
         export GANTRY_OIDC_CLIENT_SECRET="$$(cat /run/secrets/oidc_client_secret)"
+        export GANTRY_ADMIN_CLIENT_SECRET="$$(cat /run/secrets/idp_admin_client_secret)"
+        # Demo users (asha, daniel, ...; password gantry-dev) exist only on a seeded stack (GANTRY_DEV_SEED=true).
+        # Without the seed the realm is imported with no users; the first Factory Admin comes from GANTRY_BOOTSTRAP_ADMIN_USERNAME.
+        mkdir -p /opt/keycloak/data/import
+        if [ "$${GANTRY_DEV_SEED:-false}" = "true" ]; then src=realm-gantry.json; else src=realm-gantry.empty.json; fi
+        cp "/opt/keycloak/realms/$$src" /opt/keycloak/data/import/realm-gantry.json
         exec /opt/keycloak/bin/kc.sh "$$@"
       - kc
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      GANTRY_DEV_SEED: ${GANTRY_DEV_SEED:-false}
       KC_HTTP_ENABLED: "true"
       KC_HTTP_PORT: "8081"
       KC_HTTP_RELATIVE_PATH: /idp
-      KC_HOSTNAME: https://localhost/idp
+      KC_HOSTNAME: https://${GANTRY_HOSTNAME:-localhost}/idp
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
-    secrets: [keycloak_admin_password, oidc_client_secret]
+      # The admin console is not served on the public site; the ingress serves it on 127.0.0.1:8081 only.
+      KC_HOSTNAME_ADMIN: http://localhost:8081/idp
+    secrets: [keycloak_admin_password, oidc_client_secret, idp_admin_client_secret]
     volumes:
-      - ./keycloak/realm-gantry.json:/opt/keycloak/data/import/realm-gantry.json:ro
+      # The dev H2 database lives under data/. Persisting it keeps user ids (the OIDC `sub` Gantry links people to)
+      # stable across container recreation. --import-realm skips a realm that already exists, so edits to
+      # realm-gantry.json (or realm-gantry.empty.json, the same realm without users) only apply after `docker volume rm gantry_kcdata`.
+      - kcdata:/opt/keycloak/data
+      - ./keycloak/realm-gantry.json:/opt/keycloak/realms/realm-gantry.json:ro
+      - ./keycloak/realm-gantry.empty.json:/opt/keycloak/realms/realm-gantry.empty.json:ro
     healthcheck:
       test:
         - CMD-SHELL
@@ -302,7 +440,7 @@ services:
     networks: [control]
 
   mailpit:
-    image: axllent/mailpit:v1.33.1
+    image: axllent/mailpit:v1.33.1@sha256:aef2aacc11f075ec0fb6874275ee4a421e688e11a96ebb296134d1735c7761ce
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
@@ -323,9 +461,91 @@ services:
       retries: 5
     networks: [control]
 
+  # Daily backups of Postgres (Gantry and Keycloak) and the object store, with a weekly restore drill (deploy/backup).
+  # Locally only when asked for (--profile backup); the production profile always runs it. Sets go to the `backups`
+  # volume, or to GANTRY_BACKUP_VOLUME (a host path owned by uid 10001). It joins `egress` only to copy sets off the host
+  # when GANTRY_BACKUP_REMOTE and the backup_remote secret are set.
+  gantry-backup:
+    <<: *hardened
+    profiles: [backup]
+    build: { context: .., dockerfile: deploy/backup/Dockerfile }
+    image: ${GANTRY_IMAGE_PREFIX:-}gantry-backup:${GANTRY_VERSION:-dev}
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_NAME: gantry
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: gantry
+      S3_ACCESS_KEY: gantry
+      GANTRY_VERSION: ${GANTRY_VERSION:-dev}
+      GANTRY_BACKUP_AT: ${GANTRY_BACKUP_AT:-02:00}
+      GANTRY_BACKUP_KEEP: ${GANTRY_BACKUP_KEEP:-7}
+      GANTRY_BACKUP_DRILL: ${GANTRY_BACKUP_DRILL:-weekly}
+      GANTRY_BACKUP_REMOTE: ${GANTRY_BACKUP_REMOTE:-}
+    secrets: [db_owner_password, minio_root_password, backup_remote]
+    volumes:
+      - ${GANTRY_BACKUP_VOLUME:-backups}:/backups
+      - backupstatus:/status
+    healthcheck:
+      # Healthy while the newest backup succeeded and is less than 26 hours old.
+      test: ["CMD-SHELL", "grep -q '\"ok\":true' /status/last-backup.json && [ -n \"$$(find /status/last-backup.json -mmin -1560)\" ]"]
+      interval: 5m
+      timeout: 10s
+      retries: 1
+      start_period: 30m
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    networks: [control, egress]
+
+  # Optional monitoring (--profile monitoring; deploy/PRODUCTION.md, "Monitoring and alerts"). Prometheus scrapes /metrics of the API,
+  # worker and launcher over the internal networks and evaluates deploy/monitoring/alerts.yml; Alertmanager keeps and routes the alerts.
+  # Both UIs are published on host loopback only (reach them with an SSH tunnel). Alertmanager joins `egress` so it can send mail or chat.
+  prometheus:
+    <<: *hardened
+    profiles: [monitoring]
+    image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${GANTRY_METRICS_RETENTION:-30d}
+      - --web.listen-address=:9090
+    ports:
+      - "127.0.0.1:${GANTRY_PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - promdata:/prometheus
+    healthcheck:
+      <<: *http-check
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
+    depends_on:
+      volume-init: { condition: service_completed_successfully }
+    # `launch` is how it reaches the launcher; `front` only carries the loopback-published port.
+    networks: [control, launch, front]
+
+  alertmanager:
+    <<: *hardened
+    profiles: [monitoring]
+    image: prom/alertmanager:v0.28.1@sha256:27c475db5fb156cab31d5c18a4251ac7ed567746a2483ff264516437a39b15ba
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.listen-address=:9093
+    ports:
+      - "127.0.0.1:${GANTRY_ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - amdata:/alertmanager
+    healthcheck:
+      <<: *http-check
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9093/-/healthy"]
+    depends_on:
+      volume-init: { condition: service_completed_successfully }
+    networks: [control, egress]
+
   # One-shot: named volumes are created root-owned when the image has no such directory, so hand them to uid 10001.
   volume-init:
-    image: caddy:2-alpine
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
     user: "0:0"
     read_only: true
     cap_drop: [ALL]
@@ -333,10 +553,15 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: "no"
-    command: ["sh", "-c", "chown 10001:10001 /vol/objdata /vol/caddydata"]
+    command: ["sh", "-c", "chown 10001:10001 /vol/objdata /vol/caddydata /vol/backups /vol/backupstatus /vol/auditanchors /vol/promdata /vol/amdata"]
     volumes:
       - objdata:/vol/objdata
       - caddydata:/vol/caddydata
+      - ${GANTRY_BACKUP_VOLUME:-backups}:/vol/backups
+      - backupstatus:/vol/backupstatus
+      - auditanchors:/vol/auditanchors
+      - promdata:/vol/promdata
+      - amdata:/vol/amdata
     networks: [control]
 
   # Build-only: `docker compose -f deploy/compose.yml build gantry-runner` produces the image the launcher starts runs from.
@@ -344,25 +569,63 @@ services:
   gantry-runner:
     profiles: [runner-image]
     build: { context: .., dockerfile: runner/Dockerfile }
-    image: gantry-runner:dev
+    image: ${GANTRY_IMAGE_PREFIX:-}gantry-runner:${GANTRY_VERSION:-dev}
     networks: [control]
 
 networks:
+  # Subnets are pinned (G-A6) to the ranges the stack already uses, so Gantry's address guard can name them as control networks and no LAN range can open them.
+  # Keep them in step with CONTROL_CIDRS in packages/domain/src/netguard.ts. Per-run networks come from Docker's default pool (172.16.0.0/12), also guarded.
   front:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
   control:
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: 10.89.17.0/24
+          # Dynamic addresses come only from the upper half, so they can never take a fixed one (the ingress is 10.89.17.2).
+          ip_range: 10.89.17.128/25
   launch:
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
+  # Launcher <-> socket proxy only.
+  dockerapi:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.19.0.0/16
+  # Broker <-> workspace socket proxy only.
+  wsapi:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.23.0.0/16
   egress:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
 
 volumes:
+  # Empty; only its filesystem is read (free space), by the launcher's free-disk guard.
+  diskprobe:
   pgdata:
   objdata:
   caddydata:
+  kcdata:
+  backups:
+  backupstatus:
+  auditanchors:
+  promdata:
+  amdata:
 
 secrets:
   db_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/db_password" }
@@ -378,3 +641,12 @@ secrets:
   minio_root_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/minio_root_password" }
   keycloak_admin_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/keycloak_admin_password" }
   oidc_client_secret: { file: "${GANTRY_SECRETS_DIR:-./secrets}/oidc_client_secret" }
+  # The secret of the `gantry-admin` service-account client in the gantry realm (manage-users in that realm only). It is what the API uses at run time instead of the
+  # Keycloak master-admin password, which only the keycloak service reads (to start). Written by the owner (a long random string), never generated here.
+  idp_admin_client_secret: { file: "${GANTRY_SECRETS_DIR:-./secrets}/idp_admin_client_secret" }
+  # Written by the owner, never generated: the initial password of the first Factory Admin (empty file = not used).
+  bootstrap_admin_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/bootstrap_admin_password" }
+  backup_remote: { file: "${GANTRY_SECRETS_DIR:-./secrets}/backup_remote" }
+  # Production profile (deploy/compose.prod.yml).
+  keycloak_db_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/keycloak_db_password" }
+  smtp_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/smtp_password" }

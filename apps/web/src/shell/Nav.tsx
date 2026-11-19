@@ -1,13 +1,13 @@
 /** Left nav (legacy renderNav): groups filtered by role, collapsible groups, icon rail, badges. */
-import { useRef, useState } from "react";
-import { useUI } from "../ui/overlay-context";
+import { useEffect, useRef, useState } from "react";
 import { useNavBadges } from "../api/queries";
 import { useCan, useCanMany } from "../api/can";
 import type { Me } from "../api/types";
-import { NAV_GROUPS, ROUTES, ROUTE_PERMS, canSeeRoute, isProjectRoute, routeDef } from "../lib/routes";
+import { NAV_GROUPS, ROUTES, ROUTE_PERMS, canSeeRoute, isProjectRoute } from "../lib/routes";
 import { hashFor } from "../lib/router";
-import { updatePrefs, usePrefs } from "../lib/prefs";
+import { usePrefs } from "../lib/prefs";
 import { Icon } from "../ui/Icon";
+import { sectionTag, toggleNavRail, toggleNavSection, useDrawerWidth, useNavRail } from "./navRail";
 
 export function useRouteCtx() {
   const audit = useCan("audit.view");
@@ -28,174 +28,162 @@ export function useRouteAccess(me: Me): { visible: (id: string) => boolean; deni
   };
 }
 
-const OPEN_KEY = "gantry.navOpen";
-function readOpen(): string | null {
-  try {
-    return sessionStorage.getItem(OPEN_KEY) || null;
-  } catch {
-    return null;
-  }
-}
-function writeOpen(g: string | null): void {
-  try {
-    if (g) sessionStorage.setItem(OPEN_KEY, g);
-    else sessionStorage.removeItem(OPEN_KEY);
-  } catch {
-    /* session storage unavailable: the menu just stays collapsed after a reload */
-  }
+/** The Gantry mark of the blueprint prototype: a registration square with a drafting grid and a filled centre. */
+export function BrandMark() {
+  return (
+    <svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="var(--accent)" strokeWidth="1.8" aria-hidden="true">
+      <rect x="3" y="3" width="26" height="26" />
+      <path d="M3 12h26M3 20h26M12 3v26M20 3v26" strokeWidth=".8" opacity=".6" />
+      <circle cx="16" cy="16" r="5" fill="var(--accent)" />
+    </svg>
+  );
 }
 
 /**
- * Left nav: only the group headers show, all collapsed on a fresh load. Opening a group closes the
- * others (accordion); the group holding the current page is marked, not forced open. The Project group
- * is entered from its header: switcher, "All projects" and the project's pages.
+ * True when the server says this session may submit no work and change nothing. Decided by the can-decisions
+ * (wo.submit and line.halt on the first project, kill.factory), never by comparing role names; false while unresolved.
  */
-export function Nav({ me, current, project, onNavigate }: { me: Me; current: string; project: ProjectLite | null; onNavigate: () => void }) {
+export function useReadOnly(): boolean {
+  const checks = useCanMany([{ action: "wo.submit" }, { action: "line.halt" }, { action: "kill.factory" }]);
+  return checks.every((c) => !c.pending && !c.allowed);
+}
+
+const GROUP_LABEL: Record<string, string> = { Project: "Project line" };
+
+/** What the rail flyout shows for the icon the pointer or focus is on. */
+interface Fly { label: string; sub: string; key: string; top: number; left: number }
+
+/**
+ * Sidebar (prototype .side): brand, then the groups as a mono heading and a list of links. The groups, routes, badges and
+ * permission filtering are the app's; only the markup is the prototype's. Under 1025px it slides over the page (`open`).
+ * From 1025px it collapses to an icon rail: the Gantry mark is the handle (with a notch on the panel edge and "[" on the
+ * keyboard), sections become ruled dividers with a mono tag, badges become a dot, and a flyout names the icon under the
+ * pointer or focus. Each section can also be folded on its own (aria-expanded), and the choices are remembered.
+ */
+export function Nav({ me, current, project, open, onNavigate }: { me: Me; current: string; project: ProjectLite | null; open: boolean; onNavigate: () => void }) {
+  const readOnly = useReadOnly();
   const prefs = usePrefs();
   const badges = useNavBadges();
   const access = useRouteAccess(me);
-  const rail = prefs.navRail;
-  const [open, setOpenState] = useState<string | null>(readOpen);
-  const setOpen = (g: string | null) => {
-    setOpenState(g);
-    writeOpen(g);
-  };
+  const rail = useNavRail();
+  const drawer = useDrawerWidth();
+  const [fly, setFly] = useState<Fly | null>(null);
   const inProject = isProjectRoute(current) && !!project;
   // on factory pages the Project group is a shortcut to the last project, never a selector implying scope
   const shown = inProject ? project : (me.projects.find((p) => p.id === prefs.project) ?? null);
-  const activeGroup = routeDef(current)?.group ?? null;
-  const go = () => {
-    setOpen(null);
-    onNavigate();
+  const toggleLabel = rail ? "Expand navigation" : "Collapse navigation";
+
+  const showFly = (e: { target: EventTarget | null }) => {
+    const el = (e.target as Element | null)?.closest?.<HTMLElement>("[data-fly]");
+    if (!el || !(rail || el.dataset.flyAlways)) return setFly(null);
+    const r = el.getBoundingClientRect();
+    setFly({ label: el.dataset.fly ?? "", sub: el.dataset.flySub ?? "", key: el.dataset.flyKey ?? "", top: r.top + r.height / 2, left: r.right + 10 });
   };
-  const onHeaderKey = (e: React.KeyboardEvent<HTMLButtonElement>) => {
-    const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
-    if (!keys.includes(e.key)) return;
-    const hs = Array.from(e.currentTarget.closest("nav")?.querySelectorAll<HTMLButtonElement>(".nav-group-btn") ?? []);
-    const i = hs.indexOf(e.currentTarget);
-    const n = e.key === "Home" ? 0 : e.key === "End" ? hs.length - 1 : e.key === "ArrowDown" ? (i + 1) % hs.length : (i - 1 + hs.length) % hs.length;
-    e.preventDefault();
-    hs[n]?.focus();
-  };
+  // pointer, focus and Escape listening is attached to the landmark itself (a non-interactive element takes no JSX handlers)
+  const navEl = useRef<HTMLElement>(null);
+  const showRef = useRef(showFly);
+  showRef.current = showFly;
+  const flyOpen = !!fly;
+  useEffect(() => {
+    const el = navEl.current;
+    if (!el) return;
+    const over = (e: Event) => showRef.current(e);
+    const leave = () => setFly(null);
+    const out = (e: FocusEvent) => { if (!el.contains(e.relatedTarget as Node | null)) setFly(null); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && flyOpen) { setFly(null); e.stopPropagation(); } };
+    el.addEventListener("mouseover", over);
+    el.addEventListener("focusin", over);
+    el.addEventListener("mouseleave", leave);
+    el.addEventListener("focusout", out);
+    el.addEventListener("keydown", key);
+    return () => {
+      el.removeEventListener("mouseover", over);
+      el.removeEventListener("focusin", over);
+      el.removeEventListener("mouseleave", leave);
+      el.removeEventListener("focusout", out);
+      el.removeEventListener("keydown", key);
+    };
+  }, [flyOpen]);
+  const mark = <BrandMark />;
   return (
-    <nav className="nav" id="nav" aria-label="Main">
-      {NAV_GROUPS.map((gname) => {
-        const isProj = gname === "Project";
-        const noProj = isProj && !shown;
-        const items = ROUTES.filter((r) => r.group === gname && r.nav !== false && (noProj || access.visible(r.id)));
-        if (!items.length) return null;
-        const expanded = !noProj && open === gname;
-        const gid = `navg-${gname.toLowerCase()}`;
-        const total = items.reduce((n, it) => n + (badges[it.id]?.n ?? 0), 0);
-        const activeG = activeGroup === gname;
-        if (rail) {
+    <nav
+      ref={navEl}
+      className={`side${open ? " open" : ""}${rail ? " rail" : ""}`}
+      id="side"
+      aria-label="Primary"
+    >
+      <div className="brand">
+        {drawer ? (
+          <a className="brand-mark" href="#home" onClick={onNavigate} aria-label="Gantry home">{mark}</a>
+        ) : (
+          <button type="button" className="brand-mark" id="nav-rail-toggle" aria-label={toggleLabel} aria-expanded={!rail} aria-controls="nav" aria-keyshortcuts="[" data-fly={toggleLabel} data-fly-key="[" data-fly-always="1" onClick={toggleNavRail}>
+            {mark}
+          </button>
+        )}
+        <a className="brand-name" href="#home" onClick={onNavigate} tabIndex={rail ? -1 : undefined} aria-hidden={rail ? true : undefined}>
+          <b>Gantry</b>
+          <small>{readOnly ? "READ-ONLY SHEET" : (me.org?.plant ?? me.config.orgName ?? "Software factory").toUpperCase()}</small>
+        </a>
+      </div>
+      {drawer ? null : (
+        <button type="button" className="rail-notch" aria-hidden="true" tabIndex={-1} onClick={toggleNavRail}>
+          <Icon name={rail ? "right" : "left"} />
+        </button>
+      )}
+      <div className="nav" id="nav">
+        {NAV_GROUPS.map((gname) => {
+          const noProj = gname === "Project" && !shown;
+          const items = ROUTES.filter((r) => r.group === gname && r.nav !== false && (noProj || access.visible(r.id)));
+          if (!items.length) return null;
+          const label = GROUP_LABEL[gname] ?? gname;
+          const isActive = (it: (typeof items)[number]) => current === it.id || (it.id === "work-orders" && (current === "record" || current === "changes" || current === "traveler")) || (it.id === "people" && current === "person");
+          // a folded section still shows the page you are on, so the nav never loses your place; the rail never folds
+          const folded = !rail && !!prefs.navCollapsed[gname];
+          const list = folded ? items.filter(isActive) : items;
+          const sid = `nav-sec-${gname.toLowerCase()}`;
           return (
-            <RailGroup key={gname} gname={gname} icon={GROUP_ICON[gname] ?? "dots"} items={items} project={shown} active={activeG} disabled={noProj} current={current} onNavigate={onNavigate} onKey={onHeaderKey} />
-          );
-        }
-        return (
-          <GroupBlock key={gname}>
-            {rail ? (
-              <div className="nav-group-rule" role="separator" aria-label={gname} />
-            ) : (
-              <button
-                type="button"
-                className={`nav-group nav-group-btn${activeG ? " is-active-group" : ""}`}
-                id={`${gid}-btn`}
-                aria-expanded={expanded ? "true" : "false"}
-                aria-disabled={noProj ? "true" : undefined}
-                title={noProj ? "Choose a project" : undefined}
-                aria-controls={gid}
-                data-active-group={activeG ? "true" : undefined}
-                onClick={() => { if (!noProj) setOpen(open === gname ? null : gname); }}
-                onKeyDown={onHeaderKey}
-              >
-                <Icon name={expanded ? "down" : "chevron"} className="nav-caret" />
-                <span className="nav-group-name">
-                  {gname}
-                  {noProj ? <span className="nav-proj">Choose a project</span> : null}
-                </span>
-                {!expanded && total ? <span className="nav-count mono">{String(total)}</span> : null}
-              </button>
-            )}
-            <div id={gid} hidden={!expanded}>
-              <ul className="nav-list">
-                {items.map((it) => {
+            <div key={gname} role="group" aria-label={label} className={`sec${folded ? " folded" : ""}`}>
+              <h3>
+                {rail ? (
+                  <>
+                    <span className="sr-only">{label}</span>
+                    <span className="sec-tag" aria-hidden="true" title={label}>{sectionTag(gname)}</span>
+                  </>
+                ) : (
+                  <button type="button" className="sec-h" aria-expanded={!folded} aria-controls={sid} onClick={() => toggleNavSection(gname)}>
+                    <span>{label}</span>
+                    {folded ? <span className="sec-n" aria-label={`${items.length} pages`}>{items.length}</span> : null}
+                    <Icon name="chevron" />
+                  </button>
+                )}
+              </h3>
+              <div id={sid} className="sec-items">
+                {list.map((it) => {
                   const bd = badges[it.id];
-                  const active = current === it.id || (it.id === "work-orders" && current === "record");
+                  const active = isActive(it);
+                  const bt = bd ? (bd.text ?? String(bd.n ?? 0)) : "";
                   return (
-                    <li key={it.id}>
-                      <a
-                        href={hashFor(it.id, null, it.project ? shown?.id : null)}
-                        className={`nav-link${active ? " is-active" : ""}`}
-                        aria-current={current === it.id ? "page" : undefined}
-                        aria-label={rail ? it.title + (bd ? `, ${bd.label}` : "") : undefined}
-                        data-tip={rail ? it.title + (bd ? ` · ${bd.label}` : "") : undefined}
-                        onClick={go}
-                      >
-                        <Icon name={it.icon} />
-                        <span className="nav-text">{it.title}</span>
-                        {bd ? bd.text ? <span className={`nav-badge ${bd.kind || ""}`} title={bd.label}>{bd.text}</span> : <span className={`nav-count mono ${bd.kind || ""}`} title={bd.label}>{String(bd.n ?? 0)}</span> : null}
-                      </a>
-                    </li>
+                    <a key={it.id} href={hashFor(it.id, null, it.project ? shown?.id : null)} aria-current={active ? "page" : undefined} data-fly={it.title} data-fly-sub={bd ? (bd.label ?? bt) : ""} onClick={onNavigate}>
+                      <Icon name={it.icon} />
+                      <span className="lbl">{it.title}</span>
+                      {bd ? <span className={`cnt ${bd.kind || ""}`} title={rail ? undefined : bd.label}>{bt}</span> : null}
+                    </a>
                   );
                 })}
-              </ul>
+              </div>
             </div>
-          </GroupBlock>
-        );
-      })}
+          );
+        })}
+      </div>
+      {fly ? (
+        <div className="rail-fly" id="nav-fly" aria-hidden="true" style={{ top: fly.top, left: fly.left }}>
+          <b>{fly.label}</b>
+          {fly.sub ? <span>{fly.sub}</span> : null}
+          {fly.key ? <kbd>{fly.key}</kbd> : null}
+        </div>
+      ) : null}
     </nav>
   );
 }
 
 export type ProjectLite = Me["projects"][number];
-
-const GROUP_ICON: Record<string, string> = { Overview: "home", Project: "project", Agents: "agent", Connect: "plug", Govern: "shield" };
-
-/** Icon-rail mode: one button per group; its items open in a flyout. */
-function RailGroup({ gname, icon, items, project, active, disabled, current, onNavigate, onKey }: { gname: string; icon: string; items: typeof ROUTES[number][]; project: ProjectLite | null; active: boolean; disabled: boolean; current: string; onNavigate: () => void; onKey: (e: React.KeyboardEvent<HTMLButtonElement>) => void }) {
-  const ui = useUI();
-  const ref = useRef<HTMLButtonElement>(null);
-  const label = disabled ? `${gname} (choose a project first)` : gname;
-  const [isOpen, setIsOpen] = useState(false);
-  const openFly = () => {
-    if (disabled || !ref.current) return;
-    setIsOpen(true);
-    ui.popover(ref.current, (close) => <Flyout title={gname} items={items} project={project} current={current} close={() => { close(); onNavigate(); }} />, () => setIsOpen(false));
-  };
-  return (
-    <button ref={ref} type="button" className={`nav-group nav-group-btn nav-rail-group${active ? " is-active-group" : ""}`} id={`navg-${gname.toLowerCase()}-btn`} aria-label={label} data-tip={label} aria-haspopup="menu" aria-expanded={isOpen ? "true" : "false"} aria-disabled={disabled ? "true" : undefined} data-active-group={active ? "true" : undefined} onClick={openFly} onKeyDown={onKey}>
-      <Icon name={icon} />
-    </button>
-  );
-}
-
-function Flyout({ title, items, project, current, close }: { title: string; items: typeof ROUTES[number][]; project: ProjectLite | null; current: string; close: () => void }) {
-  const onKey = (e: React.KeyboardEvent<HTMLUListElement>) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    const as = Array.from(e.currentTarget.querySelectorAll<HTMLAnchorElement>("a"));
-    const i = as.indexOf(document.activeElement as HTMLAnchorElement);
-    e.preventDefault();
-    as[(i + (e.key === "ArrowDown" ? 1 : -1) + as.length) % as.length]?.focus();
-  };
-  return (
-    <div className="nav-flyout" role="menu" aria-label={title}>
-      <div className="sw-sec">{title}</div>
-      <ul className="plain-list" onKeyDown={onKey}>
-        {items.map((it, i) => (
-          <li key={it.id}>
-            <a role="menuitem" className={`nav-link${current === it.id ? " is-active" : ""}`} href={hashFor(it.id, null, it.project ? project?.id : null)} aria-current={current === it.id ? "page" : undefined} autoFocus={i === 0} onClick={close}>
-              <Icon name={it.icon} />
-              <span className="nav-text">{it.title}</span>
-            </a>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function GroupBlock({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
-}

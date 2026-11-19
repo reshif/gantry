@@ -1,0 +1,80 @@
+/* The work order page (#record/<WO>): header card, tabs, document card, properties column, and the changes page. Tokens only. */
+.dz { display: block; min-width: 0; }
+.dz > * { min-width: 0; }
+.dz-head { border-radius: var(--r2); }
+.dz-head > .body { display: flex; flex-direction: column; gap: 14px; padding: 14px 18px 16px; }
+.dz-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.dz-head .callout { display: flex; gap: 10px; align-items: flex-start; font-size: var(--t-md); }
+.dz-head .callout .ic { margin-top: 2px; flex: none; }
+.dz-head .callout b { margin-right: 4px; }
+.dz-head .trv-why { margin: 0; }
+.dz-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.dz-side { top: 64px; overflow-y: auto; border-radius: var(--r2); }
+.dz-exp { display: flex; flex-wrap: wrap; gap: 6px; }
+.dz-side .rec-meter { border: 0; padding: 0; background: none; }
+.dz-side .rec-meter-top { display: none; }
+.dz-side .rec-meter-bar { margin-bottom: 6px; }
+
+/* the document: one card, sections that fold */
+.dz-replay { margin-top: 16px; border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); }
+.dz-replay > summary { padding: 8px 14px; cursor: pointer; font-size: var(--t-md); color: var(--muted); }
+.dz-replay[open] > summary { border-bottom: 1px solid var(--line); }
+.dz-replay .rec-scrub { border: 0; }
+
+/* the conversation inside the page */
+.dz-main .osx.is-bare { display: block; }
+.dz-main .osx.is-bare .osx-grid { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
+.dz-main .osx.is-bare .osx-main { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); box-shadow: var(--shadow-1); }
+.dz-main .osx.is-bare .osx-thread { max-height: none; }
+.dz-main .osx.is-bare .osx-side { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); padding: 14px 16px; }
+.dz-main .osx.is-bare .osx-side { order: 0; }
+.dz-main .osx.is-bare .osx-side > .osx-facts:first-of-type, .dz-main .osx.is-bare .osx-steps { display: none; }
+
+/* the changes page */
+
+@media (max-width: 1100px) {
+  .dz-side { position: static; max-height: none; order: -1; }
+}
+@media (max-width: 640px) {
+  .dz-head > .body { padding: 12px; }
+}
+
+/* Blueprint: header and tabs are plain page furniture; the side column is panels */
+.dz-head { border: 0; background: none; box-shadow: none; display: block; }
+.dz-head > .ph { margin-bottom: 12px; }
+.dz-side { position: static; max-height: none; overflow: visible; border: 0; background: none; box-shadow: none; }
+.dz-side .props { display: grid; gap: 16px; }
+
+/* Activity tab (prototype): the conversation as bubbles inside the Conversation panel, person messages to the right */
+.dz-conv .osx.is-bare .osx-grid { gap: 0; }
+.dz-conv .osx.is-bare .osx-main { border: 0; box-shadow: none; background: none; }
+.dz-conv .osx.is-bare .osx-side { border: 0; border-top: 1px solid var(--line); border-radius: 0; box-shadow: none; }
+.dz-conv .osx-thread { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
+.dz-conv .osx-msg { max-width: 92%; border: 1px solid var(--line2); background: var(--surface); padding: 8px 12px; overflow-wrap: anywhere; }
+.dz-conv .osx-msg.is-user { align-self: flex-end; background: var(--accent-soft); border-color: var(--accent); }
+.dz-conv .osx-msg.is-update { border: 0; background: none; padding: 0; max-width: 100%; }
+.dz-conv .osx-who { font: 600 11px var(--mono); color: var(--ink3); margin-bottom: 2px; }
+
+/* a long text value in a stat tile (prototype .v.txtv): smaller, one line */
+.stat .v .txtv-in { display: block; font-size: 19px; line-height: 31px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Header actions stay compact and inline at phone width, as in the prototype (no full-width touch-target stretching). */
+@media (pointer: coarse) {
+  .dz-head .dz-actions .btn { min-height: 0; }
+}
+
+/* Changes page: the agent's actual diff (GET .../diff), one block per file, hunks with line numbers, per-commit sections when a file was touched more than once. */
+.dfv{font:12.5px/1.5 var(--mono);background:var(--sunk);border-top:1px solid var(--line);overflow:auto}
+.dfv-note{padding:8px 12px;font:13px/1.45 var(--font);border-bottom:1px solid var(--line)}
+.dfv-sec{border-bottom:1px solid var(--line)}
+.dfv-sec>h4{margin:0;padding:6px 12px;font:600 12px var(--font);background:var(--surface2);border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.dfv-hunk{min-width:max-content}
+.dfv-head{padding:2px 12px;color:var(--muted);background:var(--accent-soft)}
+.dfv-row{display:grid;grid-template-columns:44px 44px 1fr;white-space:pre-wrap;overflow-wrap:anywhere}
+.dfv-row .n{text-align:right;padding:0 8px;color:var(--muted);user-select:none;border-right:1px solid var(--line)}
+.dfv-row .t{padding:0 8px}
+.dfv-row.add .t{background:var(--ok-bg);color:var(--ok)}
+.dfv-row.del .t{background:var(--bad-bg);color:var(--bad)}
+.chg-file{display:flex;gap:8px;align-items:center}
+/* Activity tab: the Timeline panel is as tall as its events, not stretched to the long Conversation column beside it */
+.dz-act { align-items: start; }

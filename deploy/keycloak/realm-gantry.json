@@ -10,11 +10,253 @@
   "editUsernameAllowed": false,
   "rememberMe": false,
   "bruteForceProtected": true,
+  "eventsEnabled": true,
+  "eventsExpiration": 7776000,
+  "eventsListeners": [
+    "jboss-logging"
+  ],
+  "enabledEventTypes": [],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
   "failureFactor": 10,
   "accessTokenLifespan": 300,
   "ssoSessionIdleTimeout": 1800,
   "ssoSessionMaxLifespan": 36000,
   "accessCodeLifespan": 60,
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "otpPolicyLookAheadWindow": 1,
+  "browserFlow": "gantry-browser",
+  "requiredActions": [
+    {
+      "alias": "UPDATE_PASSWORD",
+      "name": "Update Password",
+      "providerId": "UPDATE_PASSWORD",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 10
+    },
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 20
+    },
+    {
+      "alias": "webauthn-register",
+      "name": "Webauthn Register",
+      "providerId": "webauthn-register",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 30
+    },
+    {
+      "alias": "CONFIGURE_RECOVERY_AUTHN_CODES",
+      "name": "Recovery Authentication Codes",
+      "providerId": "CONFIGURE_RECOVERY_AUTHN_CODES",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 40
+    },
+    {
+      "alias": "VERIFY_EMAIL",
+      "name": "Verify Email",
+      "providerId": "VERIFY_EMAIL",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 50
+    },
+    {
+      "alias": "delete_account",
+      "name": "Delete Account",
+      "providerId": "delete_account",
+      "enabled": false,
+      "defaultAction": false,
+      "priority": 60
+    }
+  ],
+  "authenticatorConfig": [
+    {
+      "alias": "gantry-no-factor-cond",
+      "config": {
+        "flow_to_check": "gantry-second-factor",
+        "check_result": "not-executed"
+      }
+    },
+    {
+      "alias": "gantry-deny",
+      "config": {
+        "denyErrorMessage": "Two-step sign-in is not set up for this account. Ask an administrator for an enrolment link."
+      }
+    },
+    {
+      "alias": "gantry-loa-2",
+      "config": {
+        "loa-condition-level": "2",
+        "loa-store-in-user-session": "true",
+        "loa-max-age": "36000"
+      }
+    }
+  ],
+  "authenticationFlows": [
+    {
+      "alias": "gantry-browser",
+      "description": "Browser sign-in for everyone: a password and then a second factor (authenticator app, security key or recovery code) the person already has. Nobody can enrol a factor here: enrolment is only by the one-time link an administrator issues through Gantry.",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 10,
+          "userSetupAllowed": false,
+          "authenticator": "auth-cookie"
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 15,
+          "userSetupAllowed": false,
+          "authenticator": "identity-provider-redirector"
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "ALTERNATIVE",
+          "priority": 20,
+          "userSetupAllowed": false,
+          "flowAlias": "gantry-browser-forms"
+        }
+      ]
+    },
+    {
+      "alias": "gantry-browser-forms",
+      "description": "Password, then the second factor, then the authentication level is recorded",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false,
+          "authenticator": "auth-username-password-form"
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 20,
+          "userSetupAllowed": false,
+          "flowAlias": "gantry-second-factor"
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 30,
+          "userSetupAllowed": false,
+          "flowAlias": "gantry-no-factor"
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 40,
+          "userSetupAllowed": false,
+          "flowAlias": "gantry-level-2"
+        }
+      ]
+    },
+    {
+      "alias": "gantry-second-factor",
+      "description": "Runs when the person has at least one enrolled second factor: any of them is accepted",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false,
+          "authenticator": "conditional-user-configured"
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 20,
+          "userSetupAllowed": false,
+          "authenticator": "auth-otp-form"
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 30,
+          "userSetupAllowed": false,
+          "authenticator": "webauthn-authenticator"
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 40,
+          "userSetupAllowed": false,
+          "authenticator": "auth-recovery-authn-code-form"
+        }
+      ]
+    },
+    {
+      "alias": "gantry-no-factor",
+      "description": "Runs when the second-factor step did not run (no factor enrolled): the sign-in is refused and the person is NOT offered to enrol one with only a password",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false,
+          "authenticator": "conditional-sub-flow-executed",
+          "authenticatorConfig": "gantry-no-factor-cond"
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "userSetupAllowed": false,
+          "authenticator": "deny-access-authenticator",
+          "authenticatorConfig": "gantry-deny"
+        }
+      ]
+    },
+    {
+      "alias": "gantry-level-2",
+      "description": "Records authentication level 2 (acr 2) once the second factor passed; the allow-access step only gives this conditional flow something to run",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false,
+          "authenticator": "conditional-level-of-authentication",
+          "authenticatorConfig": "gantry-loa-2"
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "userSetupAllowed": false,
+          "authenticator": "allow-access-authenticator"
+        }
+      ]
+    }
+  ],
   "clients": [
     {
       "clientId": "gantry-web",
@@ -32,7 +274,8 @@
       "rootUrl": "https://localhost",
       "baseUrl": "/",
       "redirectUris": [
-        "https://localhost/auth/callback"
+        "https://localhost/auth/callback",
+        "https://localhost/"
       ],
       "webOrigins": [
         "https://localhost"
@@ -40,6 +283,9 @@
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "post.logout.redirect.uris": "https://localhost/",
+        "backchannel.logout.url": "http://gantry-api:8000/auth/backchannel-logout",
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.revoke.offline.tokens": "false",
         "access.token.lifespan": "300",
         "client_credentials.use_refresh_token": "false"
       },
@@ -84,6 +330,46 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "gantry-admin",
+      "name": "Gantry identity-provider admin",
+      "description": "Gantry API runtime service account: manage-users in this realm only (enrolment links, authenticator resets, the bootstrap admin). No login, no browser flows.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "secret": "${GANTRY_ADMIN_CLIENT_SECRET}",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "redirectUris": [],
+      "webOrigins": [],
+      "attributes": {
+        "access.token.lifespan": "300",
+        "client_credentials.use_refresh_token": "false"
+      },
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "admin-cli",
+      "name": "${client_admin-cli}",
+      "description": "Built-in client for the master realm's admin REST; unused in this realm. A password-only direct grant is off (G-M8).",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "attributes": {},
+      "fullScopeAllowed": false
     }
   ],
   "components": {
@@ -93,7 +379,7 @@
         "subComponents": {},
         "config": {
           "kc.user.profile.config": [
-            "{\"attributes\":[{\"name\":\"username\",\"validations\":{\"length\":{\"min\":3,\"max\":255},\"username-prohibited-characters\":{},\"up-username-not-idn-homograph\":{}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"email\",\"validations\":{\"email\":{},\"length\":{\"max\":255}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"firstName\",\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"lastName\",\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"gantry_id\",\"validations\":{\"length\":{\"max\":64}},\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]}},{\"name\":\"gantry_title\",\"validations\":{\"length\":{\"max\":255}},\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]}}]}"
+            "{\"attributes\": [{\"name\": \"username\", \"validations\": {\"length\": {\"min\": 3, \"max\": 255}, \"username-prohibited-characters\": {}, \"up-username-not-idn-homograph\": {}}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\"]}}, {\"name\": \"email\", \"validations\": {\"email\": {}, \"length\": {\"max\": 255}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\"]}}, {\"name\": \"firstName\", \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}}, {\"name\": \"lastName\", \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}}, {\"name\": \"gantry_id\", \"validations\": {\"length\": {\"max\": 64}}, \"permissions\": {\"view\": [\"admin\"], \"edit\": [\"admin\"]}}, {\"name\": \"gantry_title\", \"validations\": {\"length\": {\"max\": 255}}, \"permissions\": {\"view\": [\"admin\"], \"edit\": [\"admin\"]}}]}"
           ]
         }
       }
@@ -444,6 +730,36 @@
           "temporary": false
         }
       ]
+    },
+    {
+      "username": "service-account-gantry-admin",
+      "enabled": true,
+      "serviceAccountClientId": "gantry-admin",
+      "clientRoles": {
+        "realm-management": [
+          "manage-users",
+          "view-events"
+        ]
+      }
     }
-  ]
+  ],
+  "otpPolicyCodeReusable": false,
+  "webAuthnPolicyRpEntityName": "Gantry",
+  "webAuthnPolicySignatureAlgorithms": [
+    "ES256",
+    "RS256"
+  ],
+  "webAuthnPolicyUserVerificationRequirement": "preferred",
+  "webAuthnPolicyRequireResidentKey": "No",
+  "webAuthnPolicyAuthenticatorAttachment": "not specified",
+  "webAuthnPolicyAttestationConveyancePreference": "not specified",
+  "webAuthnPolicyCreateTimeout": 0,
+  "webAuthnPolicyAvoidSameAuthenticatorRegister": true,
+  "actionTokenGeneratedByAdminLifespan": 3600,
+  "smtpServer": {
+    "host": "mailpit",
+    "port": "1025",
+    "from": "gantry@localhost",
+    "fromDisplayName": "Gantry"
+  }
 }

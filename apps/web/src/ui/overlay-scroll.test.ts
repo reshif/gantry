@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /** jsdom does no layout, so these pin the CSS rules that keep tall dialogs and drawers scrollable. */
-const css = readFileSync(resolve(__dirname, "../styles/base.css"), "utf8");
+const css = readFileSync(resolve(__dirname, "../styles/base.css"), "utf8") + "\n" + readFileSync(resolve(__dirname, "../styles/blueprint.css"), "utf8");
 const rule = (sel: string): string => {
   const m = new RegExp(`(^|\\n)${sel.replace(/\./g, "\\.")}\\s*\\{([^}]*)\\}`).exec(css);
   if (!m) throw new Error(`no rule for ${sel}`);
@@ -28,8 +28,8 @@ describe("overlay scrolling", () => {
     expect(rule(".drawer")).toMatch(/overflow-y:\s*auto/);
   });
 
-  it("the dialog wrapper scrolls when the viewport is shorter than the dialog's minimum", () => {
-    expect(rule(".dlg-wrap")).toMatch(/overflow-y:\s*auto/);
+  it("the dialog wrapper adds no box of its own (the dialog is fixed to the viewport and capped)", () => {
+    expect(rule(".dlg-wrap,.drawer-wrap")).toMatch(/display:\s*contents/);
   });
 
   it("popovers and menus are capped to the viewport and scroll inside themselves", () => {

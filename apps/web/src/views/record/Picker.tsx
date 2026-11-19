@@ -1,4 +1,5 @@
 /** The record picker: every work order the viewer may see, with search, project and stage filters (legacy record.js picker). */
+import { qk } from "../../api/keys";
 import { useInfiniteQuery, keepPreviousData } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { fmt } from "@gantry/domain";
@@ -36,7 +37,7 @@ export function Picker({ note }: { note?: string | null }) {
   }, [q]);
   const params = { q: dq, sort: sort.k, dir: sort.dir > 0 ? "asc" : "desc", ...(stage === "intake" ? { where: "intake", state: "open" } : stage === "flight" ? { state: "open" } : stage === "done" ? { state: "done" } : stage === "killed" ? { state: "killed" } : {}) };
   const list = useInfiniteQuery({
-    queryKey: ["workOrders", "records", projectId, params],
+    queryKey: qk.woRecords(projectId, params),
     queryFn: ({ pageParam }) => get<Page<WorkOrder>>(api(`projects/${encodeURIComponent(projectId ?? "")}/work-orders`), { ...params, limit: PAGE, cursor: pageParam || undefined }),
     initialPageParam: "",
     getNextPageParam: (last) => last.next || undefined,
@@ -70,9 +71,8 @@ export function Picker({ note }: { note?: string | null }) {
   return (
     <div className="view rec-view rec-picker">
       <ViewHead
-        kicker="Project · Work order record"
         title="Work order records"
-        sub="The whole lifecycle of a work order in one place: request, clarification, agreement, every station, the change itself, tests, merge, approvals and what happened after release. Pick one to open."
+        sub="Everything about one work order in one place, from the request to what happened after release. Pick one to open."
         meta={[["Records", String(total)], ["Shown", String(rows.length)]]}
       />
       {note ? (

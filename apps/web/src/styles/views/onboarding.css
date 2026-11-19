@@ -1,42 +1,32 @@
 /* Onboarding view: stage strip, stepper table, repo drawer, connect wizard, guidelines. Tokens only. */
-.onb-strip { list-style: none; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); border: 1px solid var(--line-strong); background: var(--surface); }
-.onb-strip li { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "no n" "l l"; gap: 0 6px; padding: 6px 10px 8px; border-right: 1px solid var(--line); min-width: 0; position: relative; }
-.onb-strip li:last-child { border-right: 0; }
-.onb-strip li:not(.onb-strip-off):not(:nth-last-child(2))::after { content: ""; position: absolute; right: -5px; top: 50%; width: 8px; height: 8px; transform: translateY(-50%) rotate(45deg); border-top: 1px solid var(--line-strong); border-right: 1px solid var(--line-strong); background: var(--surface); z-index: 1; }
-.onb-strip-no { grid-area: no; font-size: 9.5px; letter-spacing: 0.04em; color: var(--muted); align-self: start; padding-top: 4px; }
-.onb-strip-n { grid-area: n; font-family: var(--f-display); font-size: var(--t-2xl); font-weight: 700; line-height: 1; text-align: right; color: var(--faint); font-variant-numeric: tabular-nums; }
-.onb-strip li.has-n .onb-strip-n { color: var(--ink); }
-.onb-strip-l { grid-area: l; font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.onb-strip-off { background: repeating-linear-gradient(-45deg, var(--sunk) 0 6px, transparent 6px 12px); border-left: 1px dashed var(--line-strong); }
-.onb-strip-off.has-n .onb-strip-n { color: var(--block); }
+/* Stage strip: one card per stage with the number of repos in it; the last card is the off-belt bay. */
+.onb-strip { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; }
+.onb-strip li { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2); box-shadow: var(--shadow-1); }
+.onb-strip-no { font-size: var(--t-sm); color: var(--faint); }
+.onb-strip-n { font-size: var(--t-2xl); font-weight: 600; line-height: 1.2; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--faint); }
+.onb-strip-l { font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.onb-strip-off { border-style: dashed !important; }
+@media (max-width: 1100px) { .onb-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .onb-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.onb-tabrow { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+.onb-tabrow .tabs { border-bottom: 0; min-width: 0; }
+.onb-tabrow .btn { margin-bottom: 4px; }
+.onb-callout { display: flex; gap: 10px; align-items: flex-start; }
 
 .onb-table td { vertical-align: middle; }
 .onb-repo { display: grid; gap: 1px; min-width: 160px; }
 .onb-stage-cell { display: grid; gap: 3px; justify-items: start; }
 
-.onb-steps { list-style: none; display: flex; gap: 0; align-items: center; }
-.onb-steps li { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--t-xs); }
-.onb-steps li + li::before { content: ""; width: 8px; height: 0; border-top: 1px solid var(--line-strong); }
-.onb-steps li.is-done + li::before { border-top: 2px solid var(--done); }
-.onb-step-mark { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid var(--line-strong); background: var(--surface); font-size: 10px; font-weight: 700; color: var(--faint); flex: none; }
-.onb-steps .is-done .onb-step-mark { background: var(--done); border-color: var(--done); color: var(--surface); }
-.onb-steps .is-now .onb-step-mark { border: 2px solid var(--accent); color: var(--accent); background: var(--accent-soft); }
-.onb-steps .is-stop .onb-step-mark { border: 2px solid var(--block); color: var(--block); background: var(--block-soft); transform: rotate(45deg); }
-.onb-steps .is-stop .onb-step-mark { font-size: 0; }
-.onb-steps .is-stop .onb-step-mark::after { content: "!"; font-size: 11px; transform: rotate(-45deg); }
-.onb-steps.is-big { flex-wrap: wrap; row-gap: 6px; margin-bottom: var(--s3); }
-.onb-steps.is-big li { color: var(--ink-2); }
-.onb-steps.is-big li.is-now, .onb-steps.is-big li.is-stop { color: var(--ink); font-weight: 600; }
-.onb-steps.is-big li + li::before { width: 12px; }
+/* Compact stage marks for table rows. */
+.onb-steps { list-style: none; margin: 0; padding: 0; display: flex; gap: 3px; align-items: center; }
+.onb-steps li { display: flex; align-items: center; }
+.onb-step-mark { width: 14px; height: 6px; border-radius: 3px; background: var(--line-strong); flex: none; }
+.onb-steps .is-done .onb-step-mark { background: var(--done); }
+.onb-steps .is-now .onb-step-mark { background: var(--run); }
+.onb-steps .is-stop .onb-step-mark { background: var(--wait); }
 
-.onb-status { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); font-weight: 600; padding: 1px 6px; border: 1px solid var(--line); border-radius: 2px; white-space: nowrap; color: var(--ink-2); background: var(--panel); }
-.onb-status .ic { width: 12px; height: 12px; }
-.onb-st-ready { color: var(--done); border-color: var(--done); background: var(--done-soft); }
-.onb-st-exception { color: var(--wait); border-color: var(--wait); border-style: dashed; background: var(--wait-soft); }
-.onb-st-person { color: var(--block); border-color: var(--block); background: var(--block-soft); }
-.onb-st-failed { color: var(--fail); border-color: var(--fail); background: var(--fail-soft); border-width: 2px; }
-.onb-st-merge, .onb-st-openpr { color: var(--gate); border-color: var(--gate); background: var(--gate-soft); }
-.onb-st-progress { color: var(--run); border-color: var(--run); background: var(--run-soft); }
+/* The repo status is the shared Status badge; this wrapper only keeps the hook. */
+.onb-status { display: inline-flex; }
 
 .onb-acts { display: flex; flex-wrap: wrap; gap: 6px; margin: var(--s3) 0; }
 .onb-drawer .callout { margin-bottom: var(--s2); }
@@ -117,7 +107,27 @@
 .onb-src .rc-d { overflow-wrap: anywhere; }
 
 /* Agent-authored pull request: parts a person confirms, and what must change outside the files. */
-.osx-sensitive { border: 1px solid var(--warn, #b7791f); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
-.osx-sensitive ul { margin: 4px 0 6px 16px; }
-.osx-blocker { border: 1px solid var(--danger, #c53030); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
 .osx-purpose { display: block; margin: 0 0 4px 8px; }
+
+
+/* The repo's onboarding session: header, conversation and lifecycle, in the shared card look. */
+.onb-view .osx-top { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s3); flex-wrap: wrap; padding: 0 0 var(--s3); }
+.onb-view .osx-title { overflow-wrap: anywhere; }
+.onb-view .osx-main, .onb-view .osx-side, .onb-view .osx-card { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); box-shadow: var(--shadow-1); }
+.onb-view .osx-card { box-shadow: none; }
+.onb-view .osx-side { padding: var(--s4); gap: var(--s3); }
+.onb-view .osx-msg.is-user { border-radius: var(--r2); }
+.onb-view .osx-composer { border-top: 1px solid var(--line); }
+.onb-view .osx-waiting { border-radius: var(--r1); }
+.onb-view .osx-file { border-radius: var(--r1); }
+.onb-view .osx-diff { border-radius: var(--r1); }
+.onb-view .osx-status { text-transform: none; letter-spacing: 0; font-size: var(--t-sm); }
+.onb-view .osx-proposal { border-left-width: 1px; border-left-color: var(--line); }
+.onb-view .osx-proposal.is-pending { border-color: var(--wait); }
+.onb-view .osx-proposal.is-approved { border-color: var(--done); }
+@media (max-width: 640px) { .onb-view .osx-thread { max-height: none; padding: var(--s3); } .onb-view .osx-composer { padding: var(--s3); } }
+.onb-view .is-done .osx-dot { background: var(--done); border-color: var(--done); color: var(--surface); }
+.onb-view .is-current .osx-dot { border-color: var(--run); background: var(--run-soft); }
+.onb-drawer .prail { padding-top: var(--s2); }
+.onb-rail { flex: none; width: 100%; max-width: 100%; min-width: 0; }
+.onb-drawer .drawer-scroll { min-width: 0; grid-template-columns: minmax(0, 1fr); }

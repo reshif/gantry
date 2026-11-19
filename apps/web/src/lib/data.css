@@ -1,0 +1,10 @@
+/* Data-layer states: the stale-copy strip, sticky command errors and the draft conflict banner. Tokens only. */
+.async-stale, .cmd-error, .draft-conflict {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2, 8px) var(--s3, 12px);
+  padding: var(--s2, 8px) var(--s3, 12px); border: 1px solid var(--line-strong, var(--line)); border-radius: var(--r2);
+  background: var(--warn-soft); color: var(--ink);
+}
+.cmd-error { background: var(--bad-soft); }
+.async-stale > span, .cmd-error > span, .draft-conflict > span { flex: 1 1 18rem; min-width: 0; }
+.draft-conflict-actions { display: flex; gap: var(--s2, 8px); flex-wrap: wrap; }
+.draft-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--wait, #d29a1c); margin-left: var(--s2, 8px); flex: none; vertical-align: middle; }

@@ -1,0 +1,91 @@
+/* Design-system layer (docs/ui/design-system.md). Loaded last so one rule wins everywhere.
+   Change shared looks here, not in per-view files. */
+
+/* ---------- one status look (docs/ui/design-system.md §2) ----------
+   Every status — work-order state, integration/model/MCP health, project health, status chips —
+   is a glyph + word on a soft tone, sentence case, same size and shape. */
+.health, .hk-health { padding: 1px 7px 1px 5px; border: 0; border-radius: 5px;
+  font-family: var(--f-body); font-size: var(--t-sm); font-weight: 500; line-height: 1.35; text-transform: none; letter-spacing: 0;
+  white-space: nowrap; color: var(--ink-2); background: var(--sunk);
+}
+.health .ic, .hk-health .ic { width: 14px; height: 14px; }
+.h-healthy, .hk-ok, .tone-done { color: var(--done); background: var(--done-soft); }
+.h-degraded, .tone-wait { color: var(--wait); background: var(--wait-soft); }
+.h-failing, .hk-attention, .tone-block { color: var(--block); background: var(--block-soft); }
+.hk-halted { color: var(--block); background: var(--block-soft); box-shadow: inset 0 0 0 1px var(--block); }
+.hk-new, .hk-onboarding, .tone-accent { color: var(--accent); background: var(--accent-soft); }
+.h-offline, .hk-archived, .tone-neutral { color: var(--muted); background: var(--sunk); }
+.tone-run { color: var(--run); background: var(--run-soft); }
+.tone-fail { color: var(--fail); background: var(--fail-soft); }
+/* status chips used as statuses: same tones, no border box */
+.chip-ok, .chip-warn, .chip-block, .chip-accent { border-color: transparent; }
+
+/* ---------- filters: one compact row ----------
+   Filters are a toolbar, not a form. Each filter is one 32px box that reads "Label  value", so a row of them stays
+   one line high, needs no label row above it, and looks the same on every page. */
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); min-width: 0; }
+.filters .field-label { padding: 0 2px 0 10px; font-family: var(--f-body); font-size: var(--t-sm); font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted); white-space: nowrap; cursor: pointer; }
+
+/* a status next to a page title sits on the title's middle line */
+
+/* header stats on a phone: smaller, still one glance */
+@media (max-width: 560px) {
+  .titleblock > div { padding: 6px 10px; }
+  .titleblock dd { font-size: 18px; }
+}
+
+/* ---------- shared data states (ui/async.tsx) ---------- */
+.async-loading { display: grid; gap: 10px; padding: var(--s4) 0; min-height: 96px; align-content: start; }
+.async-bar { display: block; height: 12px; background-size: 200% 100%; }
+@media (prefers-reduced-motion: reduce) { .async-bar { animation: none; } }
+.empty-state .empty-icon { color: var(--faint); }
+.async-stat .ic, .async-stat svg { width: 14px; height: 14px; vertical-align: -2px; }
+
+/* ---------- production pass: targets, focus, motion (tokens.css) ---------- */
+/* 24px is the floor everywhere (WCAG 2.5.8). Small controls that were shorter now reach it without growing visually much. */
+.btn, .th-sort, .seg-label, .mseg, .chip-x, .toast-x, .menu-item { min-height: var(--target-min); }
+.icon-btn, .icon-btn-sm, .toast-x { min-width: var(--target-min); }
+input[type="checkbox"], input[type="radio"] { width: 16px; height: 16px; margin: 4px; }
+/* primary controls get a comfortable 44px target on touch screens; dense table and chip controls stay at the floor */
+@media (pointer: coarse) {
+  .btn:not(.btn-sm):not(.sm), .icon-btn:not(.icon-btn-sm), .menu-item { min-height: var(--target-coarse); }
+  .icon-btn:not(.icon-btn-sm) { min-width: var(--target-coarse); }
+}
+/* focus is always visible and survives forced-colors: ring from the token, plus a real (transparent) outline */
+@media (forced-colors: active) { :focus-visible { outline: 2px solid Highlight; } }
+@media (prefers-reduced-motion: reduce) { :root { --dur-fast: 0ms; --dur-base: 0ms;} }
+
+/* ---------- Field: description, error ---------- */
+.field-error { color: var(--block); font-size: var(--t-sm); font-weight: 500; }
+.field-req { color: var(--block); }
+.input[aria-invalid="true"] { border-color: var(--block); }
+
+/* ---------- ExtLink ---------- */
+.ext-link { text-decoration: underline; text-underline-offset: 2px; }
+.ext-ic { display: inline-block; width: 12px; height: 12px; margin-left: 3px; vertical-align: -1px; flex: none; opacity: 0.8; }
+.ext-host { color: var(--muted); font-size: 0.92em; }
+
+/* ---------- Modal: discard step ---------- */
+
+/* ---------- DataTable ---------- */
+/* the first-cell control: a real button/link stretched over the cell, so the whole first cell is the target and the row text is its name */
+.dtable .row-link { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; margin: 0; border: 0; background: transparent; cursor: pointer; border-radius: 0; z-index: 0; }
+.dtable .cell-content { position: relative; z-index: 1; pointer-events: none; }
+.dtable .cell-content a, .dtable .cell-content button, .dtable .cell-content input, .dtable .cell-content select, .dtable .cell-content [role="button"] { pointer-events: auto; }
+.dtable .row-link:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+/* scroll region: focusable only while it scrolls; edge shadows hint at hidden columns (pure CSS, no JS) */
+.dtable-scroll.is-overflow { background:
+  linear-gradient(to right, var(--surface), transparent 24px) left / 24px 100% no-repeat local,
+  linear-gradient(to left, var(--surface), transparent 24px) right / 24px 100% no-repeat local,
+  linear-gradient(to right, var(--line), transparent) left / 8px 100% no-repeat scroll,
+  linear-gradient(to left, var(--line), transparent) right / 8px 100% no-repeat scroll; }
+.dtable-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.dtable-more { display: flex; align-items: center; gap: var(--s3); }
+.dtable-count { color: var(--muted); font-size: var(--t-sm); }
+/* the sort picker replaces the (hidden) header row in the card layout */
+.dtable-sortsel { display: none; align-items: center; gap: var(--s2); margin-bottom: var(--s2); color: var(--muted); font-size: var(--t-sm); }
+.dtable-sortsel .input { width: auto; flex: 1; }
+@media (max-width: 640px) {
+  .dtable-sortsel { display: flex; }
+  .dtable .row-link { inset: 0; }
+}

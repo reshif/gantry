@@ -34,12 +34,15 @@ interface OutboxRow {
   id: string; org_id: string; event_id: string; destination: string; payload: unknown; attempts: number;
 }
 
+/** Credentials in a payload (an invite's one-time link) are dropped once the row is final: a delivered or dead row keeps no token. */
+const SCRUB = "(payload #- '{link}' #- '{token}' #- '{inviteToken}')";
+
 export async function claimOutbox(
   db: Queryable,
   o: { workerId: string; leaseMs: number; destinations?: string[]; limit?: number },
 ): Promise<OutboxItem[]> {
   await db.query(
-    `update outbox set status = 'dead', lease_owner = null, lease_until = null, last_error = coalesce(last_error, 'lease expired')
+    `update outbox set status = 'dead', payload = ${SCRUB}, lease_owner = null, lease_until = null, last_error = coalesce(last_error, 'lease expired')
      where status = 'sending' and lease_until < now() and attempts >= max_attempts`,
   );
   const { rows } = await db.query<OutboxRow>(
@@ -61,7 +64,8 @@ export async function claimOutbox(
 
 export async function markDelivered(db: Queryable, id: string, workerId: string): Promise<boolean> {
   const r = await db.query(
-    `update outbox set status = 'delivered', delivered_at = now(), lease_owner = null, lease_until = null
+    `update outbox set status = 'delivered', delivered_at = now(), lease_owner = null, lease_until = null,
+       payload = ${SCRUB}
      where id = $1 and lease_owner = $2 and status = 'sending'`,
     [id, workerId],
   );
@@ -81,6 +85,7 @@ export async function markFailed(
        status = case when attempts < max_attempts then 'pending' else 'dead' end,
        next_attempt_at = case when attempts < max_attempts
          then now() + (least($3::float8 * power(2, attempts - 1), $4::float8) * (0.5 + random() * 0.5)) * interval '1 millisecond' else next_attempt_at end,
+       payload = case when attempts < max_attempts then payload else ${SCRUB} end,
        lease_owner = null, lease_until = null, last_error = $5
      where id = $1 and lease_owner = $2 and status = 'sending'
      returning status`,

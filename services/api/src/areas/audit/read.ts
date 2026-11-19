@@ -21,7 +21,7 @@ export const TOPICS = [
   { id: "learning", name: "Learning", sql: `(e.type ~ '^learning\\.' or e.type = 'eval.case')` },
   {
     id: "catalogue", name: "Catalogue",
-    sql: `(e.type ~ '^(station|class|bay|vendor)\\.' or e.type ~ '^role\\.(add|edit|remove)$' or e.type in ('gate.add','flow.gate','integration.type','integration.add','integration.remove','model.add','model.remove','card.template'))`,
+    sql: `(e.type ~ '^(station|class|bay|vendor)\\.' or e.type ~ '^role\\.(add|edit|remove)$' or e.type in ('gate.add','flow.gate','flow.override','integration.type','integration.add','integration.remove','model.add','model.remove','card.template'))`,
   },
   { id: "record", name: "Records", sql: `(e.type ~ '^(record|outcome)\\.')` },
 ] as const;
@@ -62,7 +62,12 @@ export interface AuditDetail extends AuditRow {
 const COLS = `e.seq, e.occurred_at, e.type, e.category, e.actor, e.on_behalf_of, e.channel, e.subject, e.project_id, e.wo_id, e.outcome, e.rule,
   e.before, e.after, e.session_id, host(e.source_ip) as ip, e.request_id, e.command_id, e.idempotency_key, e.hash, e.prev_hash,
   case when p.id is not null then 'human' when a.id is not null then 'agent' else 'system' end as actor_kind,
-  coalesce(p.name, a.name, e.actor) as actor_name`;
+  coalesce(p.name, a.name, e.actor) as actor_name,
+  case e.subject->>'type'
+    when 'person' then (select sp.name from people sp where sp.org_id = e.org_id and sp.id = e.subject->>'id')
+    when 'team' then (select st.name from teams st where st.org_id = e.org_id and st.id = e.subject->>'id')
+    when 'agent' then (select sa.name from agents sa where sa.org_id = e.org_id and sa.id = e.subject->>'id')
+  end as subject_name`;
 const FROM = `events e left join people p on p.org_id = e.org_id and p.id = e.actor left join agents a on a.org_id = e.org_id and a.id = e.actor`;
 
 /** jsonb -> the legacy text form: strings as they are, everything else as JSON. */
@@ -73,13 +78,15 @@ interface Raw {
   seq: string; occurred_at: Date; type: string; category: string; actor: string; on_behalf_of: string | null; channel: string; subject: unknown; project_id: string | null;
   wo_id: string | null; outcome: string; rule: string | null; before: unknown; after: unknown; session_id: string | null; ip: string | null; request_id: string | null;
   command_id: string | null; idempotency_key: string | null; hash: string; prev_hash: string; actor_kind: "human" | "agent" | "system"; actor_name: string;
+  /** The person, team or agent the event is about, by name (null for other subjects or a name since removed). */
+  subject_name?: string | null;
 }
 
 /** The legacy topic tests, in JS (the detail view shows the topic chip). Mirrors TOPICS.sql. */
 export function topicFor(a: string): string | null {
   if (/^trust\./.test(a) || a === "gate.trust") return "trust";
   if (/^learning\./.test(a) || a === "eval.case") return "learning";
-  if (/^(station|class|bay|vendor)\./.test(a) || /^role\.(add|edit|remove)$/.test(a) || ["gate.add", "flow.gate", "integration.type", "integration.add", "integration.remove", "model.add", "model.remove", "card.template"].includes(a)) return "catalogue";
+  if (/^(station|class|bay|vendor)\./.test(a) || /^role\.(add|edit|remove)$/.test(a) || ["gate.add", "flow.gate", "flow.override", "integration.type", "integration.add", "integration.remove", "model.add", "model.remove", "card.template"].includes(a)) return "catalogue";
   if (/^(record|outcome)\./.test(a)) return "record";
   return null;
 }
@@ -89,7 +96,8 @@ export function toAudit(r: Raw): AuditRow {
   const sid = subject && typeof subject.id === "string" ? subject.id : null;
   const stype = subject && typeof subject.type === "string" ? subject.type : null;
   const named = subject && (typeof subject.target === "string" ? subject.target : typeof subject.name === "string" ? subject.name : null);
-  const target = named ?? (stype ? `${stype}${sid ? ` ${sid}` : ""}` : r.type);
+  // a person, team or agent reads by name first; the id stays in the text so a search for it still finds the row
+  const target = named ?? (r.subject_name && sid ? `${r.subject_name} · ${stype} ${sid}` : stype ? `${stype}${sid ? ` ${sid}` : ""}` : r.type);
   const seq = Number(r.seq);
   return {
     id: seq, seq, at: ms(r.occurred_at) ?? 0, actor: r.actor, action: r.type, target, where: r.project_id ?? "factory", project: r.project_id, category: r.category,
@@ -147,7 +155,7 @@ export interface AuditPage {
     entries: number;
     denied: number;
     changes: number;
-    /** Hash of the newest entry in the org's chain. */
+    /** Hash of the newest entry in the org's chain, for readers of the whole ledger only; "" otherwise (it moves with activity in projects the caller can't see). */
     head: string;
     /** Per category, over the other filters. */
     categories: Record<string, number>;
@@ -171,7 +179,7 @@ export async function listAudit(db: Queryable, orgId: string, vis: Visibility, f
     db.query<{ outcomes: string[]; channels: string[] }>(
       `select coalesce(array_agg(distinct e.outcome), '{}') as outcomes, coalesce(array_agg(distinct e.channel), '{}') as channels from ${FROM} where ${base.sql}`, base.params),
     db.query<{ id: string; name: string }>(`select distinct e.actor as id, p.name from ${FROM} where ${base.sql} and p.id is not null order by p.name`, base.params),
-    db.query<{ hash: string }>(`select last_hash as hash from gantry_event_head($1)`, [orgId]),
+    vis.all ? db.query<{ hash: string }>(`select last_hash as hash from gantry_event_head($1)`, [orgId]) : Promise.resolve({ rows: [{ hash: "" }] }),
   ]);
   const page = rows.rows.slice(0, o.limit).map(toAudit);
   const more = rows.rows.length > o.limit;
@@ -181,7 +189,7 @@ export async function listAudit(db: Queryable, orgId: string, vis: Visibility, f
     next: more && page.length ? String(page[page.length - 1]!.seq) : null,
     total: Number(total.rows[0]?.n ?? 0),
     summary: {
-      entries: Number(tot.rows[0]?.n ?? 0), denied: Number(tot.rows[0]?.denied ?? 0), changes: Number(tot.rows[0]?.changes ?? 0), head: head.rows[0]?.hash ?? "0".repeat(64),
+      entries: Number(tot.rows[0]?.n ?? 0), denied: Number(tot.rows[0]?.denied ?? 0), changes: Number(tot.rows[0]?.changes ?? 0), head: head.rows[0]?.hash ?? (vis.all ? "0".repeat(64) : ""),
       categories: Object.fromEntries(cats.rows.map((r) => [r.category, Number(r.n)])),
       topics: Object.fromEntries(TOPICS.map((t) => [t.id, Number(topics.rows[0]?.[t.id] ?? 0)])),
       facets: { outcomes: [...(fx?.outcomes ?? [])].sort(), channels: [...(fx?.channels ?? [])].sort(), actors: people.rows },

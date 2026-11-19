@@ -6,7 +6,7 @@
 export const esc = (s: unknown): string =>
   String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
 
-export function Spark({ values, w = 84, h = 22, min, max, cls, label }: { values: number[]; w?: number; h?: number; min?: number; max?: number; cls?: string; label?: string }) {
+export function Spark({ values, w = 84, h = 22, min, max, cls, label, area = true, line, plain }: { values: number[]; w?: number; h?: number; min?: number; max?: number; cls?: string; label?: string; /** false draws the plain polyline (the prototype's agent cards). */ area?: boolean; /** alias of `line` */ plain?: boolean; /** the prototype's plain line with an end dot (no area fill). */ line?: boolean }) {
   if (values.length < 2) return null;
   const pad = 2;
   let lo = min ?? Math.min(...values);
@@ -18,8 +18,9 @@ export function Spark({ values, w = 84, h = 22, min, max, cls, label }: { values
   const pts = values.map((v, i) => [pad + (i * (w - pad * 2)) / (values.length - 1), h - pad - ((v - lo) / (hi - lo)) * (h - pad * 2)] as const);
   const d = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join("");
   const lastPt = pts[pts.length - 1] ?? [0, 0];
-  const area = `${d}L${lastPt[0].toFixed(1)} ${h - pad}L${pad} ${h - pad}Z`;
-  const svg = `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><path d="${area}" class="spark-area"/><path d="${d}" class="spark-line"/><circle cx="${lastPt[0].toFixed(1)}" cy="${lastPt[1].toFixed(1)}" r="2.4" class="spark-dot"/></svg>`;
+  const areaD = `${d}L${lastPt[0].toFixed(1)} ${h - pad}L${pad} ${h - pad}Z`;
+  const showArea = area && !line && !plain;
+  const svg = `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">${showArea ? `<path d="${areaD}" class="spark-area"/>` : ""}<path d="${d}" class="spark-line"/><circle cx="${lastPt[0].toFixed(1)}" cy="${lastPt[1].toFixed(1)}" r="2.4" class="spark-dot"/></svg>`;
   return <span className={`spark${cls ? ` ${cls}` : ""}`} role="img" aria-label={label || `Trend, latest ${values[values.length - 1]}`} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
@@ -164,5 +165,30 @@ export function BarChart(o: BarChartProps) {
       {o.title ? <figcaption className="chart-title">{o.title}</figcaption> : null}
       <div className="chart-svg" role="img" aria-label={`${o.title || "Bar chart"}: ${rows.map((r) => `${r.label} ${fmt(r.value)}`).join(", ")}`} dangerouslySetInnerHTML={{ __html: `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${s}</svg>` }} />
     </figure>
+  );
+}
+
+/** Horizontal bar list as the prototype's barChart draws it: a right-aligned label, a bar scaled to the largest value, the value. */
+export function BarList({ items, label, labelWidth = 150, valueAtEnd }: { items: Array<{ label: string; value: number; tone?: "warn" }>; label: string; labelWidth?: number; /** Prototype style: the value sits right after the end of its bar instead of at the far right. */ valueAtEnd?: boolean }) {
+  const max = Math.max(1, ...items.map((i) => i.value));
+  return (
+    <ul className="barlist" aria-label={label} style={{ ["--lw" as string]: `${labelWidth}px` }}>
+      {items.map((i) => (
+        <li key={i.label} className={i.tone ? `is-${i.tone}` : undefined}>
+          <span className="barlist-l mono" title={i.label}>{i.label}</span>
+          {valueAtEnd ? (
+            <span className="barlist-t" style={{ position: "relative", overflow: "visible", background: "none" }}>
+              <span className="barlist-b" style={{ display: "block", width: `${Math.max(i.value ? 1 : 0, (i.value / (max * 1.12)) * 100)}%` }} />
+              <span className="barlist-v mono" style={{ position: "absolute", top: 0, left: `${(i.value / (max * 1.12)) * 100}%`, paddingLeft: 6, width: "auto" }}>{i.value}</span>
+            </span>
+          ) : (
+            <>
+              <span className="barlist-t"><span className="barlist-b" style={{ width: `${Math.max(i.value ? 1 : 0, (i.value / max) * 100)}%` }} /></span>
+              <span className="barlist-v mono">{i.value}</span>
+            </>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

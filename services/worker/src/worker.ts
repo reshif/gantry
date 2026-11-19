@@ -12,6 +12,7 @@ import { attemptDispatch } from "./handlers/dispatch.js";
 import { evalDispatch, trustEvaluate } from "./handlers/evals.js";
 import { learningRefresh } from "./handlers/learning.js";
 import { mergeRequest } from "./handlers/merge.js";
+import { prDescribe } from "./handlers/describe.js";
 import { chainVerify, flowTimer, githubEvent, githubReconcile, triggerEvaluate, triggerTick } from "./handlers/misc.js";
 import { onboardingAgentCollect, onboardingAssess, onboardingMerge, onboardingOpenPr, onboardingSync, onboardingVerify } from "./handlers/onboarding.js";
 import { reaperSweep } from "./handlers/reaper.js";
@@ -29,6 +30,7 @@ export const HANDLERS: Handlers = {
   "run.result": runResult,
   publish: publishJob,
   "merge.request": mergeRequest,
+  "pr.describe": prDescribe,
   "flow.timer": flowTimer,
   "stop.enforce": stopEnforce,
   "github.reconcile": githubReconcile,
@@ -67,6 +69,7 @@ export class Worker {
   readonly outbox: OutboxDispatcher;
   readonly scheduler: Scheduler;
   private beat: NodeJS.Timeout | null = null;
+  private launcherBeat: NodeJS.Timeout | null = null;
 
   constructor(readonly deps: Deps) {
     // Every event the worker's flow engine and handlers append produces its notifications in the same transaction (spec 12.2).
@@ -79,8 +82,26 @@ export class Worker {
 
   async start(): Promise<void> {
     const touch = (): void => void writeFile(this.deps.cfg.heartbeatFile, String(Date.now())).catch((e) => this.deps.log.warn({ err: errMsg(e) }, "heartbeat file"));
-    touch();
-    this.beat = setInterval(touch, 5_000);
+    // The same beat is also recorded in the database, which is how the API's system health view sees the worker (it cannot read this file).
+    const record = (): void => void this.deps.pool
+      .query(
+        `insert into worker_heartbeats (org_id, worker_id) select id, $1 from orgs on conflict (org_id, worker_id) do update set seen_at = now()`, [this.deps.workerId])
+      .then(() => this.deps.pool.query(`delete from worker_heartbeats where seen_at < now() - interval '1 day'`))
+      .catch((e) => this.deps.log.warn({ err: errMsg(e) }, "heartbeat row"));
+    const tick = (): void => { touch(); record(); };
+    tick();
+    this.beat = setInterval(tick, 5_000);
+    // The launcher is only reachable from the worker's network (the API is deliberately not on it), so the worker reports whether it answers.
+    // list-runs is the authenticated read the worker already depends on; a slow or failed answer is "down".
+    const probeLauncher = (): void => void (async () => {
+      const ok = await Promise.race([
+        this.deps.launcher.list().then(() => true, () => false),
+        new Promise<boolean>((r) => setTimeout(() => r(false), 3_000).unref()),
+      ]);
+      await this.deps.pool.query(`update worker_heartbeats set launcher_ok = $2, launcher_checked_at = now() where worker_id = $1`, [this.deps.workerId, ok]);
+    })().catch((e) => this.deps.log.warn({ err: errMsg(e) }, "launcher probe"));
+    setTimeout(probeLauncher, 1_000).unref();
+    this.launcherBeat = setInterval(probeLauncher, 15_000);
     this.runner.start();
     this.outbox.start();
     this.scheduler.start();
@@ -90,6 +111,7 @@ export class Worker {
   /** Graceful shutdown: stop claiming, let running jobs finish (their leases cover a hard kill), close the loops. */
   async stop(graceMs = 30_000): Promise<void> {
     if (this.beat) clearInterval(this.beat);
+    if (this.launcherBeat) clearInterval(this.launcherBeat);
     await Promise.allSettled([this.scheduler.stop(), this.outbox.stop(), this.runner.stop(graceMs)]);
     this.deps.log.info({ worker: this.deps.workerId }, "worker stopped");
   }

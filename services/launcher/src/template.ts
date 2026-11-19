@@ -37,6 +37,16 @@ export const names = {
 };
 
 export const WORKSPACE_PATH = "/workspace";
+
+/**
+ * The workspace volume (S-90). `disk`: a plain local volume (host ext4, no kernel quota: the wrapper measures and stops the run). `tmpfs`: the local
+ * driver's tmpfs mount with `size=`, a hard cap the run cannot change; its pages are memory, charged to the run's own memory limit, so only use it where
+ * RAM allows. The driver options are exactly this shape and the socket proxy allows exactly this shape (sockpolicy.ts checkVolume).
+ */
+export function volumeDriverOpts(cfg: LauncherConfig): Record<string, string> | undefined {
+  if (cfg.workspace.backing !== "tmpfs") return undefined;
+  return { type: "tmpfs", device: "tmpfs", o: `size=${cfg.workspace.maxMb}m,uid=${cfg.limits.uid},gid=${cfg.limits.gid},mode=0755` };
+}
 export const TMP_OPTIONS = (bytes: number) => `rw,noexec,nosuid,nodev,size=${bytes}`;
 
 export function runLabels(input: Pick<StartRunInput, "runId" | "workspaceRef" | "variant">): Record<string, string> {
@@ -62,18 +72,63 @@ export function networkOptions(cfg: LauncherConfig, input: StartRunInput, subnet
   };
 }
 
-/** The edge's forward proxy identifies a run by Basic credentials `run:<runToken>` in the proxy URL (services/edge/src/proxy.ts). */
-export function proxyUrlFor(proxyUrl: string, runToken: string): string {
+/**
+ * The edge's forward proxy identifies a run by Basic credentials `run:<runToken>` (services/edge/src/proxy.ts). The container is given the proxy
+ * URL WITHOUT credentials: the wrapper's loopback relay adds them from the token it read from the token file.
+ */
+export function proxyUrlPlain(proxyUrl: string): string {
   const u = new URL(proxyUrl);
-  u.username = "run";
-  u.password = runToken;
+  u.username = "";
+  u.password = "";
   return u.toString().replace(/\/$/, "");
 }
 
 /**
- * The fixed runner template (spec 4.1). Nothing here comes from the caller except the id, the image chosen from
- * the allow-list, the labels and the per-run token. There is deliberately no parameter for anything else.
+ * The run token is delivered in a file, never in the container's environment (an environment is readable from /proc/1/environ by every process of
+ * the same uid, for the whole life of the container). The launcher creates the container, copies this one-file archive into the workspace volume
+ * (PUT /containers/<id>/archive, allowed on a volume path even with a read-only root), then starts it. The wrapper, PID 1, reads the file first
+ * thing and unlinks it before it starts anything else (runner/wrapper/src/token.ts).
  */
+export const TOKEN_FILE_NAME = ".gantry-run-token";
+export const TOKEN_FILE_PATH = `${WORKSPACE_PATH}/${TOKEN_FILE_NAME}`;
+
+/** A one-entry ustar archive: TOKEN_FILE_NAME, mode 0400, owned by the runner uid:gid. */
+export function tokenArchive(token: string, uid: number, gid: number): Buffer {
+  const data = Buffer.from(token, "utf8");
+  const h = Buffer.alloc(512);
+  const put = (off: number, len: number, v: string) => void h.write(v, off, len, "ascii");
+  const oct = (n: number, len: number) => n.toString(8).padStart(len - 1, "0") + "\0";
+  put(0, 100, TOKEN_FILE_NAME);
+  put(100, 8, oct(0o400, 8));
+  put(108, 8, oct(uid, 8));
+  put(116, 8, oct(gid, 8));
+  put(124, 12, oct(data.length, 12));
+  put(136, 12, oct(Math.floor(Date.now() / 1000), 12));
+  put(148, 8, "        ");
+  put(156, 1, "0");
+  put(257, 6, "ustar\0");
+  put(263, 2, "00");
+  let sum = 0;
+  for (const b of h) sum += b;
+  put(148, 8, sum.toString(8).padStart(6, "0") + "\0 ");
+  const pad = Buffer.alloc((512 - (data.length % 512)) % 512);
+  return Buffer.concat([h, data, pad, Buffer.alloc(1024)]);
+}
+
+/**
+ * The fixed runner template (spec 4.1). Nothing here comes from the caller except the id, the image chosen from
+ * the allow-list and the labels. The per-run token is NOT in the create body: see tokenArchive. There is deliberately no parameter for anything else.
+ */
+/**
+ * dockerode's createContainer sends its whole options object as the query string AND as the body (every 4.x release does). The socket proxy
+ * only allows `name` in the query, and a runner's env carries its run token, which must not sit in a URL that gets logged. `_query` and
+ * `_body` are docker-modem's own split: the query is just the name, the body is the rest.
+ */
+export function createRequest<T extends { name?: string }>(o: T): ContainerCreateOptions & { _query: { name?: string }; _body: Omit<T, "name"> } {
+  const { name, ...body } = o;
+  return { _query: name === undefined ? {} : { name }, _body: body };
+}
+
 export function runnerContainerOptions(cfg: LauncherConfig, input: StartRunInput): ContainerCreateOptions {
   const image = cfg.variants.get(input.variant);
   if (image === undefined) throw new Error(`variant ${input.variant} is not allowed`); // validated upstream: a bug if reached
@@ -86,9 +141,10 @@ export function runnerContainerOptions(cfg: LauncherConfig, input: StartRunInput
     WorkingDir: WORKSPACE_PATH,
     Env: [
       `EDGE_URL=${cfg.runnerEnv.edgeUrl}`,
-      `HTTPS_PROXY=${proxyUrlFor(cfg.runnerEnv.proxyUrl, input.runToken)}`,
-      `GANTRY_RUN_TOKEN=${input.runToken}`,
+      `HTTPS_PROXY=${proxyUrlPlain(cfg.runnerEnv.proxyUrl)}`,
       `GANTRY_RUN_ID=${input.runId}`,
+      // The wrapper's own measurement of /workspace (S-90); the volume is also size-limited when the backing is tmpfs.
+      `GANTRY_WORKSPACE_MAX_MB=${cfg.workspace.maxMb}`,
     ],
     Labels: runLabels(input),
     StopSignal: "SIGTERM",

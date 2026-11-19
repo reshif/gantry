@@ -5,13 +5,17 @@
  *   project.view          anywhere   catalogue, templates, home, activity, workload, conversations, stops, console, evals, learning, triggers, trust, card templates, deliveries
  *                                    (any project role; these views filter to the projects the person can see)
  *   project.view          on :id     everything under /projects/{id}
- *   people.view / policy.view / agents.view / models.view / integrations.view   the factory-wide registers (factory-level role)
+ *   people.view / policy.view / agents.view / models.view / integrations.view   the factory-wide registers (factory-level role; system health reads as integrations.view)
+ *                                    (the plain lists of people, teams, agents, skills, MCP servers and integrations answer anyone on a
+ *                                    project with a directory view of their own projects instead: core/directory.ts)
  *
  * Own data stays open: /me, own sessions and sign-ins, saved views, notifications, the stream (filtered by visibility), `can`.
  * API keys and services are not touched here (keys carry their own scopes).
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { decide } from "./decide.js";
+import { DIRECTORY_PATHS } from "./directory.js";
+import { canonicalPath } from "./paths.js";
 
 interface Gate {
   re: RegExp;
@@ -29,7 +33,7 @@ export const READ_GATES: readonly Gate[] = [
   G(/^\/api\/v1\/agents\/[^/]+\/effective$/, "project.view"), // composed instructions for a project: filtered to visible projects
   G(/^\/api\/v1\/(agents|skills|instructions)(\/|$)/, "agents.view"),
   G(/^\/api\/v1\/(vendors|vendor-templates|models|routing|prices|budgets)(\/|$)/, "models.view"),
-  G(/^\/api\/v1\/(integrations|integration-types|mcp)(\/|$)/, "integrations.view"),
+  G(/^\/api\/v1\/(integrations|integration-types|mcp|system)(\/|$)/, "integrations.view"),
   G(/^\/api\/v1\/(catalog|templates|project-presets|guidelines|home|activity|workload|conversations|stops|console|suites|evals|learning|triggers|trigger-proposals|trust|card-templates|deliveries)(\/|$)/, "project.view"),
 ];
 
@@ -44,10 +48,16 @@ export function readGateFor(path: string): { action: string; project: string | n
 /** Refuses (403) a read; read refusals are not written to the ledger (a no-access screen polls several reads, which would flood it); writes are. Covers a read the person has no role for. Called after authentication; only for people reading with GET/HEAD. */
 export async function enforceReadGate(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   if ((req.method !== "GET" && req.method !== "HEAD") || req.gx.principal?.kind !== "person") return;
-  const gate = readGateFor(req.url.split("?")[0] ?? "");
+  const path = canonicalPath(req.url) ?? "";
+  const gate = readGateFor(path);
   if (!gate) return;
   const d = await decide(req, gate.action, gate.project ? { project: gate.project } : {});
   if (d.allowed) return;
+  // A list with a directory view: someone on a project reads the rows that touch their projects (core/directory.ts).
+  if (DIRECTORY_PATHS.has(path.split("?")[0]!) && d.rule.kind !== "stop" && (await decide(req, "project.view", {})).allowed) {
+    req.gx.directory = true;
+    return;
+  }
   // A project the person holds no role on does not reveal itself: the same 404 as an unknown project.
   if (gate.project) {
     await reply.code(404).send({ ok: false, msg: "No such project." });

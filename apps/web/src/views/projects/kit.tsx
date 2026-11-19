@@ -3,11 +3,14 @@
  * class chip, gate diamond, mini belt, health chip, a sortable data table and the catalogue query.
  * Same DOM and classes as legacy.
  */
+import { qk } from "../../api/keys";
 import { useQuery } from "@tanstack/react-query";
+import { useTeams as useTeamsRead } from "../../api/queries";
 import { useState, type ReactNode } from "react";
 import { flowOf, gateExplain, gateStateText, gateTitle, route as routeOf, routeGates as routeGatesOf, type Bay, type Catalog, type Gate, type Project, type Role, type Station, type WorkClass } from "@gantry/domain";
 import { api } from "../../api/client";
 import { get } from "../../api/client";
+import type { FlowOverrideView } from "../../api/types";
 import { Icon } from "../../ui/Icon";
 import { Empty } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
@@ -33,7 +36,7 @@ export interface Metrics {
   onboarding: number;
   health: { id: "killed" | "halted" | "attention" | "new" | "onboarding" | "ok" | "archived"; label: string; icon: string; detail?: string };
 }
-export type PView = Project & { version: number; metrics?: Metrics };
+export type PView = Project & { version: number; metrics?: Metrics; flowOverride?: FlowOverrideView };
 
 export const EMPTY_METRICS: Metrics = {
   wip: 0, bays: 0, gates: 0, oldest: 0, late: 0, eff: null, effN: 0, cov: { total: 0, auto: 0, share: 0 }, bad: 0, haltedRepos: 0,
@@ -42,13 +45,18 @@ export const EMPTY_METRICS: Metrics = {
 export const metricsOf = (p: PView): Metrics => p.metrics ?? EMPTY_METRICS;
 
 /** The catalogue: built-in plus custom stations, gates, bays, classes, roles and actions. Refetched whenever projects change (a flow edit can append to it). */
+export function useCatalogQuery() {
+  return useQuery({ queryKey: qk.catalog(), queryFn: () => get<Catalog>(api("catalog")), staleTime: 30_000 });
+}
+/** One plain sentence per recorded event (Home Recent activity and the bell); re-exported so both screens share one chunk. */
+export { eventSentence } from "../../lib/eventText";
+
 export function useCatalog(): Catalog | null {
-  const q = useQuery({ queryKey: ["projects", "catalog"], queryFn: () => get<Catalog>(api("catalog")), staleTime: 30_000 });
-  return q.data ?? null;
+  return useCatalogQuery().data ?? null;
 }
 
-export const classOf = (cat: Catalog, p: Project, id: string): WorkClass =>
-  p.flow.classes.find((c) => c.id === id) ?? cat.classes.find((c) => c.id === id) ?? ({ id, name: id, skips: [], priority: "P2", slaH: 72, est: "M" } as WorkClass);
+export const classOf = (cat: Catalog, p: Project | null, id: string): WorkClass =>
+  p?.flow?.classes?.find((c) => c.id === id) ?? cat.classes.find((c) => c.id === id) ?? ({ id, name: id, skips: [], priority: "P2", slaH: 72, est: "M" } as WorkClass);
 export const stationName = (cat: Catalog, id: string): string => cat.stations.find((s) => s.id === id)?.name ?? id;
 export const gateLabel = (cat: Catalog, id: string): string => cat.gates.find((g) => g.id === id)?.label ?? id;
 export const roleName = (cat: Catalog, id: string): string => cat.roles.find((r) => r.id === id)?.name ?? id;
@@ -145,13 +153,13 @@ export function MiniBelt({ cat, project, counts, cls, labels, stationsOff, gates
     const skipped = !!route && !route.includes(s.id);
     const n = c[s.id]?.n ?? 0;
     const blocked = (c[s.id]?.blocked ?? 0) > 0;
-    const segCls = `mseg${off ? " is-off" : ""}${skipped ? " is-skipped" : ""}${blocked ? " is-blocked" : ""}${s.custom ? " is-custom" : ""}`;
+    const segCls = `mseg${off ? " is-off" : ""}${!off && !n ? " is-empty" : ""}${skipped ? " is-skipped" : ""}${blocked ? " is-blocked" : ""}${s.custom ? " is-custom" : ""}`;
     const title = `${s.no} ${s.name}${off ? " (off)" : ""}: ${n} WIP${blocked ? ", blocked work" : ""}`;
     const style = { "--heat": (n / max).toFixed(2) } as React.CSSProperties;
     const body = (
       <>
         {labels ? <span className="mseg-l">{s.name}</span> : null}
-        <span className="mseg-n mono">{off ? "–" : String(n)}</span>
+        {off || n ? <span className="mseg-n mono">{off ? "–" : String(n)}</span> : null}
         {blocked ? <span className="mseg-x" aria-hidden="true" /> : null}
       </>
     );
@@ -184,60 +192,11 @@ export function MiniBelt({ cat, project, counts, cls, labels, stationsOff, gates
 
 /* ---------- table ---------- */
 
-export interface Col<R> {
-  key: string;
-  label: string;
-  render?: (row: R) => ReactNode;
-  align?: "end";
-  hideSmall?: boolean;
-}
+/** The one table: `ui/SortTable`. Columns sort only when they say how. */
+export { SortTable as DataTable, type SortCol as Col } from "../../ui/SortTable";
 
-/** Responsive table (legacy G.dataTable without sorting; the portfolio sorts before rendering). */
-export function DataTable<R>({ id, caption, columns, rows, rowKey, empty }: { id?: string; caption?: string; columns: Col<R>[]; rows: R[]; rowKey: (r: R) => string; empty?: { title: string; text?: string } }) {
-  if (!rows.length) return <Empty title={empty?.title ?? "Nothing here"} text={empty?.text ?? "No rows match."} />;
-  return (
-    <div className="dtable-wrap" id={id}>
-      <table className="dtable">
-        {caption ? <caption className="sr-only">{caption}</caption> : null}
-        <thead>
-          <tr>
-            {columns.map((c) => (
-              <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined}>
-                {c.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={rowKey(r)} data-key={rowKey(r)}>
-              {columns.map((c) => (
-                <td key={c.key} data-label={c.label} className={`${c.align === "end" ? "is-end" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined}>
-                  {c.render ? c.render(r) : null}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-export function EmptyState({ id, icon, title, text, action }: { id?: string; icon?: string; title: ReactNode; text?: ReactNode; action?: ReactNode }) {
-  return (
-    <div className="empty empty-state" id={id}>
-      {icon ? (
-        <div className="empty-icon" aria-hidden="true">
-          <Icon name={icon} />
-        </div>
-      ) : null}
-      <div className="empty-title">{title}</div>
-      {text ? <p>{text}</p> : null}
-      {action ?? null}
-    </div>
-  );
-}
+/** Kept as a name for existing call sites; it is the shared `Empty`. */
+export const EmptyState = Empty;
 
 /** Crumbs above the page title (legacy pageHeader crumbs). */
 export function Crumbs({ items }: { items: Array<{ label: string; href?: string }> }) {
@@ -271,7 +230,7 @@ export const focusLater = (id: string): void => {
 };
 
 /** Number input that commits on change (legacy numInput). */
-export function NumInput({ id, value, min, max, onCommit, locked, label }: { id: string; value: number; min: number; max: number; onCommit: (v: number) => void; locked?: boolean; label?: string }) {
+export function NumInput({ id, value, min, max, limit, minMsg, onCommit, locked, label }: { id: string; value: number; min: number; max: number; /** the largest value accepted (the input's max attribute may be tighter) */ limit?: number; /** the toast for a value below min */ minMsg?: string; onCommit: (v: number) => void; locked?: boolean; label?: string }) {
   const ui = useUI();
   const [draft, setDraft] = useState<string | null>(null);
   return (
@@ -289,8 +248,8 @@ export function NumInput({ id, value, min, max, onCommit, locked, label }: { id:
         if (draft === null) return;
         const v = parseInt(draft, 10);
         setDraft(null);
-        if (Number.isNaN(v) || v < min || v > max) {
-          ui.toast(`Enter a number from ${min} to ${max}.`, "error");
+        if (Number.isNaN(v) || v < min || v > (limit ?? max)) {
+          ui.toast(minMsg && (Number.isNaN(v) || v < min) ? minMsg : `Enter a number from ${min} to ${limit ?? max}.`, "error");
           return;
         }
         if (v !== value) onCommit(v);
@@ -309,7 +268,7 @@ export interface TeamRow {
 }
 /** GET /api/v1/teams (the web has no teams hook of its own). */
 export function useTeams(): TeamRow[] {
-  const q = useQuery({ queryKey: ["teams"], queryFn: () => get<TeamRow[]>(api("teams")), staleTime: 30_000 });
+  const q = useTeamsRead();
   return q.data ?? [];
 }
 

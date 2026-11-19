@@ -116,16 +116,60 @@ describe("ops mapping", () => {
     expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ target: "S3", dry_run: true });
     expect(header(calls[1], "If-Match")).toBe("4");
   });
+  it("A8: a reject names the instance it was shown; a refusal for a stale or missing pin keeps the current instance and says nothing was decided", async () => {
+    mockFetch((url) => (url.endsWith("%3A3/reject") ? { body: { ok: true, msg: "Rejected." } } : { status: 428, body: { ok: false, msg: "Say which opening you are deciding.", needs: "gate instance", current: { instance: "WO-7:G2:5", n: 5, gate: "G2", wo: "WO-7" } } }));
+    const sent = await ops.rejectGate("WO-7", "G2", "WO-7:G2:3", "Not enough tests");
+    expect(calls[0]?.url).toBe("/api/v1/gate-instances/WO-7%3AG2%3A3/reject");
+    expect(sent.ok).toBe(true);
+    const bare = await ops.approveGate("WO-7", "G2", undefined);
+    expect(bare.ok).toBe(false);
+    if (!bare.ok) {
+      expect(bare.status).toBe(428);
+      expect(bare.kind).toBe("conflict");
+      expect(bare.current).toMatchObject({ instance: "WO-7:G2:5" });
+      expect(bare.msg).toMatch(/It is now at instance 5\. Nothing was decided\./);
+    }
+  });
+  it("A8: an instance shown for another gate or work order is never sent for this decision", async () => {
+    mockFetch(() => ({ body: { ok: true, msg: "" } }));
+    await ops.approveGate("WO-7", "G2", "WO-7:G3:2");
+    await ops.approveGate("WO-7", "G2", "WO-8:G2:2");
+    expect(calls[0]?.url).toBe("/api/v1/gate-instances/WO-7%3AG2/approve");
+    expect(calls[1]?.url).toBe("/api/v1/gate-instances/WO-7%3AG2/approve");
+  });
   it("addresses gate instances and stops by the documented id conventions", async () => {
     mockFetch(() => ({ body: { ok: true, msg: "" } }));
-    await ops.approveGate("WO-1042", "G3");
+    await ops.approveGate("WO-1042", "G3", "WO-1042:G3:4");
     await ops.resumeProject("payments");
-    expect(calls[0]?.url).toBe("/api/v1/gate-instances/WO-1042%3AG3/approve");
+    expect(calls[0]?.url).toBe("/api/v1/gate-instances/WO-1042%3AG3%3A4/approve");
     expect(calls[1]?.url).toBe("/api/v1/stops/project%3Apayments");
   });
   it("builds sign-in URLs", () => {
+    window.location.hash = ""; // loginUrl reads the window hash by default; another test may have left one
     expect(loginUrl("sso")).toBe("/auth/login?method=sso");
     expect(loginUrl("github")).toBe("/auth/login?method=github");
     expect(loginUrl("sso", "asha@acme.dev")).toBe("/auth/login?login_hint=asha%40acme.dev");
+    expect(loginUrl("sso", undefined, "#/floor")).toBe("/auth/login?method=sso&return_to=%2F%23%2Ffloor");
+  });
+});
+
+describe("background marker for the idle clock", () => {
+  it("reads after a minute without input carry X-Gantry-Background; input clears it; writes never carry it", async () => {
+    vi.useFakeTimers();
+    try {
+      mockFetch(() => ({ body: {} }));
+      await get("/api/v1/x");
+      expect(header(calls[0], "X-Gantry-Background")).toBeUndefined();
+      vi.advanceTimersByTime(61_000);
+      await get("/api/v1/x");
+      expect(header(calls[1], "X-Gantry-Background")).toBe("1");
+      await command("/api/v1/x", { method: "POST", body: {} });
+      expect(header(calls[calls.length - 1], "X-Gantry-Background")).toBeUndefined();
+      window.dispatchEvent(new Event("pointerdown"));
+      await get("/api/v1/x");
+      expect(header(calls[calls.length - 1], "X-Gantry-Background")).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

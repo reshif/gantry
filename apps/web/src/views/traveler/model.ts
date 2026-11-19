@@ -10,6 +10,8 @@ export interface TDecision {
   reason: string;
   needs?: string;
   rule?: unknown;
+  override?: boolean;
+  overrideKind?: string;
 }
 export interface GateProg {
   have: number;
@@ -34,10 +36,13 @@ export interface TStop {
 export type TWo = WorkOrder & {
   version: number;
   gateProgress: Record<string, GateProg>;
-  allowed: { approve: (TDecision & { gate: string; instance: string }) | null; moves: Record<string, TMove>; can: Record<string, TDecision> };
+  allowed: { approve: (TDecision & { gate: string; instance: string }) | null; moves: Record<string, TMove>; can: Record<string, TDecision>; wipOverride?: TDecision };
   stop: TStop | null;
   route: string[];
+  /** Why the run is not running (R1): waiting for a run slot or low host disk, or stopped for a critically low host disk. */
+  wait?: RunWait | null;
 };
+export interface RunWait { label: string; reason: string | null; since: string | null; kind: "slot" | "disk" | "disk_critical" }
 
 export function useTravelerWo(id: string | null | undefined) {
   return useQuery({ queryKey: qk.workOrder(id ?? ""), queryFn: () => get<TWo>(api(`work-orders/${encodeURIComponent(id ?? "")}`)), enabled: !!id });
@@ -51,6 +56,9 @@ export const dec = (wo: TWo | undefined, k: string): TDecision => wo?.allowed?.c
 
 export const stName = (cat: Catalog | null, sid: string | null | undefined): string => (sid ? (cat?.stations.find((s) => s.id === sid)?.name ?? sid) : "");
 export const stNo = (cat: Catalog | null, sid: string | null | undefined): string => cat?.stations.find((s) => s.id === sid)?.no ?? "";
+/** "Waiting: Verify is full (3/3)": why a work order that finished its station has not gone in yet. */
+export const wipWaitText = (cat: Catalog | null, wo: { wipWait?: { station: string; live: number; limit: number } | null | undefined }): string =>
+  wo.wipWait ? `Waiting: ${stName(cat, wo.wipWait.station)} is full (${wo.wipWait.live}/${wo.wipWait.limit})` : "";
 export const bayLabel = (cat: Catalog | null, id: string | null | undefined): string => (id ? (cat?.bays.find((b) => b.id === id)?.name ?? id) : "");
 export const clsName = (cat: Catalog | null, id: string | null | undefined): string => (id ? (cat?.classes.find((c) => c.id === id)?.name ?? id) : "");
 export const openEntry = (w: Pick<WorkOrder, "history">) => w.history[w.history.length - 1];
@@ -108,5 +116,5 @@ export function useTravelerCatalog(): Catalog | null {
 export { plural } from "../../lib/plural";
 export const isClosed = (w: Pick<WorkOrder, "state">): boolean => w.state === "done" || w.state === "killed";
 /** Tab ids of the traveler. */
-export const TRAVELER_TABS = ["journey", "lifecycle", "conversation", "brief", "artefacts", "history"] as const;
+export const TRAVELER_TABS = ["journey", "lifecycle", "conversation", "brief", "documents", "run", "artefacts", "history"] as const;
 export type TravelerTab = (typeof TRAVELER_TABS)[number];

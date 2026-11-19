@@ -75,7 +75,7 @@ function syncBare() {
     const got = gitIn(text, "hash-object", "-t", "commit", "-w", "--stdin");
     if (got !== sha) throw new Error(`commit mismatch ${got} != ${sha}`);
   }
-  for (const [ref, sha] of gh.refs) if (/^refs\/heads\/[A-Za-z0-9._\/-]+$/.test(ref) && gh.commits.has(sha)) gitIn(undefined, "update-ref", ref, sha);
+  for (const [ref, sha] of gh.refs) if (/^refs\/heads\/[A-Za-z0-9._/-]+$/.test(ref) && gh.commits.has(sha)) gitIn(undefined, "update-ref", ref, sha);
 }
 
 function smartHttp(req, res, url) {
@@ -126,7 +126,7 @@ const handler = async (req, res) => {
   }
   if (url.pathname.startsWith("/api/v3/")) {
     if (req.method === "PUT" && /\/pulls\/\d+\/merge$/.test(url.pathname)) { // a merge moves the default branch to the PR head, as a fast-forward merge would
-      res.on("finish", () => { try { const n = Number(/pulls\/(\d+)\/merge/.exec(url.pathname)[1]); const pr = gh.pulls.find((q) => q.number === n); if (res.statusCode === 200 && pr?.merged_at && gh.commits.has(pr.head.sha)) gh.setRef(`refs/heads/${pr.base.ref}`, pr.head.sha); } catch {} });
+      res.on("finish", () => { try { const n = Number(/pulls\/(\d+)\/merge/.exec(url.pathname)[1]); const pr = gh.pulls.find((q) => q.number === n); if (res.statusCode === 200 && pr?.merged_at && gh.commits.has(pr.head.sha)) gh.setRef(`refs/heads/${pr.base.ref}`, pr.head.sha); } catch { /* best effort */ } });
     }
     const rm = /^\/api\/v3\/repos\/([^/]+)\/([^/]+)(\/|$)/.exec(url.pathname);
     if (rm && !ALIASES.has(`${rm[1]}/${rm[2]}`)) { // only one repository is installed: every other one is invisible, as on GitHub

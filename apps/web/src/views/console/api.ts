@@ -1,6 +1,6 @@
 /** Console API calls and queries (services/api/src/routes/console.ts). Query keys start with `console`, the slice name the API publishes on SSE. */
 import { useQuery } from "@tanstack/react-query";
-import { api, command, del, get, put, streamCommand, post, type ApiResult } from "../../api/client";
+import { api, command, del, get, patch, put, streamCommand, post, type ApiResult } from "../../api/client";
 import type { Cited, ConsoleStatus, ExplainResult, Proposal, Thread, ThreadSummary, ToolResult } from "./types";
 
 export const ck = {
@@ -18,6 +18,7 @@ export const useThread = (id: string | null) => useQuery({ queryKey: ck.thread(i
 export const callTool = (name: string, input: Record<string, unknown> = {}): Promise<ApiResult<ToolResult>> => post<ToolResult>(api(`console/tools/${encodeURIComponent(name)}`), { input });
 export const explain = (o: { person?: string; action: string; project?: string | null; repo?: string | null; time?: number }): Promise<ApiResult<ExplainResult>> => post<ExplainResult>(api("console/explain"), o);
 export const clearThread = (id: string) => del(api(`console/threads/${encodeURIComponent(id)}`));
+export const renameThread = (id: string, title: string) => patch<{ title: string }>(api(`console/threads/${encodeURIComponent(id)}`), { title });
 export const savePinned = (id: string, pinned: string[]) => put(api(`console/threads/${encodeURIComponent(id)}/pinned`), { pinned });
 export const saveProposal = (messageId: string, p: Proposal, status: "done" | "failed" | "dismissed", result: string) =>
   put(api(`console/messages/${encodeURIComponent(messageId)}/proposals/${encodeURIComponent(p.id)}`), { status, result });

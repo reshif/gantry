@@ -1,6 +1,7 @@
 /* MCP servers. Tokens only. */
 .mcp-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s4); align-items: start; }
-.mcp-detail { display: grid; gap: var(--s4); min-width: 0; }
+.mcp-detail { display: block; min-width: 0; }
+.mcp-detail > [role="tabpanel"] { margin-top: var(--s4); }
 .mcp-reg td { vertical-align: top; }
 .mcp-name { font-weight: 600; color: var(--ink); text-decoration: none; }
 .mcp-name:hover { color: var(--accent); }
@@ -12,10 +13,6 @@
 
 .mcp-rw { display: inline-grid; place-items: center; width: 18px; height: 18px; font-family: var(--f-mono); font-size: 10px; font-weight: 700; border: 1px solid var(--line-strong); border-radius: 2px; color: var(--ink-2); vertical-align: middle; }
 .mcp-rw.is-w { border-color: var(--gate); color: var(--gate); background: var(--gate-soft); clip-path: polygon(0 0, 100% 0, 100% 70%, 70% 100%, 0 100%); }
-.mcp-sens { font-family: var(--f-mono); font-size: var(--t-xs); text-transform: uppercase; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 2px; color: var(--ink-2); white-space: nowrap; }
-.mcp-sens-confidential { border-color: var(--wait); color: var(--wait); background: var(--wait-soft); }
-.mcp-sens-restricted { border-color: var(--block); color: var(--block); background: var(--block-soft); border-style: double; border-width: 3px; padding: 0 4px; }
-.mcp-sens-public { border-style: dashed; }
 
 .mcp-tb { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .mcp-tb dd { font-size: var(--t-sm); }
@@ -51,3 +48,8 @@
 .mcp-class { width: auto; min-width: 0; padding: 1px 6px; font-size: var(--t-sm); }
 .mcp-disc-list .mcp-class { margin-left: auto; }
 .mcp-tools .chip { margin-left: 6px; }
+
+/* The re-approval note wraps: the text takes the full row, the buttons sit on their own row (no overflow at 320 px). */
+#mcp-reapproval-note { flex-wrap: wrap; }
+#mcp-reapproval-note .mcp-reapproval-why { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; }
+#mcp-reapproval-note .mcp-reapproval-actions { display: flex; flex-wrap: wrap; gap: 8px; }

@@ -3,16 +3,17 @@
  *   GET/POST /api/v1/vendors, PATCH /api/v1/vendors/{id}, POST /api/v1/vendors/{id}/qualify
  *   GET /api/v1/vendor-templates, POST /api/v1/vendors/from-template, POST /api/v1/vendors/{id}/discover
  *   POST/DELETE /api/v1/models, PATCH /api/v1/models/{id}
- *   GET/PUT /api/v1/routing, GET /api/v1/routing/resolve?station=&repo=&project=&class=
+ *   GET/PUT /api/v1/routing, GET /api/v1/routing/versions, GET /api/v1/routing/resolve?station=&repo=&project=&class=
  *   GET/POST /api/v1/prices, GET /api/v1/prices/quote
  *   GET /api/v1/budgets, PUT /api/v1/budgets/{project}
  * Every state-changing handler goes through command() (docs/BUILD.md, spec 15.4). Only `model.edit` changes vendors, models, routing and prices.
  */
-import { validateTemplateValues, vendorTemplate, VENDOR_TEMPLATES, visibleProjects } from "@gantry/domain";
+import { templateEndpoint, validateTemplateValues, vendorTemplate, VENDOR_TEMPLATES, visibleProjects } from "@gantry/domain";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { slug } from "../areas/agents/config.js";
-import { command, decide, policyState, refuse } from "../core/index.js";
-import { addModel, addVendor, publishPrices, qualifyVendor, removeModel, setModelContext, setModelEnabled, setRouting, setVendor, setWoBudget } from "../areas/models/commands.js";
+import { appendEvent, withTx } from "@gantry/db";
+import { command, mayCallOut, policyState, refuse } from "../core/index.js";
+import { checkEndpoint, lanRangesOf, addModel, addVendor, publishPrices, qualifyVendor, removeModel, setModelContext, setModelEnabled, setRouting, setVendor, setWoBudget } from "../areas/models/commands.js";
 import { resolveFor } from "../areas/models/facts.js";
 import { costMicros, listPriceVersions, priceBookAt } from "../areas/models/prices.js";
 import { discoverModels, discoveryHosts, type DiscoverResult } from "../areas/models/discovery.js";
@@ -50,6 +51,14 @@ export const modelRoutes: FastifyPluginAsync = async (app) => {
   app.get("/api/v1/routing", async (req) => {
     requirePerson(req);
     return loadRouting(g.pool, g.orgId);
+  });
+
+  /** Every published routing version, newest first: who published it, when, and the change note. Read-only history. */
+  app.get("/api/v1/routing/versions", async (req) => {
+    requirePerson(req);
+    const { rows } = await g.pool.query<{ version: number; published_at: Date; published_by: string | null; note: string | null }>(
+      `select version, published_at, published_by, note from routing_versions where org_id = $1 and published_at is not null order by version desc limit 50`, [g.orgId]);
+    return rows.map((r) => ({ version: r.version, publishedAt: r.published_at.toISOString(), publishedBy: r.published_by, note: r.note ?? "" }));
   });
 
   /** Where would a request go? The same resolver the edge uses at authorize time. */
@@ -100,7 +109,7 @@ export const modelRoutes: FastifyPluginAsync = async (app) => {
          from budgets b where b.org_id = $1 and b.project_id = any($2) order by b.project_id`,
       [g.orgId, ids],
     );
-    return rows.map((r) => ({ project: r.project_id, monthly: Number(r.monthly) / 1e6, alertAt: Number(r.alert_at), perWorkOrder: Number(r.wo) / 1e6, spent: Number(r.spent) / 1e6, version: r.version }));
+    return rows.map((r) => ({ project: r.project_id, monthly: Number(r.monthly) / 1e6, capped: Number(r.monthly) > 0, alertAt: Number(r.alert_at), perWorkOrder: Number(r.wo) / 1e6, spent: Number(r.spent) / 1e6, version: r.version }));
   });
 
   // ------------------------------------------------------------------ commands
@@ -127,8 +136,15 @@ export const modelRoutes: FastifyPluginAsync = async (app) => {
    * has no way to be handed unsaved ones. A failure is audited and comes back as a 422 with the reason; nothing is stored.
    */
   const discover = async (req: import("fastify").FastifyRequest, t: NonNullable<ReturnType<typeof vendorTemplate>>, values: Record<string, string>): Promise<DiscoverResult | null> => {
-    if (!(await decide(req, "model.edit", {})).allowed) return null;
-    allowDiscoveryHosts(discoveryHosts(t, values));
+    // G-A1: the right AND a fresh sign-in come before any network call or allow-list entry; otherwise the command that follows refuses and audits.
+    if (!(await mayCallOut(req, "model.edit"))) return null;
+    // G-A2: the API never fetches an endpoint that checkEndpoint would refuse (metadata, loopback, control plane, service names).
+    checkEndpoint(templateEndpoint(t, values), { allowHttp: false, lan: await withTx(g.pool, (tx) => lanRangesOf(tx, g.orgId)) });
+    // The discovery host is on the worker's list for five minutes so this one call can go through the proxy; the grant is ledgered here (by a stepped-up caller), and the command's own egress.host.added row follows when it commits.
+    const hosts = discoveryHosts(t, values);
+    allowDiscoveryHosts(hosts);
+    const who = req.gx.principal;
+    await withTx(g.pool, (tx) => appendEvent(tx, { orgId: g.orgId, type: "egress.discovery.allowed", category: "config", actor: who?.id ?? "unknown", channel: "web", subject: { type: "vendor-discovery", id: t.id }, outcome: "ok", rule: "STEP-UP", after: { hosts, minutes: 5, list: "worker" }, requestId: req.id, sourceIp: req.ip || null }));
     const http = opsEnv(app).http;
     let r = await discoverModels(http, t, values);
     // The edge caches the system allow-list for a few seconds; a host added a moment ago may need one more try.

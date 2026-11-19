@@ -36,11 +36,13 @@ export class FakeLauncher {
   runs = new Map<string, FakeRun>();
   calls: Call[] = [];
   /** Answer 429 to start-run (the launcher is full). */
-  capacity = false;
+  capacity: boolean | string = false;
   /** Runs that survive stop-run (a container that will not die). */
   stuck = new Set<string>();
   /** Fail this many stop-run calls with teardown_incomplete. */
   stopFailures = 0;
+  /** Runs the launcher stopped for a critically low host disk (its list answer). */
+  criticalStops: Array<{ runId: string; at: number; freeBytes: number }> = [];
   /** Runs the double lists although nobody started them (orphans left by a crash). */
   onStop: ((id: string) => void | Promise<void>) | null = null;
   onStart: ((r: Record<string, any>) => void | Promise<void>) | null = null;
@@ -67,7 +69,7 @@ export class FakeLauncher {
       await this.onStart?.(b);
       const allowed = new Set(["runId", "workspaceRef", "variant", "runToken", "seedComplete"]);
       if (Object.keys(b).some((k) => !allowed.has(k))) return send(res, 422, { ok: false, msg: "invalid request" });
-      if (this.capacity) return send(res, 429, { ok: false, kind: "capacity", msg: "at capacity" });
+      if (this.capacity) return send(res, 429, { ok: false, kind: "capacity", msg: typeof this.capacity === "string" ? this.capacity : "at the concurrent run limit (3)" });
       const have = this.runs.get(b.runId);
       if (have?.state === "started") return send(res, 200, { ok: true, runId: b.runId, state: "running" });
       const state = b.seedComplete === false ? "prepared" : "started";
@@ -88,7 +90,7 @@ export class FakeLauncher {
     }
     if (req.method === "GET" && u.pathname === "/v1/runs") {
       this.calls.push({ op: "list", at: Date.now() });
-      return send(res, 200, { ok: true, runs: [...this.runs.values()].map((r) => ({ runId: r.runId, variant: r.variant, workspaceRef: r.workspaceRef, container: r.state === "started" ? { id: `c-${r.runId}` } : null, network: { name: `run-${r.runId}` }, volume: { name: `ws-${r.runId}` } })), capacity: { max: 32, networks: this.runs.size } });
+      return send(res, 200, { ok: true, runs: [...this.runs.values()].map((r) => ({ runId: r.runId, variant: r.variant, workspaceRef: r.workspaceRef, container: r.state === "started" ? { id: `c-${r.runId}` } : null, network: { name: `run-${r.runId}` }, volume: { name: `ws-${r.runId}` } })), capacity: { max: 32, networks: this.runs.size }, criticalStops: this.criticalStops });
     }
     send(res, 404, { ok: false, msg: "not found" });
   }
@@ -96,7 +98,7 @@ export class FakeLauncher {
 
 /* ------------------------------------------------------------------------------------------ github broker */
 
-export interface FakePr { number: number; state: "open" | "closed" | "merged"; head: string; draft: boolean; mergeSha: string | null; checks?: Array<{ name: string; status: string; conclusion: string | null }> }
+export interface FakePr { number: number; state: "open" | "closed" | "merged"; head: string; draft: boolean; mergeSha: string | null; body?: string; title?: string; checks?: Array<{ name: string; status: string; conclusion: string | null }> }
 
 export class FakeBroker {
   readonly token = "github-test-token";
@@ -107,6 +109,15 @@ export class FakeBroker {
   /** Perform the merge, then cut the connection before the answer: the worker crashes between the call and its commit. */
   dropAfterMerge = 0;
   failSeed = 0;
+  /** What the seed answers as the repository context (the broker reads the convention files while it has the checkout). */
+  repoContext: unknown = undefined;
+  /** What the seed answers as the convention files at the target branch head, and the convention files the work branch changed against it. */
+  baseRepoContext: unknown = undefined;
+  conventionChanges: unknown = undefined;
+  /** What GET /v1/default-head answers: the branch and its head, or null for a refusal (the broker cannot read it). */
+  defaultHead: { branch: string; sha: string } | null = null;
+  /** What the seed answers as the head of the requested base branch (null: the branch could not be read). */
+  seedBase: string | null = null;
   publishResponse: Record<string, any> | { status: number; body: Record<string, any> } | null = null;
   mergeResponse: { status: number; body: Record<string, any> } | null = null;
   gateCheckStatus = 200;
@@ -136,7 +147,11 @@ export class FakeBroker {
     if (path === "/v1/workspaces/seed") {
       this.calls.push({ op: "seed", at: Date.now(), body: b });
       if (this.failSeed > 0) { this.failSeed--; return send(res, 502, { ok: false, code: "fetch_failed", msg: "GitHub is down" }); }
-      return send(res, 200, { ok: true, ...b });
+      return send(res, 200, { ok: true, ...b, base: b.baseBranch ? this.seedBase : null, ...(this.repoContext !== undefined ? { repoContext: this.repoContext } : {}), ...(this.baseRepoContext !== undefined ? { baseRepoContext: this.baseRepoContext } : {}), ...(this.conventionChanges !== undefined ? { conventionChanges: this.conventionChanges } : {}) });
+    }
+    if (path === "/v1/default-head") {
+      this.calls.push({ op: "default-head", at: Date.now(), query: u.search });
+      return this.defaultHead ? send(res, 200, { ok: true, ...this.defaultHead }) : send(res, 409, { ok: false, code: "no_default_head", msg: "cannot read the default branch" });
     }
     if (path === "/v1/publish") {
       this.calls.push({ op: "publish", at: Date.now(), body: b });
@@ -154,6 +169,15 @@ export class FakeBroker {
       const pr = this.prs.get(b.number);
       if (pr) pr.draft = true;
       return send(res, 200, { ok: true, draft: true, alreadyDraft: false });
+    }
+    if (path === "/v1/pulls/describe") {
+      this.calls.push({ op: "describe", at: Date.now(), body: b });
+      const pr = this.prs.get(b.number);
+      if (!pr) return send(res, 404, { ok: false, code: "not_found", msg: "no such pull request" });
+      const changed = pr.body !== b.body || (b.title !== undefined && pr.title !== b.title);
+      pr.body = b.body;
+      if (b.title !== undefined) pr.title = b.title;
+      return send(res, 200, { ok: true, changed, redacted: 0, number: b.number });
     }
     if (path === "/v1/pull-state") {
       const n = Number(u.searchParams.get("number"));

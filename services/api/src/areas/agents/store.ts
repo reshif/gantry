@@ -1,4 +1,6 @@
 /** Agent reads: rows to the legacy `G.store.agents` shape, plus the eval promotion gate (spec 13.2). */
+import type { RunLimits } from "@gantry/domain";
+import { readRunLimits } from "./run-limits.js";
 import { fmt, type Agent, type AgentVersion } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { cfgOf, diffKeys, initialsOf, VERSIONED_KEYS, type AgentCfg } from "./config.js";
@@ -128,6 +130,12 @@ export interface AgentOut extends Agent {
   threshold: number | null;
   /** Work orders being worked by this agent right now. */
   running: number;
+  /** The skills the version on the floor runs with, in order, each at the version it is pinned to (`skills` is the draft attachments). Empty `version`: no pin recorded. */
+  liveSkills: Array<{ id: string; version: string }>;
+  /** The run limits of the version on the floor: what a run is bound by (`limits` is the working copy, which only a new version and its promotion puts on the floor). */
+  liveLimits: RunLimits;
+  /** The per-run budget a run is bound by when no cost limit is set: the floor version's, else the agent's. */
+  liveBudget: number;
   versions: Array<AgentVersion & { eligibility: Omit<Eligibility, "needs"> & { needs: string } }>;
 }
 
@@ -143,6 +151,7 @@ export async function readAgents(db: Queryable, orgId: string, id?: string, now 
   const skills = (await db.query<{ agent_id: string; skill_id: string }>(`select agent_id, skill_id from agent_skills where org_id = $1 ${id ? "and agent_id = $2" : ""} order by agent_id, position, created_at, skill_id`, id ? [orgId, id] : [orgId])).rows;
   const suites = new Map((await db.query<{ id: string; name: string; threshold: string | null }>(`select id, name, data->>'threshold' as threshold from suites where org_id = $1`, [orgId])).rows.map((s) => [s.id, s]));
   const ex = await extras(db, orgId, now);
+  const skillLabels = new Map((await db.query<{ skill_id: string; version: number; label: string | null }>(`select skill_id, version, body->>'label' as label from skill_versions where org_id = $1`, [orgId])).rows.map((r) => [`${r.skill_id}:${r.version}`, r.label || `${r.version}.0.0`]));
   const out: AgentOut[] = [];
   for (const a of agents) {
     const mine = vers.filter((v) => v.agent_id === a.id);
@@ -170,9 +179,14 @@ export async function readAgents(db: Queryable, orgId: string, id?: string, now 
       });
     }
     const liveV = versions.find((v) => v.live);
+    const liveIds = live && Array.isArray(live.body.skills) ? (live.body.skills as unknown[]).filter((x): x is string => typeof x === "string") : [];
+    const liveVers = live && live.body.skillVersions && typeof live.body.skillVersions === "object" ? (live.body.skillVersions as Record<string, unknown>) : {};
     out.push({
+      liveLimits: readRunLimits(live?.body.limits),
+      liveBudget: typeof live?.body.budget === "number" ? live.body.budget : cfg.budget,
+      liveSkills: liveIds.map((sid) => ({ id: sid, version: typeof liveVers[sid] === "number" ? skillLabels.get(`${sid}:${liveVers[sid]}`) ?? "" : "" })),
       id: a.id, name: a.name, station: a.station, model: cfg.model, fallbacks: cfg.fallbacks, version: liveV?.v ?? "", status: a.status, autonomy: cfg.autonomy, tools: cfg.tools,
-      skills: skills.filter((s) => s.agent_id === a.id).map((s) => s.skill_id), mcp: cfg.mcp, stations: cfg.stations, projects: cfg.projects, budget: cfg.budget, guardrails: cfg.guardrails,
+      skills: skills.filter((s) => s.agent_id === a.id).map((s) => s.skill_id), mcp: cfg.mcp, stations: cfg.stations, projects: cfg.projects, budget: cfg.budget, guardrails: cfg.guardrails, limits: cfg.limits,
       suite: cfg.suite, instructions: cfg.instructions, overrides: cfg.overrides, versions, spark: ex.spark.get(a.id) ?? [], spend7d: ex.spend.get(a.id) ?? 0, initials: initialsOf(a.name),
       evalScore: liveV?.suiteScore ?? 0, ...(a.data.builtin === true ? { builtin: true } : {}), running: ex.running.get(a.id) ?? 0, rev: a.version, suiteName: suite?.name ?? null, threshold: suite ? (suite.threshold !== null && !Number.isNaN(Number(suite.threshold)) ? Number(suite.threshold) : 0.85) : null,
     });

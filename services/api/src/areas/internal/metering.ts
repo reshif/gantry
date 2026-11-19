@@ -1,5 +1,7 @@
+import { planOf } from "../workorders/research.js";
 import type { Queryable } from "@gantry/db";
 import type { RunCtx } from "./context.js";
+import { runLimitsOf } from "../agents/run-limits.js";
 
 import { costMicros, priceBookAt, type Price, type PriceBook, type Usage } from "../models/prices.js";
 
@@ -16,7 +18,7 @@ export interface Limits {
 }
 
 export interface Breach {
-  scope: "project" | "wo" | "run";
+  scope: "project" | "wo" | "run" | "plan";
   spentMicros: number;
   limitMicros: number;
 }
@@ -29,11 +31,14 @@ const toMicros = (usd: unknown): number | null => {
 /** Spec 10.4 Budget: project monthly budget, work-order cap (the work order's own data.budgetUsd, else the project's budgets.wo_limit_micros, else config extra.woBudgetUsd), per-run cap (agent budget). */
 export async function loadLimits(db: Queryable, c: RunCtx): Promise<Limits> {
   const b = await db.query<{ m: string; w: string }>(`select monthly_limit_micros::text as m, wo_limit_micros::text as w from budgets where org_id = $1 and project_id = $2`, [c.orgId, c.projectId]);
+  // A monthly amount of 0 means no cap (owner decision); monthly_zero_cap is ignored.
   const projectMicros = b.rows[0] && Number(b.rows[0].m) > 0 ? Number(b.rows[0].m) : null;
   const projectWoMicros = b.rows[0] && Number(b.rows[0].w) > 0 ? Number(b.rows[0].w) : null;
   const extra = (c.projectConfig.extra ?? {}) as Record<string, unknown>;
   const woMicros = toMicros(c.woData.budgetUsd) ?? projectWoMicros ?? toMicros(extra.woBudgetUsd);
-  const runMicros = toMicros((await agentConfig(db, c)).budgetUsd);
+  // The per-run cap is the run's resolved cost limit (one-off raise, station override, agent limits, else the agent's budget).
+  const agent = await agentConfig(db, c);
+  const runMicros = toMicros((await runLimitsOf(db, c, agent)).costUsd);
   return { projectMicros, woMicros, runMicros };
 }
 
@@ -60,6 +65,13 @@ export async function budgetBreach(db: Queryable, c: RunCtx): Promise<Breach | n
   if (lim.projectMicros !== null && spent.project >= lim.projectMicros) return { scope: "project", spentMicros: spent.project, limitMicros: lim.projectMicros };
   if (lim.woMicros !== null && spent.wo >= lim.woMicros) return { scope: "wo", spentMicros: spent.wo, limitMicros: lim.woMicros };
   if (lim.runMicros !== null && spent.run >= lim.runMicros) return { scope: "run", spentMicros: spent.run, limitMicros: lim.runMicros };
+  // An approved research plan's budget covers its station's runs from the approval on (Phase 2): the gateway refuses the next model call past it.
+  const plan = planOf(c.woData);
+  if (plan?.status === "approved" && plan.budgetUsd && plan.station === c.station && plan.decidedAt) {
+    const limit = Math.round(plan.budgetUsd * 1e6);
+    const used = Number((await db.query<{ n: string }>(`select coalesce(sum(u.cost_micros),0)::text as n from run_usage u join attempts a on a.org_id = u.org_id and a.id = u.attempt_id where u.org_id = $1 and u.wo_id = $2 and a.station = $3 and u.at >= $4`, [c.orgId, c.woId, c.station, new Date(plan.decidedAt)])).rows[0]!.n);
+    if (used >= limit) return { scope: "plan", spentMicros: used, limitMicros: limit };
+  }
   return null;
 }
 

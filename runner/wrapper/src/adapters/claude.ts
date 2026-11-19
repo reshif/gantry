@@ -7,23 +7,64 @@
  * edge reporting are exercised in tests against a stand-in executable that emits stream-json lines.
  */
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { STATION_DIR, STATION_TOOLS_INSTRUCTION, TOOL_DEFS } from "../station-tools.js";
 import type { Adapter, AdapterContext, AdapterOutcome } from "../adapter.js";
 import type { UsageEntry } from "../edge.js";
 import type { RunEnv } from "../env.js";
 import type { RunSpec } from "../spec.js";
+import { startRelay } from "../relay.js";
+import { narrowShell } from "../tools.js";
 
 /** Writable scratch space: the root filesystem is read-only, /tmp is a tmpfs. */
+/** Package caches live on the run's workspace volume, not the 64M /tmp tmpfs. A dot-directory kept out of git (see excludeCacheFromGit). */
+export const CACHE_DIRNAME = ".gantry-cache";
+
+/**
+ * Caches for uv, pip, npm and anything that honours XDG_CACHE_HOME, under `<workspace>/.gantry-cache`. They cannot be set by the agent
+ * (that command form needs approval) and the /tmp tmpfs is too small for a toolchain download.
+ */
+export function cacheEnv(workspace: string): Record<string, string> {
+  const root = join(workspace, CACHE_DIRNAME);
+  return { UV_CACHE_DIR: join(root, "uv"), PIP_CACHE_DIR: join(root, "pip"), XDG_CACHE_HOME: join(root, "xdg"), npm_config_cache: join(root, "npm") };
+}
+
+/**
+ * Keep the cache out of every commit: `.gantry-cache/` goes in the repository's .git/info/exclude (local, never committed), so `git add -A` and
+ * `git commit -a` skip it. Idempotent. The publisher reads only committed objects, so an excluded file cannot reach a pull request.
+ */
+export async function excludeCacheFromGit(workspace: string): Promise<void> {
+  const gitDir = join(workspace, ".git");
+  try {
+    if (!(await stat(gitDir)).isDirectory()) return;
+  } catch {
+    return; // not a git workspace
+  }
+  const file = join(gitDir, "info", "exclude");
+  const line = `/${CACHE_DIRNAME}/`;
+  let cur = "";
+  try { cur = await readFile(file, "utf8"); } catch { /* absent */ }
+  if (cur.split("\n").some((l) => l.trim() === line)) return;
+  await mkdir(join(gitDir, "info"), { recursive: true });
+  await writeFile(file, `${cur}${cur === "" || cur.endsWith("\n") ? "" : "\n"}${line}\n`);
+}
+
 export const SCRATCH = process.env.GANTRY_SCRATCH ?? "/tmp/gantry";
 
 const MAX_ARG_BYTES = 100_000;
+/** A scout run (Phase 3): its handoff names its own question. */
+const isScout = (spec: RunSpec): boolean => !!spec.input && typeof spec.input === "object" && "scout" in (spec.input as object);
+const STATION_TOOLS_JS = fileURLToPath(new URL("../station-tools.js", import.meta.url));
+/** The harness names MCP tools `mcp__<server>__<tool>`. */
+export const STATION_TOOL_NAMES = TOOL_DEFS.map((t) => `mcp__gantry__${t.name}`);
 
 export interface ClaudeInvocation {
   args: string[];
   env: Record<string, string>;
-  /** Written to `mcpConfigPath` (mode 0600) before launch: it carries the run token for the edge's MCP gateway. */
+  /** Written to `mcpConfigPath` (mode 0600) before launch: it names only relay URLs, no credential. */
   mcpConfig: { mcpServers: Record<string, unknown> };
   mcpConfigPath: string;
   stdin: string;
@@ -32,9 +73,48 @@ export interface ClaudeInvocation {
 const RESULT_INSTRUCTION =
   "When the work is finished, end your final message with exactly one fenced ```json block holding the station result as a single JSON object. Do not put anything after it.";
 
+/** The harness's built-in tools. Any that is not on the agent's allow-list is also named in `--disallowedTools`, a second rail. */
+export const KNOWN_BUILTIN_TOOLS = [
+  "Agent", "Bash", "Cron", "CronCreate", "CronDelete", "CronList", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "TodoWrite", "WebFetch", "WebSearch", "Workflow", "Write",
+];
+
+/**
+ * Paths no file tool may touch, whatever the allow-list says (S-91): git runs programs named in `.git/config` (filter, textconv, aliases, sshCommand ...)
+ * and in `.git/hooks`, so a "may write the branch" agent that could edit them could run commands. Listed as deny rules for every editing tool and
+ * every spelling of the path (relative, nested, absolute). `.gitattributes` and `.gitmodules` are named too: they select the filters and drivers.
+ * The git front (bin/git) is the second rail: it refuses to run when the config names such a program.
+ */
+export const GIT_PATH_DENIES: string[] = ["Edit", "Write", "NotebookEdit"].flatMap((t) => [`${t}(.git)`, `${t}(.git/**)`, `${t}(**/.git)`, `${t}(**/.git/**)`, `${t}(**/gitdir)`, `${t}(//workspace/.git)`, `${t}(//workspace/.git/**)`, `${t}(**/.gitattributes)`, `${t}(**/.gitmodules)`]);
+
+/** Directory of the git front, first on the harness's PATH (runner/wrapper/bin, installed at /opt/gantry-wrapper/bin). */
+export const GIT_FRONT_DIR = fileURLToPath(new URL("../../bin", import.meta.url));
+
+const toolBase = (entry: string): string => entry.replace(/\(.*$/s, "").trim();
+
+/** Built-in tool names an allow-list grants. An entry may carry a specifier, `Bash(npm test:*)`, which grants the tool and narrows approval; MCP entries are not built-ins. */
+export function builtinTools(allow: string[]): string[] {
+  return [...new Set(allow.map(toolBase).filter((t) => t !== "" && !t.startsWith("mcp__")))];
+}
+
+/** Whether a tool the model called is permitted: a listed built-in, or an MCP tool (gated by the edge gateway). */
+export function toolAllowed(name: string, allow: string[]): boolean {
+  return name.startsWith("mcp__") || builtinTools(allow).includes(name);
+}
+
+/** Names of the tools an assistant event asks to call. */
+export function toolUses(ev: StreamEvent): string[] {
+  const content = (ev as { message?: { content?: unknown } }).message?.content;
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((b: unknown) => {
+    const x = b as { type?: unknown; name?: unknown };
+    return typeof b === "object" && b !== null && x.type === "tool_use" && typeof x.name === "string" ? [x.name] : [];
+  });
+}
+
 export function composeSystemPrompt(spec: RunSpec): string {
   const parts = [spec.instructions.trim()];
   for (const s of spec.skills) parts.push(`## Skill: ${s.name}\n\n${s.content.trim()}`);
+  parts.push(STATION_TOOLS_INSTRUCTION);
   parts.push(RESULT_INSTRUCTION);
   return parts.filter((p) => p !== "").join("\n\n");
 }
@@ -43,15 +123,21 @@ export function composeSystemPrompt(spec: RunSpec): string {
  * Builds the harness command line. Isolation of repository-controlled configuration (spec 4.2, test T9):
  *  - `--setting-sources user` with an empty CLAUDE_CONFIG_DIR: project and local settings (hooks, permissions, env) never load;
  *  - `--strict-mcp-config` with an explicit `--mcp-config`: `.mcp.json` in the repo is ignored; only edge-gateway servers are used;
- *  - CLAUDE_CODE_DISABLE_CLAUDE_MDS: the repository guidelines arrive through the composed instructions at the pinned commit;
+ *  - CLAUDE_CODE_DISABLE_CLAUDE_MDS stays on on purpose: the harness's own memory-file loader would read whatever CLAUDE.md sits in the workspace (and user/managed
+ *    files), unrecorded, uncapped, unscanned and only for this harness. Gantry decides instead: the broker reads AGENTS.md / CLAUDE.md at the pinned commit when it
+ *    seeds, scans and caps them, records what was offered on the run, and the run spec's instructions carry them under "Repository context" with a stated
+ *    precedence (factory rails > project overlay > repository conventions > agent defaults). Deterministic, audited, identical for every harness;
  *  - `--disable-slash-commands`: repo-defined commands and skills are not discovered.
  */
-export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, baseEnv: NodeJS.ProcessEnv = process.env): ClaudeInvocation {
-  const edgeHost = new URL(env.edgeUrl).hostname;
+export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, relayUrl: string, baseEnv: NodeJS.ProcessEnv = process.env): ClaudeInvocation {
+  const edgeOrigin = new URL(env.edgeUrl).origin;
   const mcpServers: Record<string, unknown> = {};
   for (const [name, s] of Object.entries(spec.mcpServers)) {
-    mcpServers[name] = { ...s, headers: { authorization: `Bearer ${env.runToken}` } };
+    // The edge's MCP gateway is reached through the relay, which adds the run token: the config file and the harness never hold it.
+    mcpServers[name] = { ...s, url: s.url.startsWith(edgeOrigin) ? relayUrl + s.url.slice(edgeOrigin.length) : s.url };
   }
+  // The station tools run in this container as a stdio server (they only record into the run's scratch space): see station-tools.ts.
+  mcpServers.gantry = { type: "stdio", command: baseEnv.GANTRY_NODE_BIN ?? process.execPath, args: [STATION_TOOLS_JS], env: { GANTRY_STATION_DIR: STATION_DIR, GANTRY_EDGE_URL: relayUrl, GANTRY_RUN_ID: env.runId, ...(isScout(spec) ? { GANTRY_STATION_ROLE: "scout" } : {}) } };
   const mcpConfigPath = join(SCRATCH, "mcp.json");
   const args = [
     "-p",
@@ -65,29 +151,56 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, baseEnv: NodeJ
     "--append-system-prompt", composeSystemPrompt(spec),
   ];
   if (spec.model) args.push("--model", spec.model);
-  if (spec.toolAllowList.length > 0) args.push("--allowedTools", spec.toolAllowList.join(","));
+  // `--allowedTools` only pre-approves; it removes nothing. `--tools` is the restriction: the built-in tools the model is offered at all, and
+  // `--disallowedTools` names the rest as a second rail. MCP tools (station tools, registry servers in scope) are gated by the edge and stay.
+  const granted = builtinTools(spec.toolAllowList);
+  args.push("--tools", granted.join(","));
+  args.push("--disallowedTools", [...KNOWN_BUILTIN_TOOLS.filter((t) => !granted.includes(t)), ...GIT_PATH_DENIES].join(","));
+  args.push("--allowedTools", [...narrowShell(spec.toolAllowList), ...STATION_TOOL_NAMES].join(","));
 
   const cloneEnv: Record<string, string> = {};
-  for (const k of ["PATH", "LANG", "LC_ALL", "TZ"]) {
+  for (const k of ["PATH", "LANG", "LC_ALL", "TZ", "UV_PYTHON_INSTALL_DIR", "UV_PYTHON_PREFERENCE", "UV_PYTHON_DOWNLOADS", "UV_LINK_MODE", "UV_NO_PROGRESS"]) {
     const v = baseEnv[k];
     if (v !== undefined) cloneEnv[k] = v;
   }
+  // The git front first: it refuses config-borne commands (see bin/git). The real git is whatever the image has.
+  cloneEnv.PATH = [GIT_FRONT_DIR, cloneEnv.PATH ?? "/usr/local/bin:/usr/bin:/bin"].join(":");
   Object.assign(cloneEnv, {
     HOME: join(SCRATCH, "home"),
+    GANTRY_WORKSPACE: env.workspace,
+    ...cacheEnv(env.workspace),
     CLAUDE_CONFIG_DIR: join(SCRATCH, "claude-config"),
-    // The harness talks to the edge's model gateway with the run token; the vendor key never enters the runner.
-    ANTHROPIC_BASE_URL: `${env.edgeUrl}/model`,
-    ANTHROPIC_AUTH_TOKEN: env.runToken,
-    // Package and other HTTPS goes through the edge proxy; the gateway itself is reached directly.
-    HTTPS_PROXY: baseEnv.HTTPS_PROXY ?? "",
-    NO_PROXY: edgeHost,
+    // The harness talks to the edge's model gateway through the loopback relay, which adds the run token; the vendor key never enters the runner.
+    // The placeholder only satisfies the harness's need for some credential. Nothing in this environment is a secret.
+    ANTHROPIC_BASE_URL: `${relayUrl}/model`,
+    ANTHROPIC_AUTH_TOKEN: "relay",
+    // Package and other HTTPS goes through the same relay, which opens the tunnel to the edge proxy with the run's credentials.
+    HTTPS_PROXY: relayUrl,
+    NO_PROXY: "127.0.0.1,localhost",
+    // The harness's inner sandbox (bubblewrap) cannot start in this container (no user namespaces, no capabilities), so it is off. What it protected
+    // is gone instead: no token or credential is in this environment, so no tool subprocess can inherit one (see relay.ts).
+    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0",
+    // The image sets the git identity and the hardening (hooks off, fsmonitor off, /workspace trusted) in its environment, but this clean environment
+    // dropped them, and `git commit` refuses without an identity. Same values as runner/Dockerfile; no token is among them.
+    GIT_AUTHOR_NAME: "Gantry Agent", GIT_AUTHOR_EMAIL: "agent@gantry.invalid", GIT_COMMITTER_NAME: "Gantry Agent", GIT_COMMITTER_EMAIL: "agent@gantry.invalid",
+    // S-91: no system or global config, hooks and fsmonitor off, no external diff, no ssh command, no pager or editor. These are "command" scope
+    // and beat anything in the repository's own config.
+    GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_ATTR_NOSYSTEM: "1", GIT_EDITOR: "true", GIT_PAGER: "cat",
+    GIT_CONFIG_COUNT: "7",
+    GIT_CONFIG_KEY_0: "core.hooksPath", GIT_CONFIG_VALUE_0: "/dev/null",
+    GIT_CONFIG_KEY_1: "safe.directory", GIT_CONFIG_VALUE_1: "/workspace",
+    GIT_CONFIG_KEY_2: "core.fsmonitor", GIT_CONFIG_VALUE_2: "false",
+    GIT_CONFIG_KEY_3: "diff.external", GIT_CONFIG_VALUE_3: "",
+    GIT_CONFIG_KEY_4: "core.sshCommand", GIT_CONFIG_VALUE_4: "false",
+    GIT_CONFIG_KEY_5: "core.pager", GIT_CONFIG_VALUE_5: "cat",
+    GIT_CONFIG_KEY_6: "protocol.ext.allow", GIT_CONFIG_VALUE_6: "never",
+    GIT_TERMINAL_PROMPT: "0",
     DISABLE_AUTOUPDATER: "1",
     DISABLE_TELEMETRY: "1",
     DISABLE_ERROR_REPORTING: "1",
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
     CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1",
   });
-  if (cloneEnv.HTTPS_PROXY === "") delete cloneEnv.HTTPS_PROXY;
 
   const input = spec.input === undefined ? "" : typeof spec.input === "string" ? spec.input : JSON.stringify(spec.input, null, 2);
   const stdin = `Station: ${spec.station}\n\n${input}`.trimEnd() + "\n";
@@ -228,12 +341,17 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions = {}): Adapter {
     async run(ctx: AdapterContext): Promise<AdapterOutcome> {
       const { spec, env } = ctx;
       if (!spec.model) return { status: "failed", usage: [], error: { code: "spec_invalid", msg: "claude adapter requires spec.model" } };
-      const inv = buildClaudeInvocation(spec, env);
+      const relay = await startRelay({ edgeUrl: env.edgeUrl, runToken: env.runToken, runId: env.runId, upstreamProxy: process.env.HTTPS_PROXY });
+      const inv = buildClaudeInvocation(spec, env, relay.url);
       if (inv.args.some((a) => Buffer.byteLength(a) > MAX_ARG_BYTES)) {
+        await relay.close();
         return { status: "failed", usage: [], error: { code: "instructions_too_large", msg: "composed instructions exceed the command-line limit" } };
       }
       await mkdir(join(SCRATCH, "home"), { recursive: true, mode: 0o700 });
       await mkdir(join(SCRATCH, "claude-config"), { recursive: true, mode: 0o700 });
+      // Best effort: a workspace that cannot hold the cache leaves the tools to create it (or fail) themselves.
+      await mkdir(join(env.workspace, CACHE_DIRNAME), { recursive: true, mode: 0o700 }).catch(() => undefined);
+      await excludeCacheFromGit(env.workspace).catch(() => undefined);
       await writeFile(inv.mcpConfigPath, JSON.stringify(inv.mcpConfig), { mode: 0o600 });
 
       const child = spawn(bin, inv.args, { cwd: env.workspace, env: inv.env, stdio: ["pipe", "pipe", "pipe"] });
@@ -250,6 +368,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions = {}): Adapter {
       let turn = 0;
       let pending: string[] = [];
       let finalEvent: StreamEvent | undefined;
+      let violation: string | undefined;
       const flush = async () => {
         if (pending.length === 0) return;
         const content = pending.join("\n") + "\n";
@@ -274,6 +393,12 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions = {}): Adapter {
         if (!ev) return;
         pending.push(line.trim());
         if (ev.type === "assistant") {
+          // A call outside the allow-list means the harness did not enforce it. Fail closed: the call stays in the transcript, the harness is stopped, the run reports it.
+          const bad = toolUses(ev).find((n) => !toolAllowed(n, spec.toolAllowList));
+          if (bad && !violation) {
+            violation = bad;
+            aborted();
+          }
           turn += 1;
           ctx.setTurn(turn);
         } else if (ev.type === "user") {
@@ -294,11 +419,16 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions = {}): Adapter {
       });
 
       const code = await new Promise<number | null>((resolve) => child.once("close", (c) => resolve(c)));
+      await relay.close();
       if (buf.trim() !== "") chain = chain.then(() => handleLine(buf));
       await chain;
       await flush();
       ctx.signal.removeEventListener("abort", aborted);
 
+      if (violation) {
+        const msg = `The agent called ${violation}, which is not on its tool allow-list (${spec.toolAllowList.join(", ") || "none"}). The run was stopped.`;
+        return { status: "failed", usage: finalEvent ? usageFromResult(finalEvent, spec.model) : [], error: { code: "tool_not_allowed", msg } };
+      }
       if (ctx.signal.aborted) return { status: "interrupted", usage: finalEvent ? usageFromResult(finalEvent, spec.model) : [] };
       if (spawnError) return { status: "failed", usage: [], error: { code: "harness_unavailable", msg: `cannot start ${bin}: ${spawnError.message}` } };
       if (!finalEvent) return { status: "failed", usage: [], error: { code: "harness_exit", msg: `harness exited with code ${code} and no result${stderrTail ? `: ${stderrTail.trim()}` : ""}` } };

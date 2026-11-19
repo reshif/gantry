@@ -14,7 +14,7 @@ export interface SeedPerson {
 }
 export interface SeedProject {
   id: string; key: string; name: string; desc?: string; status?: string; teams?: string[]; owner?: string; template?: string;
-  regulated?: boolean; overlay?: string; halted?: unknown; killed?: unknown; created?: number;
+  regulated?: boolean; overlay?: string; halted?: unknown; killed?: unknown; created?: number; oncall?: string[];
   flow?: unknown; approvers?: Record<string, unknown>; notifications?: { id?: string; event: string; dest?: unknown; template?: string; cond?: unknown; fields?: unknown; enabled?: boolean }[];
   mcp?: string[]; budget?: { monthly?: number; mtd?: number; alertAt?: number };
   /** Any other legacy field (guidelines, ...) is kept in projects.config.extra. */
@@ -112,7 +112,7 @@ export async function seedDevOrg(tx: Tx, state: SeedState): Promise<{ orgId: str
   for (const p of state.people ?? []) {
     await q(
       `insert into people (org_id, id, name, title, email, github_login, status, mfa, oncall, away, data) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb)`,
-      [org, p.id, p.name, p.title ?? "", p.email, p.github ?? null, p.status ?? "active", p.mfa ?? false, p.oncall ?? false, p.away ? j(p.away) : null,
+      [org, p.id, p.name, p.title ?? "", p.email, p.github ?? null, p.status ?? "active", p.mfa ?? false, false, p.away ? j(p.away) : null,
         j(rest(p, ["id", "name", "title", "email", "github", "status", "mfa", "oncall", "away", "teams", "roles"]))],
     );
     for (const t of p.teams ?? []) await q(`insert into team_members (org_id, team_id, person_id) values ($1,$2,$3)`, [org, t, p.id]);
@@ -127,7 +127,7 @@ export async function seedDevOrg(tx: Tx, state: SeedState): Promise<{ orgId: str
       `insert into projects (org_id, id, key, name, description, status, owner_id, template_id, regulated, overlay, halted, killed, config, created_at, position)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb, coalesce($14::timestamptz, now()), $15)`,
       [org, pr.id, pr.key, pr.name, pr.desc ?? "", pr.status ?? "new", pr.owner ?? null, pr.template ?? null, pr.regulated ?? false, pr.overlay ?? "",
-        null, null, j({ mcp: pr.mcp ?? [], mtd: pr.budget?.mtd ?? 0, extra: rest(pr, PROJECT_COLUMNS) }), at(pr.created), position],
+        null, null, j({ mcp: pr.mcp ?? [], mtd: pr.budget?.mtd ?? 0, oncall: Array.isArray(pr.oncall) ? pr.oncall : [], extra: rest(pr, PROJECT_COLUMNS) }), at(pr.created), position],
     );
     await seedStop(q, org, "project", pr.id, pr.killed ? "kill" : pr.halted ? "halt" : null, pr.killed ?? pr.halted);
     for (const t of pr.teams ?? []) await q(`insert into project_teams (org_id, project_id, team_id) values ($1,$2,$3)`, [org, pr.id, t]);
@@ -150,6 +150,8 @@ export async function seedDevOrg(tx: Tx, state: SeedState): Promise<{ orgId: str
       await q(`insert into notification_routes (org_id, id, project_id, event, destinations, template, conditions, fields, enabled) values ($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb,$8::jsonb,$9)`,
         [org, `${pr.id}:${r.id ?? `NR-${n}`}`, pr.id, r.event, j(r.dest ?? []), r.template ?? "", j(r.cond ?? {}), j(r.fields ?? {}), r.enabled ?? true]);
     }
+    // Month-to-date spend is read from the meter, so the seeded figure is metered too (one row, this month, no vendor).
+    if (pr.budget?.mtd) await q(`insert into usage_meter (org_id, station, project_id, model_id, cost_micros, surface) values ($1,'seed',$2,'seed',$3,'seed')`, [org, pr.id, micros(pr.budget.mtd)]);
     if (pr.budget) await q(`insert into budgets (org_id, project_id, monthly_limit_micros, alert_at) values ($1,$2,$3,$4)`, [org, pr.id, micros(pr.budget.monthly), pr.budget.alertAt ?? 0.8]);
     if (pr.overlay) {
       await q(`insert into instruction_versions (org_id, scope, scope_id, version, body, hash, note, published_at, published_by) values ($1,'project',$2,1,$3,$4,'Seeded', now(), 'system')`, [org, pr.id, pr.overlay, sha(pr.overlay)]);
@@ -221,12 +223,14 @@ export async function seedDevOrg(tx: Tx, state: SeedState): Promise<{ orgId: str
     const config = { model: a.model ?? "", fallbacks: a.fallbacks ?? [], autonomy: a.autonomy ?? "suggest", tools: a.tools ?? {}, mcp: a.mcp ?? [], stations: a.stations ?? [], projects: a.projects ?? "all", budget: a.budget ?? 0, guardrails: a.guardrails ?? { paths: [], maxDiff: 0 }, suite: a.suite ?? "", instructions: a.instructions ?? "", overrides: a.overrides ?? {} };
     const promoted = versions.flatMap((v, i) => ("rc" in v && v.rc ? [] : [i + 1]));
     await q(`insert into agents (org_id, id, name, station, status, live_version, data) values ($1,$2,$3,$4,$5,$6,$7::jsonb)`, [org, a.id, a.name, a.station ?? null, a.status ?? "active", live, j({ ...config, promoted })]);
+    // Pin every skill to its latest version, as an agent version does when it is cut.
+    const skillVersions = Object.fromEntries((a.skills ?? []).map((id) => [id, Math.max(1, (state.skills ?? []).find((s) => s.id === id)?.versions?.length ?? 1)]));
     for (const [i, v] of versions.entries()) {
       const { stations: _s, projects: _p, suite: _u, ...snap } = config;
       await q(
         `insert into agent_versions (org_id, agent_id, version, body, harness_version, instruction_hash, model_id, note, published_at, published_by)
          values ($1,$2,$3,$4::jsonb,'', $5, $6, $7, coalesce($8::timestamptz, now()), 'system')`,
-        [org, a.id, i + 1, j({ ...snap, skills: a.skills ?? [], label: v.v, diff: "diff" in v ? v.diff : "", suiteScore: "suiteScore" in v ? v.suiteScore : 0, rc: "rc" in v ? !!v.rc : false }), sha(a.instructions ?? ""), a.model ?? null, v.note ?? "", at(v.at)],
+        [org, a.id, i + 1, j({ ...snap, skills: a.skills ?? [], skillVersions, label: v.v, diff: "diff" in v ? v.diff : "", suiteScore: "suiteScore" in v ? v.suiteScore : 0, rc: "rc" in v ? !!v.rc : false }), sha(a.instructions ?? ""), a.model ?? null, v.note ?? "", at(v.at)],
       );
     }
     for (const [i, sk] of (a.skills ?? []).entries()) await q(`insert into agent_skills (org_id, agent_id, skill_id, position) values ($1,$2,$3,$4)`, [org, a.id, sk, i + 1]);
@@ -298,7 +302,7 @@ export async function seedDevOrg(tx: Tx, state: SeedState): Promise<{ orgId: str
   return { orgId: org, created: true };
 }
 
-const PROJECT_COLUMNS = ["id", "key", "name", "desc", "status", "owner", "template", "regulated", "overlay", "halted", "killed", "created", "teams", "flow", "approvers", "notifications", "mcp", "budget"];
+const PROJECT_COLUMNS = ["id", "key", "name", "desc", "status", "owner", "template", "regulated", "overlay", "halted", "killed", "created", "teams", "flow", "approvers", "notifications", "mcp", "budget", "oncall"];
 
 function rest(o: object, keys: string[]): Record<string, unknown> {
   return Object.fromEntries(Object.entries(o).filter(([k]) => !keys.includes(k)));

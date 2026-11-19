@@ -5,8 +5,9 @@
  */
 import { createHash } from "node:crypto";
 import type { Tx } from "@gantry/db";
+import { checkMatches } from "@gantry/domain";
 import type { EventSpec } from "../../core/command.js";
-import { recordMerged, recordNewHead } from "../workorders/station.js";
+import { parkMergeBlocked, recheckAutoGate, recordMerged, recordNewHead } from "../workorders/station.js";
 import type { CheckFact, GithubFacts, IssueFact, PublishedCommitFact, PullRequestFact, ReviewFact } from "./facts.js";
 
 export const sha256 = (b: Buffer | string): string => createHash("sha256").update(b).digest("hex");
@@ -51,12 +52,21 @@ export async function applyFacts(tx: Tx, orgId: string, f: GithubFacts, o: { now
   const touched = new Set<string>();
 
   if (f.base) {
-    // Quiet bookkeeping (no event): the worker seeds new workspaces from repo_config.data.baseSha when a work order has no commit of its own.
-    await tx.query(
-      `update repo_config set data = jsonb_set(jsonb_set(data, '{baseSha}', to_jsonb($3::text)), '{baseBranch}', to_jsonb($4::text)), updated_at = now()
-        where org_id = $1 and repo_id = $2 and (data->>'baseSha' is distinct from $3 or data->>'baseBranch' is distinct from $4)`,
-      [orgId, repo.id, f.base.sha, f.base.branch],
-    );
+    // Quiet bookkeeping (no event): the worker seeds new workspaces from repo_config.data.baseSha when a work order has no commit of its own. `baseAt` is when the
+    // commit was last confirmed, so dispatch can tell a recorded commit that is fresh from one that has to be checked against GitHub (S-140).
+    // A push may only move the base FORWARD (G-X2): two real pushes can be delivered out of order, and the older one must not take the base back or mark it fresh.
+    // A poll reads the branch tip as it is, so it is always the truth. A push is a clean step when its `before` is the stored commit, or newer than the stored commit by time.
+    const cur = (await tx.query<{ sha: string | null; at: string | null }>(`select data->>'baseSha' as sha, data->>'baseCommittedAt' as at from repo_config where org_id = $1 and repo_id = $2`, [orgId, repo.id])).rows[0];
+    const b = f.base;
+    // When the stored commit time is unknown only a clean step (`before` is the stored commit) is forward; a hook with no `before` and no time is not (G-X6).
+    const forward = f.source !== "hook" || !cur?.sha || cur.sha === b.sha || b.before === cur.sha || (!!cur.at && !!b.committedAt && Date.parse(b.committedAt) > Date.parse(cur.at));
+    if (forward) {
+      await tx.query(
+        `update repo_config set data = (data || jsonb_build_object('baseSha', $3::text, 'baseBranch', $4::text, 'baseAt', $5::text)) - 'baseCommittedAt' || case when $6::text is null then '{}'::jsonb else jsonb_build_object('baseCommittedAt', $6::text) end, updated_at = now()
+          where org_id = $1 and repo_id = $2`,
+        [orgId, repo.id, b.sha, b.branch, (o.now ?? new Date()).toISOString(), b.committedAt ?? null],
+      );
+    }
   }
 
   if (f.publish) {
@@ -82,9 +92,15 @@ export async function applyFacts(tx: Tx, orgId: string, f: GithubFacts, o: { now
     if (r.changed) touched.add("workOrders");
   }
 
+  const settled = new Set<string>();
   for (const c of f.checks) {
     const ev = await storeCheck(tx, orgId, repo.id, c);
-    if (ev) { out.events.push({ ...ev, projectId: repo.project_id, subject: sub }); out.counts.checks++; touched.add("workOrders"); }
+    if (ev) { out.events.push({ ...ev, projectId: repo.project_id, subject: sub }); out.counts.checks++; touched.add("workOrders"); if (c.status === "completed") settled.add(c.headSha); }
+  }
+  // A finished check is evidence for an automatic gate that is waiting on this head (G4 reads the real CI results).
+  for (const sha of settled) {
+    const prs = (await tx.query<{ wo_id: string }>(`select wo_id from pull_requests where org_id = $1 and repo_id = $2 and head_sha = $3 and state = 'open' and wo_id is not null`, [orgId, repo.id, sha])).rows;
+    for (const p of prs) if ((await recheckAutoGate(tx, orgId, p.wo_id, sha, o.now ? { now: o.now } : {})).reopened) touched.add("workOrders");
   }
 
   for (const rv of f.reviews) {
@@ -139,8 +155,20 @@ async function storePullRequest(
   const id = prIdOf(repo.id, pr.number);
   const candidate = woFromBranch(pr.headBranch, prefix);
   const woId = candidate && (await woExists(tx, orgId, candidate)) ? candidate : null;
-  const prev = (await tx.query<{ state: string; head_sha: string | null; draft: boolean; wo_id: string | null }>(`select state, head_sha, draft, wo_id from pull_requests where org_id = $1 and id = $2 for update`, [orgId, id])).rows[0];
-  const data = { labels: pr.labels, author: pr.author ?? null, mergeCommitSha: pr.mergeCommitSha ?? null };
+  const prev = (await tx.query<{ state: string; head_sha: string | null; draft: boolean; wo_id: string | null; seen: string | null }>(`select state, head_sha, draft, wo_id, data->>'sourceUpdatedAt' as seen from pull_requests where org_id = $1 and id = $2 for update`, [orgId, id])).rows[0];
+  // S-63: webhooks are hints and the newest fact wins. A delivery older than what is stored changes nothing; a merged pull request is never set back, and a closed one is reopened only by
+  // a delivery that is newer (a real reopen carries a newer updated_at).
+  if (prev) {
+    const at = pr.updatedAt ? Date.parse(pr.updatedAt) : NaN;
+    const seen = prev.seen ? Date.parse(prev.seen) : NaN;
+    const older = Number.isFinite(at) && Number.isFinite(seen) && at < seen;
+    const backFromMerged = prev.state === "merged" && pr.state !== "merged";
+    const reopenedStale = source === "hook" && prev.state === "closed" && pr.state === "open" && !(Number.isFinite(at) && (!Number.isFinite(seen) || at > seen));
+    if (older || backFromMerged || reopenedStale) {
+      return { events: [{ subject: { type: "pull_request", id: `${full}#${pr.number}` }, projectId: repo.project_id, woId: prev.wo_id, category: "integrations", type: "github.pull_request.stale_ignored", before: { state: prev.state, headSha: prev.head_sha }, after: { state: pr.state, headSha: pr.headSha, updatedAt: pr.updatedAt ?? null, seenUpdatedAt: prev.seen, source } }], changed: false, drift: 0, merged: false };
+    }
+  }
+  const data = { labels: pr.labels, author: pr.author ?? null, mergeCommitSha: pr.mergeCommitSha ?? null, ...(pr.updatedAt ? { sourceUpdatedAt: pr.updatedAt } : {}) };
   await tx.query(
     `insert into pull_requests (org_id, id, repo_id, wo_id, number, github_id, title, state, draft, head_sha, base_branch, head_branch, url, merged_at, data)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)
@@ -178,6 +206,8 @@ async function storePullRequest(
     } else if (pr.state === "closed" && prev && prev.state === "open") {
       drift++;
       events.push({ ...base, type: "github.drift", outcome: "regression", before: { state: "open" }, after: { kind: "closed_without_merge", number: pr.number, repo: full } });
+      // An approved merge waiting on this pull request cannot happen: the order goes to Needs a person, with Retry merge.
+      if (linked) await parkMergeBlocked(tx, orgId, linked, { prNumber: pr.number, reason: `Pull request #${pr.number} was closed without merging.`, ...(now ? { now } : {}) });
     }
   }
   return { events, changed: !unchanged, drift, merged };
@@ -189,7 +219,7 @@ async function storeCheck(tx: Tx, orgId: string, repoId: string, c: CheckFact): 
   const id = `ck-${repoId}-${c.headSha}-${sha256(c.name).slice(0, 12)}`;
   const prev = (await tx.query<{ status: string; conclusion: string | null }>(`select status, conclusion from checks where org_id = $1 and id = $2`, [orgId, id])).rows[0];
   const pr = (await tx.query<{ id: string }>(`select id from pull_requests where org_id = $1 and repo_id = $2 and head_sha = $3 order by number desc limit 1`, [orgId, repoId, c.headSha])).rows[0];
-  const required = !!(await tx.query(`select 1 from repo_config where org_id = $1 and repo_id = $2 and $3 = any(required_checks)`, [orgId, repoId, c.name])).rowCount;
+  const required = ((await tx.query<{ required_checks: string[] | null }>(`select required_checks from repo_config where org_id = $1 and repo_id = $2`, [orgId, repoId])).rows[0]?.required_checks ?? []).some((n) => checkMatches(n, c.name));
   await tx.query(
     `insert into checks (org_id, id, repo_id, pr_id, head_sha, name, status, conclusion, required, github_id, completed_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      on conflict (org_id, id) do update set pr_id = coalesce(excluded.pr_id, checks.pr_id), status = excluded.status, conclusion = excluded.conclusion, required = excluded.required, github_id = coalesce(excluded.github_id, checks.github_id), completed_at = excluded.completed_at, updated_at = now()`,

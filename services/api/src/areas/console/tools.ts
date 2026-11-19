@@ -9,7 +9,7 @@
  * says about it right now. The frontend renders it as a confirm card; confirming calls that endpoint under the person's own authority, so the
  * decision point, audit, stop checks and idempotency are the endpoint's own. A kind of proposal is offered only to a person who holds its console right (console.propose.*).
  */
-import { can, policyTrace, visibleProjects } from "@gantry/domain";
+import { briefBase, can, policyTrace, visibleProjects } from "@gantry/domain";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { decide, policyState, type PolicyStateLoaded } from "../../core/index.js";
 import type { Decision } from "@gantry/domain";
@@ -39,6 +39,9 @@ export interface Proposal {
   entities: Cited[];
   status: "pending" | "done" | "failed" | "dismissed";
   result?: string;
+  /** What a refused card still needs (the server's own `needs` line) and the rule that refused it; written by the server when it ran the card. */
+  needs?: string;
+  refusal?: { code: number; rule?: unknown; overrideKind?: string };
 }
 
 export interface ToolCtx {
@@ -471,10 +474,13 @@ const PROPOSE: ToolDef[] = [
       if (!gate) return { error: `${id} is not waiting at a gate.` };
       const st = await stateOf(ctx);
       const prog = obj(obj(w.gateProgress)[gate] ?? w.gateProgress);
+      // The decision names the exact opening the person is shown (A8): a stale card cannot land on a newer instance.
+      const opened = str(obj(obj(w.allowed).approve).instance);
+      const instance = opened && opened.split(":").length === 3 ? opened : `${id}:${gate}`;
       return mk(ctx, {
         kind: "approve", title: `Approve ${gate} on ${id}`, summary: String(w.title ?? ""),
         steps: [mark(w.title, 160), ...(typeof prog.have === "number" ? [`Approvals so far: ${prog.have} of ${String(prog.need)}`] : [])],
-        call: { method: "POST", path: `/api/v1/gate-instances/${encodeURIComponent(`${id}:${gate}`)}/approve`, body: { via: "console" }, idempotent: false },
+        call: { method: "POST", path: `/api/v1/gate-instances/${encodeURIComponent(instance)}/approve`, body: { via: "console", ...(gate === "G0G1" ? { briefBase: briefBase(obj(w.brief) as never) } : {}) }, idempotent: false },
         perm: { action: actionForGate(st.catalog, gate), project: String(w.project) }, needsReason: null, phrase: null, danger: false, entities: [{ type: "wo", id: id! }], scope: { project: String(w.project), repo: w.repo ? String(w.repo) : null, wo: id! },
       });
     },
@@ -532,7 +538,7 @@ const PROPOSE: ToolDef[] = [
       const t = await stopTarget(ctx, scope, str(i.id));
       if ("error" in t) return t;
       return mk(ctx, {
-        kind: "restore", title: `Restore ${t.label}`, summary: str(i.reason) ?? "", steps: ["Held work resumes; cancelled work orders stay killed until restored one by one", ...(scope === "factory" ? ["The factory may need two different Factory Admins"] : [])],
+        kind: "restore", title: `Restore ${t.label}`, summary: str(i.reason) ?? "", steps: ["Held work resumes, and the work orders it killed come back from where they were", ...(scope === "factory" ? ["The factory may need two different Factory Admins"] : [])],
         call: { method: "POST", path: `/api/v1/stops/${encodeURIComponent(t.apiId)}/restore`, body: { reason: str(i.reason) ?? "", via: "console" }, idempotent: false },
         perm: { action: stopAction("restore", scopeFromApi(scope)), project: t.project }, needsReason: 4, phrase: null, danger: false, entities: [], scope: { project: t.project, wo: t.wo ?? null },
       });
@@ -559,10 +565,11 @@ const PROPOSE: ToolDef[] = [
     async run(ctx, i) {
       const cellId = str(i.cell);
       let cell: Json | undefined;
+      let switchOn = true;
       for (const p of await visibleProjectsOf(ctx)) {
         const r = await api(ctx, `/api/v1/trust/cells?project=${encodeURIComponent(String(p.id))}`);
         cell = (r.status === 200 ? (arr(obj(r.body).cells) as Json[]) : []).find((c) => c.id === cellId);
-        if (cell) break;
+        if (cell) { switchOn = obj(r.body).levelsAboveL1 !== false; break; }
       }
       if (!cell) return { error: `No visible trust cell ${cellId}.` };
       const level = num(i.level, -1, -1, 4);
@@ -570,7 +577,13 @@ const PROPOSE: ToolDef[] = [
       const cap = Number(obj(cell.ceiling).max ?? 4);
       return mk(ctx, {
         kind: "trust", title: `Set ${cellId} to L${level}`, summary: str(i.reason) ?? "",
-        steps: [`Now L${String(cell.level)}; ceiling L${cap}`, ...(level > cap ? [`Capped at L${cap} by a ceiling: the change will be refused.`] : [])],
+        steps: [
+          `Now L${String(cell.level)}; ceiling L${cap}`,
+          ...(level < Number(cell.level) ? ["Lowering a level is always allowed."] : [
+            ...(level > cap ? [`Capped at L${cap} by a ceiling: the change will be refused.`] : []),
+            ...(level > 1 && !switchOn ? ["Trust levels above L1 are switched off: raising to this level will be refused until the switch is on."] : []),
+          ]),
+        ],
         call: { method: "POST", path: "/api/v1/trust/grants", body: { target: cellId, level, reason: str(i.reason) ?? "", via: "console" }, idempotent: false },
         perm: { action: "trust.grant", project: String(cell.project) }, needsReason: 1, phrase: null, danger: false, entities: [{ type: "project", id: String(cell.project) }], scope: { project: String(cell.project) },
       });

@@ -48,7 +48,7 @@ d("MCP end to end", () => it("registry -> run -> the SDK's MCP client through th
   await w.q(`update projects set config = jsonb_set(config, '{mcp}', $1::jsonb) where id = 'payments'`, [JSON.stringify([id])]);
   await w.q(`insert into work_orders (org_id, id, project_id, title, class, position, state, flow_version) values ($1,'WO-e2e','payments','T','feature','build','running',1)`, [t.orgId]);
   const at = await w.q(`insert into attempts (org_id, id, wo_id, station, visit, state) values ($1,'at-e2e','WO-e2e','build',1,'running') returning fencing::text as f`, [t.orgId]);
-  await w.q(`insert into runs (org_id, id, attempt_id, wo_id, data) values ($1,'run-e2e','at-e2e','WO-e2e','{}')`, [t.orgId]);
+  await w.q(`insert into runs (org_id, id, attempt_id, wo_id, data) values ($1,'run-e2e','at-e2e','WO-e2e','{"adapter":"stub"}')`, [t.orgId]);
   const tk = await withTx(t.db.app, (tx) => issueRunToken(tx, "run-e2e", "at-e2e", at[0].f));
   const spec = (await t.app.inject({ method: "GET", url: "/internal/v1/runs/run-e2e/spec", headers: { authorization: "Bearer edge-token-for-tests", "x-run-token": tk.token } })).json();
   expect(Object.keys(spec.mcpServers)).toEqual(["docs-wiki"]);
@@ -61,7 +61,8 @@ d("MCP end to end", () => it("registry -> run -> the SDK's MCP client through th
   expect(tools).toEqual(["explode", "search"]); // update_page is allowed but needs a pre-authorisation this attempt does not hold
 
   const r1 = (await client.callTool({ name: "search", arguments: { query: "refunds" } })) as { content: Array<{ text: string }>; isError?: boolean };
-  expect(r1.content[0]!.text).toBe("results for refunds");
+  expect(r1.content[0]!.text).toMatch(/Untrusted data returned by MCP server/);
+  expect(r1.content[1]!.text).toBe("results for refunds");
   expect(mcp.seen.every((s: { authorization?: string }) => s.authorization === `Bearer ${SECRET}`)).toBe(true);
 
   const denied = (await client.callTool({ name: "update_page", arguments: { id: "p", body: "b" } })) as { content: Array<{ text: string }>; isError?: boolean };
@@ -73,7 +74,7 @@ d("MCP end to end", () => it("registry -> run -> the SDK's MCP client through th
   expect((await w.call("p-asha", "POST", "/api/v1/mcp/grants", { wo: "WO-e2e", tools: [`${id}/update_page`] }, { "idempotency-key": "k1" })).status).toBe(200);
   expect((await client.listTools()).tools.map((x) => x.name).sort()).toEqual(["explode", "search", "update_page"]);
   const w1 = (await client.callTool({ name: "update_page", arguments: { id: "p", body: "b" } })) as { content: Array<{ text: string }> };
-  expect(w1.content[0]!.text).toBe("updated p");
+  expect(w1.content[1]!.text).toBe("updated p");
   expect(mcp.calls.filter((c: { tool: string }) => c.tool === "update_page")).toHaveLength(1);
 
   const rows = await w.q(`select tool, outcome, args_hash, wo_id, agent_id, station, latency_ms from mcp_calls order by id`);
@@ -99,6 +100,6 @@ d("MCP end to end", () => it("registry -> run -> the SDK's MCP client through th
   const ok = await w.call("p-asha", "POST", `/api/v1/mcp/servers/${id}/approve`, {});
   expect(ok.status, JSON.stringify(ok.body)).toBe(200);
   const after = (await client.callTool({ name: "search", arguments: { query: "again" } })) as { content: Array<{ text: string }> };
-  expect(after.content[0]!.text).toBe("results for again");
+  expect(after.content[1]!.text).toBe("results for again");
   await client.close();
 }, 60_000));

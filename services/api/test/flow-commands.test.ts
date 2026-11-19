@@ -127,7 +127,7 @@ d("work order commands: denied and stale for every one", () => {
     expect((await w.call("p-meera", "POST", `${base}/move`, { target: "research", reason: "Back from the board" })).status).toBe(200);
     // send-back: validations, then to Intake (the gate reopens, live attempts cancelled)
     await matrix(id, "POST", `${base}/send-back`, { toStation: "intake", note: "The brief was wrong" }, { stale: "p-meera" });
-    expect((await w.call("p-meera", "POST", `${base}/send-back`, { toStation: "research", note: "same station" })).status).toBe(422);
+    expect((await w.call("p-meera", "POST", `${base}/send-back`, { toStation: "research", note: "x" })).status).toBe(422);
     const sb = await w.call("p-meera", "POST", `${base}/send-back`, { toStation: "intake", note: "The brief was wrong" });
     expect(sb.status, JSON.stringify(sb.body)).toBe(200);
     const wo = await w.get(id);
@@ -166,7 +166,9 @@ d("work order commands: denied and stale for every one", () => {
     expect(q).toMatchObject({ applied: true, next: "person" });
     const w2 = await w.get(id2);
     expect(w2.bay).toBe("person");
-    expect(w2.conv.raised.at(-1)).toMatchObject({ text: "Which currency should refunds use?", answered: false });
+    expect(w2.bayReason).toBe("Waiting for an answer at Research");
+    const dl = (await w.call("p-asha", "GET", `/api/v1/work-orders/${id2}/dialogue`)).body;
+    expect(dl.questions).toMatchObject([{ question: "Which currency should refunds use?", blocking: true, status: "open", station: "research" }]);
     // a lost lease: bounded retry
     const id3 = await w.atStation("research", "Lost lease");
     const a3 = (await w.liveAttempt(id3))!;
@@ -199,7 +201,7 @@ d("work order commands: denied and stale for every one", () => {
     await t.db.admin.query(`update pull_requests set head_sha = 'def9999aaaa' where id = 'PR-1'`);
     let merging = false;
     for (const who of w.APPROVERS) {
-      const r = await w.call(who, "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:G5`)}/approve`, {});
+      const r = await w.call(who, "POST", await w.gateUrl(id, "G5"), {});
       if (r.status === 200 && r.body.passed) {
         merging = true;
         break;
@@ -238,8 +240,31 @@ d("work order commands: denied and stale for every one", () => {
     for (const k of kids) {
       const wo = await w.get(k.id);
       expect(wo.parent).toBe(id);
+      // No agent ran at Intake for an inherited brief: no invented, attributed Intake history entry.
+      expect(wo.history.filter((h: { station: string; agent: string }) => h.station === "intake" && h.agent === "ag-intake")).toEqual([]);
       await w.walk(k.id, (x) => x.state === "done", 80);
     }
     expect((await w.get(id)).state).toBe("done");
+  });
+
+  it("epics: a plan with no split never builds as one work order; it waits for a person, whose children split it with 'Title: goal' parsed into child title and description", async () => {
+    const id = (await w.submit("p-tomas", { title: "Epic: report jobs" })).body.id as string;
+    await t.db.admin.query(`update work_orders set class = 'epic' where id = $1`, [id]);
+    await w.answerAll(id);
+    expect((await w.confirm(id)).status).toBe(200);
+    const order = ((await w.call("p-asha", "GET", "/api/v1/catalog")).body.stations as Array<{ id: string }>).map((s) => s.id);
+    await w.walk(id, (x) => order[x.station] === "plan" && x.state === "running");
+    expect((await w.apply((await w.liveAttempt(id))!, { status: "succeeded", summary: "Planned", output: { children: [] } })).applied).toBe(true);
+    const held = await w.walk(id, (x) => x.state === "parked");
+    expect(held.children.length).toBe(0);
+    expect((await w.q(`select position from work_orders where id = $1`, [id]))[0].position).toBe("person");
+    const wo = await w.get(id);
+    const r = await w.call("p-tomas", "PATCH", `/api/v1/work-orders/${id}/brief`, { children: ["Interfaces report: list interfaces by location"] }, w.ifm(wo.version));
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const split = await w.walk(id, (x) => x.children.length === 1);
+    expect(split.state).toBe("waiting");
+    const kid = (await w.q(`select title, data from work_orders where parent_id = $1`, [id]))[0];
+    expect(kid.title).toBe("Epic: report jobs: Interfaces report");
+    expect(String(kid.data.description)).toContain("list interfaces by location");
   });
 });

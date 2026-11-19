@@ -206,6 +206,20 @@ d("command pipeline", () => {
     expect(ke).toMatchObject({ actor: "apikey:key-9", channel: "api", session_id: null });
   });
 
+  it("a browser can't claim another channel: via slack, teams or api is pinned to web, and an API key's via is dropped", async () => {
+    for (const [i, claimed] of ["slack", "teams", "api", "github"].entries()) {
+      await post(admin, "/api/v1/test/templates", { id: `tpl-spoof-${i}`, name: "S", via: claimed });
+      const e = (await events("template.saved")).find((x) => x.subject.id === `tpl-spoof-${i}`)!;
+      expect(e).toMatchObject({ channel: "web", actor: admin, on_behalf_of: null });
+    }
+    const { generateApiKey } = await import("../src/core/auth/apikeys.js");
+    const k = generateApiKey();
+    await t.db.admin.query(`insert into api_keys (org_id, id, name, key_hash, key_prefix, scopes) values ($1,'key-spoof','bot',$2,$3,'["template.edit"]')`, [t.orgId, k.hash, k.prefix]);
+    const r = await t.app.inject({ method: "POST", url: "/api/v1/test/templates", headers: { authorization: `Bearer ${k.key}`, "idempotency-key": "spoof-1" }, payload: { id: "tpl-key-spoof", name: "K", via: "slack" } });
+    expect(r.statusCode).toBe(200);
+    expect((await events("template.saved")).find((x) => x.subject.id === "tpl-key-spoof")).toMatchObject({ actor: "apikey:key-spoof", channel: "api" });
+  });
+
   it("jobs and outbox rows are written in the same transaction; reduced stop commands refuse them", async () => {
     const r = await post(admin, "/api/v1/test/jobs", {});
     expect(r.statusCode).toBe(200);

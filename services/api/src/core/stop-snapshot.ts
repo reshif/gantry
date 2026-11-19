@@ -33,7 +33,7 @@ export function snapshotOf(st: PolicyStateLoaded): StopSnapshot {
     matrix: st.matrix,
     policies: st.policies,
     catalog: { roles: st.catalog.roles, actions: st.catalog.actions },
-    projects: st.projects.map((p) => ({ id: p.id, name: p.name, status: p.status, regulated: !!p.regulated })),
+    projects: st.projects.map((p) => ({ id: p.id, name: p.name, status: p.status, regulated: !!p.regulated, oncall: Array.isArray(p.oncall) ? p.oncall : [] })),
     repos: st.repos.map((r) => ({ id: r.id, name: r.name, project_id: r.project })),
   };
 }

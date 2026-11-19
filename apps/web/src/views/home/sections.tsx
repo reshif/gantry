@@ -1,20 +1,27 @@
 /** The sections of Home. Each renders only what the API put in `home.sections` (built by the caller's rights); none checks a role. */
-import { useEffect, useState, type ReactNode } from "react";
-import { WO_STATES, fmt } from "@gantry/domain";
+import { useMemo, useState, type ReactNode } from "react";
 import { useCan } from "../../api/can";
-import { ops } from "../../api/ops";
-import { useMe } from "../../api/queries";
+import { useActivity, useMe, useScorecards } from "../../api/queries";
 import { plural } from "../../lib/plural";
 import { hasCommand, runCommand } from "../../lib/commands";
+import { WoActions } from "../work/WoActions";
 import { navigate } from "../../lib/router";
-import { setProject, updatePrefs } from "../../lib/prefs";
-import { Btn, Chip, Meter } from "../../ui/primitives";
+import { gotoWithQuery } from "../../lib/urlState";
+import { getPrefs, setProject } from "../../lib/prefs";
+import { useActors } from "../../ui/actors";
+import { Avatar, Btn, Chip, Empty, Panel } from "../../ui/primitives";
+import { Async } from "../../ui/async";
+import { TrendChart } from "./TrendChart";
+import { hashFor } from "../../lib/router";
+import { GateActions, pendingTitle } from "../work/gate";
+import { agoMs } from "../work/format";
+import type { Item } from "../work/items";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { makeStopActions } from "../../shell/stopActions";
 import { useOpenTraveler } from "../../shell/useTraveler";
-import { ClassChip, HealthChip, MiniBelt, classOf, goProject, metricsOf, useCatalog, type PView } from "../projects/kit";
-import { goAttention, STAGE_NAME, type Approval, type AttentionItem, type Conversation, type HomeSections, type MineWo, type SetupStep } from "./data";
+import { eventSentence, metricsOf, useCatalog, type PView } from "../projects/kit";
+import { goAttention, type Approval, type AttentionItem, type HomeSections, type SetupStep } from "./data";
 
 /** From Home to the New project wizard on the Projects screen, once that screen has mounted and registered it. */
 export function openNewProject(): void {
@@ -29,15 +36,12 @@ export function openNewProject(): void {
   }, 50);
 }
 
-function Section({ id, title, count, tools, cls = "", children }: { id: string; title: string; count?: number | undefined; tools?: ReactNode; cls?: string; children: ReactNode }) {
+/** A Home section is one titled card. `id` stays on the wrapper so the page can link to it. */
+function Section({ id, title, count, tools, cls = "", flush, children }: { id: string; title: string; count?: number | undefined; tools?: ReactNode; cls?: string; flush?: boolean; children: ReactNode }) {
   return (
-    <section className={`hm-sec ${cls}`} aria-labelledby={`${id}-h`} id={id}>
-      <div className="hm-sec-head">
-        <h2 className="panel-title" id={`${id}-h`}>{title}{count !== undefined ? <span className="hm-count mono">{` ${count}`}</span> : null}</h2>
-        {tools ?? null}
-      </div>
+    <Panel id={id} cls={`hm-sec ${cls}`} title={<>{title}{count !== undefined ? <span className="hm-count">{count}</span> : null}</>} tools={tools} flush={!!flush}>
       {children}
-    </section>
+    </Panel>
   );
 }
 
@@ -55,7 +59,7 @@ function RestoreAction({ item }: { item: AttentionItem }) {
   if (!me || d.pending || !d.allowed) return null;
   const done = r.approvals?.length ?? 0;
   const already = !!r.approvals?.some((a) => a.by === me.person.id);
-  const label = r.scope === "factory" ? (done ? `Approve restore (${done + 1} of ${r.needs ?? 2})` : "Restore factory") : "Restore project";
+  const label = r.scope === "factory" && d.override ? "Restore with a reason" : r.scope === "factory" ? (done ? `Approve restore (${done + 1} of ${r.needs ?? 2})` : "Restore factory") : "Restore project";
   return (
     <Btn
       label={label} small kind="primary" id={`hm-restore-${r.scope}${r.id ? `-${r.id}` : ""}`} aria={`${label}: ${item.title}`}
@@ -72,7 +76,7 @@ export function AttentionStrip({ items }: { items: AttentionItem[] }) {
   const shown = all ? items : items.slice(0, SHOWN);
   const crit = items.filter((x) => x.sev === 0).length;
   return (
-    <Section id="hm-attention" title="Needs attention" count={items.length} cls="hm-att-sec">
+    <Section id="hm-attention" title="Needs attention" count={items.length} flush tools={items.length > SHOWN ? <Btn label={all ? `Show the top ${SHOWN}` : `Show all ${items.length}`} small kind="ghost" id="hm-att-more" aria={all ? undefined : `Show all ${plural(items.length, "attention item")}`} onClick={() => setAll(!all)} /> : null}>
       {crit ? <p className="sr" role="status">{`${plural(crit, "critical item")}.`}</p> : null}
       <ol className="hm-att">
         {shown.map((x) => {
@@ -92,96 +96,61 @@ export function AttentionStrip({ items }: { items: AttentionItem[] }) {
           );
         })}
       </ol>
-      {items.length > SHOWN ? <Btn label={all ? `Show the top ${SHOWN}` : `Show all ${items.length}`} small kind="ghost" id="hm-att-more" aria={all ? undefined : `Show all ${plural(items.length, "attention item")}`} onClick={() => setAll(!all)} /> : null}
     </Section>
   );
 }
 
 /* ------------------------------------------------------- waiting on you */
 
-function ApprovalRow({ a }: { a: Approval }) {
-  const ui = useUI();
-  const open = useOpenTraveler();
-  if (a.repo) {
-    return (
-      <li className="hm-my-row">
-        <Icon name="rocket" className="hm-my-ic" />
-        <div className="hm-my-main">
-          <div>{a.note ? `Onboarding update: ${a.repoName}` : `Merge onboarding PR ${a.repoName}#${a.pr}`}</div>
-          <div className="muted small">{a.note ? `${a.projectName} · ${a.note}` : `${a.projectName} · checks green`}</div>
-        </div>
-        <Btn label={a.note ? "Open session" : "Open onboarding"} small id={`hm-my-onb-${a.repo}`} aria={`${a.note ? "Open session" : "Open onboarding"} for ${a.repoName}`} onClick={() => { if (a.project) setProject(a.project); navigate("onboarding", a.repo); }} />
-      </li>
-    );
-  }
+/** The prototype's row: work order link and gate chip, the title, "Project · waiting <ago>", Approve and Reject on the right. */
+function GateRow({ a }: { a: Approval }) {
   const wo = a.wo ?? "";
-  const gate = a.gate ?? "";
-  const approve = async () => {
-    const r = await ops.approveGate(wo, gate);
-    ui.toast(r.msg, r.ok ? "ok" : "error");
-  };
-  const verb = gate === "G6" ? "Confirm release" : "Approve";
   return (
-    <li className="hm-my-row">
-      <span className="gate gate-waiting gate-sm" aria-label={`${a.gateName} (${a.gateLabel}): waiting on approvers`}>
-        <span className="gate-shape" aria-hidden="true"><span className="gate-count">{String(a.need !== undefined ? Math.max(1, a.need - (a.have ?? 0)) : 1)}</span></span>
-      </span>
-      <div className="hm-my-main">
-        <div><span className="mono">{wo}</span>{" · " + a.gateName + " · " + a.gateLabel}</div>
-        <div className="muted small">{`${a.title} · ${a.projectName}${a.need !== undefined ? ` · ${a.have ?? 0} of ${plural(a.need, "approval")}` : ""}${a.waitMs ? ` · waiting ${fmt.dur(a.waitMs)}` : ""}`}</div>
-      </div>
-      <div className="hm-my-acts">
-        <Btn label="Review" small kind="ghost" id={`hm-my-open-${wo}-${gate}`} aria={`Review ${wo} at ${a.gateLabel}`} onClick={() => open(wo)} />
-        {gate === "G0G1" ? null : <Btn label={verb} small kind="primary" id={`hm-my-ok-${wo}-${gate}`} aria={`${verb} ${wo} at ${a.gateLabel}`} onClick={() => void approve()} />}
+    <li className="hm-need">
+      <div className="grow">
+        <div className="row"><a className="pri mono" href={hashFor("record", wo, a.project)} id={`hm-my-wo-${wo}`}>{wo}</a><Chip text={pendingTitle(a)} cls="warn" /></div>
+        <div className="hm-need-t">{a.title}</div>
+        <div className="small muted">{`${a.projectName} · waiting ${agoMs(a.waitMs ?? 0)}`}</div>
+        <div className="act-bar" style={{ marginTop: 8 }}>
+          <GateActions a={a} idPrefix="hm-my" />
+          {wo ? <WoActions wo={wo} project={a.project ?? ""} idPrefix="hm-my" omit={["primary"]} /> : null}
+        </div>
       </div>
     </li>
   );
 }
 
-export function WaitingOnYou({ approvals, conversations }: { approvals: Approval[]; conversations: Conversation[] }) {
-  const total = approvals.length + conversations.length;
-  const sorted = approvals.slice().sort((a, b) => (b.waitMs ?? 0) - (a.waitMs ?? 0));
+/** Onboarding merges still wait on a person (kept from the working app); they follow the gate rows. */
+function OnboardingRow({ a }: { a: Approval }) {
   return (
-    <Section id="hm-waiting" title="Waiting on you" count={total}>
-      {total ? (
-        <ul className="hm-my-list">
-          {sorted.map((a) => <ApprovalRow key={`${a.wo ?? a.repo}-${a.gate ?? ""}-${a.note ? "n" : ""}`} a={a} />)}
-          {conversations.map((w) => (
-            <li key={w.wo} className="hm-my-row">
-              <Icon name="chat" className="hm-my-ic" />
-              <div className="hm-my-main">
-                <div><span className="mono">{w.wo}</span>{" · " + w.title}</div>
-                <div className="muted small">{w.question || "Confirm the brief or answer the open question."}</div>
-              </div>
-              <Btn label="Answer" small kind="primary" id={`hm-my-conv-${w.wo}`} aria={`Answer the question on ${w.wo}`} onClick={() => { setProject(w.project); updatePrefs({ openConversation: w.wo }); navigate("conversations"); }} />
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="muted small hm-quiet">Nothing is waiting on you.</p>
-      )}
-    </Section>
+    <li>
+      <div className="grow">
+        <div className="row"><span className="mono small">{a.note ? "Onboarding" : "PR"}</span><Chip text={a.repoName ?? a.repo ?? ""} cls="info" /></div>
+        <div className="trunc">{a.note ? `Onboarding update: ${a.repoName}` : `Merge onboarding PR ${a.repoName}#${a.pr}`}</div>
+        <div className="small muted">{a.note ? `${a.projectName} · ${a.note}` : `${a.projectName} · checks green`}</div>
+      </div>
+      <Btn label={a.note ? "Open session" : "Open onboarding"} small id={`hm-my-onb-${a.repo}`} aria={`${a.note ? "Open session" : "Open onboarding"} for ${a.repoName}`} onClick={() => { if (a.project) setProject(a.project); navigate("onboarding", a.repo); }} />
+    </li>
   );
 }
 
-/** The Auditor's read-only view of the human bottleneck: who the factory is waiting on, never a button that decides. */
-export function ApproversWatch({ data }: { data: NonNullable<HomeSections["approvers"]> }) {
+const NEEDS = 6;
+
+/** §1 Needs you: at most six pending gates, in the order the server sends them. */
+export function WaitingOnYou({ items }: { items: Item[] }) {
+  const gates = items.filter((i): i is Extract<Item, { kind: "gate" }> => i.kind === "gate"); // the server's order
+  const onb = items.filter((i): i is Extract<Item, { kind: "onboarding" }> => i.kind === "onboarding");
+  const shown = gates.slice(0, NEEDS);
+  const rest = onb.slice(0, Math.max(0, NEEDS - shown.length));
   return (
-    <Section id="hm-approvers" title="Waiting on approvers" count={data.count}>
-      {data.count ? (
-        <>
-          <p className="small">{`Oldest ${fmt.dur(data.oldestMs)}${data.late ? ` · ${data.late} past SLA` : ""}.`}</p>
-          <ul className="hm-my-list">
-            {data.byProject.map((p) => (
-              <li key={p.id} className="hm-my-row hm-plain-row">
-                <span className="hm-my-main">{p.name}</span>
-                <span className="muted small">{`${plural(p.count, "gate")} · oldest ${fmt.dur(p.oldestMs)}`}</span>
-              </li>
-            ))}
-          </ul>
-        </>
+    <Section id="hm-waiting" title="Needs you" flush tools={<Btn label="Open inbox" small id="hm-open-inbox" onClick={() => navigate("inbox")} />}>
+      {shown.length || rest.length ? (
+        <ul className="list">
+          {shown.map((i) => <GateRow key={i.key} a={i.a} />)}
+          {rest.map((i) => <OnboardingRow key={i.key} a={i.a} />)}
+        </ul>
       ) : (
-        <p className="muted small hm-quiet">No gate is waiting on an approver.</p>
+        <Empty id="hm-quiet" title="You are all caught up" text="Nothing needs a decision right now." />
       )}
     </Section>
   );
@@ -199,7 +168,7 @@ export function SetupChecklist({ setup }: { setup: NonNullable<HomeSections["set
   };
   const label: Record<SetupStep["id"], string> = { github: "Connect", vendor: "Add a vendor", project: "New project", repo: "Open onboarding", "work-order": "New work order" };
   return (
-    <Section id="hm-setup" title="Set up the factory" tools={<span className="mono small muted">{`${setup.done} of ${setup.total}`}</span>} cls="hm-setup">
+    <Section id="hm-setup" title="Set up the factory" tools={<span className="muted small">{`${setup.done} of ${setup.total} done`}</span>} cls="hm-setup" flush>
       <ol className="hm-steps">
         {setup.steps.map((s, i) => (
           <li key={s.id} className={`hm-step is-${s.state}`} {...(s.state === "active" ? { "aria-current": "step" as const } : {})}>
@@ -218,187 +187,121 @@ export function SetupChecklist({ setup }: { setup: NonNullable<HomeSections["set
 
 /* --------------------------------------------------------- in motion */
 
-function Token({ w, p }: { w: MineWo; p?: PView | undefined }) {
-  const open = useOpenTraveler();
+export function InMotion({ motion, projects, scope }: { motion: NonNullable<HomeSections["motion"]>; projects: PView[]; scope: string | null }) {
   const cat = useCatalog();
-  const glyph = (WO_STATES as Record<string, { glyph: string; label: string }>)[w.state] ?? { glyph: "dots", label: w.state };
-  const note = w.state === "running" ? null : w.state === "waiting" ? "waiting on a gate" : w.state === "parked" ? w.bayName ?? "Parked" : w.state === "killed" ? "Killed" : w.state === "blocked" ? "Blocked" : w.state === "failed" ? "Check failed" : w.state === "done" ? "Shipped" : "";
-  return (
-    <button type="button" className={`tok tok-${w.state}`} id={`hm-tok-${w.id}`} data-wo={w.id} aria-label={`${w.id}, ${w.title}, ${glyph.label}${note ? `, ${note}` : ""}`} onClick={() => open(w.id)}>
-      <span className="tok-top">
-        <Icon name={glyph.glyph} className="tok-glyph" />
-        <span className="mono tok-id">{w.id}</span>
-      </span>
-      <span className="tok-title">{w.title}</span>
-      <span className={`tok-foot${w.state === "running" ? "" : " has-note"}`}>
-        {cat && p ? <ClassChip cls={classOf(cat, p, w.cls)} small /> : null}
-        <span className="tok-note">{note}</span>
-      </span>
-    </button>
-  );
-}
-
-export function InMotion({ motion, projects }: { motion: NonNullable<HomeSections["motion"]>; projects: PView[] }) {
-  const cat = useCatalog();
-  const open = useOpenTraveler();
   const m = motion;
-  // The belt is the sum of the visible projects' stations: derived from the numbers the Projects list already carries.
-  const counts: Record<string, { n: number; blocked: number }> = {};
-  for (const p of projects) for (const [k, v] of Object.entries(metricsOf(p).byPosition)) {
-    const c = (counts[k] ??= { n: 0, blocked: 0 });
+  const inScope = scope ? projects.filter((p) => p.id === scope) : projects;
+  // The line is the sum of the visible projects' stations: derived from the numbers the Projects list already carries.
+  const counts: Record<string, { n: number; blocked: number; lim: number; over: number; known: boolean }> = {};
+  for (const p of inScope) for (const [k, v] of Object.entries(metricsOf(p).byPosition)) {
+    const c = (counts[k] ??= { n: 0, blocked: 0, lim: 0, over: 0, known: false });
     c.n += v.n;
     c.blocked += v.blocked;
-  }
-  const stations = cat?.stations ?? [];
-  const nonEmpty = stations.filter((s) => (counts[s.id]?.n ?? 0) > 0);
-  const delta = m.shippedWeek - m.shippedPrevWeek;
-  return (
-    <Section id="hm-motion" title="In motion">
-      {m.inFlight ? (
-        <>
-          <p className="small hm-motion-line">{`${plural(m.inFlight, "work order")} in flight · ${m.running} running${m.inBays ? ` · ${m.inBays} in bays` : ""}`}</p>
-          {cat ? (
-            <>
-              <div className="hm-belt"><MiniBelt cat={cat} project={null} counts={counts} labels /></div>
-              <ul className="hm-belt-list" aria-label="Work in flight by station">
-                {nonEmpty.map((s) => <li key={s.id}><span>{s.name}</span><span className="mono">{String(counts[s.id]?.n ?? 0)}</span></li>)}
-              </ul>
-            </>
-          ) : null}
-        </>
-      ) : (
-        <p className="muted small hm-quiet">No work orders in flight. They appear here once a repo is Ready and work is submitted.</p>
-      )}
-      {m.shippedWeek || m.shippedToday ? (
-        <p className="small hm-shipped">{`Shipped: ${m.shippedToday} today, ${m.shippedWeek} this week`}{m.shippedPrevWeek ? ` (${delta >= 0 ? "+" : "-"}${Math.abs(delta)} vs previous week)` : ""}</p>
-      ) : null}
-      {m.recentDone.length ? (
-        <p className="small hm-recent">
-          <span className="kv-k">Recently done </span>
-          {m.recentDone.map((w, i) => (
-            <span key={w.id}>
-              {i ? ", " : ""}
-              <button type="button" className="linkish mono" id={`hm-done-${w.id}`} aria-label={`Open ${w.id}, ${w.title}`} onClick={() => open(w.id)}>{w.id}</button>
-            </span>
-          ))}
-        </p>
-      ) : null}
-      {m.mine.length ? (
-        <div className="hm-mine">
-          <div className="sub-h">Your work orders</div>
-          <div className="hm-my-toks">
-            {m.mine.map((w) => (
-              <div key={w.id} className="hm-my-tok">
-                <Token w={w} p={projects.find((x) => x.id === w.project)} />
-                <div className="small muted">{`${w.projectName} · ${w.bay ? w.bayName ?? w.bay : w.station}`}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </Section>
-  );
-}
-
-/* ---------------------------------------------------------- projects */
-
-const WORST: Record<string, number> = { killed: 0, halted: 1, attention: 2, onboarding: 3, new: 4, ok: 5, archived: 6 };
-const LIMIT = 6;
-
-export function ProjectsSummary({ rows, projects, factoryWide, readOnlyNote }: { rows: NonNullable<HomeSections["projects"]>; projects: PView[]; factoryWide: boolean; readOnlyNote: boolean }) {
-  const cat = useCatalog();
-  const list = rows
-    .map((r) => ({ r, p: projects.find((p) => p.id === r.id) }))
-    .filter((x): x is { r: (typeof rows)[number]; p: PView } => !!x.p)
-    .sort((a, b) => (WORST[metricsOf(a.p).health.id] ?? 9) - (WORST[metricsOf(b.p).health.id] ?? 9) || a.p.name.localeCompare(b.p.name));
-  if (!list.length) return null;
-  return (
-    <Section id="hm-projects" title={factoryWide ? "Projects" : "My projects"} count={list.length} tools={<a href="#projects" className="linkish small" id="hm-all-projects">All projects</a>}>
-      <ul className="hm-my-projs">
-        {list.slice(0, LIMIT).map(({ r, p }) => (
-          <li key={p.id} className="hm-my-proj">
-            <div className="hm-proj-head">
-              <div className="hm-proj-name"><span className="mono hm-key">{p.key}</span><h3>{p.name}</h3></div>
-              <HealthChip p={p} />
-            </div>
-            {r.repos.length ? <div className="small hm-proj-onb">{r.repos.map((x) => `${x.name}: ${(STAGE_NAME[x.stage] ?? x.stage).toLowerCase()}`).join(" · ")}</div> : null}
-            {r.roles.length ? <div className="small"><span className="kv-k">Your roles here </span>{r.roles.map((x) => <Chip key={x.id} text={x.name} cls="chip-accent" />)}</div> : null}
-            {cat && !r.repos.length ? <MiniBelt cat={cat} project={p} counts={metricsOf(p).byPosition} onStation={() => goProject(p.id, "floor")} /> : null}
-            <div className="hm-proj-actions">
-              {r.repos.length ? <Btn label="Open onboarding" small id={`hm-proj-onb-${p.id}`} aria={`Open onboarding for ${p.name}`} onClick={() => goProject(p.id, "onboarding")} /> : <Btn label="Floor" small icon="belt" id={`hm-my-floor-${p.id}`} aria={`Open the floor for ${p.name}`} onClick={() => goProject(p.id, "floor")} />}
-              <Btn label="Work orders" small kind="ghost" id={`hm-my-wos-${p.id}`} aria={`Work orders in ${p.name}`} onClick={() => goProject(p.id, "work-orders")} />
-            </div>
-          </li>
-        ))}
-      </ul>
-      {list.length > LIMIT ? <p className="small muted">{`${list.length - LIMIT} more on the Projects page.`}</p> : null}
-      {readOnlyNote ? <p className="small muted hm-quiet">You can view these projects. Ask a Project Admin for more access.</p> : null}
-    </Section>
-  );
-}
-
-/* ----------------------------------------------------- factory health */
-
-const OPEN_KEY = "gantry.home.health.open";
-const readOpen = (): boolean => {
-  try {
-    return localStorage.getItem(OPEN_KEY) === "1";
-  } catch {
-    return false;
-  }
-};
-
-export function FactoryHealth({ health }: { health: NonNullable<HomeSections["health"]> }) {
-  const [open, setOpen] = useState(readOpen);
-  useEffect(() => {
-    try {
-      localStorage.setItem(OPEN_KEY, open ? "1" : "0");
-    } catch {
-      /* private window: the state just is not remembered */
+    if (v.n > 0 || scope) {
+      const w = p.flow?.stations?.[k]?.wip || 5;
+      c.lim += w;
+      c.known = true;
+      c.over = Math.max(c.over, v.n - w);
     }
-  }, [open]);
-  const { spend, evals } = health;
-  const bad = evals?.failing.length ?? 0;
-  const summary = `${spend.spent > 0 ? `${fmt.money0(spend.spent)} of ${fmt.money0(spend.budget)} this month` : "No spend yet"}${evals ? ` · ${evals.passing} of ${evals.scored} live agent versions pass evals` : ""}`;
+  }
+  if (!scope) for (const [k, n] of Object.entries(m.byStation ?? {})) if (!counts[k]?.n) counts[k] = { n, blocked: counts[k]?.blocked ?? 0, lim: 0, over: 0, known: false };
+  // A custom station (a project's own) shows where it sits on the line, before Close, once it has work; the built-in line always shows.
+  const builtin = (cat?.stations ?? []).filter((s) => !s.custom);
+  const custom = (cat?.stations ?? []).filter((s) => s.custom && (counts[s.id]?.n ?? 0) > 0);
+  const at = builtin.findIndex((s) => s.id === "close");
+  const stations = at < 0 ? [...builtin, ...custom] : [...builtin.slice(0, at), ...custom, ...builtin.slice(at)];
+  const mx = Math.max(1, ...stations.map((s) => counts[s.id]?.n ?? 0));
+  const flight = scope ? inScope.reduce((n, p) => n + metricsOf(p).wip, 0) : m.inFlight;
   return (
-    <section className="hm-sec hm-health" id="hm-health" aria-labelledby="hm-health-h">
-      <h2 className="panel-title hm-health-h" id="hm-health-h">
-        <button type="button" className="hm-health-toggle" id="hm-health-toggle" aria-expanded={open} aria-controls="hm-health-body" onClick={() => setOpen(!open)}>
-          <Icon name="chevron" className={open ? "hm-chev is-open" : "hm-chev"} />
-          <span>Factory health</span>
-          {open ? null : <span className="muted small hm-health-sum">{summary}</span>}
-        </button>
-      </h2>
-      {open ? (
-        <div className="hm-health-body" id="hm-health-body">
-          <div className="hm-health-row">
-            <div className="sub-h">Spend this month</div>
-            {spend.spent > 0 ? (
-              <>
-                <div>{`${fmt.money0(spend.spent)} of ${fmt.money0(spend.budget)}`}{spend.budget ? <span className="muted">{` (${fmt.pct(spend.spent / spend.budget)})`}</span> : null}</div>
-                {spend.budget ? <Meter value={spend.spent} max={spend.budget} label="Factory spend this month" warnAt={0.8} /> : null}
-              </>
-            ) : (
-              <div className="muted">No spend yet</div>
-            )}
+    <Section id="hm-motion" cls="hm-motion" title="Line at a glance">
+      {flight && cat ? (
+        <div className="hbars">
+          <div className="hb-list" aria-label="Work by station">
+            {stations.map((s) => {
+              const c = counts[s.id] ?? { n: 0, blocked: 0, lim: 0, over: 0, known: false };
+              const lim = c.known ? Math.max(5, c.lim) : null;
+              const over = c.over > 0 || (lim !== null && c.n > lim);
+              const route = scope ?? getPrefs().project;
+              return (
+                <a key={s.id} className={`hb${over ? " over" : ""}`} href={`?station=${encodeURIComponent(s.id)}${hashFor("work-orders", null, route)}`} title={`${s.name}: ${c.n} of limit ${lim ?? "—"}`}
+                  onClick={(e) => { e.preventDefault(); gotoWithQuery("work-orders", { station: s.id }, route); }}>
+                  <span className="hb-n"><span className="mono">{s.no}</span>{" " + s.name}</span>
+                  <span className="hb-bar">
+                    <i style={{ width: `${c.n ? Math.max(3, (c.n / mx) * 100) : 0}%` }} />
+                    {c.blocked ? <i className="bad" style={{ width: `${(c.blocked / mx) * 100}%` }} /> : null}
+                  </span>
+                  <span className="hb-v num">{String(c.n)}<small>{`/${lim ?? "—"}`}</small></span>
+                </a>
+              );
+            })}
           </div>
-          {evals ? (
-            <div className="hm-health-row">
-              <div className="sub-h">Agent evals</div>
-              <div>{`${evals.passing} of ${evals.scored} live agent versions pass their suite threshold (last run)`}</div>
-              {bad ? (
-                <ul className="hm-eval-fail">
-                  {evals.failing.map((f) => (
-                    <li key={f.agent}><Icon name="alert" /><span>{`${f.name} ${f.version}: ${fmt.pct(f.score)} vs ${fmt.pct(f.threshold)} on ${f.suite}`}</span></li>
-                  ))}
-                </ul>
-              ) : null}
-              <a href="#evals" className="linkish small">Evals</a>
-            </div>
-          ) : null}
+          <div className="row" style={{ marginTop: 12 }}>
+            <a href="#floor" className="btn" id="hm-open-floor"><Icon name="belt" />Open the Floor</a>
+            <span className="small muted">Bar = work orders at the station, limit after the slash; red = stuck.</span>
+          </div>
         </div>
-      ) : null}
-      {health.audit ? <a href="#audit" className="linkish small hm-audit-link" id="hm-audit-link">Audit ledger</a> : null}
-    </section>
+      ) : (
+        <p className="muted hm-quiet">Nothing is moving yet. Work orders appear here once a repo is Ready and work is submitted.</p>
+      )}
+    </Section>
   );
 }
+
+/** §3 Task success, 8 weeks: the mean of the agents' weekly scorecard series. The server keeps no weekly first-pass series, so the dashed line is the current first-pass mean across the agents, labelled as such. */
+export function TaskSuccess() {
+  const q = useScorecards();
+  const data = useMemo(() => {
+    const cards = Object.values(q.data ?? {}).filter((c) => c.trend?.success?.length);
+    if (!cards.length) return null;
+    const weeks = Math.max(...cards.map((c) => c.trend.success.length));
+    const success = Array.from({ length: weeks }, (_, i) => {
+      const v = cards.map((c) => c.trend.success[i]).filter((x): x is number => typeof x === "number");
+      return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+    });
+    const fp = cards.map((c) => c.firstPass).filter((x): x is number => typeof x === "number");
+    return { success, first: fp.length ? fp.reduce((a, b) => a + b, 0) / fp.length : null };
+  }, [q.data]);
+  return (
+    <Section id="hm-trend" title="Task success, 8 weeks">
+      <Async query={q} what="task success" id="hm-trend-state" isEmpty={() => !data} empty={<Empty id="hm-trend-empty" title="Not available" text="No agent has a weekly success series yet." />}>
+        {() => data ? (
+          <TrendChart
+            series={[{ name: "Success", v: data.success }, ...(data.first !== null ? [{ name: "First pass", v: data.success.map(() => data.first as number), note: "current mean; the server keeps no weekly first-pass series" }] : [])]}
+            labels={data.success.map((_, i) => `W${i + 1}`)} min={0.6} max={1} fmt={(v) => `${Math.round(v * 100)}%`} label="Task success trend"
+          />
+        ) : null}
+      </Async>
+    </Section>
+  );
+}
+
+/** §4 Recent activity: the seven newest events, an avatar (square for agents, round for people), the text, "type · WO · ago". */
+export function RecentActivity() {
+  const q = useActivity();
+  const cat = useCatalog();
+  const actor = useActors();
+  const name = (id: string | null | undefined) => actor(id).name.replace(" (agent)", "");
+  return (
+    <Section id="hm-activity" title="Recent activity" flush>
+      <Async query={q} what="recent activity" id="hm-activity-state" isEmpty={(d) => (Array.isArray(d) ? d : d.items).length === 0} empty={<Empty id="hm-activity-empty" title="No activity yet" text="Events appear here as work moves." />}>
+        {(d) => {
+          const rows = (Array.isArray(d) ? d : d.items).slice(0, 7);
+          return (
+            <ul className="list">
+              {rows.map((e) => (
+                <li key={e.id}>
+                  <Avatar id={e.by} />
+                  <div className="grow">
+                    <div>{eventSentence(e, { cat, name })}</div>
+                    <div className="small muted">{`${e.wo ? e.wo + " · " : ""}${agoMs(Date.now() - e.at)}`}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          );
+        }}
+      </Async>
+    </Section>
+  );
+}
+

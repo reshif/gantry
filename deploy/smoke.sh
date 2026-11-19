@@ -74,7 +74,11 @@ curl_in() { curl -sk --max-time 10 --resolve localhost:443:127.0.0.1 "$@"; }
 if has_service ingress; then
   check "GET https://localhost/healthz answers ok through the ingress" bash -c "[ \"\$(curl -sk --max-time 10 --resolve localhost:443:127.0.0.1 https://localhost/healthz)\" = ok ]"
   ports="$(docker port "$(cid ingress)" 2>/dev/null)"
-  if [ "$ports" = "8443/tcp -> 127.0.0.1:443" ]; then ok "ingress publishes only 127.0.0.1:443"; else bad "ingress publishes only 127.0.0.1:443" "$ports"; fi
+  if [ "$(printf '%s\n' "$ports" | sort | tr '\n' ' ')" = "8081/tcp -> 127.0.0.1:8081 8443/tcp -> 127.0.0.1:443 " ]; then ok "ingress publishes only 127.0.0.1:443 and the loopback admin port 127.0.0.1:8081"; else bad "ingress publishes only 127.0.0.1:443 and 127.0.0.1:8081" "$ports"; fi
+  for p in /idp/admin/ /idp/admin/realms/gantry/users /idp/realms/master/protocol/openid-connect/token; do
+    check "public site refuses $p (404)" bash -c "[ \"\$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve localhost:443:127.0.0.1 https://localhost$p)\" = 404 ]"
+  done
+  check "Keycloak admin console answers on the loopback admin port" bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:8081/idp/admin/)\" = 200 ]"
   published="$(docker ps --filter "label=com.docker.compose.project=$project" --format '{{.Names}} {{.Ports}}' | grep -v '^[^ ]*ingress' | grep -c -- '->' || true)"
   if [ "$published" = "0" ]; then ok "no other container publishes a port"; else bad "no other container publishes a port" "$published"; fi
   hdrs="$(curl_in -sI https://localhost/healthz)"
@@ -106,7 +110,17 @@ for n in control launch; do
 done
 if has_service gantry-launcher; then
   nets="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$(cid gantry-launcher)")"
-  [ "$nets" = "${project}_launch " ] && ok "launcher is on the launch network only" || bad "launcher is on the launch network only" "$nets"
+  [ "$nets" = "${project}_dockerapi ${project}_launch " ] && ok "launcher is on the launch and dockerapi networks only" || bad "launcher is on the launch and dockerapi networks only" "$nets"
+  mounts="$(docker inspect -f '{{range .Mounts}}{{.Destination}} {{end}}' "$(cid gantry-launcher)")"
+  case "$mounts" in *docker.sock*) bad "launcher holds no Docker socket" "$mounts" ;; *) ok "launcher holds no Docker socket (it goes through gantry-sockproxy)" ;; esac
+fi
+if has_service gantry-sockproxy; then
+  pnets="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$(cid gantry-sockproxy)")"
+  [ "$pnets" = "${project}_dockerapi " ] && ok "socket proxy is on the dockerapi network only" || bad "socket proxy is on the dockerapi network only" "$pnets"
+  probe() { docker exec "$(cid gantry-launcher)" node -e "fetch('http://gantry-sockproxy:2375$2',{method:'$1',headers:{'content-type':'application/json'},body:$3}).then(r=>console.log(r.status))" 2>/dev/null; }
+  [ "$(probe POST '/containers/create?name=gantry-runner-x' "JSON.stringify({Image:'alpine',HostConfig:{Privileged:true,Binds:['/:/host']}})")" = 403 ] && ok "socket proxy refuses a privileged container with a host mount" || bad "socket proxy refuses a privileged container with a host mount" ""
+  [ "$(probe POST '/containers/gantry-sockproxy/exec' "JSON.stringify({Cmd:['sh']})")" = 403 ] && ok "socket proxy refuses exec" || bad "socket proxy refuses exec" ""
+  [ "$(probe GET '/info' undefined)" = 403 ] && ok "socket proxy refuses calls the launcher does not make" || bad "socket proxy refuses calls the launcher does not make" ""
 fi
 
 # ---- isolation from a runner-like container -------------------------------------------------------------------

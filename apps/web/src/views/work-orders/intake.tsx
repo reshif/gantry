@@ -10,6 +10,7 @@ import { useWorkOrder } from "../../api/queries";
 import { Dialog } from "../../ui/Overlay";
 import { Icon } from "../../ui/Icon";
 import { Btn, Field, LockNote } from "../../ui/primitives";
+import { useCommand } from "../../ui/async";
 import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
 import { setProject, updatePrefs } from "../../lib/prefs";
@@ -76,7 +77,8 @@ export function ReclassifyDialog({ woId, preset, onClose }: { woId: string; pres
   const [pick, setPick] = useState<string | null>(preset ?? null);
   const [reason, setReason] = useState("");
   const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
+  const reclassify = useCommand(ops.reclassify, { ok: false, toastFail: false });
+  const busy = reclassify.busy;
   const project = useProjectOf(wo?.project);
   if (!wo || !cat || !project) return null;
   const cur = pick ?? wo.cls;
@@ -93,9 +95,8 @@ export function ReclassifyDialog({ woId, preset, onClose }: { woId: string; pres
       setErr("Give a reason of at least 5 characters.");
       return;
     }
-    setBusy(true);
-    const r = await ops.reclassify(wo.id, cur, reason.trim(), (wo as { version?: number }).version !== undefined ? { ifMatch: (wo as { version?: number }).version as number } : undefined);
-    setBusy(false);
+    const r = await reclassify.run(wo.id, cur, reason.trim(), (wo as { version?: number }).version !== undefined ? { ifMatch: (wo as { version?: number }).version as number } : undefined);
+    if (!r) return;
     if (!r.ok) {
       setErr(r.msg);
       return;

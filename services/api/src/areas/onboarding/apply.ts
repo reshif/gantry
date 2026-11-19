@@ -38,12 +38,13 @@ const note = (tx: Tx, orgId: string, r: RepoRow, doc: Doc, now: Date, key: strin
   postUpdate(tx, orgId, r, { key, event, text, now, runId: doc.runId ?? null, ...(o.number !== undefined ? { number: o.number } : {}), ...(o.followUp ? { followUp: true } : {}) });
 
 /** The repo, locked, and its document, when `runId` is still the run the repo is on. */
-async function current(tx: Tx, orgId: string, repoId: string, runId: string | null, now: Date): Promise<{ repo: RepoRow; doc: Doc } | Applied> {
+async function current(tx: Tx, orgId: string, repoId: string, runId: string | null, now: Date, o: { excepted?: boolean } = {}): Promise<{ repo: RepoRow; doc: Doc } | Applied> {
   const repo = await lockRepo(tx, orgId, repoId).catch(() => null);
   if (!repo) return skipped("The repo no longer exists.");
   const doc = docOf(repo, now.getTime());
   if (runId && doc.runId && doc.runId !== runId) return skipped("A newer assessment replaced this run.");
-  if (doc.stage === "ready" && doc.exception) return skipped("The repo was marked ready by exception.");
+  // A repo ready by exception is left as it is, except by a re-check or re-assessment a person asked for or the schedule runs: those report and never change the stage.
+  if (doc.stage === "ready" && doc.exception && !o.excepted) return skipped("The repo was marked ready by exception.");
   return { repo, doc };
 }
 const isApplied = (x: { repo: RepoRow; doc: Doc } | Applied): x is Applied => "applied" in x;
@@ -56,12 +57,24 @@ export type AssessmentResult =
   | { kind: "blocked"; code: string; msg: string }
   | { kind: "failed"; msg: string };
 
+/**
+ * What the assessment found for "Test command" (`<command> (<source>)`), kept beside the repository's settings as a proposal. It grants nothing: only commands a
+ * person confirmed (`config.testCommands`) reach an agent's allow-list.
+ */
+function proposedTestCommand(findings: ReadonlyArray<{ id: string; ok: boolean; detail?: string | null }>): { testCommandProposed?: { command: string; source: string } } {
+  const f = findings.find((x) => x.id === "test" && x.ok && x.detail);
+  const m = f ? /^(.*?) \((.*)\)$/.exec(f.detail!) : null;
+  return m ? { testCommandProposed: { command: m[1]!, source: m[2]! } } : {};
+}
+
 export async function applyAssessment(tx: Tx, orgId: string, o: { repoId: string; runId: string; now: Date; adapter?: string; assessor?: OnboardAssessor; result: AssessmentResult }): Promise<Applied> {
-  const c = await current(tx, orgId, o.repoId, o.runId, o.now);
+  const c = await current(tx, orgId, o.repoId, o.runId, o.now, { excepted: true });
   if (isApplied(c)) return c;
   const { repo, doc } = c;
   if (doc.busy !== "assessing") return skipped("This repo is not waiting for an assessment.");
   doc.busy = null;
+  // Ready by exception: the assessment reports (findings, history) and the repo stays Ready with its exception; only a person withdrawing the exception changes that.
+  const excepted = doc.stage === "ready" && !!doc.exception;
   const assessor = o.assessor ?? RULE_BASED;
   const adapter = assessor.mode;
   const who = actorOf(assessor);
@@ -73,7 +86,8 @@ export async function applyAssessment(tx: Tx, orgId: string, o: { repoId: string
     doc.findings = r.findings.map((f) => ({ id: f.id, check: f.check, ok: f.ok, sev: f.sev, fix: f.fix, file: f.file, ...(f.manual ? { manual: true } : {}), required: f.required, detail: f.detail, source: f.source ?? "observed", ...(f.note ? { note: f.note } : {}) }));
     // With an open onboarding PR the repo stays where the PR is; the PR is marked for an update instead of the stage regressing.
     const openPr = doc.pr?.state === "open" && (doc.stage === "pr_opened" || doc.stage === "pr_checks");
-    if (!openPr) doc.stage = "assessed";
+    if (excepted) { /* stays Ready */ }
+    else if (!openPr) doc.stage = "assessed";
     else doc.prNeedsUpdate = true;
     delete doc.blocker;
     stamp(doc, who, `Assessment finished (${assessorLabel(assessor)}${assessor.mode === "rule-based" && assessor.reason ? `: ${assessor.reason}` : ""}): ${r.findings.length} findings, ${gaps.length} gap${gaps.length === 1 ? "" : "s"}${assessor.risk ? `; risk ${assessor.risk.level}` : ""}.`, o.now);
@@ -83,7 +97,7 @@ export async function applyAssessment(tx: Tx, orgId: string, o: { repoId: string
     await tx.query(
       `insert into repo_config (org_id, repo_id, default_branch, data) values ($1,$2,$3,$4::jsonb)
        on conflict (org_id, repo_id) do update set default_branch = excluded.default_branch, data = repo_config.data || excluded.data, updated_at = now()`,
-      [orgId, repo.id, r.defaultBranch, JSON.stringify({ baseSha: r.headSha })],
+      [orgId, repo.id, r.defaultBranch, JSON.stringify({ baseSha: r.headSha, ...proposedTestCommand(r.findings) })],
     );
     if (repo.default_branch && repo.default_branch !== r.defaultBranch) stamp(doc, SYSTEM, `The default branch on GitHub is ${r.defaultBranch}, not ${repo.default_branch}. Settings updated.`, o.now);
     await sysEvent(tx, orgId, repo, "onboarding.assess", { actor: who, after: { run: o.runId, findings: r.findings.length, gaps: gaps.length, adapter, assessor, headSha: r.headSha }, occurredAt: o.now });
@@ -92,15 +106,17 @@ export async function applyAssessment(tx: Tx, orgId: string, o: { repoId: string
     await publishChange(tx, { org: orgId, keys: ["repos", "projects", "audit", "home"], project: repo.project_id });
     return { applied: true };
   }
+  // With an open onboarding PR the repo stays where the PR is (as a successful assessment does): the PR keeps syncing and stays mergeable, and the failure is shown as the blocker.
+  const keepPr = excepted || (doc.pr?.state === "open" && (doc.stage === "pr_opened" || doc.stage === "pr_checks"));
   if (r.kind === "blocked") {
-    doc.stage = "person";
-    doc.blocker = r.msg;
+    if (!keepPr) doc.stage = "person";
+    if (!excepted) doc.blocker = r.msg;
     stamp(doc, SYSTEM, `Needs a person: ${r.msg}`, o.now);
     await finishRun(tx, orgId, o.runId, "needs_person", { blocker: r.msg, data: { code: r.code, adapter } });
     await sysEvent(tx, orgId, repo, "onboarding.assess", { outcome: "failed", after: { run: o.runId, blocked: r.code, msg: r.msg }, occurredAt: o.now });
   } else {
-    doc.stage = "failed";
-    doc.blocker = r.msg;
+    if (!keepPr) doc.stage = "failed";
+    if (!excepted) doc.blocker = r.msg;
     stamp(doc, SYSTEM, `The assessment failed: ${r.msg}`, o.now);
     await finishRun(tx, orgId, o.runId, "failed", { blocker: r.msg, data: { adapter } });
     await sysEvent(tx, orgId, repo, "onboarding.assess", { outcome: "failed", after: { run: o.runId, error: r.msg }, occurredAt: o.now });
@@ -315,6 +331,55 @@ export async function applyMergeRefused(tx: Tx, orgId: string, o: { repoId: stri
   return { applied: true };
 }
 
+/* ------------------------------------------------------------------ a job that died ---- */
+
+/**
+ * A job of this repo's current step used up its attempts (or its lease) and is dead: nothing will ever clear `busy`, so every command would be refused. This clears it and says
+ * why, with the job's error as the blocker. The repo moves to Needs a person, except where that would take a place away: an open onboarding PR keeps its stage (it stays synced
+ * and mergeable, as after a failed assessment) and a Ready repo stays Ready. Re-run (assess, open PR, merge, verify) works from there.
+ */
+export async function applyJobDead(tx: Tx, orgId: string, o: { repoId: string; now: Date; error: string }): Promise<Applied> {
+  const c = await current(tx, orgId, o.repoId, null, o.now);
+  if (isApplied(c)) return c;
+  const { repo, doc } = c;
+  if (!doc.busy) return skipped("This repo is not waiting for a job.");
+  const step = doc.busy;
+  const msg = `The ${step.replace("_", " ")} step stopped: ${o.error.slice(0, 300) || "the job died"}. Run it again.`;
+  doc.busy = null;
+  doc.blocker = msg;
+  const keepPr = doc.pr?.state === "open" && (doc.stage === "pr_opened" || doc.stage === "pr_checks");
+  if (doc.stage !== "ready" && !keepPr) doc.stage = "person";
+  stamp(doc, SYSTEM, `Needs a person: ${msg}`, o.now);
+  if (step === "assessing" && doc.runId) await finishRun(tx, orgId, doc.runId, "needs_person", { blocker: msg, data: { jobDead: true } });
+  await sysEvent(tx, orgId, repo, "onboarding.job.dead", { outcome: "failed", after: { step, error: o.error.slice(0, 300), stage: doc.stage }, occurredAt: o.now });
+  await note(tx, orgId, repo, doc, o.now, `${doc.runId ?? repo.id}:dead:${step}:${o.now.getTime()}`, "job.dead", msg);
+  await finish(tx, orgId, repo, doc, ["home"]);
+  return { applied: true };
+}
+
+/**
+ * S-64: GitHub told us the App can no longer reach the repo (the repo was removed from the installation, or the installation was deleted or suspended). The repo is marked not ready
+ * with the reason "GitHub App access removed" and halted with the readiness halt, so its live work orders are held in place (the existing hold mechanism) and nothing new starts.
+ * Access coming back does not resume anything: a person verifies the repo again (which lifts this halt) or resumes it. Idempotent: a repo already marked is left as it is.
+ */
+export async function applyAccessLost(tx: Tx, orgId: string, o: { repoId: string; now: Date; reason: string; delivery?: string | null }): Promise<Applied> {
+  const c = await current(tx, orgId, o.repoId, null, o.now, { excepted: true });
+  if (isApplied(c)) return c;
+  const { repo, doc } = c;
+  const msg = `GitHub App access removed. ${o.reason} Give the App access to ${repo.name} again in GitHub, then verify the repo; its work orders are held until then.`;
+  if (doc.blocker === msg || (doc.stage === "person" && String(doc.blocker ?? "").startsWith("GitHub App access removed"))) return skipped("Already marked as not reachable.");
+  doc.stage = "person";
+  doc.blocker = msg;
+  delete doc.readyAt;
+  stamp(doc, SYSTEM, `Needs a person: ${msg}`, o.now);
+  await tx.query(`update repos set readiness_checked_at = $3, readiness_state = 'lost' where org_id = $1 and id = $2`, [orgId, repo.id, o.now]);
+  const halt = await raiseReadinessHalt(tx, orgId, repo, "GitHub App access removed", o.now);
+  await sysEvent(tx, orgId, repo, "github.app.access_removed", { category: "integrations", actor: "github", channel: "github", outcome: "regression", after: { reason: o.reason, halted: !!halt, ...(o.delivery ? { delivery: o.delivery } : {}) }, occurredAt: o.now });
+  if (halt) { await appendEvent(tx, halt.eventInput); await enqueue(tx, { orgId, ...halt.job }); }
+  await finish(tx, orgId, repo, doc, ["stops", "floor", "workOrders", "home"]);
+  return { applied: true };
+}
+
 /* ------------------------------------------------------------------ verification and readiness ---- */
 
 export interface VerificationInput { repoId: string; runId: string | null; trigger: "merge" | "manual" | "schedule"; by: string | null; now: Date; results: ReadinessResult[] }
@@ -326,10 +391,11 @@ const failedLabels = (r: ReadinessResult[]): string => r.filter((x) => !x.ok && 
  * consecutive scheduled checks (or on a person's own request) loses readiness, which halts the repo with cause `readiness`. A check that could not be made
  * (GitHub or the broker did not answer) is never a failure and never halts anything.
  */
-export async function applyVerification(tx: Tx, orgId: string, o: VerificationInput): Promise<Applied & { outcome?: "ready" | "failed" | "lost" | "held" | "unknown" | "strike" }> {
-  const c = await current(tx, orgId, o.repoId, null, o.now);
+export async function applyVerification(tx: Tx, orgId: string, o: VerificationInput): Promise<Applied & { outcome?: "ready" | "failed" | "lost" | "held" | "unknown" | "strike" | "excepted" }> {
+  const c = await current(tx, orgId, o.repoId, null, o.now, { excepted: true });
   if (isApplied(c)) return c;
   const { repo, doc } = c;
+  const excepted = doc.stage === "ready" && !!doc.exception;
   const lost = readinessLost(o.results);
   const unknown = readinessUnknown(o.results);
   const wasReady = doc.stage === "ready";
@@ -349,8 +415,17 @@ export async function applyVerification(tx: Tx, orgId: string, o: VerificationIn
   );
   const prior = Number((await tx.query<{ n: number }>(`select readiness_failures as n from repos where org_id = $1 and id = $2`, [orgId, repo.id])).rows[0]!.n);
   // A definite failure counts as one more strike, a clean pass clears them, and an unanswered check leaves them as they were.
-  const failures = lost ? prior + 1 : unknown ? prior : 0;
+  const failures = excepted ? 0 : lost ? prior + 1 : unknown ? prior : 0;
   await tx.query(`update repos set readiness_checked_at = $3, readiness_state = $4, readiness_failures = $5 where org_id = $1 and id = $2`, [orgId, repo.id, o.now, lost ? "lost" : unknown ? "unknown" : "ok", failures]);
+
+  if (excepted) {
+    // Ready by exception: the re-check runs and reports, but a person accepted these gaps, so nothing is lost, halted or unset. Withdrawing the exception is a person's call.
+    if (lost) stamp(doc, SYSTEM, `Re-checked a repo ready by exception: ${failedLabels(o.results)} The exception stays until a person withdraws it.`, o.now);
+    else if (o.trigger === "manual") stamp(doc, SYSTEM, unknown ? "Re-checked; GitHub could not confirm every check. The exception stays." : `Re-checked: ${o.results.length} live checks passed. The exception stays until a person withdraws it.`, o.now);
+    await sysEvent(tx, orgId, repo, "onboarding.verify", { outcome: lost ? "failed" : "ok", after: { ok: !lost && !unknown, trigger: o.trigger, excepted: true, ...(lost ? { failed: o.results.filter((x) => !x.ok && !x.unknown).map((x) => x.id) } : {}) }, occurredAt: o.now, ...(o.by ? { onBehalfOf: o.by } : {}) });
+    await finish(tx, orgId, repo, doc);
+    return { applied: true, outcome: "excepted" };
+  }
 
   if (!wasReady) {
     if (!lost && !unknown) {

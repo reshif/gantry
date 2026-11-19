@@ -9,11 +9,27 @@ export interface Config {
   publicUrl: string;
   cookieSecure: boolean;
   sessionCookie: string;
-  oidc: { issuer: string; internalUrl: string | null; clientId: string; clientSecret: string; githubIdpAlias: string | null };
+  oidc: {
+    issuer: string; internalUrl: string | null; clientId: string; clientSecret: string; githubIdpAlias: string | null;
+    /** ID-token `acr` values that prove a second factor (the realm's level-2 authentication). The first one is what a second-factor sign-in requests. */
+    mfaAcrValues?: string[];
+  };
   devSeed: boolean;
   demoAccounts: boolean;
+  /** Development opt-in only (GANTRY_DEV_ADMIN_MFA_OPTIONAL=true, default false everywhere): waives the second sign-in factor EVERYONE otherwise needs. Always false off localhost. */
+  adminMfaOptional: boolean;
+  /** Deprecated alternative (GANTRY_BOOTSTRAP_ADMIN_EMAIL): the first verified sign-in with this email becomes Factory Admin while there is none. */
   bootstrapAdminEmail: string | null;
-  trustProxy: boolean;
+  /** GANTRY_BOOTSTRAP_ADMIN_USERNAME: the first Factory Admin is an identity-provider user with this username, created with the initial password in the `bootstrap_admin_password` secret (core/auth/bootstrap-admin.ts). */
+  bootstrapAdminUsername?: string | null;
+  /**
+   * Which peers may set X-Forwarded-For (Fastify trustProxy). Default: loopback and private networks only (the ingress on the
+   * compose network), so a client reaching the API directly from a public address can't spoof the address that the IP
+   * allow-list, rate limits and audit use. `false` trusts nobody; a list of addresses or CIDRs pins the ingress.
+   */
+  trustProxy: boolean | string;
+  /** File that receives signed audit-head checkpoints (GANTRY_AUDIT_ANCHOR_FILE); null = off. */
+  auditAnchorFile: string | null;
   host: string;
   port: number;
   secrets: { sessionKey: Buffer; dataKey: Buffer | null; edgeToken: string; githubToken: string };
@@ -49,14 +65,51 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
       clientId: need("OIDC_CLIENT_ID"),
       clientSecret,
       githubIdpAlias: env.OIDC_GITHUB_IDP_ALIAS || null,
+      mfaAcrValues: (env.OIDC_MFA_ACR_VALUES ?? "2,3,mfa").split(",").map((x) => x.trim()).filter(Boolean),
     },
     devSeed: env.GANTRY_DEV_SEED === "true",
-    demoAccounts: env.GANTRY_DEV_DEMO_ACCOUNTS === "true",
+    // The demo sign-in list follows the seed: only a stack loaded with the seeded demo organisation lists its demo users (owner, 2026-11-18).
+    demoAccounts: demoAccountsAllowed(env.GANTRY_DEV_SEED === "true", publicUrl),
+    adminMfaOptional: adminMfaOptionalAllowed(env.GANTRY_DEV_ADMIN_MFA_OPTIONAL === "true", publicUrl),
     bootstrapAdminEmail: env.GANTRY_BOOTSTRAP_ADMIN_EMAIL ? env.GANTRY_BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase() : null,
-    trustProxy: env.GANTRY_TRUST_PROXY !== "false",
+    bootstrapAdminUsername: env.GANTRY_BOOTSTRAP_ADMIN_USERNAME?.trim() ? env.GANTRY_BOOTSTRAP_ADMIN_USERNAME.trim().toLowerCase() : null,
+    trustProxy: trustProxyFrom(env.GANTRY_TRUST_PROXY),
+    auditAnchorFile: env.GANTRY_AUDIT_ANCHOR_FILE || null,
     host: env.HOST || "0.0.0.0",
     port: env.PORT ? Number(env.PORT) : 8000,
     secrets: { sessionKey: Buffer.from(sessionKey, "utf8"), dataKey, edgeToken, githubToken },
     brokerUrl: (env.GITHUB_BROKER_URL || "http://gantry-github:9200").replace(/\/+$/, ""),
   };
+}
+
+/**
+ * The demo sign-in list publishes every person's name, email and roles to anyone who reaches the sign-in page. It is shown only when the
+ * seeded demo organisation is loaded (GANTRY_DEV_SEED=true) AND the public URL is this machine; seeding a non-local stack never lists them.
+ * (The separate GANTRY_DEV_DEMO_ACCOUNTS switch was removed on 2026-11-18; it is ignored if still set.)
+ */
+export function demoAccountsAllowed(seeded: boolean, publicUrl: string): boolean {
+  if (!seeded) return false;
+  const host = (() => { try { return new URL(publicUrl).hostname; } catch { return ""; } })();
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost");
+}
+
+/**
+ * GANTRY_DEV_ADMIN_MFA_OPTIONAL=true waives the second sign-in factor everyone otherwise needs (S-121), so a throwaway local stack with password-only
+ * demo users can be tried without an authenticator. It is an explicit opt-in and is never the default. The service refuses to start when the
+ * public URL is not this machine.
+ */
+export function adminMfaOptionalAllowed(on: boolean, publicUrl: string): boolean {
+  if (!on) return false;
+  const host = (() => { try { return new URL(publicUrl).hostname; } catch { return ""; } })();
+  if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost")) return true;
+  throw new Error(`GANTRY_DEV_ADMIN_MFA_OPTIONAL=true is for local development only; GANTRY_PUBLIC_URL (${publicUrl}) is not localhost. Unset it: everyone must use a second sign-in factor.`);
+}
+
+/** GANTRY_TRUST_PROXY: unset -> "loopback, uniquelocal"; "false" -> false; anything else -> that address or CIDR list. "true" (trust any peer) is refused. */
+export function trustProxyFrom(v: string | undefined): boolean | string {
+  const x = (v ?? "").trim();
+  if (!x) return "loopback, uniquelocal";
+  if (x === "false") return false;
+  if (x === "true") throw new Error("GANTRY_TRUST_PROXY=true would let any client set its own address. Set the ingress address or CIDR, or leave it unset for private networks only.");
+  return x;
 }

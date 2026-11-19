@@ -45,9 +45,21 @@ write_secret launcher_token         "$(hex 32)"
 write_secret minio_root_password    "$(hex 24)"
 write_secret keycloak_admin_password "$(hex 16)"
 write_secret oidc_client_secret     "$(hex 32)"
+write_secret keycloak_db_password   "$(hex 24)"                    # production profile: Keycloak's own Postgres role
 write_secret vendor_keys.json       '{}'
 write_secret github_app.pem         '# PLACEHOLDER: replace this whole file with the GitHub App private key (PEM). Until then GitHub paths are unverified and gantry-github refuses to start work.'
 write_secret github_app.json        '{"_placeholder":true,"_note":"FILL IN: GitHub App id, installation id and webhook secret from the App settings page","appId":null,"installationId":null,"webhookSecret":null}'
+
+# Optional: the mail relay's password (production profile). Empty means the relay takes no login.
+# Optional, empty until filled in: the mail relay's password (empty: the relay takes no login) and the off-host backup target
+# (an mc host URL, https://ACCESS_KEY:SECRET@s3.example.com; empty: sets stay on the backup volume).
+for f in smtp_password backup_remote; do
+  if [ ! -e "$dir/$f" ]; then : >"$dir/$f"; chmod "$mode" "$dir/$f"; made+=("$f (empty)"); fi
+done
+
+# bootstrap_admin_password is the owner's to write: the initial password of the first Factory Admin (GANTRY_BOOTSTRAP_ADMIN_USERNAME).
+# It is never generated here. Only an empty file is created so compose can mount it; empty means the username bootstrap is off.
+if [ ! -e "$dir/bootstrap_admin_password" ]; then : >"$dir/bootstrap_admin_password"; chmod "$mode" "$dir/bootstrap_admin_password"; made+=("bootstrap_admin_password (empty: you write it)"); fi
 
 if [ "${#made[@]}" -gt 0 ]; then echo "created: ${made[*]}"; fi
 if [ "${#kept[@]}" -gt 0 ]; then echo "kept existing: ${kept[*]}"; fi

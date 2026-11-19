@@ -6,6 +6,7 @@
  * `stream`) that the domain package does not define. Integration note: if @gantry/domain later
  * exports `Me` / `CanCheck` / `CanResult`, replace these with re-exports.
  */
+import type { GateLockView } from "@gantry/domain";
 import type {
   Decision,
   FactoryState,
@@ -33,7 +34,7 @@ export interface DemoAccount {
 
 /** Public configuration the sign-in screen needs before anyone is signed in. */
 export interface PublicConfig {
-  /** True when GANTRY_DEV_DEMO_ACCOUNTS is on: the seeded Keycloak users may be listed. */
+  /** True when the demo organisation is seeded (GANTRY_DEV_SEED) on a local stack: the seeded Keycloak users may be listed. */
   demoAccounts: boolean;
   /** Optional server-supplied list. When absent and demoAccounts is on, the client uses DEMO_ACCOUNTS. */
   demoAccountList?: DemoAccount[];
@@ -77,6 +78,10 @@ export interface CanResult {
   reason: string;
   rule?: RuleRef | null;
   needs?: string;
+  /** Only a Factory Admin override would allow it (`overrideReason: "required"`), or the sole admin restoring the factory. */
+  override?: boolean;
+  overrideReason?: string;
+  overrideKind?: string;
 }
 
 export interface CanResponse {
@@ -330,12 +335,24 @@ export interface AgentEffective {
   live: boolean;
   project: { id: string; name: string } | null;
   repo: { id: string; name: string } | null;
+  /** The whole system prompt a run is sent. */
   text: string;
   hash: string;
+  promptHash: string;
+  sections: Array<{ key: string; title: string; source: "layer" | "skill" | "runner"; text: string; words: number }>;
+  handoff: { first: string; json: string[] };
+  draft: boolean;
   words: number;
   tokens: number;
   layers: Array<{ key: "base" | "project" | "agent" | "repo"; name: string; version: number | null; hash: string; text: string; commit?: string | null }>;
-  skills: Array<{ id: string; name: string; version: number; label: string; when: string; resources: string[] }>;
+  skills: Array<{ id: string; name: string; version: number; label: string; when: string; resources: string[]; content: string }>;
+  /** The repository's own convention files as last offered to a run (from the repo itself, not the repo guidelines text). */
+  repoContext?: {
+    commit: string;
+    runId: string;
+    offeredAt: string | null;
+    files: Array<{ path: string; bytes: number; sha256: string; inlined: boolean; truncated: boolean; withheld?: "secret" | "cap" | "too_large" }>;
+  } | null;
 }
 export interface AgentSuite {
   id: string;
@@ -343,4 +360,11 @@ export interface AgentSuite {
   station: string | null;
   agent: string | null;
   threshold: number;
+}
+
+/** What GET /projects adds to every project about the flow's locks (the server decides who may override; never a role name here). */
+export interface FlowOverrideView {
+  viewerMayOverride: boolean;
+  minReasonLength: number;
+  locks: Record<string, GateLockView>;
 }

@@ -5,6 +5,8 @@ import type { EdgeConfig } from "./config.js";
 import type { VendorLimiter } from "./limiter.js";
 import { SseUsage, usageFromJson, type Usage } from "./usage.js";
 import type { VendorKeys } from "./vendor-keys.js";
+import { scanJson, type Finding } from "./secrets-scan.js";
+import type { ObjectStore } from "./trace.js";
 
 /**
  * Model calls that belong to no run (spec 12.6): the console and "explain why not" call a model through the edge like a run does, so the
@@ -13,10 +15,19 @@ import type { VendorKeys } from "./vendor-keys.js";
  * (`/usage`); the edge holds the key, the vendor concurrency slot and the stream.
  *
  *   POST /service/v1/messages   a Messages API body; `x-gantry-purpose: console|explain|onboarding`. `model` is ignored: routing picks it, or the API's validated choice in `x-gantry-model-pick` (+ `x-gantry-project`) does.
+ *   GET  /service/v1/trace/{ref} the stored trace of a call (edge token only: the API checks who may read it, then asks here)
+ *
+ * Every call is traced like a run's (spec 7.4): the full request (system prompt, tools, messages) and the answer are scanned for secrets, redacted and stored
+ * as sha256/<hash>, and the reference goes to the API on the usage report together with where the call belongs (project, work order, person, turn) and the
+ * prompt manifest hash the API sent (`x-gantry-manifest`, base64url JSON). Same store and retention as the run traces; a store outage degrades to a call with no reference.
+ *
  *   GET  /service/v1/ready      { ready, reason?, vendor?, model? }: can a call be made right now (a route exists and its key is present)
  */
 
 const PURPOSES = new Set(["console", "explain", "onboarding"]);
+const SURFACES = new Set(["console", "explain", "onboarding", "workorder"]);
+/** The prompt manifest travels in a header; a bigger one is ignored (the caller sends a compact form, and the trace holds the full request). */
+const MAX_MANIFEST_B64 = 12_000;
 
 const fail = (reply: FastifyReply, status: number, type: string, message: string, extra: Record<string, string> = {}): FastifyReply => {
   for (const [k, v] of Object.entries(extra)) reply.header(k, v);
@@ -29,6 +40,25 @@ const sameToken = (a: string, b: string): boolean => {
   return x.length === y.length && timingSafeEqual(x, y);
 };
 
+const parseOr = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text.slice(0, 200_000);
+  }
+};
+
+/** The prompt manifest the API sent: base64url JSON, an object; anything else is ignored (the trace still holds the full request). */
+function decodeManifest(v: string | undefined): Record<string, unknown> | null {
+  if (!v || v.length > MAX_MANIFEST_B64) return null;
+  try {
+    const j: unknown = JSON.parse(Buffer.from(v, "base64url").toString("utf8"));
+    return j && typeof j === "object" && !Array.isArray(j) ? (j as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
 const upstreamUrl = (base: string, path: string): string => `${base}${base.endsWith("/v1") && path.startsWith("/v1/") ? path.slice(3) : path}`;
 
 export interface ServiceGatewayDeps {
@@ -39,18 +69,22 @@ export interface ServiceGatewayDeps {
   limiter: VendorLimiter;
   fetchImpl: typeof fetch;
   track: <T>(p: Promise<T>) => Promise<T>;
+  store: ObjectStore;
+  maxTraceBytes: number;
 }
 
 export interface ServiceMetrics {
   calls: number;
   refused: number;
+  traceStored: number;
+  traceDropped: number;
   usageReportFailures: number;
 }
 
 export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
   const { app, cfg, api, keys, limiter } = d;
   const f = d.fetchImpl;
-  const metrics: ServiceMetrics = { calls: 0, refused: 0, usageReportFailures: 0 };
+  const metrics: ServiceMetrics = { calls: 0, refused: 0, traceStored: 0, traceDropped: 0, usageReportFailures: 0 };
 
   const isCaller = (req: FastifyRequest): boolean => {
     const m = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization ?? ""));
@@ -68,6 +102,20 @@ export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
     }
     return { ok: false, status: 422, code: "no_model_configured", reason: String(r.body.reason ?? r.body.msg ?? "No model is configured.") };
   };
+
+  app.get("/service/v1/trace/:ref", async (req, reply) => {
+    if (!isCaller(req)) return reply.code(401).send({ ok: false, msg: "The edge token is required." });
+    const ref = `sha256/${String((req.params as { ref?: string }).ref ?? "")}`;
+    if (!/^sha256\/[0-9a-f]{64}$/.test(ref)) return reply.code(400).send({ ok: false, msg: "Not a trace reference." });
+    let bytes: Buffer | null;
+    try {
+      bytes = await d.store.get(ref);
+    } catch {
+      return reply.code(503).send({ ok: false, msg: "The trace store is not reachable right now." });
+    }
+    if (!bytes) return reply.code(404).send({ ok: false, msg: "No such trace." });
+    return reply.header("content-type", "application/json").header("cache-control", "no-store").send(bytes);
+  });
 
   app.get("/service/v1/ready", async (req, reply) => {
     if (!isCaller(req)) return reply.code(401).send({ ok: false, msg: "The edge token is required." });
@@ -124,6 +172,15 @@ export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
       headers["x-api-key"] = key;
       if (!/(^|\.)api\.anthropic\.com$/.test(new URL(url).hostname)) headers.authorization = `Bearer ${key}`;
     }
+    const where: Record<string, string> = {
+      // The scope the trace is read under: its own header, so naming a project for the trace never changes how the call is routed.
+      ...(h("x-gantry-trace-project") ?? h("x-gantry-project") ? { project: (h("x-gantry-trace-project") ?? h("x-gantry-project"))! } : {}),
+      ...(h("x-gantry-work-order") ? { woId: h("x-gantry-work-order")! } : {}),
+      ...(h("x-gantry-actor") ? { actor: h("x-gantry-actor")! } : {}),
+      ...(h("x-gantry-turn") ? { turn: h("x-gantry-turn")! } : {}),
+      surface: SURFACES.has(h("x-gantry-surface") ?? "") ? h("x-gantry-surface")! : purpose,
+    };
+    const manifest = decodeManifest(h("x-gantry-manifest"));
     const sse = new SseUsage();
     const chunks: Buffer[] = [];
     let jsonUsage: Usage | undefined;
@@ -134,11 +191,11 @@ export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
     try {
       const payload = JSON.stringify({ ...body, model: route.upstreamModel ?? route.modelId });
       // One retry for a connection-level failure (nothing has reached the caller yet: headers are only written after a response arrives). Never after a timeout or abort.
-      const res = await f(url, { method: "POST", headers, body: payload, signal: ac.signal }).catch(async (e: unknown) => {
+      const res = await f(url, { method: "POST", headers, body: payload, signal: ac.signal, lan: route.lan } as RequestInit).catch(async (e: unknown) => {
         if (ac.signal.aborted) throw e;
         req.log.warn({ purpose, err: e instanceof Error ? e.message : String(e) }, "service model call failed, retrying once");
         await new Promise((r) => setTimeout(r, 400));
-        return f(url, { method: "POST", headers, body: payload, signal: ac.signal });
+        return f(url, { method: "POST", headers, body: payload, signal: ac.signal, lan: route.lan } as RequestInit);
       });
       if (res.status === 429 || res.status === 529 || res.status === 503) {
         const ra = Number(res.headers.get("retry-after"));
@@ -184,9 +241,18 @@ export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
       slot.release();
     }
     const usage: Usage = sse.usage.seen ? sse.usage : (jsonUsage ?? sse.usage);
+    const requestId = vendorRequestId ?? sse.messageId ?? `edge-${randomUUID()}`;
+    const traceRef = await captureTrace(req, { purpose, route, body, response: sse.usage.seen ? sse.message : parseOr(Buffer.concat(chunks).toString("utf8")), status, requestId, where, manifest });
     const rep = await api.call("POST", "/internal/v1/service-calls/usage", {
       purpose,
-      requestId: vendorRequestId ?? sse.messageId ?? `edge-${randomUUID()}`,
+      requestId,
+      ...(traceRef ? { traceRef } : {}),
+      surface: where.surface,
+      ...(where.project ? { project: where.project } : {}),
+      ...(where.woId ? { woId: where.woId } : {}),
+      ...(where.actor ? { actor: where.actor } : {}),
+      ...(where.turn ? { turn: where.turn } : {}),
+      ...(manifest && typeof manifest.hash === "string" ? { promptHash: manifest.hash } : {}),
       model: route.modelId,
       vendor: route.vendor,
       inputTokens: usage.inputTokens,
@@ -201,6 +267,23 @@ export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
       req.log.error({ purpose, kind: rep.kind }, "service-call usage report failed");
     }
   };
+  /** Scan, then store as sha256/<hash>: the same path as a run's trace. Degrades to no reference when the store is down; never stores unscanned content. */
+  async function captureTrace(req: FastifyRequest, t: { purpose: string; route: Route; body: Record<string, unknown>; response: unknown; status: number; requestId: string; where: Record<string, string>; manifest: Record<string, unknown> | null }): Promise<string | undefined> {
+    try {
+      const record = { v: 1, kind: "service-call", purpose: t.purpose, requestId: t.requestId, vendor: t.route.vendor, model: t.route.modelId, status: t.status, ...t.where, manifest: t.manifest, request: t.body, response: t.response };
+      const scanned = scanJson(record, d.keys.knownKeys());
+      const text = JSON.stringify({ ...(scanned.value as Record<string, unknown>), redactions: scanned.findings });
+      if (Buffer.byteLength(text) > d.maxTraceBytes) throw new Error("trace exceeds the size limit");
+      const ref = await d.store.put(text, "application/json");
+      metrics.traceStored++;
+      if (scanned.findings.length) req.log.warn({ purpose: t.purpose, findings: scanned.findings as Finding[] }, "secrets redacted from service-call trace");
+      return ref;
+    } catch (e) {
+      metrics.traceDropped++;
+      req.log.error({ purpose: t.purpose, err: e instanceof Error ? e.message : String(e) }, "service-call trace not stored (degraded: the call proceeded without a trace reference)");
+      return undefined;
+    }
+  }
   app.post("/service/v1/messages", (req, reply) => d.track(messages(req, reply)));
   return metrics;
 }

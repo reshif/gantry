@@ -1,15 +1,16 @@
-import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG, defaultMatrix } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canBatcher } from "../api/can";
 import { bindQueryClient } from "../api/keys";
-import { setCsrfToken } from "../api/client";
+import { setCsrfToken, setStepUpHandler } from "../api/client";
 import { OverlayProvider } from "../ui/Overlay";
 import PeopleView from "./people";
+import PersonView from "./person";
 
 type Handler = (url: string, init?: RequestInit) => { status?: number; body: unknown };
-interface Call { method: string; path: string; body: any }
+interface Call { method: string; path: string; body: any; ifMatch?: string }
 
 const person = (id: string, name: string, teams: string[], roles: object[]) => ({ id, name, title: "Engineer", email: `${id}@acme.dev`, teams, roles, status: "active", oncall: false, github: "", away: null, version: 2 });
 const PEOPLE = [
@@ -49,7 +50,7 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
     const u = new URL(url, "http://x");
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    calls.push({ method, path: u.pathname, body });
+    calls.push({ method, path: u.pathname, body, ifMatch: (init?.headers as Record<string, string> | undefined)?.["If-Match"] });
     if (u.pathname === "/api/v1/can") {
       const checks = (body as { checks: Array<{ action: string }> }).checks;
       return new Response(JSON.stringify({ results: checks.map((c) => (denied.includes(c.action) ? { allowed: false, reason: `No role holds ${c.action}.`, needs: "Needs Factory Admin", rule: { id: "MATRIX" } } : { allowed: true, reason: "", needs: "" })) }));
@@ -61,17 +62,26 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
   return calls;
 }
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
-function mount() {
+/** The list page; with a person id, that person's own page. */
+function mount(personId?: string) {
+  if (personId) window.location.hash = `#person/${personId}`;
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
   bindQueryClient(qc);
-  return render(<QueryClientProvider client={qc}><OverlayProvider><PeopleView /></OverlayProvider></QueryClientProvider>);
+  return render(<QueryClientProvider client={qc}><OverlayProvider>{personId ? <PersonView /> : <PeopleView />}</OverlayProvider></QueryClientProvider>);
 }
+/** The card face is static (prototype); team administration is on the card's context menu: open the Teams tab, right-click the card, then the team's roles. */
+const openTeamRoles = async (team: string) => {
+  fireEvent.click(await byId("ppl-tab-teams"));
+  fireEvent.contextMenu(await byId(`ppl-team-${team}`));
+  fireEvent.click(await screen.findByText("Roles of the team"));
+};
 const writes = (calls: Call[]) => calls.filter((c) => c.method !== "GET" && c.path !== "/api/v1/can");
 
 beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
+  window.history.replaceState(null, "", "/"); // view state lives in the query string
 });
 afterEach(() => {
   cleanup();
@@ -79,18 +89,25 @@ afterEach(() => {
 });
 
 describe("People & teams: roles for teams", () => {
-  it("states the default for new people and lists each team's roles", async () => {
+  it("says Not visible to you when the people read is refused, and the counts are not 0", async () => {
+    setup({ "GET /api/v1/people": () => ({ status: 403, body: { ok: false, msg: "Needs people.view." } }) });
+    mount();
+    await waitFor(() => expect(document.getElementById("ppl-hidden")?.textContent).toContain("Not visible to you"));
+    expect(document.body.textContent).not.toContain("No people yet");
+  });
+
+  it("lists each team's roles in the team's role editor, opened from the card menu", async () => {
     setup();
     mount();
-    expect((await byId("ppl-defaults")).textContent).toContain("Default for new people: no access until granted.");
+    await openTeamRoles("payments");
     const t = await byId("ppl-tr-payments");
     expect(t.textContent).toContain("Reviewer · Payments Platform");
-    expect((await byId("ppl-tr-platform")).textContent).toContain("No roles");
   });
 
   it("adds a project role to a team through the real endpoint, without Factory Admin on offer", async () => {
     const calls = setup({ "POST /api/v1/teams/platform/roles": () => ({ body: { ok: true, msg: "Platform now has Engineer on Storefront." } }) });
     mount();
+    await openTeamRoles("platform");
     fireEvent.click(await byId("ppl-tr-add-platform"));
     const role = (await byId("ppl-tr-role")) as HTMLSelectElement;
     expect(Array.from(role.options).map((o) => o.value)).not.toContain("factory_admin");
@@ -104,6 +121,7 @@ describe("People & teams: roles for teams", () => {
   it("shows the server's message when a grant is refused, and keeps the dialog open", async () => {
     setup({ "POST /api/v1/teams/platform/roles": () => ({ status: 403, body: { ok: false, msg: "Sign in again to continue.", needs: "step_up" } }) });
     mount();
+    await openTeamRoles("platform");
     fireEvent.click(await byId("ppl-tr-add-platform"));
     fireEvent.click(await byId("ppl-tr-submit"));
     await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toContain("Sign in again"));
@@ -112,6 +130,7 @@ describe("People & teams: roles for teams", () => {
   it("removes a team role after confirming, with the grant id", async () => {
     const calls = setup({ "DELETE /api/v1/teams/payments/roles/tra-1": () => ({ body: { ok: true, msg: "Removed Reviewer from Payments." } }) });
     mount();
+    await openTeamRoles("payments");
     fireEvent.click(await byId("ppl-tr-rm-payments-tra-1"));
     fireEvent.click(await waitFor(() => within(document.body).getByText("Remove role")));
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
@@ -121,7 +140,8 @@ describe("People & teams: roles for teams", () => {
   it("locks add and remove with the server's reason when the viewer cannot manage people", async () => {
     const calls = setup({}, ["people.manage"]);
     mount();
-    const add = (await byId("ppl-tr-add-platform")) as HTMLButtonElement;
+    await openTeamRoles("payments");
+    const add = (await byId("ppl-tr-add-payments")) as HTMLButtonElement;
     await waitFor(() => expect(add.getAttribute("aria-disabled") === "true" || add.disabled).toBe(true));
     fireEvent.click(await byId("ppl-tr-rm-payments-tra-1"));
     expect(writes(calls)).toHaveLength(0);
@@ -129,26 +149,16 @@ describe("People & teams: roles for teams", () => {
 });
 
 describe("People & teams: a member's roles and where permissions come from", () => {
-  it("separates direct roles from roles inherited via a team", async () => {
+  it("lists direct roles with a remove button and inherited roles via their team without one", async () => {
     setup();
-    mount();
-    fireEvent.click(await byId("ppl-mem-payments-p-tomas"));
+    mount("p-tomas");
     const held = await byId("ppl-held");
-    await waitFor(() => expect(document.getElementById("ppl-held")?.textContent).toContain("Reviewer · Payments Platform · via Payments"));
-    const [direct, inherited] = Array.from(held.querySelectorAll(":scope > div"));
-    expect(direct!.textContent).toContain("Engineer · Payments Platform");
-    expect(direct!.textContent).not.toContain("Reviewer");
-    expect(inherited!.textContent).toContain("via Payments");
-  });
-
-  it("marks effective-permission cells with their source", async () => {
-    setup();
-    mount();
-    fireEvent.click(await byId("ppl-mem-payments-p-tomas"));
-    const cell = await byId(`ppl-eff-payments-${gate.id.replace(/\./g, "_")}`);
-    expect(cell.getAttribute("data-tip")).toContain("Role via Payments.");
-    expect(cell.textContent).toContain("allowed, via Payments");
-    expect(cell.querySelector(".eff-src")).toBeTruthy();
+    await waitFor(() => expect(held.textContent).toContain("Reviewer \u00b7 Payments Platform \u00b7 via Payments"));
+    const direct = document.getElementById("ppl-role-engineer-payments")!;
+    expect(direct.textContent).toContain("Engineer");
+    expect(direct.querySelector("button[aria-label='Remove role']")).toBeTruthy();
+    const inherited = document.getElementById("ppl-role-reviewer-payments-payments")!;
+    expect(inherited.querySelector("button")).toBeNull();
   });
 });
 
@@ -157,8 +167,309 @@ describe("People & teams: default deny", () => {
     setup({}, ["people.view"]);
     mount();
     const e = await byId("people-no-access");
-    expect(e.textContent).toContain("No access to people and teams");
+    expect(e.textContent).toContain("No access to this sheet");
     expect(e.textContent).toContain("No role holds people.view.");
     expect(document.getElementById("ppl-invite")).toBeNull();
+  });
+});
+
+describe("People & teams: deactivate", () => {
+  const open = async () => {
+    fireEvent.click(await byId("ppl-deactivate"));
+    return byId("ppl-off");
+  };
+  const typeReason = (v: string) => fireEvent.change(document.getElementById("ppl-off-reason")!, { target: { value: v } });
+  const keysH: Handler = () => ({ body: [{ id: "k1", name: "CI bot", prefix: "gk_ab12", project: "payments", actions: [], created: 0, lastUsed: null, revoked: false, by: "p-tomas" }] });
+  const wo = { id: "WO-9", project: "payments", title: "Fix refund", state: "running", requestedBy: "p-tomas", gates: {} };
+  const base = (): Record<string, Handler> => ({
+    "GET /api/v1/api-keys": keysH,
+    "GET /api/v1/sessions": () => ({ body: [{ id: "s9", person: "p-tomas", revoked: false, method: "sso", device: "d", ip: "", started: 0, lastSeen: 0 }] }),
+    "GET /api/v1/projects/payments/work-orders": () => ({ body: [wo] }),
+    "GET /api/v1/projects/storefront/work-orders": () => ({ body: [] }),
+  });
+
+  it("lists what the person holds with a consequence for each", async () => {
+    setup(base());
+    mount("p-tomas");
+    const dlg = await open();
+    // the prototype's one-sentence intro with the open work, then the Reason field; what it ends is one quiet line
+    await waitFor(() => expect(document.getElementById("ppl-off-intro")?.textContent).toContain("They currently hold 1 open work order (WO-9); those stay on the line and are reassigned to their team lead."));
+    expect(dlg.textContent).toContain("Tomás Ferreira will be signed out everywhere.");
+    expect(document.getElementById("ppl-off-reason")).toBeTruthy();
+    await waitFor(() => expect(document.getElementById("ppl-off-holds")?.textContent).toContain("1 API key"));
+    expect(document.getElementById("ppl-off-holds")?.textContent).toContain("1 session");
+    expect(dlg.textContent).toContain("Keep their 1 API key working");
+    expect(Array.from(document.querySelectorAll(".dlg-actions button, .modal button, [role=dialog] button")).map((b) => b.textContent)).toEqual(expect.arrayContaining(["Cancel", "Deactivate"]));
+  });
+
+  it("needs a reason of 10 characters and sends nothing until then", async () => {
+    const calls = setup(base());
+    mount("p-tomas");
+    await open();
+    typeReason("too short");
+    fireEvent.click(await byId("ppl-off-submit"));
+    await waitFor(() => expect(document.getElementById("ppl-off-err")?.textContent).toContain("at least 10 characters"));
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it("shows the server's refusal and rule verbatim", async () => {
+    setup({ ...base(), "POST /api/v1/people/p-tomas/deactivate": () => ({ status: 409, body: { ok: false, msg: "Tomás is the only approver for Payments.", rule: { kind: "invariant", id: "INV-14.4", name: "Last approver" } } }) });
+    mount("p-tomas");
+    await open();
+    typeReason("Left the company on Friday");
+    fireEvent.click(await byId("ppl-off-submit"));
+    await waitFor(() => expect(document.getElementById("ppl-off-err")?.textContent).toContain("Tomás is the only approver for Payments."));
+    expect(document.getElementById("ppl-off-err")?.textContent).toContain("[INV-14.4]");
+  });
+
+  it("on success sends reason, keepKeys and If-Match, then lists the server's open work with links", async () => {
+    const calls = setup({ ...base(), "POST /api/v1/people/p-tomas/deactivate": () => ({ body: { ok: true, msg: "Deactivated.", openWork: [{ id: "WO-9", title: "Fix refund", project: "payments", state: "running", roles: ["assignee"] }, { id: "WO-12", title: "Ship it", project: "payments", state: "gated", roles: ["sole_approver"], gate: "review" }] } }) });
+    mount("p-tomas");
+    await open();
+    fireEvent.click(await byId("ppl-off-keep"));
+    typeReason("Left the company on Friday");
+    fireEvent.click(await byId("ppl-off-submit"));
+    const done = await byId("ppl-off-done");
+    expect(done.textContent).toContain("WO-9");
+    expect(done.textContent).toContain("It is assigned to them.");
+    expect(done.textContent).toContain("Only approver of the review gate.");
+    expect(done.querySelector("a")?.getAttribute("href")).toContain("record/WO-9");
+    // The result dialog replaces the form: no Deactivate button left, Close is the primary action.
+    expect(document.getElementById("ppl-off-submit")).toBeNull();
+    expect(document.getElementById("ppl-off-close")?.className).toContain("primary");
+    const sent = writes(calls).find((c) => c.path.endsWith("/deactivate"));
+    expect(sent?.body).toEqual({ reason: "Left the company on Friday", keepKeys: true });
+    expect(sent?.ifMatch).toBe("2");
+  });
+
+  it("shows the server's list only, never the client preview, after success", async () => {
+    setup({ ...base(), "POST /api/v1/people/p-tomas/deactivate": () => ({ body: { ok: true, msg: "Deactivated.", openWork: [] } }) });
+    mount("p-tomas");
+    await open();
+    await waitFor(() => expect(document.getElementById("ppl-off-intro")?.textContent).toContain("WO-9"));
+    typeReason("Left the company on Friday");
+    fireEvent.click(await byId("ppl-off-submit"));
+    const done = await byId("ppl-off-done");
+    expect(done.textContent).toContain("They had no open work.");
+    expect(done.textContent).not.toContain("WO-9");
+  });
+
+  it("asks for a fresh sign-in through the step-up flow and retries with the same If-Match", async () => {
+    let n = 0;
+    const calls = setup({ ...base(), "POST /api/v1/people/p-tomas/deactivate": () => (n++ === 0 ? { status: 403, body: { ok: false, msg: "Sign in again.", needs: "step_up", rule: { kind: "step-up", id: "STEP-UP" } } } : { body: { ok: true, msg: "Deactivated.", openWork: [] } }) });
+    const asked = vi.fn(async () => ({ ok: true as const }));
+    setStepUpHandler(asked);
+    mount("p-tomas");
+    await open();
+    typeReason("Left the company on Friday");
+    fireEvent.click(await byId("ppl-off-submit"));
+    await byId("ppl-off-done");
+    expect(asked).toHaveBeenCalledTimes(1);
+    const sent = writes(calls).filter((c) => c.path.endsWith("/deactivate"));
+    expect(sent.map((c) => c.ifMatch)).toEqual(["2", "2"]);
+    setStepUpHandler(null);
+  });
+
+  it("says a list is not shown when the viewer cannot read it, instead of claiming none", async () => {
+    setup({ ...base(), "GET /api/v1/api-keys": () => ({ status: 403, body: { ok: false, msg: "No." } }) });
+    mount("p-tomas");
+    const dlg = await open();
+    await waitFor(() => expect(dlg.textContent).toContain("Some lists could not be read"));
+  });
+
+  it("S-124: Reset authenticator sends a reason (not under 5 characters) to the mfa-reset route, and is locked on yourself", async () => {
+    const calls = setup({ "POST /api/v1/people/p-tomas/mfa-reset": () => ({ body: { ok: true, msg: "Reset.", removed: 1, linkValidMinutes: 60 } }) });
+    mount("p-tomas");
+    fireEvent.click(await byId("ppl-reset-mfa"));
+    const ta = await waitFor(() => { const e = document.querySelector<HTMLTextAreaElement>("dialog textarea, [role=dialog] textarea, .dlg textarea"); if (!e) throw new Error("no reason box"); return e; });
+    fireEvent.change(ta, { target: { value: "no" } });
+    const ok = Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Reset and send link")!;
+    fireEvent.click(ok);
+    expect(writes(calls)).toEqual([]);
+    fireEvent.change(ta, { target: { value: "Lost phone, identity checked by video call" } });
+    fireEvent.click(ok);
+    await waitFor(() => expect(writes(calls).length).toBe(1));
+    expect(writes(calls)[0]!.path).toBe("/api/v1/people/p-tomas/mfa-reset");
+    expect(writes(calls)[0]!.body).toEqual({ reason: "Lost phone, identity checked by video call" });
+  });
+
+  it("S-124: nobody resets their own authenticator here; the button says who to ask", async () => {
+    setup();
+    mount("p-asha");
+    const btn = await byId("ppl-reset-mfa");
+    expect(btn.getAttribute("aria-description") ?? btn.title).toMatch(/another administrator/i);
+  });
+
+  it("G-M9: until the provider has been read the person card says Unknown, not Not enrolled", async () => {
+    setup({ "GET /api/v1/people": () => ({ body: [{ ...PEOPLE[0], mfa: true }, { ...PEOPLE[1], mfa: null }] }) });
+    mount("p-tomas");
+    await waitFor(() => expect(document.getElementById("ppl-stats")!.textContent).toContain("Unknownuntil their next sign-in"));
+    expect(document.getElementById("ppl-stats")!.textContent).not.toContain("Not enrolled");
+  });
+
+  it("S-127: the MFA stat shows the real enrolment, not a flag nothing wrote", async () => {
+    setup({ "GET /api/v1/people": () => ({ body: [{ ...PEOPLE[0], mfa: true }, { ...PEOPLE[1], mfa: false }] }) });
+    mount("p-tomas");
+    await waitFor(() => expect(document.getElementById("ppl-stats")!.textContent).toContain("Not enrolledneeds an enrolment link"));
+  });
+
+  it("Reactivate sends a reason and If-Match", async () => {
+    const off = { ...person("p-ines", "Inés Alvarez", ["payments"], []), status: "deactivated", version: 5 };
+    const calls = setup({ "GET /api/v1/people": () => ({ body: [PEOPLE[0], off, PEOPLE[1]] }), "POST /api/v1/people/p-ines/reactivate": () => ({ body: { ok: true, msg: "Active again." } }) });
+    mount("p-ines");
+    expect(document.getElementById("ppl-deactivate")).toBeNull();
+    fireEvent.click(await byId("ppl-reactivate"));
+    const ta = await waitFor(() => { const e = document.querySelector<HTMLTextAreaElement>("dialog textarea, [role=dialog] textarea, .dlg textarea"); if (!e) throw new Error("no reason box"); return e; });
+    fireEvent.change(ta, { target: { value: "short" } });
+    const ok = Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Reactivate" && b.id !== "ppl-reactivate")!;
+    fireEvent.click(ok);
+    expect(writes(calls)).toEqual([]);
+    fireEvent.change(ta, { target: { value: "Back from leave on Monday" } });
+    fireEvent.click(ok);
+    await waitFor(() => expect(writes(calls).length).toBe(1));
+    const sent = writes(calls)[0]!;
+    expect(sent.path).toBe("/api/v1/people/p-ines/reactivate");
+    expect(sent.body).toEqual({ reason: "Back from leave on Monday" });
+    expect(sent.ifMatch).toBe("5");
+  });
+
+  it("leaves the last-Factory-Admin invariant to the server: Deactivate is not pre-locked by counting roles in the browser", async () => {
+    setup({ "GET /api/v1/me": () => ({ body: { ...ME, person: PEOPLE[1] } }) });
+    mount("p-asha");
+    const btn = await byId("ppl-deactivate");
+    expect(btn.getAttribute("aria-description")).toBeNull();
+  });
+
+  it("locks Deactivate on yourself with the reason", async () => {
+    setup();
+    mount("p-asha");
+    const btn = await byId("ppl-deactivate");
+    expect(btn.getAttribute("aria-description")).toContain("cannot deactivate yourself");
+  });
+});
+
+describe("People & teams: one page per person", () => {
+  it("sends older #people/<id> links to the person's own page", async () => {
+    setup();
+    window.location.hash = "#people/p-tomas";
+    mount();
+    await waitFor(() => expect(window.location.hash).toBe("#person/p-tomas"));
+  });
+
+  it("opens a person from the table, and says so when the id is unknown", async () => {
+    setup();
+    mount();
+    const link = await screen.findByRole("link", { name: "Tomás Ferreira" });
+    expect(link.getAttribute("href")).toBe("#person/p-tomas");
+    cleanup();
+    mount("p-nobody");
+    const e = await byId("person-missing");
+    expect(e.textContent).toContain("Nothing to show");
+    expect(e.textContent).toContain("That person does not exist.");
+    // the prototype's generic 404: a Work orders button, no breadcrumb row
+    const back = document.getElementById("person-back") as HTMLAnchorElement;
+    expect(back.textContent).toBe("Work orders");
+    expect(back.getAttribute("href")).toMatch(/work-orders/);
+    expect(document.querySelector(".crumbs, nav[aria-label=Breadcrumb]")).toBeNull();
+  });
+
+  it("team cards are static: no menu button on the face, administration on the right-click menu", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("ppl-tab-teams"));
+    const card = await byId("ppl-team-payments");
+    expect(card.querySelector("button")).toBeNull();
+    expect(document.getElementById("ppl-team-menu-payments")).toBeNull();
+    fireEvent.contextMenu(card);
+    expect(await screen.findByText("Roles of the team")).toBeTruthy();
+  });
+
+  it("the person's Details row has a Change teams control and the On call switch is live", async () => {
+    const calls = setup({ "PUT /api/v1/projects/payments/oncall": () => ({ body: { ok: true, msg: "Saved.", oncall: ["p-tomas"], version: 3 } }) });
+    mount("p-tomas");
+    const sw = (await screen.findByRole("switch", { name: "On call rotation" })) as HTMLInputElement;
+    expect(document.getElementById("ppl-teams")).not.toBeNull();
+    expect(sw.getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(sw);
+    await waitFor(() => expect(writes(calls).some((c) => c.method === "PUT" && c.path.endsWith("/projects/payments/oncall"))).toBe(true));
+    expect(writes(calls).find((c) => c.path.endsWith("/projects/payments/oncall"))?.body).toEqual({ people: ["p-tomas"] });
+  });
+});
+
+describe("Person page: team membership", () => {
+  const withDefault = () => {
+    const teams = [...TEAMS, { id: "default", name: "Default", desc: "Everyone.", roles: [] }];
+    const lone = person("p-lone", "Lone Person", [], []);
+    return { "GET /api/v1/teams": () => ({ body: teams }), "GET /api/v1/people": () => ({ body: [...PEOPLE, lone] }), "GET /api/v1/people/p-lone/effective-permissions": () => ({ body: EFF }), "PUT /api/v1/people/p-lone/teams": () => ({ body: { ok: true, msg: "Saved." } }) };
+  };
+  it("shows No team with a Change control; picking Default and saving sends the teams", async () => {
+    const calls = setup(withDefault());
+    mount("p-lone");
+    const change = await byId("ppl-teams");
+    expect(change.closest("dl")?.textContent).toContain("No team");
+    fireEvent.click(change);
+    fireEvent.click(await byId("ppl-tm-default"));
+    fireEvent.click(await byId("ppl-tm-save"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]).toMatchObject({ method: "PUT", path: "/api/v1/people/p-lone/teams", body: { teams: ["default"] } });
+  });
+  it("refuses an empty selection", async () => {
+    const calls = setup(withDefault());
+    mount("p-lone");
+    fireEvent.click(await byId("ppl-teams"));
+    await byId("ppl-tm-default");
+    fireEvent.click(await byId("ppl-tm-save"));
+    await waitFor(() => expect(document.body.textContent).toContain("Keep at least one team."));
+    expect(writes(calls)).toHaveLength(0);
+  });
+  it("is locked without people.manage", async () => {
+    const calls = setup(withDefault(), ["people.manage"]);
+    mount("p-lone");
+    const change = await byId("ppl-teams");
+    await waitFor(() => expect(change.getAttribute("aria-disabled")).toBe("true"));
+    fireEvent.click(change);
+    expect(writes(calls)).toHaveLength(0);
+  });
+  it("adds a member from a team's menu with the person's teams plus that team", async () => {
+    const calls = setup({ ...withDefault(), "PUT /api/v1/people/p-tomas/teams": () => ({ body: { ok: true, msg: "Saved." } }) });
+    mount();
+    fireEvent.click(await byId("ppl-tab-teams"));
+    fireEvent.contextMenu(await byId("ppl-team-platform"));
+    fireEvent.click(await screen.findByText("Add member"));
+    fireEvent.click(await byId("ppl-am-platform-p-tomas"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]).toMatchObject({ method: "PUT", path: "/api/v1/people/p-tomas/teams", body: { teams: ["payments", "platform"] } });
+  });
+});
+
+describe("People list (T-23, T-25, T-31)", () => {
+  it("shows one chip per role, with a count when the role is held in several places", async () => {
+    const dup = person("p-dan", "Daniel Okafor", ["platform"], [{ role: "project_admin", scope: "payments" }, { role: "project_admin", scope: "storefront" }, { role: "reviewer", scope: "payments" }]);
+    setup({ "GET /api/v1/people": () => ({ body: [PEOPLE[0], dup] }) });
+    mount();
+    const row = await byId("ppl-row-p-dan");
+    const chips = Array.from(row.querySelectorAll(".chip")).map((c) => c.textContent);
+    expect(chips.filter((t) => /Project Admin/i.test(t ?? ""))).toEqual(["Project Admin ×2"]);
+    expect(chips).toContain("Reviewer");
+  });
+
+  it("a failed people read leaves no 0 in the stat or the tab count", async () => {
+    setup({ "GET /api/v1/people": () => ({ status: 500, body: { ok: false, msg: "boom" } }) });
+    mount();
+    await waitFor(() => expect(document.getElementById("ppl-tab-people")).toBeTruthy());
+    const tab = document.getElementById("ppl-tab-people") as HTMLElement;
+    expect(tab.textContent).toBe("People");
+    expect(document.getElementById("ppl-stats")?.textContent).not.toMatch(/0 active/);
+  });
+
+  it("the tab is in the hash, not before it, and a link restores it", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("ppl-tab-teams"));
+    expect(window.location.hash).toContain("ppl.tab=teams");
+    expect(window.location.search).toBe("");
+    cleanup();
+    mount();
+    expect((await byId("ppl-tab-teams")).getAttribute("aria-selected")).toBe("true");
   });
 });

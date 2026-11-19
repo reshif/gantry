@@ -22,15 +22,17 @@ export function done(fx: Fx, msg: string, project: string | null, extra: Record<
 }
 
 export function person(actor: Actor, what = "This"): string {
-  if (!actor.personId) throw refuse("denied", `${what} is for signed-in people.`);
+  if (!actor.personId) throw refuse("denied", /\b(is|are)$/.test(what) ? `${what} for signed-in people.` : `${what} is for signed-in people.`);
   return actor.personId;
 }
 
 /** The refusal for a stop covering the work order: audited as a denial by the pipeline (spec 15.4). */
-export async function guardStop(fx: Fx, w: Wo, action: string): Promise<void> {
+export async function guardStop(fx: Fx, w: Wo, action: string, o: { haltOverride?: boolean } = {}): Promise<void> {
   const s = await coveringStop(fx.tx, fx.orgId, w);
   if (!s) return;
   if (s.mode === "halt" && !HALT_BLOCKS.has(action)) return;
+  // A Factory Admin's "Approve anyway": the gate decision (gateDecision, with the override) decides who may; a kill is never skipped here.
+  if (s.mode === "halt" && o.haltOverride) return;
   const where = s.scope === "factory" ? "The factory" : s.scope === "wo" ? "This work order" : s.scope === "project" ? `Project ${w.project}` : `Repo ${w.repo ?? ""}`;
   throw refuse("stopped", `${where} is ${s.mode === "halt" ? "halted (andon)" : "killed"}: ${s.reason || "no reason given"}.`, {
     rule: { kind: "stop", id: `STOP-${s.scope.toUpperCase()}`, name: "Stop state" }, needs: s.mode === "halt" ? "Resume first" : "Restore first",
@@ -42,10 +44,10 @@ export const guardOpen = (w: Wo): void => {
 };
 
 /** Locks the work order (F2: commands on one work order are serialised and `If-Match` is checked against the locked row) and applies the stop guard. */
-export async function begin(tx: Tx, actor: Actor, woId: string, action: string, o: { allowClosed?: boolean; skipStop?: boolean } = {}): Promise<{ fx: Fx; w: Wo }> {
+export async function begin(tx: Tx, actor: Actor, woId: string, action: string, o: { allowClosed?: boolean; skipStop?: boolean; haltOverride?: boolean } = {}): Promise<{ fx: Fx; w: Wo }> {
   const w = await lockWo(tx, actor.orgId, woId, actor.ifMatch);
   const fx = await makeFx(tx, actor);
-  if (!o.skipStop) await guardStop(fx, w, action);
+  if (!o.skipStop) await guardStop(fx, w, action, { haltOverride: !!o.haltOverride });
   if (!o.allowClosed) guardOpen(w);
   return { fx, w };
 }

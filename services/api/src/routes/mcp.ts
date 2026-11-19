@@ -7,7 +7,8 @@
  * The edge makes every connection to a server (it holds the credentials and sits on the egress network); the API asks it over /mcp-admin/v1.
  */
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
-import { command, decide, refuse, type CommandSpec } from "../core/index.js";
+import { visibleProjects } from "@gantry/domain";
+import { command, decide, mayCallOut, policyState, refuse, type CommandSpec } from "../core/index.js";
 import { checkAccess } from "../areas/mcp/access.js";
 import { addServer, applyDiscovery, checkAuth, checkUrl, grantWrites, patchServer, recordDiscovery, removeServer } from "../areas/mcp/commands.js";
 import { discoverTools, type Discovery, type EdgeTarget } from "../areas/mcp/edge-client.js";
@@ -15,6 +16,7 @@ import { openSecret } from "../areas/mcp/secret.js";
 import { AddBody, CallsQuery, CheckQuery, DiscoverBody, GrantBody, IdParam, PatchBody } from "../areas/mcp/schemas.js";
 import { readCalls, readServer, readServerRows, readServers } from "../areas/mcp/store.js";
 import { refuseIfFactoryKilled } from "../areas/integrations/stop.js";
+import { directoryScope, directoryServers } from "../core/directory.js";
 
 const requirePerson = (req: FastifyRequest): void => {
   if (req.gx.principal?.kind !== "person") throw refuse("denied", "This view is for signed-in people.");
@@ -24,7 +26,7 @@ export const mcpRoutes: FastifyPluginAsync = async (app) => {
   const g = app.gantry;
   const spec = (idem = false): CommandSpec => ({ action: "mcp.edit", scope: {}, ...(idem ? { idempotent: true } : {}) });
   /** The network call to the edge happens before the transaction opens, and only for a caller the decision point allows (a denial is then audited by `command`). */
-  const discoverFirst = async (req: FastifyRequest, t: EdgeTarget): Promise<Discovery | null> => ((await decide(req, "mcp.edit", {})).allowed ? discoverTools(g.config.secrets.edgeToken, t) : null);
+  const discoverFirst = async (req: FastifyRequest, t: EdgeTarget): Promise<Discovery | null> => ((await mayCallOut(req, "mcp.edit")) ? discoverTools(g.config.secrets.edgeToken, t) : null);
   const denied: Discovery = { ok: false, msg: "Not permitted." };
 
   /** The target of a saved server, with its credential opened for the edge. */
@@ -37,7 +39,9 @@ export const mcpRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/api/v1/mcp/servers", async (req) => {
     requirePerson(req);
-    return readServers(g.pool, g.orgId);
+    const mine = await directoryScope(req);
+    const servers = await readServers(g.pool, g.orgId);
+    return mine ? directoryServers(servers, mine) : servers;
   });
 
   app.get("/api/v1/mcp/calls", async (req) => {
@@ -118,8 +122,22 @@ export const mcpRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/v1/mcp/grants", async (req) => {
     const b = GrantBody.parse(req.body);
     const wo = (await g.pool.query<{ project_id: string; repo_id: string | null }>(`select project_id, repo_id from work_orders where org_id = $1 and id = $2`, [g.orgId, b.wo])).rows[0];
-    if (!wo) throw refuse("not_found", `No such work order ${b.wo}.`);
-    return command(req, { action: "gate.approve", scope: { project: wo.project_id, repo: wo.repo_id, wo: b.wo }, idempotent: true }, (tx, a) => grantWrites(tx, a, b));
+    // An id the caller cannot see is the same 404 as one that does not exist (as for stops); one they can see but may not approve is a 403.
+    // Pre-authorising writes needs a fresh sign-in.
+    const who = req.gx.principal;
+    const st = who?.kind === "person" ? await policyState(req).catch(() => null) : null;
+    const seen = !!wo && (who?.kind !== "person" || !st || visibleProjects(st, who.id).some((x) => x.id === wo.project_id));
+    if (!wo || !seen) {
+      // Decided before answering, so a caller with no approve right anywhere gets the 403, not a hint about the id.
+      await decide(req, "gate.approve", {}).then((d) => { if (!d.allowed) throw refuse("denied", "Not permitted."); });
+      throw refuse("not_found", "No such work order.");
+    }
+    // Owner decision (audit A6): only a Factory Admin grants an agent access to an MCP tool. The server decides; the UI only displays it.
+    const me = who?.kind === "person" ? st?.people.find((x) => x.id === who.id) : null;
+    if (!me?.roles.some((r) => r.role === "factory_admin" && r.scope === "factory")) {
+      throw refuse("denied", "Only a Factory Admin can pre-authorise an agent's write tools.", { needs: "A Factory Admin to grant this" });
+    }
+    return command(req, { action: "gate.approve", scope: { project: wo.project_id, repo: wo.repo_id, wo: b.wo }, stepUp: true, idempotent: true }, (tx, a) => grantWrites(tx, a, b));
   });
 
   // Read helper kept for the screen after a command: one server by id.

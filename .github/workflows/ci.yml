@@ -1,0 +1,444 @@
+# Gantry CI. Every pull request, every merge-queue run and every push to main must pass `checks`, `audit`, `deploy-config`,
+# `migrations` and `images` (branch protection: deploy/ci/branch-protection.sh). A push to main builds each image ONCE, pushes it
+# by commit, scans that pushed digest, signs it with cosign (keyless, this workflow's identity), attaches the SBOM, and then
+# `release-manifest` signs one manifest of all the digests: the only thing deploy.yml will deploy. Tags are not built here:
+# release.yml gives an already-built, already-signed digest its version tag. The nightly run brings the whole stack up and runs
+# the smoke and isolation checks and a backup with a restore drill. The design is docs: gantry-designs/v3-readiness/CICD.md.
+# Actions are pinned by commit; Dependabot (.github/dependabot.yml) proposes updates.
+name: CI
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_OPTIONS: --max-old-space-size=4096
+
+jobs:
+  checks:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17.12-alpine@sha256:d3244e8ce3f165ee3c93d9c4a4b1d0fe48b3a89e2287b717fdcbbde92d405065
+        env:
+          POSTGRES_PASSWORD: pw
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      GANTRY_TEST_DATABASE_URL: postgres://postgres:pw@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            runner/wrapper/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      # Build before typecheck: the worker typechecks against @gantry/api's built declarations (dist), so a fresh
+      # checkout fails typecheck until the workspaces are built.
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      # Frontend gates (AGENTS.md): the architecture-lint ratchet, the per-view definition-of-done report, the entry
+      # bundle budget (measured from the build above) and the check that every rule in AGENTS.md has an enforcement.
+      - run: npm run lint:ratchet
+      - run: npm run dod
+      - run: npm run check:bundle
+      - run: npm run check:agents
+      - name: Runner wrapper
+        working-directory: runner/wrapper
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Production realm is generated from the development realm
+        run: node deploy/keycloak/prod-realm.mjs --check
+
+  audit:
+    name: Dependency audit and licences
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts
+        working-directory: runner/wrapper
+      # Shipped code: any high or critical advisory fails the build.
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: runner/wrapper
+      # Build and test tools: reported, not blocking (they never reach an image).
+      - name: Development dependencies (report only)
+        run: npm audit --include=dev || echo "::warning title=npm audit::development dependencies have advisories (see the log)"
+      - name: Licences of shipped dependencies
+        run: node deploy/ci/licences.mjs
+
+  deploy-config:
+    name: Dockerfiles, compose, Caddy, shell
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          recursive: true
+          config: .hadolint.yaml
+      - name: Compose files (development and production)
+        run: |
+          deploy/secrets/generate.sh >/dev/null
+          docker compose -f deploy/compose.yml config -q
+          docker compose -f deploy/compose.yml --profile backup --profile runner-image config -q
+          docker compose --env-file deploy/prod.env.example -f deploy/compose.yml -f deploy/compose.prod.yml config -q
+          # The production profile must not contain development services or switches.
+          docker compose --env-file deploy/prod.env.example -f deploy/compose.yml -f deploy/compose.prod.yml config > /tmp/prod.yml
+          ! grep -nE 'mailpit|GANTRY_DEV_DEMO_ACCOUNTS: "true"|GANTRY_DEV_SEED: "true"|start-dev' /tmp/prod.yml
+      - name: Only the socket proxies hold the Docker socket
+        run: node deploy/ci/compose-socket.mjs
+      - name: Image provenance matcher (deploy/verify-images.sh)
+        run: node --test deploy/ci/provenance-names-repo.test.mjs
+      # The pipeline's own rules (supply chain, forks, deploy order): actions pinned by commit, persist-credentials: false, least
+      # privilege, no pull_request_target, self-hosted only behind an Environment, no untrusted text in a shell. Then the release
+      # tooling's tests (manifest, host deploy script decisions in a dry run).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # The workflow policy parses YAML with the `yaml` package (a dev dependency); scripts are off, nothing is built.
+      - run: npm ci --ignore-scripts
+      - name: Workflow syntax (actionlint, pinned release, checksum verified)
+        run: |
+          curl -fsSL -o actionlint.tgz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tgz" | sha256sum -c -
+          tar xzf actionlint.tgz actionlint
+          ./actionlint
+      - name: Workflow policy and release tooling
+        run: |
+          node deploy/ci/workflow-policy.mjs
+          node --test deploy/ci/workflow-policy.test.mjs deploy/release/release-manifest.test.mjs deploy/release/release-notes.test.mjs deploy/release/gantry-release.test.mjs deploy/release/gantry-release.replay.test.mjs deploy/release/notify.test.mjs
+      - name: Caddyfile (development and production)
+        run: |
+          img=caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+          docker run --rm -v "$PWD/deploy/caddy:/etc/caddy:ro" "$img" caddy validate --config /etc/caddy/Caddyfile
+          docker run --rm -v "$PWD/deploy/caddy:/etc/caddy:ro" -e GANTRY_INGRESS_PROFILE=prod -e GANTRY_HOSTNAME=gantry.example.com -e GANTRY_TLS=ops@example.com "$img" caddy validate --config /etc/caddy/Caddyfile
+      - name: Shell scripts
+        run: shellcheck --severity=warning deploy/*.sh deploy/*/*.sh
+
+  migrations:
+    name: Migration upgrade from the base
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17.12-alpine@sha256:d3244e8ce3f165ee3c93d9c4a4b1d0fe48b3a89e2287b717fdcbbde92d405065
+        env:
+          POSTGRES_PASSWORD: pw
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace @gantry/domain --workspace @gantry/db
+      - name: Apply the base's migrations, then this tree's
+        env:
+          GANTRY_TEST_DATABASE_URL: postgres://postgres:pw@127.0.0.1:5432/postgres
+          # A pull request: its base. A merge queue run: the branch it merges into. A push: the commit before it.
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: |
+          base="$BASE"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then base=origin/main; fi
+          echo "BASE_REV=$base" >>"$GITHUB_ENV"
+          deploy/ci/migration-upgrade.sh "$base"
+      # Expand/contract (deploy/ci/migration-safety.mjs): a new migration that drops, renames or tightens something must say so
+      # (`-- gantry:contract`) and stand alone, and an applied migration is never edited. A contract migration is a warning on the
+      # pull request: its release cannot be rolled back automatically past it.
+      - name: Migration safety (expand / contract)
+        run: |
+          node --test deploy/ci/migration-safety.test.mjs
+          node deploy/ci/migration-safety.mjs "$BASE_REV"
+
+  images:
+    name: Image ${{ matrix.name }}
+    needs: [checks, deploy-config]
+    # Pull requests, the merge queue and the schedule only build and scan: read-only token, no registry login, nothing pushed.
+    # (A push to main publishes in the job below.)
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: api, dockerfile: services/api/Dockerfile }
+          - { name: worker, dockerfile: services/worker/Dockerfile }
+          - { name: migrate, dockerfile: packages/db/Dockerfile }
+          - { name: launcher, dockerfile: services/launcher/Dockerfile }
+          - { name: edge, dockerfile: services/edge/Dockerfile }
+          - { name: github, dockerfile: services/github/Dockerfile }
+          - { name: web, dockerfile: apps/web/Dockerfile }
+          - { name: runner, dockerfile: runner/Dockerfile }
+          - { name: keycloak, dockerfile: deploy/keycloak/Dockerfile }
+          - { name: backup, dockerfile: deploy/backup/Dockerfile }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/gantry-${{ matrix.name }}" >>"$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+            type=sha,format=long
+          labels: |
+            org.opencontainers.image.title=gantry-${{ matrix.name }}
+            org.opencontainers.image.licenses=UNLICENSED
+      # Build, scan and SBOM a local image.
+      - name: Build (for the scan)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          push: false
+          tags: gantry-${{ matrix.name }}:scan
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: HARNESS_LOCK=require
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: Vulnerability scan (fails on a fixable high or critical)
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          grype-version: v0.122.1
+          image: gantry-${{ matrix.name }}:scan
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table
+      - name: SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: gantry-${{ matrix.name }}:scan
+          format: spdx-json
+          output-file: sbom-${{ matrix.name }}.spdx.json
+          upload-artifact: true
+
+  publish:
+    name: Publish image ${{ matrix.name }}
+    needs: [checks, deploy-config]
+    # Only a push to main of this repository publishes (never a pull request, the queue, the schedule or a fork),
+    # and only once continuous delivery is switched on (repository variable GANTRY_CD_ENABLED=true; off: CI runs the tests only).
+    if: vars.GANTRY_CD_ENABLED == 'true' && github.event_name == 'push' && !github.event.repository.fork
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: api, dockerfile: services/api/Dockerfile }
+          - { name: worker, dockerfile: services/worker/Dockerfile }
+          - { name: migrate, dockerfile: packages/db/Dockerfile }
+          - { name: launcher, dockerfile: services/launcher/Dockerfile }
+          - { name: edge, dockerfile: services/edge/Dockerfile }
+          - { name: github, dockerfile: services/github/Dockerfile }
+          - { name: web, dockerfile: apps/web/Dockerfile }
+          - { name: runner, dockerfile: runner/Dockerfile }
+          - { name: keycloak, dockerfile: deploy/keycloak/Dockerfile }
+          - { name: backup, dockerfile: deploy/backup/Dockerfile }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/gantry-${{ matrix.name }}" >>"$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+            type=sha,format=long
+          labels: |
+            org.opencontainers.image.title=gantry-${{ matrix.name }}
+            org.opencontainers.image.licenses=UNLICENSED
+      # A push to main: build ONCE, push by commit only, then scan, SBOM and sign THAT pushed digest. (Scanning a loaded image and
+      # then pushing a second build would sign bytes that were never scanned.) The branch and version tags are added after the
+      # signature, so a tag never points at an unscanned or unsigned image.
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ env.IMAGE }}:sha-${{ github.sha }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: HARNESS_LOCK=require
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          provenance: mode=max
+      - name: Vulnerability scan of the pushed digest (fails on a fixable high or critical)
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          grype-version: v0.122.1
+          image: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table
+      - name: SBOM of the pushed digest
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.name }}.spdx.json
+          upload-artifact: true
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.4
+      - name: Sign, attest the SBOM, then add the branch tag
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+          cosign attest --yes --type spdxjson --predicate "sbom-${{ matrix.name }}.spdx.json" "${IMAGE}@${DIGEST}"
+          # Version tags are release.yml's job; here only the moving branch tag.
+          for t in $TAGS; do case "$t" in *:sha-*|*:[0-9]*) ;; *) docker buildx imagetools create -t "$t" "${IMAGE}@${DIGEST}" ;; esac; done
+          echo "### gantry-${{ matrix.name }}: \`${IMAGE}@${DIGEST}\`" >>"$GITHUB_STEP_SUMMARY"
+
+  # One signed manifest of every digest this commit produced: what staging rehearses, what a person approves, what production runs
+  # and what a rollback goes back to (deploy/release/release-manifest.mjs). Built only after every gate above has passed.
+  release-manifest:
+    name: Signed release manifest
+    needs: [checks, audit, deploy-config, migrations, publish]
+    if: vars.GANTRY_CD_ENABLED == 'true' && github.event_name == 'push' && !github.event.repository.fork
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.4
+      - name: Resolve and verify every digest, write the manifest, sign it
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          args=()
+          for n in api worker migrate launcher edge github web runner keycloak backup; do
+            ref="ghcr.io/${owner}/gantry-${n}"
+            digest="$(docker buildx imagetools inspect "${ref}:sha-${GITHUB_SHA}" --format '{{json .Manifest}}' | jq -r .digest)"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no digest for gantry-${n}"; exit 1; }
+            # The signature, made by this workflow on main, must be on exactly that digest.
+            cosign verify --certificate-identity "https://github.com/${GITHUB_WORKFLOW_REF}" --certificate-oidc-issuer https://token.actions.githubusercontent.com "${ref}@${digest}" >/dev/null
+            args+=(--image "${n}=${digest}")
+          done
+          node deploy/release/release-manifest.mjs build --sha "$GITHUB_SHA" --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" "${args[@]}" >release.json
+          cosign sign-blob --yes --bundle release.json.bundle release.json >/dev/null
+          node deploy/release/release-manifest.mjs validate release.json --sha "$GITHUB_SHA"
+          { echo "### Release ${GITHUB_SHA:0:12}"; echo '```json'; cat release.json; echo '```'; } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ github.sha }}
+          path: |
+            release.json
+            release.json.bundle
+          if-no-files-found: error
+          retention-days: 90
+
+  e2e:
+    name: Whole stack (nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the runner image
+        run: docker compose -f deploy/compose.yml --profile runner-image build gantry-runner
+      - name: Smoke and isolation checks
+        run: |
+          DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          export DOCKER_GID
+          deploy/smoke.sh
+      - name: Backup and restore drill
+        run: |
+          DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          export DOCKER_GID
+          docker compose -f deploy/compose.yml --profile backup run --rm gantry-backup now
+          docker compose -f deploy/compose.yml --profile backup run --rm gantry-backup drill
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -f deploy/compose.yml logs --no-color --tail=200 > compose.log
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compose-logs
+          path: compose.log

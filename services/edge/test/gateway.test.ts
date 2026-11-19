@@ -300,11 +300,17 @@ describe("model gateway and run calls", () => {
       expect(res.status).toBe(200);
       const sent = JSON.parse(api.of("/checkpoint")[0]!.body);
       expect(sent).toMatchObject({ token: TOKEN, turn: 2, kind: "artefact", name: "notes.md", contentType: "text/markdown" });
-      expect(sent.content).toBeUndefined();
+      // A markdown document goes on with its (redacted) text so people can read it; anything else goes by reference only.
+      expect(sent.content).toBe("deploy with [REDACTED:aws-access-key] now");
       expect(sent.contentHash).toMatch(/^[0-9a-f]{64}$/);
       const stored = objectText(`sha256/${sent.contentHash}`);
       expect(stored).toBe("deploy with [REDACTED:aws-access-key] now");
       expect(sent.size).toBe(Buffer.byteLength(stored));
+    });
+
+    it("checkpoint: a transcript goes by reference only", async () => {
+      await run("POST", "/run/v1/checkpoint", { runId: RUN, at: "t", turn: 1, kind: "transcript", name: "t.jsonl", contentType: "text/markdown", content: "secret plan" });
+      expect(JSON.parse(api.of("/checkpoint").at(-1)!.body).content).toBeUndefined();
     });
 
     it("checkpoint FAILS CLOSED (503) when object storage is down: nothing is recorded", async () => {

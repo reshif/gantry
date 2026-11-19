@@ -44,11 +44,11 @@ export async function loadFlowState(db: Queryable, orgId: string, opts: FlowLoad
 type PolicyProject = PolicyState["projects"][number];
 type PolicyRepo = PolicyState["repos"][number];
 
-export interface ProjectRow { id: string; name: string; status: string; regulated: boolean }
+export interface ProjectRow { id: string; name: string; status: string; regulated: boolean; oncall: unknown }
 export interface RepoRow { id: string; name: string; project_id: string }
 
 export async function policyProjects(db: Queryable, orgId: string): Promise<ProjectRow[]> {
-  const { rows } = await db.query<ProjectRow>(`select id, name, status, regulated from projects where org_id = $1 order by position nulls last, created_at, id`, [orgId]);
+  const { rows } = await db.query<ProjectRow>(`select id, name, status, regulated, config -> 'oncall' as oncall from projects where org_id = $1 order by position nulls last, created_at, id`, [orgId]);
   return rows;
 }
 
@@ -62,7 +62,9 @@ export function foldProjects(rows: ProjectRow[], stops: ActiveStop[]): PolicyPro
   return rows.map((r) => {
     const kill = stops.find((s) => s.scope === "project" && s.project === r.id && s.mode === "kill");
     const halt = stops.find((s) => s.scope === "project" && s.project === r.id && s.mode === "halt");
-    return { id: r.id, name: r.name, status: r.status, killed: kill ? killInfo(kill) : null, halted: halt ? haltInfo(halt) : null, regulated: r.regulated } as PolicyProject;
+    return { id: r.id, name: r.name, status: r.status, killed: kill ? killInfo(kill) : null, halted: halt ? haltInfo(halt) : null, regulated: r.regulated,
+      // who is on call for this project: on-call policies and approver conditions read it (isOnCall)
+      oncall: Array.isArray(r.oncall) ? r.oncall.filter((x): x is string => typeof x === "string") : [] } as PolicyProject;
   });
 }
 

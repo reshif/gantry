@@ -100,7 +100,6 @@ export async function createTrigger(tx: Tx, a: Actor, b: CreateInput): Promise<C
   };
 }
 
-const CONFIG_KEYS = ["source", "label", "labelMap", "command", "schedule", "cls", "who", "reply", "dedupe", "title", "repo", "priority", "limits"] as const;
 
 export async function patchTrigger(tx: Tx, a: Actor, id: string, b: PatchInput): Promise<Cmd> {
   const row = await readTriggerRow(tx, a.orgId, id, true);

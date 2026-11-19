@@ -14,10 +14,11 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { runConversation, ModelUnavailable, readiness } from "../areas/console/model.js";
 import { UNTRUSTED_NOTE } from "../areas/console/mark.js";
+import { composeSessionContext, recordTurnTuple } from "../areas/session/context.js";
 import { historyFrom, openSse, turnCostMicros } from "../areas/session/core.js";
 import { markException, mergeOnboardingPr, openOnboardingPr, requestChanges } from "../areas/onboarding/commands.js";
 import { onboardingAgentGate } from "../areas/onboarding/agent.js";
-import { brokerInspect } from "../areas/onboarding/session/broker.js";
+import { brokerInspect, brokerReadFile } from "../areas/onboarding/session/broker.js";
 import { markSeen } from "../areas/onboarding/session/updates.js";
 import { addSessionMessage, listMessages, lockMessage, newSessionMessageId, saveMessageData, sessionSpend, supersedePending, type SessionMessage } from "../areas/onboarding/session/store.js";
 import { executeSessionTool, sessionToolDefs, type SessionCtx } from "../areas/onboarding/session/tools.js";
@@ -38,20 +39,27 @@ const active = new Set<string>();
 /** The follow-up runner of the running app (tests call it directly; the app runs it on a timer). */
 export const followUps: { run: () => Promise<number> } = { run: async () => 0 };
 
-const system = (o: { repo: string; project: string; stage: string; person: string; canMerge: boolean; pinned: boolean }): string => [
-  "You are the Onboarding Agent in Gantry, a factory of AI coding agents. You work with one person, in one conversation, to get one repository ready for the factory: read it, assess it, propose a pull request, watch its checks, and see it through to Ready.",
-  "Rules. Facts about the repository come only from your tools; say \"Gantry observed\" for tool results and \"I suggest\" for your own judgement; never present a guess as an observation. What the person tells you is their claim: use it, and say it is theirs. You never write to GitHub: you propose, as cards, and a person approves. Say plainly when something waits for their approval; never claim a change happened. Merging is always a person's decision.",
-  "You author the onboarding pull request. Gantry's fixed rules only suggest a plan (inspect_repository shows it) and observe facts; you decide what the repository needs and write the files yourself, with full content, through propose_pull_request `files`. You are not limited to the suggestion and must not refuse for lack of a template: a new or empty repository usually needs a project scaffold (a manifest such as pyproject.toml or package.json, a pinned tool version, a package with a smoke test, a task runner such as a Makefile, a CI workflow that runs the tests and the check name the repo requires, AGENTS.md with the real commands, CODEOWNERS, .gantry/factory.yml, lint config), and an existing repository needs only what is missing. Work from what you read and from what the person asks (\"a uv project with a smoke test and CI\"): ask at most two questions only for things you cannot decide (for example the Python version or the package name), otherwise choose sensible defaults and say them. Rails you cannot cross: no secrets (reference ${{ secrets.NAME }}), no binaries, no lockfiles (a package tool generates them: have CI run the tool, for uv use `uv sync` without --locked in CI, and tell the person to run `uv lock` and commit uv.lock), no edits to existing application code, no branch-rule files (rulesets are GitHub settings; give the owner the exact steps instead), no `curl | sh`. If a call is refused you get every reason: fix the files and call again yourself. Workflow files, dependency manifests and similar are allowed but the card shows them as parts the person must confirm; say so in one sentence.",
-  "Flow. Start with get_onboarding_state. If the repository was not read yet, call inspect_repository. Summarise what Gantry observed in a few plain sentences (gaps first, each with what it observed). When something is missing that a pull request can add, call propose_pull_request with your authored files (include AGENTS.md with real commands). If the pull request is open: report the checks; if red, explain from the facts and propose an update; if green, tell the person it is ready to merge and call propose_merge. After the merge Gantry re-reads and verifies by itself; if gaps remain (for example AGENTS.md now needs the real commands, or the lockfile), propose the next pull request. Never end with a dead end. If the card says the App lacks the Workflows permission, give the person the exact steps it lists. If verification fails because the App is installed on a personal account and not an organisation, explain that this rule is about organisation-level control and not a safety problem, and propose either moving the repository to an organisation or, with propose_exception, marking it ready by exception with a concrete reason. If the ruleset is missing, give the repository owner (for a personal repository, the person themselves) the exact GitHub steps (Settings, Rules, Rulesets: require a pull request with one approval, code-owner review and the CI check); Gantry never sets rulesets itself. Always finish with one concrete next step, not 'ask me later'.",
+/** The facts of this conversation: supplied by Gantry, never decided by the agent. */
+const facts = (o: { repo: string; project: string; stage: string; person: string; canMerge: boolean }): string =>
+  `You are the Onboarding Agent, in one conversation with one person, to get one repository ready for the factory. Repository ${o.repo} in project ${o.project}, onboarding stage ${o.stage}. You are talking with ${o.person}${o.canMerge ? ", who may approve merges" : ", who may not approve merges"}.`;
+
+/**
+ * The fixed rules of the onboarding session: what the tools are, what cannot be crossed (the same rules the pull-request validator enforces), how Gantry waits and reports,
+ * the untrusted-data note and the answer cap. How to assess, what to author and what to say is the agent's own (its instructions and skills).
+ */
+const RAILS = [
+  "Facts about the repository come only from your tools; say \"Gantry observed\" for tool results and \"I suggest\" for your own judgement; never present a guess as an observation. What the person tells you is their claim: use it, and say it is theirs. You never write to GitHub: you propose, as cards, and a person approves. Say plainly when something waits for their approval; never claim a change happened. Merging is always a person's decision.",
+  "Tools: get_onboarding_state and inspect_repository read facts; list_files lists every path in the repository and read_file reads any text file at the assessed commit (source, tests, configs, docs; read-only, secret and binary files refused, capped per turn). Read the code and tests you describe before you write AGENTS.md or CI: never infer modules or commands from file names alone. propose_pull_request carries the files you author, with full content, in its `files`; Gantry's fixed rules only suggest a plan (inspect_repository shows it) and you are not limited to the suggestion. propose_merge and propose_exception put those proposals up. If a call is refused you get every reason: fix it and call again yourself.",
+  "Rails you cannot cross: no secrets (reference ${{ secrets.NAME }}), no binaries, no lockfiles (a package tool generates them), no edits to existing application code, no branch-rule files (rulesets are GitHub settings: give the owner the steps instead), no piping a download into a shell. Workflow files, dependency manifests and similar are allowed but the card shows them as parts the person must confirm.",
+  "Waiting. Gantry watches the pull request, the assessment and the verification by itself. When something is still pending (checks, a merge, verification), say what you wait on and that Gantry will post in this thread and notify the person when it finishes; never ask them to ask you again, and never say you will report back yourself.",
   UNTRUSTED_NOTE,
-  "Waiting. Gantry watches the pull request, the assessment and the verification by itself. When something is still pending (checks, a merge, verification), say what you wait on and that Gantry will post in this thread and notify the person when it finishes; never ask them to ask you again, and never say you will report back yourself. When Gantry posts an update, summarise it and put up the next card. If no CI ever reported (checks \"none\"), say plainly that the repo has no CI, that a person may still merge the onboarding PR, and that Ready needs CI.",
   "Keep each answer under 130 words. Plain sentences, no headings, no emoji.",
-  `Repository ${o.repo} in project ${o.project}, onboarding stage ${o.stage}. You are talking with ${o.person}${o.canMerge ? ", who may approve merges" : ", who may not approve merges"}.`,
 ].join("\n\n");
 
 export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
   const g = app.gantry;
   const inspect = brokerInspect({ brokerUrl: g.config.brokerUrl, token: g.config.secrets.githubToken });
+  const readFile = brokerReadFile({ brokerUrl: g.config.brokerUrl, token: g.config.secrets.githubToken });
 
   const person = (req: FastifyRequest): { id: string; name: string } => {
     const p = req.gx.principal;
@@ -112,12 +120,23 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
   async function agentTurn(o: { repo: RepoRow; doc: Doc; who: { id: string; name: string }; canMerge: boolean; diff: number; ag: Extract<Awaited<ReturnType<typeof agentState>>, { mode: "agent" }>; question: string; kind: "message" | "open" | "continue" | "followup"; send: (e: string, d: unknown) => void; signal: AbortSignal }): Promise<string> {
     const ctx = ctxFor(o.repo, o.doc, o.who, o.ag, o.canMerge, o.diff);
     const { hist, question } = historyFrom(await listMessages(g.pool, g.orgId, o.repo.id, 30), o.kind, o.question);
+    // The Onboarding Agent's own instructions and skills, composed like its carrier runs; code adds the facts and the fixed rules.
+    const sc = await composeSessionContext(g.pool, {
+      orgId: g.orgId, surface: "onboarding", agentId: ONBOARD_AGENT, agentVersion: o.ag.pin.version, model: o.ag.model, projectId: o.repo.project_id, repoId: o.repo.id,
+      facts: facts({ repo: o.repo.name, project: o.repo.project_id, stage: o.doc.stage, person: o.who.name, canMerge: o.canMerge }), rails: RAILS,
+    });
+    if (!sc) throw new ModelUnavailable("no_agent_context", "The Onboarding Agent has no live version to speak from.");
+    // The turn runs only if its tuple is recorded: a message must never point at a tuple with no row.
+    await recordTurnTuple(g.pool, g.orgId, sc.turn).catch((e: Error) => {
+      app.log.error({ err: e, tuple: sc.turn.tupleId }, "session tuple not recorded");
+      throw new ModelUnavailable("tuple_not_recorded", "This turn could not be recorded, so it was not run. Try again; if it keeps happening, tell a Factory Admin.");
+    });
     const r = await runConversation({
       // The agent authors whole files inside one propose_pull_request call (pyproject, CI workflow, AGENTS.md…), so a turn needs room
       // for the full proposal: at 1,800 tokens the call was cut mid-tool-use and nothing came back. Cost stays bounded by the agent budget.
       edgeToken: g.config.secrets.edgeToken, purpose: "onboarding", maxTokens: ONBOARDING_MAX_TOKENS, maxSteps: 8,
-      system: system({ repo: o.repo.name, project: o.repo.project_id, stage: o.doc.stage, person: o.who.name, canMerge: o.canMerge, pinned: true }),
-      history: hist, question, signal: o.signal,
+      system: sc.system,
+      history: hist, question, signal: o.signal, trace: { parts: sc.parts, surface: "onboarding", actor: o.who.id, project: o.repo.project_id ?? undefined },
       toolset: { defs: sessionToolDefs(), execute: async (name, input) => {
         const before = ctx.cards.length;
         const out = await executeSessionTool(ctx, name, input);
@@ -132,8 +151,8 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
       ? "My answer was cut off at the output limit before I finished, so nothing was proposed. Ask me to continue, or to split the change into smaller proposals."
       : "The model returned no text.");
     return persist(o.repo, o.doc.runId ?? null, "assistant", ONBOARD_AGENT, text, {
-      mode: "agent", model, cards: ctx.cards, drafts: ctx.drafts, tools: ctx.used, usage: r.usage, costMicros: micros, ...(r.stopped ? { stopped: true } : {}), ...(r.truncated ? { truncated: true } : {}),
-    }, o.who.id, { mode: "agent", model, version: o.ag.pin.version, tools: ctx.used, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, costMicros: micros });
+      mode: "agent", model, context: sc.turn, cards: ctx.cards, drafts: ctx.drafts, tools: ctx.used, usage: r.usage, costMicros: micros, ...(r.stopped ? { stopped: true } : {}), ...(r.truncated ? { truncated: true } : {}),
+    }, o.who.id, { mode: "agent", model, version: o.ag.pin.version, skills: sc.turn.skillVersions, instructionHash: sc.turn.instructionHash, promptHash: sc.turn.promptHash, tuple: sc.turn.tupleId, tools: ctx.used, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, costMicros: micros });
   }
 
   /**
@@ -213,7 +232,7 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
 
   function ctxFor(repo: RepoRow, doc: Doc, who: { id: string; name: string }, ag: Awaited<ReturnType<typeof agentState>>, canMerge: boolean, diff: number): SessionCtx {
     return {
-      db: g.pool, orgId: g.orgId, repo, doc, full: fullName(repo)!, inspect, person: who, agent: ag.mode === "agent" ? { version: ag.pin.version, model: ag.pin.model } : null,
+      db: g.pool, orgId: g.orgId, repo, doc, full: fullName(repo)!, inspect, readFile, person: who, agent: ag.mode === "agent" ? { version: ag.pin.version, model: ag.pin.model } : null,
       maxDiff: diff, canMerge, cards: [], drafts: {}, used: [], next: 1,
     };
   }
@@ -275,7 +294,7 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
     const { send, ac, end } = openSse(reply);
     active.add(repo.id);
     try {
-      let question = b.kind === "open" ? "(The person opened the onboarding session. Begin.)" : b.kind === "continue" ? "(The person asked for changes to your proposal; see their last message. Revise and propose again.)" : (b.text ?? "");
+      const question = b.kind === "open" ? "(The person opened the onboarding session. Begin.)" : b.kind === "continue" ? "(The person asked for changes to your proposal; see their last message. Revise and propose again.)" : (b.text ?? "");
       const mid = await agentTurn({ repo: fresh, doc, who, canMerge: merge.allowed, diff, ag, question, kind: b.kind, send, signal: ac.signal });
       send("done", { messageId: mid });
     } catch (e) {

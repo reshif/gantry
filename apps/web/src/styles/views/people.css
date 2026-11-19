@@ -1,71 +1,63 @@
-/* People & teams. Tokens only. */
-.view-people .people-grid { grid-template-columns: minmax(280px, 2fr) minmax(0, 3.4fr); }
-.ppl-tree .panel-body { padding: 12px 14px; }
-.ppl-search { margin: 10px 0 4px; }
-.ppl-search .input { width: 100%; }
-.team-name { display: flex; align-items: baseline; gap: 8px; }
-.ppl-count { font-size: var(--t-xs); font-weight: 400; }
-.ppl-owns { margin-left: 8px; }
-.member { grid-template-columns: 22px minmax(0, 1fr) auto; }
-.ppl-name { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; font-weight: 500; }
-.ppl-frole { font-family: var(--f-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); border: 1px solid var(--accent-line); padding: 0 4px; border-radius: 2px; }
-.ppl-flags { display: flex; flex-direction: column; gap: 2px; align-items: flex-end; }
-.ppl-flags .chip { margin-right: 0; }
-.ppl-flags .ic, .ppl-badges .ic { width: 11px; height: 11px; }
+/* People & teams and the person page. Tokens only. Shared look (panels, chips, tables) lives in foundation.css. */
 
-.member-detail .ad-head { flex-wrap: wrap; align-items: flex-start; }
-.ppl-who { min-width: 0; flex: 1 1 260px; display: grid; gap: 2px; }
-.ppl-who .ad-meta { overflow-wrap: anywhere; }
-.ppl-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.member-detail > .sub-h { margin-left: 16px; margin-right: 16px; }
-.ppl-pad { margin-left: 16px; margin-right: 16px; }
-.member-detail > .table-scroll { margin: 0 16px; border: 1px solid var(--line); }
-.ppl-frole-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.ppl-frole-row select { max-width: 380px; }
+/* shared two-up row used by the person page (and Access / Security panels that sit side by side) */
 
-.ppl-roles th[scope="row"] { white-space: nowrap; }
-.ppl-pname { display: block; font-weight: 600; font-size: var(--t-sm); }
-.ppl-rcol { text-align: center !important; font-size: 10px !important; white-space: normal !important; min-width: 62px; line-height: 1.2; }
-.ppl-rcell { text-align: center !important; }
-.ppl-rcell.is-on { background: var(--accent-soft); }
-.ppl-roles tr.is-member th[scope="row"] { box-shadow: inset 3px 0 0 var(--accent); }
+/* organisation card */
 
-.ppl-eff-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: var(--s4) 16px var(--s2); }
-.ppl-eff-head .sub-h { margin: 0; }
-.ppl-eff-head select { margin-left: auto; max-width: 200px; }
-.ppl-grp th { background: var(--sunk); font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
-.ppl-stop th[scope="row"] { color: var(--kill); }
-.ppl-aid { display: block; font-size: 10px; }
-.eff-cell { position: relative; }
-.eff-cell.is-policy { background: var(--wait-soft); color: var(--wait); }
-.eff-pol { display: block; font-size: 9px; line-height: 1; }
-.eff-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.member-detail .caps-grid li[tabindex]:focus-visible { outline: 2px solid var(--accent); }
+/* team cards */
+.ppl-teams { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); align-items: start; }
+.ppl-team-desc { margin: 0; }
+.team-lines { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0; }
+.team-roles { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0; }
 
-@media (max-width: 1100px) { .view-people .people-grid { grid-template-columns: minmax(0, 1fr); } }
+/* person page */
+.person-back { align-self: flex-start; }
+.person-top { display: flex; gap: 16px; align-items: flex-start; padding: 16px; flex-wrap: wrap; }
+.person-kicker { font-size: var(--t-sm); color: var(--muted); }
+.person-name { margin: 0; }
+.person-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 16px 16px; }
+.person-actions .btn { flex: none; }
+.person-anchor { display: block; scroll-margin-top: 72px; }
+.ppl-held { display: grid; gap: 12px; }
+.ppl-held .kicker { display: block; margin-bottom: 4px; }
+
+@media (max-width: 1100px) { .ppl-teams { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 560px) {
-  .ppl-eff-head select { margin-left: 0; max-width: 100%; }
-  .member-detail .ad-tools { margin-left: 0; width: 100%; }
+  .person-actions .btn { flex: 1 1 auto; }
 }
 
-/* round three: custom roles and the selected permission cell */
-.ppl-rcol.is-custom { background: var(--accent-soft); }
-.ppl-custom { display: block; font-size: 9px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; }
-.eff-cell { cursor: pointer; }
-.eff-cell.is-sel { box-shadow: inset 0 0 0 2px var(--ink); }
-.ppl-cell { margin: var(--s2) 16px; }
-.ppl-cell p { margin: 0; }
-.ppl-cell > .row { flex-wrap: wrap; align-items: flex-start; }
-
 /* Team roles and inherited roles. */
-.ppl-defaults { display: flex; gap: 6px; align-items: baseline; margin: 0 0 12px; }
-.team-roles { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
 .team-grants { display: contents; list-style: none; margin: 0; padding: 0; }
 .team-grant { display: inline-flex; gap: 6px; align-items: center; }
-.chip-x { background: none; border: 0; padding: 0 2px; cursor: pointer; color: var(--muted); font: inherit; line-height: 1; }
-.chip-x:hover, .chip-x:focus-visible { color: var(--text); }
-.chip-x[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
-.ppl-held { display: grid; gap: 8px; }
-.ppl-held-list { display: flex; gap: 4px; flex-wrap: wrap; list-style: none; margin: 4px 0 0; padding: 0; }
-.ppl-via { display: block; color: var(--accent); }
-.eff-src { font-size: 9px; color: var(--accent); margin-left: 2px; }
+
+/* Deactivated people and the deactivate dialog */
+.chip-muted { border-color: var(--line); color: var(--muted); white-space: nowrap; }
+.ppl-off-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ppl-off-list li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 4px 12px; align-items: baseline; }
+.ppl-off-what { min-width: 0; overflow-wrap: anywhere; }
+.ppl-off-ok { display: flex; align-items: center; gap: 6px; margin: 0; font-weight: 500; }
+.ppl-off-ok .ic { color: var(--done); }
+@media (max-width: 600px) { .ppl-off-list li { grid-template-columns: minmax(0, 1fr); } }
+
+/* Account page */
+.acct-body { display: grid; gap: var(--s4); min-width: 0; }
+.acct-hint { margin: 0 0 12px; }
+.acct-hint-pad { padding: 12px 16px 4px; margin: 0; }
+.acct-who { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; font-size: var(--t-lg); }
+.acct-kv { display: grid; margin: 0; border-top: 1px solid var(--line); }
+.acct-kv > div { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.acct-kv dt { color: var(--muted); font-size: var(--t-sm); }
+.acct-kv dd { margin: 0; overflow-wrap: anywhere; }
+.acct-act { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.acct-setrow { display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 8px 0 12px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+.acct-setrow-main { display: grid; gap: 2px; flex: 1 1 260px; }
+.acct-setrow-main label { font-weight: 500; }
+.acct-links { display: grid; gap: 12px; }
+.acct-linkhead { display: flex; gap: 8px; align-items: center; }
+.acct-linklist { list-style: none; margin: 0; padding: 0; display: grid; }
+.acct-linklist li { display: flex; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.acct-linklist li .btn { margin-left: auto; }
+@media (max-width: 560px) { .acct-kv > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+
+/* Blueprint filter bars: the sheet's fields sit on one baseline (a Field's form margin does not apply inside the bar). */
+/* A bar with only a search box: the count sits to its right (a zero filter count makes the grid track list invalid). */

@@ -90,6 +90,12 @@ export interface Catalog {
   actions: Action[];
 }
 
+/**
+ * `blocked` is reserved: no engine path sets it today (a work order that cannot go on is `failed`, or `parked` in a bay such as Needs a person; a merge that
+ * cannot happen is parked with bayCause "merge"). Retry, Home, the session and the board still treat it as live, so a future producer or an imported row behaves
+ * like `failed`. Statechart model, gap 7: the handling is kept and documented rather than removed; `lifecycle-gaps.test.ts` fails if something starts setting it
+ * without this note being revisited.
+ */
 export type WoStateId = "running" | "waiting" | "blocked" | "failed" | "parked" | "killed" | "done";
 export interface WoStateInfo {
   label: string;
@@ -106,6 +112,8 @@ export interface Template {
   classesSkip: Record<string, string[]>;
   mcp: Id[];
   approverPreset: "standard" | "light" | "strict";
+  /** Approver rules saved from a project (counts, escalation hours, conditions, fallback, separation of duties); a project made from it starts with these instead of the preset (S-58). */
+  approvers?: Record<string, ApproverRule>;
   notify: "standard" | "light" | "strict";
   builtIn: boolean;
   order?: string[];
@@ -181,7 +189,10 @@ export interface Person {
   oncall: boolean;
   github: string;
   away: Away | null;
-  mfa?: boolean;
+  /** Holds a second factor: true; known not to: false; null = unknown until their next sign-in (not read from the provider yet). */
+  mfa?: boolean | null;
+  /** Record version (read only). Sent as If-Match by offboarding. */
+  version?: number;
   invitedBy?: Id;
   invitedAt?: Ms;
 }
@@ -190,15 +201,46 @@ export interface Person {
 
 export type ProjectStatus = "active" | "onboarding" | "new" | "archived";
 
+/** Who turned something off or changed a locked mode against its lock, when and why (a Factory Admin override, owner decision 2026-11-19). */
+export interface FlowOverrideMark {
+  by: string;
+  byName: string;
+  at: number;
+  reason: string;
+  /** For a mode override: the mode before. */
+  from?: GateKind;
+}
+/** A safety rail on one agent run. Every field is optional; what is unset is inherited (station override, then the agent version, then the defaults: 40 turns, 60 minutes). */
+export interface RunLimits {
+  turns?: number;
+  wallClockSeconds?: number;
+  costUsd?: number;
+}
+/** What a run that stopped on a limit reports: which limit and the numbers (used 40 of 40 turns). */
+export interface LimitStop {
+  limit: "turns" | "time" | "cost";
+  used: number;
+  max: number;
+  unit: "turns" | "seconds" | "usd";
+  text: string;
+  station: string;
+  attempt: string;
+}
 export interface StationConfig {
   enabled: boolean;
   wip: number;
+  /** Overrides the agent's run limits for runs at this station in this project, per field. */
+  runLimits?: RunLimits;
   absent?: boolean;
+  /** Set while the station is off by a Factory Admin override of a lock it carries. */
+  override?: { off?: FlowOverrideMark };
 }
 export interface GateConfig {
   enabled: boolean;
   mode: GateKind;
   absent?: boolean;
+  /** Set while the gate is off, or in a locked mode, by a Factory Admin override. */
+  override?: { off?: FlowOverrideMark; mode?: FlowOverrideMark };
 }
 export interface ProjectFlow {
   stations: Record<string, StationConfig>;
@@ -225,6 +267,11 @@ export interface ApproverRule {
   roles: string[];
   people: Id[];
   required: number;
+  /**
+   * Per-work-class override of `required`: class id -> approvals needed for work orders of that class. It changes the COUNT only, for a listed class.
+   * A class without an entry uses `required`. It never touches `sod` and never makes a gate optional (every count is a whole number of at least 1).
+   */
+  classRequired?: Record<string, number>;
   sod: boolean;
   conditions: ApproverCondition[];
   escalateH: number;
@@ -255,7 +302,10 @@ export interface NotificationRoute {
 }
 
 export interface ProjectBudget {
+  /** The monthly cap in USD. Read it with `capped`: 0 with capped true is a real $0 cap (nothing metered runs); 0 with capped false is no cap. */
   monthly: number;
+  /** True when a monthly cap is in force (an amount above 0, or a $0 cap a person set). */
+  capped: boolean;
   mtd: number;
   alertAt: number;
 }
@@ -291,6 +341,8 @@ export interface HaltInfo {
   by: Id;
   at: Ms;
   reason: string;
+  /** Why the halt exists: `manual` (a person), `budget` or `readiness` (Gantry raised it). Absent on older data. */
+  cause?: string;
 }
 
 export interface Project {
@@ -313,6 +365,12 @@ export interface Project {
   killed: KillInfo | null;
   overlay: string;
   guidelines?: ProjectGuidelines;
+  /** People on call for this project, chosen by its admins. Factory Admins always count as on call too (see isOnCall). */
+  oncall?: Id[];
+  /** The default page to the people on call for halts, blocked work orders, security holds and escalations (kill and restore always page). */
+  pageOnCall?: boolean;
+  /** What the on-call page covers right now, as the server words it (kill and restore only while the default page is off). */
+  pagedFor?: string[];
   [extra: string]: unknown;
 }
 
@@ -453,6 +511,8 @@ export interface Approval {
   by: Id;
   at: Ms;
   via: string;
+  /** The seat this vote fills when the voter acted as the stand-in of an away approver (S-53): the away person's id. Absent for a vote in the voter's own seat. */
+  for?: Id;
 }
 export interface Rejection {
   by: Id;
@@ -479,8 +539,12 @@ export interface GateInstance {
   rejections: Rejection[];
   checks: GateCheck[];
   waitingSince?: Ms;
+  /** The approvals this opening was opened with. A later loosening of the rule never lowers what a waiting gate needs (spec 9.3), so progress and the satisfiable warning use it too. */
+  openedRequired?: number;
   decision?: GateDecisionRecord;
   trustNote?: string | null;
+  /** The gate waited past its escalation limit: the rule's fallback approver (else the project owner) may approve it from then on. */
+  escalated?: boolean;
 }
 
 export interface HistorySkill {
@@ -554,6 +618,8 @@ export interface ConvMessage {
   text: string;
   qid?: string;
   chips?: string[];
+  /** Written by Gantry's scripted questionnaire, not by an agent. */
+  scripted?: boolean;
 }
 export interface ConvQuestion {
   id: string;
@@ -702,6 +768,9 @@ export interface Guardrail {
 export type WorkOrderState = WoStateId;
 export type WoBayId = string;
 
+/** Why a work order waits before a full station (the counts are those when it began to wait; `wipStatus` has the live ones). */
+export interface WipWait { station: Id; since: Ms; live: number; limit: number; /** Why it waits: it advanced, was sent back, is retried, returns from a bay, or was restored. */ kind?: "forward" | "back" | "retry" | "unpark" | "restore" | "merge" }
+
 export interface WorkOrder {
   id: Id;
   project: Id;
@@ -737,6 +806,14 @@ export interface WorkOrder {
   pr: PullRequest | null;
   blockReason: string | null;
   failReason: string | null;
+  /** Set while the work order's station stopped on a run limit: which one and the numbers. */
+  limitStop?: LimitStop | null;
+  /** Why the work order sits in the Needs a person bay: "failed" when the station failed or lost its run repeatedly, "merge" when the approved merge could not happen (so Retry or Retry merge applies). */
+  bayCause?: string;
+  /** Set while the work order waits for a station at its WIP limit (after an advance, a send-back, a retry, a return from a bay or a restore). It stays where it is and goes in when a place frees. */
+  wipWait?: WipWait | null;
+  /** "start" when the failed run never started (workspace seeding, the launcher, no model). */
+  failPhase?: string;
   doneAt: Ms | null;
   killed: WoKill | null;
   parent: Id | null;
@@ -807,6 +884,12 @@ export interface Agent {
   projects: "all" | Id[];
   budget: number;
   guardrails: { paths: string[]; maxDiff: number };
+  /** Run limits a person set on the working copy (versioned with the agent). Empty: the defaults apply. */
+  limits?: RunLimits;
+  /** The limits of the version on the floor: what a run is bound by. `limits` is the working copy, which only a new version and its promotion puts on the floor. */
+  liveLimits?: RunLimits;
+  /** The per-run budget of the version on the floor: the cost limit a run has when none is set. */
+  liveBudget?: number;
   suite: Id;
   instructions: string;
   overrides: Record<string, { model?: string; autonomy?: Autonomy; budget?: number }>;
@@ -817,6 +900,8 @@ export interface Agent {
   evalScore: number;
   /** Loaded with the built-in starter kit. */
   builtin?: boolean;
+  /** The skills the version on the floor runs with, each at its pinned version label ("" when none is recorded). `skills` is the draft attachments, which can differ until a new version goes live. */
+  liveSkills?: Array<{ id: Id; version: string }>;
 }
 
 export interface SkillVersion {
@@ -1081,6 +1166,8 @@ export interface McpServer {
   protocolRevision?: string;
   enabled?: boolean;
   disabledReason?: string | null;
+  /** The address or transport changed and its tools were not approved again; it cannot be switched on until they are. */
+  needsReapproval?: boolean;
   healthDetail?: string | null;
   discoveredAt?: Ms | null;
   version?: number;
@@ -1144,7 +1231,8 @@ export interface IntegrationInstance {
   name: string;
   config: Record<string, string | boolean | undefined>;
   secretMask: string;
-  status: "healthy" | "failing" | "offline" | (string & {});
+  /** "unknown" means the connection was never tested, or its settings changed since (shown as "Not tested yet"). */
+  status: "healthy" | "failing" | "offline" | "unknown" | (string & {});
   connected: boolean;
   projects: "all" | Id[];
   lastSync: Ms;
@@ -1356,7 +1444,8 @@ export interface SsoSettings {
 }
 export interface SecuritySettings {
   sso: SsoSettings;
-  mfa: { policy: string; methods: string[] };
+  /** What the server enforces (read-only, S-127): a second factor for everyone. `waived` only on a local dev stack that opted in. */
+  mfa: { policy: string; methods: string[]; required?: boolean; waived?: boolean };
   sessionHours: number;
   idleMin: number;
   domains: string[];
@@ -1367,6 +1456,12 @@ export interface SecuritySettings {
   /** Minutes a sign-in counts as fresh for step-up operations (spec 14.1). Default 15, allowed 5 to 60. */
   stepUpWindowMinutes?: number;
   githubLogin: boolean;
+  /** Hosts station agents may read through governed web research (patterns like docs.example.com or *.example.org). Empty: no web research. */
+  researchHosts?: string[];
+  /** LAN ranges (IPv4 CIDR, private space only) an on-prem vendor endpoint may be in. Empty: a vendor endpoint must be a public address (S-68). Set by a Factory Admin with a fresh sign-in; audited. */
+  vendorLanRanges?: string[];
+  /** Most a person may spend on chats (the Console and side threads with agents) per rolling 24 hours, in dollars. Null: no cap beyond the model budgets. */
+  chatCapUsdPerDay?: number | null;
 }
 export interface Session {
   id: Id;
@@ -1679,4 +1774,11 @@ export interface Decision {
   reason: string;
   rule: DecisionRule;
   needs: string;
+  /**
+   * A Factory Admin break-glass (owner decision 2026-11-19). On a denial: only an override with a reason would allow it (`needs` is "override_reason").
+   * On an allow: the override was used, so the caller must record the reason in the audit.
+   */
+  override?: boolean;
+  /** Which stop the override passes: a release freeze or an andon halt. */
+  overrideKind?: "freeze" | "halt";
 }

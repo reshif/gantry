@@ -1,53 +1,97 @@
-/** Onboarding (#onboarding): repo readiness pipeline for the current project, the repo drawer, the connect-repo wizard, per-repo settings and the Onboarding agent tab with versioned guidelines. Ported from legacy/js/views/onboarding.js. */
-import { useState } from "react";
+/** Onboarding (#onboarding): the Blueprint's pipeline of repositories moving to Ready, the guidelines, and one session page per repository. */
 import { useCan } from "../api/can";
-import { useMe, useProjects, useRepos } from "../api/queries";
-import { usePrefs } from "../lib/prefs";
-import { navigate, useHash } from "../lib/router";
-import { Btn, Empty, Tabs, ViewHead } from "../ui/primitives";
+import { useGuidelines, useMe, useProjects, useRepos, useReposOf } from "../api/queries";
+import { navigate, hashFor, useHash } from "../lib/router";
+import { Btn, Chip, Empty, Panel, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
+import { Async, qState } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
-import { AgentTab } from "./onboarding/Agent";
-import { RepoDrawer, rememberTab } from "./onboarding/Drawer";
-import { isStopped, needsMerge, needsPr, type RepoV } from "./onboarding/kit";
-import { Pipeline } from "./onboarding/Pipeline";
+import { setProject } from "../lib/prefs";
+import { usePrefs } from "../lib/prefs";
+import { ProtoList } from "./projects/protolist";
+import { ActBtn, useTab } from "./projects/proto";
+import { GuidelinesPanel } from "./onboarding/Guidelines";
+import { OnboardDialog } from "./onboarding/OnboardDialog";
+import { RepoDrawer } from "./onboarding/Drawer";
+import { PSTAGES, protoStage, stoppedLabel, type OnbRow } from "./onboarding/proto";
+import { gaps, useAvailableRepos, type RepoV } from "./onboarding/kit";
 import { SessionPage } from "./onboarding/Session";
-import { ConnectWizard } from "./onboarding/Wizard";
+import "../styles/views/onboarding.css";
+import "../styles/views/onboarding-session.css";
 
 export default function OnboardingView() {
   const ui = useUI();
   const me = useMe();
   const hash = useHash();
   const prefs = usePrefs();
-  const projects = useProjects().data ?? [];
+  const projectsQ = useProjects();
+  const projects = projectsQ.data ?? [];
   const project = projects.find((p) => p.id === prefs.project) ?? null;
-  const repos = (useRepos(project?.id).data ?? []) as RepoV[];
+  const reposQ = useRepos(project?.id);
+  const repos = (reposQ.data ?? []) as RepoV[];
+  const availQ = useAvailableRepos(project?.id ?? "", !!project);
+  const gl = useGuidelines().data;
+  const allRepos = useReposOf(projects.map((p) => p.id));
+  const live = allRepos.reduce((n, q) => n + (q.data ? q.data.filter((r) => r.onboarding.stage === "ready").length : 0), 0);
   const connect = useCan("repo.onboard", { project: project?.id });
-  const [tab, setTab] = useState<"pipeline" | "agent">("pipeline");
-  const openRepo = (repoId: string, dtab?: string) => {
-    if (!project) return;
-    if (dtab) rememberTab(repoId, dtab);
-    ui.drawer.open(`onb:${repoId}`, (close) => <RepoDrawer repoId={repoId} projectId={project.id} close={close} />);
-  };
-  const wizard = () => {
-    if (!project) return;
-    ui.open((close) => <ConnectWizard project={project} repos={repos} close={close} onDone={(id) => { setTab("pipeline"); navigate("onboarding", id); }} />);
-  };
+  const [tab, setTab] = useTab(["pipeline", "guidelines"], "pipeline");
   if (!me) return null;
-  if (!project) return <div className="view"><Empty title="No project" text="You do not have a project to show." /></div>;
-  // `#/p/<project>/onboarding/<repo>`: the onboarding session of one repo (the pipeline's rows open it).
-  if (hash.param) return <div className="view onb-view"><SessionPage projectId={project.id} repoId={hash.param} back={() => navigate("onboarding", null)} details={() => openRepo(hash.param!)} /></div>;
-  const ready = repos.filter((r) => r.onboarding.stage === "ready").length;
-  const attention = repos.filter((r) => isStopped(r) || needsMerge(r) || needsPr(r)).length;
+  if (!project) return <div className="view">{projectsQ.data ? <Empty title="No project" text="You do not have a project to show." /> : <Async query={projectsQ} what="your projects" id="onb-projects">{() => null}</Async>}</div>;
+  // `#/p/<project>/onboarding/<repo>`: the onboarding session of one repo.
+  if (hash.param) {
+    return (
+      <div className="view onb-view">
+        <SessionPage projectId={project.id} repoId={hash.param} back={() => navigate("onboarding", null)} details={() => ui.drawer.open(`onb:${hash.param}`, (close) => <RepoDrawer repoId={hash.param!} projectId={project.id} close={close} />)} />
+      </div>
+    );
+  }
+  const connected = new Set(repos.map((r) => r.name.toLowerCase()));
+  const rows: OnbRow[] = [
+    // the pipeline is what is moving to Ready: a repository that is already live is counted in the Ready figure and listed in Project config
+    ...repos.filter((r) => r.onboarding.stage !== "ready").map((r) => ({ id: r.id, name: r.name, lang: r.lang, stage: protoStage(r), gaps: r.onboarding.findings.length ? gaps(r).length : null, repo: r })),
+    ...(availQ.data?.available ?? []).filter((a) => !connected.has(a.repo.toLowerCase())).map((a) => ({ id: a.repo, name: a.repo, lang: a.lang, stage: 0, gaps: null, repo: null })),
+  ];
+  // in progress first, then the ones waiting to start, then the ready ones (the Blueprint lists what is moving)
+  const order = (r: OnbRow) => (r.stage === 4 ? 2 : r.stage === 0 ? 1 : 0);
+  rows.sort((a, b) => order(a) - order(b));
+  const waiting = rows.filter((r) => r.stage === 0).length;
+  const moving = rows.filter((r) => r.stage > 0 && r.stage < 4).length;
+  const ready = live;
+  const onboard = (pick?: OnbRow) => ui.open((close) => <OnboardDialog rows={rows} projects={projects} project={project} pick={pick} close={close} />);
+  const href = (r: OnbRow): string => hashFor("onboarding", r.repo ? r.repo.id : null, project.id);
   return (
     <div className="view onb-view">
       <ViewHead
-        kicker={`Project · ${project.name}`} title="Onboarding"
-        sub="A repo must reach Ready before anyone can submit work orders to it. Gantry assesses each repo and opens a PR with the changes it needs. The Onboarding Agent adds its judgement and drafts when a model vendor is connected; otherwise the work is rule-based."
-        meta={[["Repos", String(repos.length)], ["Ready", `${ready} / ${repos.length}`], ["In progress", String(repos.length - ready - attention)], ["Needs action", String(attention)]]}
-        actions={<Btn kind="primary" icon="plus" id="onb-connect" label="Connect repo" guard={connect} onClick={wizard} />}
+        kicker={project.key} title="Onboarding" sub="Bring a repository onto the line: assess it, fix the gaps by pull request, then go live."
+        actions={<ActBtn kind="primary" icon="plus" id="onb-connect" label="Onboard a repo" guard={connect} onClick={() => onboard()} />}
       />
-      <Tabs idPrefix="onb-tab" items={[{ id: "pipeline", label: "Pipeline", count: repos.length }, { id: "agent", label: "Onboarding agent and guidelines" }]} active={tab} onChange={(t) => setTab(t as typeof tab)} />
-      {tab === "pipeline" ? <Pipeline project={project.id} repos={repos} open={(id) => navigate("onboarding", id)} details={openRepo} /> : <AgentTab project={project} />}
+      <StatRow>
+        <Stat label="Waiting" value={qState(reposQ, () => String(waiting))} sub="not started" />
+        <Stat label="In progress" value={qState(reposQ, () => String(moving))} tone="info" />
+        <Stat label="Ready" value={allRepos.every((q) => q.isSuccess) ? String(ready) : "…"} tone="done" sub="repos live" />
+        <Stat label="Guidelines" value={gl ? String(gl.items.length) : "…"} sub={gl ? `v${gl.version}` : ""} />
+      </StatRow>
+      <Tabs revealActive idPrefix="onb-tab" items={[{ id: "pipeline", label: "Pipeline", count: rows.filter((r) => r.stage > 0).length }, { id: "guidelines", label: "Guidelines", count: gl?.items.length ?? null }]} active={tab} onChange={setTab} />
+      {tab === "pipeline" ? (
+        <Async query={reposQ} what="repos" id="onb-repos" isEmpty={() => false}>
+          {() => (
+            <Panel title="Repositories moving to Ready" flush>
+              <ProtoList<OnbRow>
+                id="onb-list" noun="repo" rows={rows} rowKey={(r) => r.id} text={(r) => r.name} searchLabel="Search repo" searchPlaceholder="Search…"
+                filters={[{ k: "stage", label: "Stage", opts: PSTAGES.map((s, i) => [String(i), s] as [string, string]), fn: (r, v) => String(r.stage) === v }]}
+                cols={[
+                  { key: "r", label: "Repository", sort: (r) => r.name, render: (r) => <div>{r.stage ? <a className="pri" href={href(r)} onClick={() => setProject(project.id)}>{r.name}</a> : <span className="pri">{r.name}</span>}<span className="sub">{r.lang}</span></div> },
+                  { key: "s", label: "Stage", sort: (r) => r.stage, render: (r) => <div className="row" style={{ gap: 2 }} role="img" aria-label={`Stage ${PSTAGES[r.stage]}`}>{PSTAGES.map((s, i) => <span key={s} title={s} style={{ width: 18, height: 8, background: i <= r.stage ? "var(--accent)" : "var(--sunk)", border: "1px solid var(--line2)" }} />)}</div> },
+                  { key: "sn", label: "Status", render: (r) => { const stop = r.repo ? stoppedLabel(r.repo) : null; return stop ? <Chip text={stop} cls={stop === "Failed" ? "bad" : "warn"} /> : <Chip text={PSTAGES[r.stage]} cls={r.stage === 4 ? "ok" : r.stage ? "info" : "plain"} />; } },
+                  { key: "f", label: "Gaps", align: "end", render: (r) => (r.gaps == null ? "—" : String(r.gaps)) },
+                  { key: "a", label: "", align: "end", render: (r) => (r.stage ? <div className="row" style={{ gap: 6, justifyContent: "flex-end" }}><ActBtn small id={`onb-chat-${r.id}`} label="Conversation" icon="chat" onClick={() => { window.location.hash = `${hashFor("onboarding", r.repo?.id ?? r.id, project.id)}?focus=chat`; }} /><ActBtn small id={`onb-open-${r.id}`} label="Open" onClick={() => navigate("onboarding", r.repo?.id ?? r.id)} /></div> : <Btn small kind="primary" id={`onb-start-${r.id}`} label="Start" guard={connect} onClick={() => onboard(r)} />) },
+                ]}
+              />
+            </Panel>
+          )}
+        </Async>
+      ) : (
+        <GuidelinesPanel project={project} />
+      )}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 # Build context is the repository root:  docker build -f apps/web/Dockerfile -t gantry-web:dev .
 # Behind a TLS-intercepting proxy, add: --secret id=cacert,src=/path/to/ca-bundle.crt (optional; used only for npm ci).
 
-FROM node:22-alpine AS build
+FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS build
 WORKDIR /repo
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false
 
@@ -27,11 +27,11 @@ RUN npm run build --workspace @gantry/domain
 COPY apps/web apps/web
 RUN npm run build --workspace @gantry/web
 
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.27.5-alpine@sha256:65e3e85dbaed8ba248841d9d58a899b6197106c23cb0ff1a132b7bfe0547e4c0 AS runtime
 COPY apps/web/nginx.conf /etc/nginx/nginx.conf
 COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
 # nginx-unprivileged already runs as uid 101; pin the uid the compose file expects (10001:10001 is set by compose `user:`).
 EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1
+  CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
 CMD ["nginx", "-g", "daemon off;"]

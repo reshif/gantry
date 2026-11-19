@@ -272,15 +272,16 @@ d("demo personas: enforcement on real endpoints", () => {
       const h = await stop("p-tomas", { scope: "project", id: "payments", mode: "halt", reason: "Flaky integration tests" });
       expect(h.status, JSON.stringify(h.body)).toBe(200);
       await expectDenied("p-tomas", "line.resume", () => lift("p-tomas", "project:payments"));
-      await expectDenied("p-fatima", "line.resume", () => lift("p-fatima", "project:payments"));
+      expect((await lift("p-fatima", "project:payments")).status).toBe(403); // holds no resume right anywhere: refused before the project is looked up, so it does not reveal itself either
       expect((await lift("p-meera", "project:payments")).status).toBe(200);
     });
     it("Tomás cannot halt Storefront (not his project)", async () => {
-      await expectDenied("p-tomas", "line.halt", () => stop("p-tomas", { scope: "project", id: "storefront", mode: "halt", reason: "Flaky integration tests" }));
+      // another project's id answers like an unknown one (no existence oracle)
+      expect((await stop("p-tomas", { scope: "project", id: "storefront", mode: "halt", reason: "Flaky integration tests" })).status).toBe(404);
     });
     it("Lena (Project Admin, fresh sign-in) kills and restores Identity, and cannot touch Payments", async () => {
       const name = await projectName("identity");
-      await expectDenied("p-lena", "kill.project", () => stop("p-lena", { scope: "project", id: "payments", mode: "kill", reason: "Bad release suspected", confirmText: "Payments Platform" }));
+      expect((await stop("p-lena", { scope: "project", id: "payments", mode: "kill", reason: "Bad release suspected", confirmText: "Payments Platform" })).status).toBe(404);
       const k = await stop("p-lena", { scope: "project", id: "identity", mode: "kill", reason: "Bad release suspected", confirmText: name, inFlight: "hold" });
       expect(k.status, JSON.stringify(k.body)).toBe(200);
       expect((await restore("p-lena", "project:identity")).status).toBe(200);
@@ -288,9 +289,12 @@ d("demo personas: enforcement on real endpoints", () => {
   });
 
   describe("on call changes what a person may do (POL-103, POL-106)", () => {
-    const setOncall = async (who: string, on: boolean) => {
-      const v = (await w.q(`select version from people where id = $1`, [who]))[0].version;
-      return w.call(who, "PUT", `/api/v1/people/${who}/oncall`, { on }, { "if-match": String(v) });
+    // On call is per project (owner decision 7): the project's admin (Asha here) sets the list.
+    const setOncall = async (who: string, on: boolean, project: string) => {
+      const row = (await w.q(`select version, coalesce(config -> 'oncall', '[]'::jsonb) as oncall from projects where id = $1`, [project]))[0];
+      const cur = row.oncall as string[];
+      const next = on ? [...new Set([...cur, who])] : cur.filter((x) => x !== who);
+      return w.call("p-asha", "PUT", `/api/v1/projects/${project}/oncall`, { people: next }, { "if-match": String(row.version) });
     };
     const canNow = async (who: string, action: string, project: string, time = Date.UTC(2026, 10, 11, 5, 30)) => {
       const s = await t.session(who);
@@ -299,28 +303,29 @@ d("demo personas: enforcement on real endpoints", () => {
     };
     it("Lena on call may release Identity; off call she may not (POL-103 applies only on call)", async () => {
       expect((await canNow("p-lena", "release", "identity")).allowed).toBe(true);
-      const off = await setOncall("p-lena", false);
+      const off = await setOncall("p-lena", false, "identity");
       expect(off.status, JSON.stringify(off.body)).toBe(200);
       const x = await canNow("p-lena", "release", "identity");
       expect(x.allowed).toBe(false);
       expect(x.reason).toMatch(/not on call/);
-      expect((await setOncall("p-lena", true)).status).toBe(200);
+      expect((await setOncall("p-lena", true, "identity")).status).toBe(200);
       expect((await canNow("p-lena", "release", "identity")).allowed).toBe(true);
       ok(0);
     });
     it("Meera on call may kill her project (POL-106 extends kill.project to on-call line leads) but still not restore it", async () => {
       expect((await canNow("p-meera", "kill.project", "payments")).allowed).toBe(false);
-      expect((await setOncall("p-meera", true)).status).toBe(200);
+      expect((await setOncall("p-meera", true, "payments")).status).toBe(200);
       expect((await canNow("p-meera", "kill.project", "payments")).allowed).toBe(true);
       expect((await canNow("p-meera", "restore.project", "payments")).allowed).toBe(false);
       expect((await canNow("p-meera", "kill.project", "storefront")).allowed).toBe(false); // on call on Payments only
-      expect((await setOncall("p-meera", false)).status).toBe(200);
+      expect((await setOncall("p-meera", false, "payments")).status).toBe(200);
       expect((await canNow("p-meera", "kill.project", "payments")).allowed).toBe(false);
       ok(0);
     });
-    it("a person cannot set someone else's on-call status without people.manage", async () => {
-      const v = (await w.q(`select version from people where id = 'p-lena'`))[0].version;
-      await expectDenied("p-tomas", "people.manage", () => w.call("p-tomas", "PUT", "/api/v1/people/p-lena/oncall", { on: false }, { "if-match": String(v) }));
+    it("nobody puts themselves on call, and only a project admin sets who is (project.members)", async () => {
+      expect((await w.call("p-lena", "PUT", "/api/v1/people/p-lena/oncall", { on: true })).status).toBe(410);
+      const v = (await w.q(`select version from projects where id = 'payments'`))[0].version;
+      await expectDenied("p-tomas", "project.members", () => w.call("p-tomas", "PUT", "/api/v1/projects/payments/oncall", { people: ["p-tomas"] }, { "if-match": String(v) }));
     });
   });
 
@@ -372,8 +377,9 @@ d("demo personas: enforcement on real endpoints", () => {
       ok(0);
     });
     it("Priya's approval is accepted for real and Rui (a viewer) is refused with the audit trail", async () => {
-      await expectDenied("p-rui", "gate.approve", () => w.call("p-rui", "POST", `/api/v1/gate-instances/${encodeURIComponent(`${wo}:${gateId}`)}/approve`, {}));
-      const a = await w.call("p-priya", "POST", `/api/v1/gate-instances/${encodeURIComponent(`${wo}:${gateId}`)}/approve`, {});
+      const gurl = await w.gateUrl(wo, gateId);
+      await expectDenied("p-rui", "gate.approve", () => w.call("p-rui", "POST", gurl, {}));
+      const a = await w.call("p-priya", "POST", gurl, {});
       expect(a.status, JSON.stringify(a.body)).toBe(200);
       expect(a.body.passed).toBe(true);
     });
@@ -384,7 +390,7 @@ d("demo personas: enforcement on real endpoints", () => {
       expect((await w.confirm(id, "p-tomas")).status).toBe(200);
       await w.walk(id, (x) => x.state === "waiting" && !!x.allowed.approve && x.allowed.approve.gate === "G2");
       await setRule({ roles: ["reviewer", "approver", "line_lead", "release_manager", "project_admin"], people: [], required: 2, sod: true, conditions: [], escalateH: 0, fallback: null });
-      const url = `/api/v1/gate-instances/${encodeURIComponent(`${id}:G2`)}/approve`;
+      const url = await w.gateUrl(id, "G2");
       const hidden = await w.call("p-fatima", "POST", url, {}); // a Payments work order is not even visible to Fatima
       expect([403, 404]).toContain(hidden.status);
       expect((await w.get(id)).gates.G2.approvals ?? []).toHaveLength(0);

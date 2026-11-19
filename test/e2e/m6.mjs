@@ -2,13 +2,13 @@
 // Usage: node m6.mjs [budget|model|learning|trust|workload|console ...]   (no argument: all)
 // Needs agent-double.mjs running (stub adapter with long delays) for the budget section.
 import { randomUUID } from "node:crypto";
-import { session, close, log, q, sleep, until, sh, check, summary, PSQL, DIR } from "./lib4.mjs";
+import { session, close, log, q, sleep, until, sh, check, summary, PSQL } from "./lib4.mjs";
 import { execFileSync, spawnSync } from "node:child_process";
 
 const idem = () => ({ "idempotency-key": randomUUID() });
 const wanted = process.argv.slice(2);
 const want = (n) => !wanted.length || wanted.includes(n);
-const sql = (s) => execFileSync(PSQL, ["-tA", "-c", s], { encoding: "utf8" }).trim();
+const _sql = (s) => execFileSync(PSQL, ["-tA", "-c", s], { encoding: "utf8" }).trim();
 const asha = await session("asha");
 const PROJECT = process.env.E2E_PROJECT ?? "w4e2e";
 
@@ -54,7 +54,7 @@ async function budget() {
   await until("run torn down after the grace", () => !containerUp(run), 90000, 1500);
   check("budget: the run is stopped and torn down within the halt grace", true, `${Math.round((Date.now() - t0) / 1000)} s after the first refusal`);
   const st = q(`select state from work_orders where id='${wo}'`)[0]?.[0];
-  const slot = q(`select count(*) from stops where wo_id='${wo}' and cause like '%budget%'`)[0]?.[0];
+  const _slot = q(`select count(*) from stops where wo_id='${wo}' and cause like '%budget%'`)[0]?.[0];
   check("budget: the work order is halted, not failed, and the halt is audited", st !== "failed" && q(`select count(*) from events where type='stop.set' and after::text like '%budget%'`)[0][0] > "0", `state=${st}`);
   const other = q(`select count(*) from stops where cause like '%budget%' and wo_id is distinct from '${wo}' and lifted_at is null`)[0][0];
   check("budget: no other work order or project was stopped", other === "0", `others=${other}`);
@@ -151,7 +151,7 @@ async function journey() {
   check("journey: the brief is confirmed (G0G1, a person decides)", cb.status === 200, `${cb.status} ${cb.body.msg}`);
   const who = {}; const pool = ["daniel", "meera", "priya", "sam", "omar", "kenji", "grace", "hana"];
   const sessions = {};
-  let approvals = 0; const gates = [];
+  const gates = [];
   for (let guard = 0; guard < 40; guard++) {
     const st = await until("work order to settle", () => { const w = q(`select position,state from work_orders where id='${wo}'`)[0]; return ["waiting", "done", "failed", "blocked", "parked", "killed"].includes(w?.[1]) ? w : null; }, 420000, 2000).catch(() => ["?", "timeout"]);
     if (st[1] === "done" || st[1] === "timeout" || st[1] === "failed") break;
@@ -161,7 +161,7 @@ async function journey() {
     for (const u of pool) {
       sessions[u] ??= await session(u);
       const r = await sessions[u].api("POST", `/api/v1/gate-instances/${gate[0]}/approve`, {});
-      if (r.status === 200) { approvals++; gates.push(gate[1]); who[gate[1]] = u; ok = true; break; }
+      if (r.status === 200) { gates.push(gate[1]); who[gate[1]] = u; ok = true; break; }
     }
     if (!ok) { log("no candidate could approve", gate[0]); break; }
     await sleep(2500);

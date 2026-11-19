@@ -12,16 +12,16 @@ GANTRY_DEV_SEED=true docker compose -f deploy/compose.yml up -d --build
 deploy/smoke.sh
 ```
 
-Open https://localhost and sign in with a demo account such as `asha` / `gantry-dev`. Details, including trusting the local certificate, are in [deploy/README.md](deploy/README.md).
+Open https://localhost and sign in with a demo account such as `asha` / `gantry-dev`. Details, including trusting the local certificate, are in [deploy/README.md](deploy/README.md). New to Gantry? Start with the [guides](docs/guide/README.md). To run it on a server, see [deploy/PRODUCTION.md](deploy/PRODUCTION.md).
 
 - `GANTRY_DEV_SEED=true` loads the legacy demo organisation (people, projects, repos, work orders). It is for development and demos only.
-- Without it the organisation starts empty, and the first sign-in with `GANTRY_BOOTSTRAP_ADMIN_EMAIL` (a verified email) becomes Factory Admin.
+- Without it the organisation starts empty, and the first Factory Admin is the user `GANTRY_BOOTSTRAP_ADMIN_USERNAME`, created with the initial password you write to `deploy/secrets/bootstrap_admin_password` (set `GANTRY_BOOTSTRAP_ADMIN_EMAIL` too: Keycloak emails that address the one-time link that sets the password and the authenticator). **MFA is required for everyone**: a password alone never signs anyone in, and the second factor is enrolled only from a one-time link an administrator issues. `GANTRY_DEV_ADMIN_MFA_OPTIONAL=true` is an explicit local dev opt-in (false by default), see [deploy/PRODUCTION.md](deploy/PRODUCTION.md).
 
 ## Layout
 
 | Path | What it is |
 | --- | --- |
-| `apps/web` | React 19 + Vite frontend, a faithful port of `legacy/` against the real API |
+| `apps/web` | React 19 + Vite frontend (the Blueprint design, `docs/ui/design-system.md`) against the real API |
 | `packages/domain` | Pure TypeScript domain logic: permission engine, flow rules, lifecycle, trust, workload |
 | `packages/db` | Postgres schema and migrations, event ledger with hash chain, job queue, timers, outbox |
 | `services/api` | `gantry-api`: REST API, sign-in, the decision point, all commands, live updates |
@@ -32,6 +32,7 @@ Open https://localhost and sign in with a demo account such as `asha` / `gantry-
 | `runner` | `gantry-runner` image and wrapper (Claude Code headless adapter and a deterministic stub adapter) |
 | `deploy` | Compose stack, Caddy, Keycloak realm, secrets generator, smoke and isolation checks |
 | `legacy` | The original vanilla-JS frontend, kept as the behavioural reference |
+| `docs/guide` | [User guide](docs/guide/user-guide.md) and [admin guide](docs/guide/admin-guide.md) for people new to Gantry, with an [overview](docs/guide/README.md) |
 | `docs/BUILD.md` | Build conventions; `docs/build-notes/` has per-area interfaces, verification and open items |
 
 ## Development

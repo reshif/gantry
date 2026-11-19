@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { DEFAULT_SOURCE_CAPS, SourceGuard } from "./source-guard.js";
 import { lookup } from "node:dns/promises";
 import http from "node:http";
 import net from "node:net";
@@ -16,13 +17,33 @@ export interface ProxyDeps {
   cfg: EdgeConfig;
   api?: ApiClient;
   logger: ProxyLogger;
+  limits?: Partial<RunLimits>;
+  /** The per-source guard shared with the model gateway (main.ts); built from the config when absent. */
+  guard?: SourceGuard;
   /** Test hook: maps a host name to an address instead of DNS. */
   resolve?: (host: string) => Promise<string>;
 }
 
+/** Per-run ceilings on what one run can make the shared edge do (it also serves the model gateway for every run). */
+export interface RunLimits {
+  /** Denied-egress events recorded per run per minute; past this a single "suppressed" event is recorded and the rest are only counted. */
+  deniedEventsPerMinute: number;
+  /** CONNECT tunnels (including ones still being opened) one run may hold at once. */
+  maxTunnelsPerRun: number;
+  /** Absolute lifetime of a tunnel: a keepalive stream cannot outlive it. */
+  tunnelLifetimeMs: number;
+  /** Largest request body forwarded on the plain HTTP path. */
+  maxHttpBodyBytes: number;
+}
+export const DEFAULT_RUN_LIMITS: RunLimits = { deniedEventsPerMinute: 20, maxTunnelsPerRun: 16, tunnelLifetimeMs: 3_600_000, maxHttpBodyBytes: 16 * 1024 * 1024 };
+
 export interface ProxyMetrics {
   allowed: number;
   denied: number;
+  /** Denial reports not recorded in the ledger because the run was over its per-minute budget. */
+  deniedSuppressed: number;
+  /** CONNECTs refused because the run already held its maximum number of tunnels. */
+  tunnelRefused: number;
   /** CONNECT tunnels cut because their run was refused after they were established. */
   cut: number;
 }
@@ -110,7 +131,7 @@ export function isPrivateAddress(addr: string): boolean {
   return false;
 }
 
-type Caller = { kind: "run"; runId: string; token: string } | { kind: "system" } | { kind: "none" };
+type Caller = { kind: "run"; runId: string; token: string; src: string } | { kind: "system" } | { kind: "none" };
 
 interface AllowEntry {
   hosts: string[];
@@ -129,7 +150,13 @@ interface AllowEntry {
 export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: ProxyMetrics } {
   const { cfg, logger } = deps;
   const api = deps.api ?? new ApiClient(cfg);
-  const metrics: ProxyMetrics = { allowed: 0, denied: 0, cut: 0 };
+  const lim: RunLimits = { ...DEFAULT_RUN_LIMITS, ...deps.limits };
+  const guard = deps.guard ?? new SourceGuard(cfg.sourceCaps ?? DEFAULT_SOURCE_CAPS, cfg.runSubnet, logger);
+  const metrics: ProxyMetrics = { allowed: 0, denied: 0, deniedSuppressed: 0, tunnelRefused: 0, cut: 0 };
+  /** Denial events recorded per caller in the current minute (the ledger takes one audit event per distinct host, so a run varying the name could otherwise grow it without bound). */
+  const budget = new Map<string, { since: number; used: number }>();
+  /** Tunnels held or being opened, per run. */
+  const holding = new Map<string, number>();
   const cache = new Map<string, AllowEntry>();
   const reported = new Map<string, number>();
   /** Established CONNECT tunnels per run (spec 4.4): cut when the run's token is revoked or the run is stopped, instead of living until teardown or the idle timeout. */
@@ -143,7 +170,7 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
       const cred = Buffer.from(m[1]!, "base64").toString("utf8");
       const token = cred.slice(cred.indexOf(":") + 1);
       const runId = runIdOfToken(token);
-      return runId ? { kind: "run", runId, token } : { kind: "bad" };
+      return runId ? { kind: "run", runId, token, src: req.socket.remoteAddress ?? "" } : { kind: "bad" };
     }
     const ip = req.socket.remoteAddress ?? "";
     return inCidr(ip, cfg.runSubnet) ? { kind: "none" } : { kind: "system" };
@@ -164,11 +191,27 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
   }
 
   const reportDenied = (c: Caller, host: string, port: number, reason: string): void => {
-    const key = `${c.kind === "run" ? c.runId : c.kind}|${host}:${port}`;
+    // Keyed by source address only: the run id comes from an unauthenticated token, so it must neither spend another run's budget nor open a fresh one.
+    const who = c.kind === "run" ? c.src : c.kind;
+    const key = `${who}|${host}:${port}`;
     const now = Date.now();
     if ((reported.get(key) ?? 0) > now - 60_000) return;
     reported.set(key, now);
     if (reported.size > 5000) reported.delete(reported.keys().next().value as string);
+    let b = budget.get(who);
+    if (!b || b.since <= now - 60_000) budget.set(who, (b = { since: now, used: 0 }));
+    if (b.used >= lim.deniedEventsPerMinute) {
+      metrics.deniedSuppressed++;
+      return;
+    }
+    b.used++;
+    if (budget.size > 5000) budget.delete(budget.keys().next().value as string);
+    // The last event of the minute says that the rest are not recorded, so the ledger shows the run was throttled.
+    if (b.used === lim.deniedEventsPerMinute) {
+      host = "(many hosts)";
+      port = 0;
+      reason = `More than ${lim.deniedEventsPerMinute} distinct denied destinations in a minute; further denials this minute are counted by the edge, not recorded.`;
+    }
     void api.call("POST", "/internal/v1/egress/denied", { ...(c.kind === "run" ? { runId: c.runId, token: c.token } : {}), caller: c.kind === "run" ? "run" : "system", host, port, reason }).catch(() => undefined);
   };
 
@@ -206,6 +249,7 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
       if (!res.headersSent) res.writeHead(status, { "content-type": "text/plain", ...(status === 407 ? { "proxy-authenticate": 'Basic realm="gantry"' } : {}), connection: "close" });
       res.end(`${msg}\n`);
     };
+    if (req.url !== "/healthz" && !guard.request(req.socket.remoteAddress)) return deny(429, "This run is making too many requests; slow down.");
     let u: URL;
     try {
       u = new URL(req.url ?? "");
@@ -232,22 +276,60 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
     });
     up.setTimeout(120_000, () => up.destroy());
     up.on("error", () => deny(502, "Upstream connection failed."));
+    let sent = 0;
+    req.on("data", (chunk: Buffer) => {
+      sent += chunk.length;
+      if (sent > lim.maxHttpBodyBytes) {
+        up.destroy();
+        req.unpipe(up);
+        deny(413, "Request body is too large for the forward proxy.");
+        req.destroy();
+      }
+    });
     req.pipe(up);
   });
 
   server.on("connect", async (req, clientSocket: net.Socket, head) => {
     const deny = (status: number, msg: string): void => {
-      clientSocket.end(`HTTP/1.1 ${status} ${status === 407 ? "Proxy Authentication Required" : status === 403 ? "Forbidden" : "Bad Gateway"}\r\n${status === 407 ? 'Proxy-Authenticate: Basic realm="gantry"\r\n' : ""}Content-Type: text/plain\r\nConnection: close\r\nContent-Length: ${Buffer.byteLength(msg) + 1}\r\n\r\n${msg}\n`);
+      clientSocket.end(`HTTP/1.1 ${status} ${status === 407 ? "Proxy Authentication Required" : status === 403 ? "Forbidden" : status === 429 ? "Too Many Requests" : "Bad Gateway"}\r\n${status === 407 ? 'Proxy-Authenticate: Basic realm="gantry"\r\n' : ""}Content-Type: text/plain\r\nConnection: close\r\nContent-Length: ${Buffer.byteLength(msg) + 1}\r\n\r\n${msg}\n`);
     };
     clientSocket.on("error", () => undefined);
+    if (!guard.request(req.socket.remoteAddress)) return deny(429, "This run is making too many requests; slow down.");
     const m = /^(?:\[([^\]]+)\]|([^:]+)):(\d{1,5})$/.exec(req.url ?? "");
     if (!m) return deny(400, "Bad CONNECT target.");
     const host = (m[1] ?? m[2])!;
     const port = Number(m[3]);
+    // Reserve a tunnel slot before the (slow) admit and connect, so a burst of opens cannot overshoot the per-run cap.
+    const who = callerOf(req);
+    // Keyed by source address only (G-S1): the run id in the credentials is not validated yet, so varying it must not open a bucket per id.
+    const slot = who.kind === "run" ? who.src : null;
+    if (slot !== null) {
+      if ((holding.get(slot) ?? 0) >= lim.maxTunnelsPerRun) {
+        metrics.tunnelRefused++;
+        logger.warn({ caller: `run:${slot}`, host, port, limit: lim.maxTunnelsPerRun }, "egress tunnel limit reached");
+        return deny(429, `This run already holds ${lim.maxTunnelsPerRun} tunnels.`);
+      }
+      holding.set(slot, (holding.get(slot) ?? 0) + 1);
+      let released = false;
+      const release = (): void => {
+        if (released) return;
+        released = true;
+        const n = (holding.get(slot) ?? 1) - 1;
+        if (n <= 0) holding.delete(slot);
+        else holding.set(slot, n);
+      };
+      clientSocket.once("close", release);
+    }
     const addr = await admit(req, host, port, deny);
     if (!addr) return;
+    // The client may have reset while admit was pending (its slot is already released): do not open an uncounted upstream.
+    if (clientSocket.destroyed) return;
     const upstream = net.connect({ host: addr, port });
     upstream.setTimeout(300_000, () => upstream.destroy());
+    // An absolute lifetime as well: the idle timeout alone lets a keepalive stream live forever.
+    const lifetime = setTimeout(() => { upstream.destroy(); clientSocket.destroy(); }, lim.tunnelLifetimeMs);
+    lifetime.unref();
+    clientSocket.once("close", () => clearTimeout(lifetime));
     upstream.on("error", () => {
       if (!clientSocket.writableEnded) deny(502, "Upstream connection failed.");
       clientSocket.destroy();
@@ -291,6 +373,7 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
       tunnels.delete(runId);
     }));
   };
+  guard.attach(server, "proxy");
   if (cfg.tunnelCheckMs > 0) {
     let busy = false;
     const timer = setInterval(() => {

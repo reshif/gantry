@@ -5,14 +5,26 @@
  * matrix, policies, people (and the other decision inputs) change, and when the session changes.
  */
 import { useSyncExternalStore } from "react";
-import { api, post } from "./client";
+import { ApiError, api, post } from "./client";
 import { onCanInvalidated } from "./keys";
+import { usePrefs } from "../lib/prefs";
 import type { CanCheck, CanResult } from "./types";
 
 export interface CanContext {
   project?: string | null | undefined;
   repo?: string | null | undefined;
   time?: number | undefined;
+}
+
+/** Shown on a control whose only blocker is the step-up rail: it stays usable and the command asks for a fresh sign-in. */
+export const STEP_UP_HINT = "You'll be asked to sign in again to confirm.";
+
+/**
+ * A decision whose only blocker is `needs: "step_up"` is not a denial: the person may do it after a fresh sign-in, and api/client routes the
+ * refused command to ui/stepup, which prompts and retries. So the control stays enabled (the server still decides every command).
+ */
+export function softenStepUp(r: CanResult): CanResult {
+  return !r.allowed && r.needs === "step_up" ? { ...r, allowed: true, reason: STEP_UP_HINT, needs: "step_up" } : r;
 }
 
 /** Before the server answers a control stays usable-looking but unresolved. */
@@ -74,6 +86,21 @@ export class CanBatcher {
     return null;
   }
 
+  /** The decision, waiting for the batch when it is not cached yet. */
+  ask(check: CanCheck): Promise<CanResult> {
+    const hit = this.peek(check);
+    if (hit) return Promise.resolve(hit);
+    return new Promise((resolve) => {
+      const off = this.subscribe(() => {
+        const r = this.get(check);
+        if (r) {
+          off();
+          resolve(r);
+        } else if (!this.pending.has(canKey(this.session, check)) && !this.inflight.has(canKey(this.session, check))) this.peek(check); // cleared meanwhile: ask again
+      });
+    });
+  }
+
   get(check: CanCheck): CanResult | null {
     return this.cache.get(canKey(this.session, check)) ?? null;
   }
@@ -111,7 +138,7 @@ export class CanBatcher {
     if (results && results.length === entries.length) {
       entries.forEach(([k], i) => {
         const r = results[i];
-        if (r) this.cache.set(k, r);
+        if (r) this.cache.set(k, softenStepUp(r));
       });
     } else {
       // The server did not answer: show locked rather than guess "allowed" for a control.
@@ -127,31 +154,62 @@ export class CanBatcher {
 export const canBatcher = new CanBatcher();
 onCanInvalidated(() => canBatcher.clear());
 
+const VIEW_AS_LOCK = "Your role is read-only for this action.";
+const READ_ACTION = /\.(view|read)$/;
+
+/**
+ * "View as" preview: a person can look at the sheet as a less privileged role. It only ever takes rights away from the
+ * server's decision, never adds one, and the server still decides every command.
+ */
+export function previewDecision(action: string, r: CanResult, viewAs: "" | "approver" | "viewer"): CanResult {
+  if (!viewAs || !r.allowed) return r;
+  const read = READ_ACTION.test(action);
+  const deny =
+    viewAs === "viewer"
+      ? !read || /^(policy|audit)\./.test(action)
+      : !read && /^(people|policy|security|integration|api|mcp|agent|model|flow|kill|halt|line|restore)/.test(action);
+  return deny ? { allowed: false, reason: VIEW_AS_LOCK, needs: "" } : r;
+}
+
 /** Decision for one action. Returns PENDING-allowed shape until the batch answers, with `pending: true`. */
 export function useCan(action: string, ctx: CanContext = {}): CanResult & { pending: boolean } {
+  const viewAs = usePrefs().viewAs;
   useSyncExternalStore(canBatcher.subscribe, canBatcher.snapshot);
   const check: CanCheck = { action };
   if (ctx.project) check.project = ctx.project;
   if (ctx.repo) check.repo = ctx.repo;
   if (ctx.time !== undefined) check.time = ctx.time;
   const r = canBatcher.peek(check);
-  return r ? { ...r, pending: false } : { ...PENDING, pending: true };
+  return r ? { ...previewDecision(action, r, viewAs), pending: false } : { ...PENDING, pending: true };
 }
 
 /** Several checks at once (e.g. a toolbar). Results are in the order asked. */
-export function useCanMany(checks: Array<{ action: string } & CanContext>): Array<CanResult & { pending: boolean }> {
+export function useCanMany(checks: Array<{ action: string } & CanContext>, opts: { raw?: boolean } = {}): Array<CanResult & { pending: boolean }> {
   useSyncExternalStore(canBatcher.subscribe, canBatcher.snapshot);
+  const pref = usePrefs().viewAs;
+  const viewAs = opts.raw ? "" : pref;
   return checks.map((c) => {
     const check: CanCheck = { action: c.action };
     if (c.project) check.project = c.project;
     if (c.repo) check.repo = c.repo;
     if (c.time !== undefined) check.time = c.time;
     const r = canBatcher.peek(check);
-    return r ? { ...r, pending: false } : { ...PENDING, pending: true };
+    return r ? { ...previewDecision(c.action, r, viewAs), pending: false } : { ...PENDING, pending: true };
   });
 }
 
 /** Keeps the cache keyed to the signed-in session. Mount once under the shell. */
 export function useCanSession(sessionId: string | null): void {
   canBatcher.setSession(sessionId); // idempotent; must run before children call useCan in the same render
+}
+
+/**
+ * A read the person may not be allowed: ask first, and when the answer is no, fail like a 403 without sending the request (the
+ * page shows "Not visible to you", and the network and console stay clean). Any one of `actions` allowed is enough.
+ */
+export async function readIfAllowed<T>(actions: readonly string[], read: () => Promise<T>): Promise<T> {
+  const results = await Promise.all(actions.map((action) => canBatcher.ask({ action })));
+  if (results.some((r) => r.allowed)) return read();
+  const first = results[0];
+  throw new ApiError(403, first?.reason || "Your roles don't include this.", { ok: false, msg: first?.reason, needs: first?.needs });
 }

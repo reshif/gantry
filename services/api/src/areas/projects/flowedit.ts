@@ -1,5 +1,6 @@
-import { gateLock, type ApproverRule, type Bay, type Catalog, type Gate, type GateKind, type ProjectFlow, type Station, type WorkClass } from "@gantry/domain";
-import { conflict, invalid, refuse } from "../../core/errors.js";
+import { gateLock, gateModeLock, gateOverridable, OVERRIDE_REASON_MIN, type ApproverRule, type FlowOverrideMark, type Bay, type Catalog, type Gate, type GateKind, type ProjectFlow, type RunLimits, type Station, type WorkClass } from "@gantry/domain";
+import { conflict, invalid, refuse, type Refusal } from "../../core/errors.js";
+import { limitInRange, limitRangeText, type LimitField } from "../agents/run-limits.js";
 
 /**
  * Pure flow editing (legacy `G.catalog.*` and the checks in `ops3.js`). A `FlowDraft` is a deep copy of one project's flow, its approver
@@ -158,9 +159,18 @@ export function addBay(d: FlowDraft, def: { id?: string | undefined; name: strin
   return b;
 }
 
+/** A class route may not drop a locked gate: not by skipping its station, and not by leaving it out of a gate list. */
+export function assertRouteKeepsLockedGates(d: FlowDraft, c: { name: string; skips?: string[] | undefined; gates?: string[] | undefined }, o: { regulated?: boolean } = {}): void {
+  for (const g of d.catalog.gates) {
+    if (g.id === "G0G1" || !gateLive(d, g.id) || !gateLock(g, o).locked) continue;
+    if (c.skips?.includes(g.after)) throw conflict(`${c.name} cannot skip ${station(d, g.after)?.name ?? g.after}: it carries ${g.name} (${g.label}). ${gateLock(g, o).reason}`);
+    if (c.gates && c.gates.length && !c.gates.includes(g.id)) throw conflict(`${c.name} must keep ${g.name} (${g.label}) on its route. ${gateLock(g, o).reason}`);
+  }
+}
+
 export type ClassDef = Partial<Omit<WorkClass, "id" | "name">> & { id?: string | undefined; name: string };
 
-export function addClass(d: FlowDraft, def: ClassDef): WorkClass {
+export function addClass(d: FlowDraft, def: ClassDef, o: { regulated?: boolean } = {}): WorkClass {
   const name = def.name.trim();
   if (!name) throw invalid("Name the work class.");
   const id = def.id || slug(name);
@@ -168,6 +178,7 @@ export function addClass(d: FlowDraft, def: ClassDef): WorkClass {
   if (d.flow.classes.some((c) => c.id === id)) throw conflict(`This project already has ${name}.`);
   const bad = (def.skips ?? []).filter((s) => s === "intake" || s === "close" || !present(d, s));
   if (bad.length) throw invalid(`Can't skip ${bad.join(", ")}.`);
+  assertRouteKeepsLockedGates(d, { name, skips: def.skips, gates: def.gates }, o);
   const c: WorkClass = { skips: [], priority: "P2", slaH: 72, est: "M", token: "cls-chore", shape: "bar", hints: [], gates: [], enabled: true, ...clone(def), id, name, custom: true, project: d.projectId };
   if (!d.catalog.classes.some((x) => x.id === id)) {
     d.catalog.classes.push(clone(c));
@@ -178,12 +189,16 @@ export function addClass(d: FlowDraft, def: ClassDef): WorkClass {
 }
 
 /** `open`: open work orders using the class. Turning a class off while work is in it is refused (spec 14.4). */
-export function updateClass(d: FlowDraft, clsId: string, patch: Partial<WorkClass>, open: number): { before: WorkClass; after: WorkClass } {
+export function updateClass(d: FlowDraft, clsId: string, patch: Partial<WorkClass>, open: number, o: { regulated?: boolean } = {}): { before: WorkClass; after: WorkClass } {
   const c = d.flow.classes.find((x) => x.id === clsId);
   if (!c) throw invalid("No such class in this project.");
   if (patch.enabled === false && open) throw conflict(`Open work orders use ${c.name}. Reclassify or finish them first.`);
   if (patch.skips?.some((s) => s === "intake" || s === "close")) throw invalid("Intake and Close can't be skipped.");
   if (patch.skips?.some((s) => !present(d, s))) throw invalid("A skipped station is not in this flow.");
+  if (patch.skips || patch.gates) {
+    const added = (patch.skips ?? []).filter((s) => !c.skips.includes(s));
+    assertRouteKeepsLockedGates(d, { name: c.name, skips: added, gates: patch.gates }, o);
+  }
   const before = clone(c);
   Object.assign(c, clone(patch));
   const g = d.catalog.classes.find((x) => x.id === clsId);
@@ -197,37 +212,93 @@ export function updateClass(d: FlowDraft, clsId: string, patch: Partial<WorkClas
 
 const MODES: readonly GateKind[] = ["auto", "human", "mixed"];
 
-export function setGateMode(d: FlowDraft, gateId: string, mode: string): { before: GateKind; after: GateKind; gate: Gate } {
+/**
+ * A Factory Admin overriding a lock (owner decision 2026-11-19): `admin` says the caller holds a factory-scope Factory Admin grant (decided by the
+ * server, never from a role name), `reason` is what they gave. Every lock but G5's can be overridden; the caller records the audited event.
+ */
+export interface OverrideIn {
+  regulated?: boolean;
+  admin?: boolean;
+  reason?: string | undefined;
+  by?: string;
+  byName?: string;
+  at?: number;
+}
+
+const reasonOf = (o: OverrideIn): string => (o.reason ?? "").trim();
+const markOf = (o: OverrideIn, from?: GateKind): FlowOverrideMark => ({ by: o.by ?? "", byName: o.byName ?? o.by ?? "", at: o.at ?? Date.now(), reason: reasonOf(o), ...(from ? { from } : {}) });
+
+/** The refusal an admin gets when they have not given a reason: names the lock and says how to proceed. */
+function needsReason(what: string, lockReason: string): Refusal {
+  return refuse("denied", `${what} ${lockReason} As Factory Admin you can override this lock. Give a reason of at least ${OVERRIDE_REASON_MIN} characters; it is recorded in the audit.`, { needs: "override_reason", overrideKind: "gate_lock", rule: { kind: "lock", id: "GATE-LOCK", name: "Gate lock" } });
+}
+
+export interface OverrideRecord { gate: string; station?: string | undefined; kind: "off" | "mode"; before: unknown; after: unknown; reason: string }
+
+export function setGateMode(d: FlowDraft, gateId: string, mode: string, o: OverrideIn = {}): { before: GateKind; after: GateKind; gate: Gate; override: OverrideRecord | null } {
   const g = gate(d, gateId);
   if (!g || !gateLive(d, gateId)) throw invalid("Unknown project or gate.");
   if (!MODES.includes(mode as GateKind)) throw invalid("Mode is auto, human or mixed.");
-  if (gateId === "G0G1" && mode !== "human") throw invalid("Brief confirmed (G0+G1) is always confirmed by a person.");
-  if (gateId === "G6" && mode === "auto") throw invalid("Release confirmation always needs a person.");
+  let refusal = gateModeLock(g, mode as GateKind, o);
+  let override = false;
+  if (refusal && o.admin && gateOverridable(g)) {
+    // Only the permission locks can be overridden; the correctness rule and G5 stay (an admin gets a clear reason, not a way round).
+    if (gateModeLock(g, mode as GateKind, o, { override: true }) === null) {
+      if (reasonOf(o).length < OVERRIDE_REASON_MIN) throw needsReason(`${g.name} (${g.label}) cannot be set to ${mode}.`, refusal);
+      override = true;
+      refusal = null;
+    } else refusal = gateModeLock(g, mode as GateKind, o, { override: true });
+  }
+  if (refusal) throw invalid(refusal);
   const cfg = d.flow.gates[gateId]!;
   const before = cfg.mode || g.kind;
   cfg.mode = mode as GateKind;
+  if (override) cfg.override = { ...(cfg.override ?? {}), mode: markOf(o, before) };
+  else if (cfg.override?.mode && mode === g.kind) delete cfg.override.mode;
+  if (cfg.override && !cfg.override.off && !cfg.override.mode) delete cfg.override;
   const r = d.approvers[gateId];
   if (mode !== "auto" && r && !r.roles.length && !r.people.length) {
     r.roles = ["line_lead", "project_admin"];
     r.required = 1;
     d.rulesChanged.add(gateId);
   }
-  return { before, after: mode as GateKind, gate: g };
+  return { before, after: mode as GateKind, gate: g, override: override ? { gate: gateId, kind: "mode", before, after: mode, reason: reasonOf(o) } : null };
 }
 
-/** A station or gate toggled on or off. Intake and G0+G1 are always on. */
-export function setEnabled(d: FlowDraft, kind: "stations" | "gates", id: string, on: boolean, o: { regulated?: boolean } = {}): { name: string; before: boolean } {
+/** A station or gate toggled on or off. Intake is always on. A locked gate (or the station that carries it) stays on, except that a Factory Admin may switch it off with a reason, G5 excepted. */
+export function setEnabled(d: FlowDraft, kind: "stations" | "gates", id: string, on: boolean, o: OverrideIn = {}): { name: string; before: boolean; override: OverrideRecord | null } {
   const cfg = d.flow[kind][id];
   const def = kind === "stations" ? station(d, id) : gate(d, id);
   if (!cfg || cfg.absent || !def) throw invalid(`This project has no ${kind === "stations" ? "station" : "gate"} ${id}.`);
   if (kind === "stations" && id === "intake" && !on) throw conflict("Intake is always on: every work order starts there.");
+  let override: OverrideRecord | null = null;
+  const mayOverride = (g: Gate): boolean => !!o.admin && gateOverridable(g);
+  if (kind === "stations" && !on) {
+    // A station's gate leaves the route with it: a locked gate keeps its station on.
+    const lockedGate = d.catalog.gates.find((g) => g.after === id && gateLive(d, g.id) && gateLock(g, o).locked);
+    if (lockedGate) {
+      const why = gateLock(lockedGate, o).reason;
+      if (!mayOverride(lockedGate)) throw conflict(`${(def as Station).name} cannot be turned off: it carries ${lockedGate.name} (${lockedGate.label}). ${why}`);
+      if (reasonOf(o).length < OVERRIDE_REASON_MIN) throw needsReason(`${(def as Station).name} carries ${lockedGate.name} (${lockedGate.label}).`, why);
+      override = { gate: lockedGate.id, station: id, kind: "off", before: true, after: false, reason: reasonOf(o) };
+    }
+  }
   if (kind === "gates" && !on) {
     const lock = gateLock(def as Gate, o);
-    if (lock.locked) throw conflict(`${(def as Gate).name} (${(def as Gate).label}) cannot be turned off. ${lock.reason}`);
+    if (lock.locked) {
+      if (!mayOverride(def as Gate)) throw conflict(`${(def as Gate).name} (${(def as Gate).label}) cannot be turned off. ${lock.reason}`);
+      if (reasonOf(o).length < OVERRIDE_REASON_MIN) throw needsReason(`${(def as Gate).name} (${(def as Gate).label}) is always on.`, lock.reason);
+      override = { gate: id, kind: "off", before: true, after: false, reason: reasonOf(o) };
+    }
   }
   const before = cfg.enabled;
   cfg.enabled = on;
-  return { name: kind === "stations" ? (def as Station).name : (def as Gate).label, before };
+  if (override) cfg.override = { ...(cfg.override ?? {}), off: markOf(o) };
+  else if (on && cfg.override?.off) {
+    delete cfg.override.off;
+    if (!Object.keys(cfg.override).length) delete cfg.override;
+  }
+  return { name: kind === "stations" ? (def as Station).name : (def as Gate).label, before, override };
 }
 
 export function setWip(d: FlowDraft, stationId: string, wip: number): { name: string; before: number } {
@@ -239,14 +310,34 @@ export function setWip(d: FlowDraft, stationId: string, wip: number): { name: st
   return { name: def.name, before };
 }
 
+/** The station's run limits override, per field (`null` clears a field; an empty result removes the override). Returns what was there and what is there now. */
+export function setRunLimits(d: FlowDraft, stationId: string, patch: Record<string, unknown>): { name: string; before: RunLimits; after: RunLimits } {
+  const cfg = d.flow.stations[stationId];
+  const def = station(d, stationId);
+  if (!cfg || cfg.absent || !def) throw invalid(`This project has no station ${stationId}.`);
+  const before: RunLimits = { ...(cfg.runLimits ?? {}) };
+  const next: RunLimits = { ...before };
+  for (const [k, v] of Object.entries(patch)) {
+    if (k !== "turns" && k !== "wallClockSeconds" && k !== "costUsd") throw invalid(`${k} is not a run limit.`);
+    if (v === null) { delete next[k as LimitField]; continue; }
+    if (!limitInRange(k, v)) throw invalid(limitRangeText(k));
+    next[k] = k === "costUsd" ? Math.round(v * 100) / 100 : v;
+  }
+  if (Object.keys(next).length) cfg.runLimits = next;
+  else delete cfg.runLimits;
+  return { name: def.name, before, after: next };
+}
+
 /** The whole class list replaced (route edits, reset to template). Classes cannot disappear or turn off while open work uses them. */
-export function replaceClasses(d: FlowDraft, next: WorkClass[], openByClass: Record<string, number>): { before: WorkClass[]; after: WorkClass[] } {
+export function replaceClasses(d: FlowDraft, next: WorkClass[], openByClass: Record<string, number>, o: { regulated?: boolean } = {}): { before: WorkClass[]; after: WorkClass[] } {
   const ids = new Set<string>();
   for (const c of next) {
     if (ids.has(c.id)) throw invalid(`Class ${c.id} appears twice.`);
     ids.add(c.id);
     // Only a route that changed is checked: a built-in class may already end early (Spike skips Close).
     const cur = d.flow.classes.find((x) => x.id === c.id);
+    if (!cur || JSON.stringify(cur.gates ?? []) !== JSON.stringify(c.gates ?? [])) assertRouteKeepsLockedGates(d, { name: c.name, skips: [], gates: c.gates }, o);
+    assertRouteKeepsLockedGates(d, { name: c.name, skips: c.skips.filter((x) => !cur?.skips.includes(x)) }, o);
     if (cur && JSON.stringify(cur.skips) === JSON.stringify(c.skips)) continue;
     if (c.skips.some((s) => s === "intake" || s === "close")) throw invalid("Intake and Close can't be skipped.");
     if (c.skips.some((s) => !present(d, s))) throw invalid(`${c.name} skips a station that is not in this flow.`);

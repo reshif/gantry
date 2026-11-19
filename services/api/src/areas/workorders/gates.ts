@@ -1,9 +1,10 @@
 /** Gate votes and decisions (spec 9.5): approve, reject and the brief confirmation. Each approver counts once (F6) and a vote is judged by the rule in force at that moment. */
-import { gateDef, gateProgress, gateDecision, route, stationDef, type Catalog } from "@gantry/domain";
+import { briefBase, briefGateOff, gateDef, gateProgress, delegatedSeat, gateDecision, route, stationDef, type Catalog } from "@gantry/domain";
 import type { Actor } from "../../core/command.js";
-import { invalid, refuse, stale } from "../../core/errors.js";
-import { closeEntry, closeInstance, advance, bayOf, enterStation, finish, note, openInstanceOf, recordDecision, ev, stationIdOf, cancelAttempts, type Fx } from "./engine.js";
+import { conflict, invalid, refuse } from "../../core/errors.js";
+import { coveringStop, pinned, closeEntry, closeInstance, advance, bayOf, enterStation, finish, note, openInstanceOf, recordDecision, ev, stationIdOf, cancelAttempts, type Fx } from "./engine.js";
 import { appendMessage, closeConversation } from "./conversation.js";
+import { recordBriefDocument } from "./station-docs.js";
 import { begin, done, flowFor, person, type CmdResult } from "./ctx.js";
 import { saveWo, type Wo } from "./model.js";
 import { declineInner } from "./intake.js";
@@ -22,16 +23,31 @@ export function actionForGate(catalog: Pick<Catalog, "gates">, gateId: string): 
   return gateDef(catalog as Catalog, gateId)?.action ?? (gateId === "G6" ? "release" : "gate.approve");
 }
 
+/**
+ * A8: a person's approve or reject names the exact opening it decides (`WO-1:G2:3`), so a decision made on a stale screen cannot land on a newer
+ * instance. Without the number the request is refused with 428 and the open instance, so a script can read it and send it back. Runs inside the
+ * command, after the permission check, so it tells nobody what they may not see. Slack buttons and the work-order session pass their own instance.
+ */
+export async function requireGatePin(tx: import("@gantry/db").Tx, orgId: string, woId: string, gateId: string, n: number | null): Promise<number> {
+  if (n !== null) return n;
+  const open = await openInstanceOf(tx, orgId, woId, gateId);
+  const cur = open ? Number(open.id.split(":")[2]) : null;
+  const id = open?.id ?? null;
+  throw refuse("precondition", open
+    ? `Say which opening you are deciding: send the instance id ${id} (POST /api/v1/gate-instances/${id}/approve). ${woId} is waiting at ${gateId} on instance ${cur}.`
+    : `${woId} is not waiting at ${gateId}. Nothing to decide; reload.`, { needs: "gate instance", current: { instance: id, n: cur, gate: gateId, wo: woId } });
+}
+
 /** A stale click (spec 9.5): the instance a card or button refers to is not the open one any more. */
 async function openInstanceFor(fx: Fx, w: Wo, gateId: string, n: number | null) {
   const inst = await openInstanceOf(fx.tx, fx.orgId, w.id, gateId);
   if (!inst || (n !== null && inst.id !== `${w.id}:${gateId}:${n}`)) {
-    throw stale(`${w.id} is no longer waiting at ${gateDef(fx.catalog, gateId)?.label ?? gateId} on that instance. It was decided, sent back or reopened. Reload and try again.`);
+    throw refuse("stale", `${w.id} is no longer waiting at ${gateDef(fx.catalog, gateId)?.label ?? gateId} on that instance. It was decided, sent back or reopened. Reload and try again.`, { current: { instance: inst?.id ?? null, gate: gateId, wo: w.id } });
   }
   return inst;
 }
 
-async function insertVote(fx: Fx, w: Wo, instId: string, voter: string, vote: "approve" | "reject", comment: string, via: string): Promise<void> {
+async function insertVote(fx: Fx, w: Wo, instId: string, voter: string, vote: "approve" | "reject", comment: string, via: string, seat: string | null = null): Promise<void> {
   const role = (
     await fx.tx.query<{ role_id: string; id: string }>(
       `select id, role_id from effective_role_assignments where org_id = $1 and person_id = $2 and revoked_at is null and (expires_at is null or expires_at > now()) and (project_id = $3 or project_id is null) order by (project_id is null), created_at limit 1`,
@@ -39,8 +55,8 @@ async function insertVote(fx: Fx, w: Wo, instId: string, voter: string, vote: "a
     )
   ).rows[0];
   const r = await fx.tx.query(
-    `insert into gate_votes (org_id, id, gate_instance_id, voter, role_id, role_assignment_id, vote, comment, at, via) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) on conflict (org_id, gate_instance_id, voter) do nothing`,
-    [fx.orgId, `GV-${instId}-${voter}`, instId, voter, role?.role_id ?? null, role?.id ?? null, vote, comment, fx.now, via],
+    `insert into gate_votes (org_id, id, gate_instance_id, voter, role_id, role_assignment_id, vote, comment, at, via, for_person) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) on conflict (org_id, gate_instance_id, voter) do nothing`,
+    [fx.orgId, `GV-${instId}-${voter}`, instId, voter, role?.role_id ?? null, role?.id ?? null, vote, comment, fx.now, via, seat],
   );
   if (!r.rowCount) throw refuse("denied", "You already voted on this gate instance.", { rule: { kind: "approver", id: "APPROVERS", name: "Approver rules" }, needs: "Another approver" });
 }
@@ -59,8 +75,12 @@ function markLastEntry(w: Wo, outcome: string, text = ""): void {
  * Approve the open instance of a gate. G0+G1 is the brief confirmation: one confirmation passes it. Other gates pass when N of M is met by distinct approvers
  * under the rule in force now, and never below the number the instance was opened with (tightening applies at once, loosening never approves waiting work, spec 9.3).
  */
-export async function approveGate(tx: import("@gantry/db").Tx, actor: Actor, woId: string, gateId: string, n: number | null, o: { via?: string; reason?: string } = {}): Promise<CmdResult> {
-  const { fx, w } = await begin(tx, actor, woId, "gate.approve");
+export async function approveGate(tx: import("@gantry/db").Tx, actor: Actor, woId: string, gateId: string, n: number | null, o: { via?: string; reason?: string; briefBase?: string } = {}): Promise<CmdResult> {
+  // "Approve anyway": a Factory Admin who gives a reason is not stopped by the halt guard here; approveInner decides, records and audits it. A kill is never skipped.
+  const adminWithReason = !!o.reason && o.reason.trim().length >= 5 && !!actor.personId && (await tx.query(`select 1 from effective_role_assignments where org_id = $1 and person_id = $2 and role_id = 'factory_admin' and project_id is null and revoked_at is null and (expires_at is null or expires_at > now()) limit 1`, [actor.orgId, actor.personId])).rows.length > 0;
+  const { fx, w } = await begin(tx, actor, woId, "gate.approve", { haltOverride: adminWithReason });
+  // A confirm that names the brief the person read (the console card does) is refused when the brief moved since, so it never confirms text nobody saw.
+  if (gateId === "G0G1" && o.briefBase && briefBase(w.data.brief) !== o.briefBase) throw conflict("The brief changed since you read it. Read it again, then confirm.");
   return approveInner(fx, actor, w, gateId, n, o.via, o.reason);
 }
 
@@ -72,41 +92,68 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   const by = person(actor, "Gate decisions are");
   const { st, wo } = await flowFor(fx, w);
   if (gateId === "G0G1" && !wo.conv.done) throw invalid("Answer the open intake questions first; the brief is not complete.");
-  const d = gateDecision(st, by, wo, gateId, fx.now.getTime());
+  let d = gateDecision(st, by, wo, gateId, fx.now.getTime());
+  // Owner decision 2026-11-19: a Factory Admin may approve during a freeze or a halt with a reason (a kill still blocks). Never silent: the reason is audited below.
+  const reason5 = overrideReason && overrideReason.trim().length >= 5 ? overrideReason.trim() : "";
+  const covering = await coveringStop(fx.tx, fx.orgId, w);
+  const adminNow = st.people.some((p) => p.id === by && p.roles.some((r) => r.role === "factory_admin" && r.scope === "factory"));
+  let stopKind: "freeze" | "halt" | null = null;
+  if (adminNow && covering?.mode === "halt") stopKind = "halt";
+  if (!d.allowed && d.override) {
+    stopKind = d.overrideKind ?? (d.rule.kind === "stop" ? "halt" : "freeze");
+    if (!reason5) throw refuse("denied", `${d.reason} As Factory Admin you can approve anyway. Give a reason of at least 5 characters; it is recorded in the audit.`, { needs: "override_reason", rule: d.rule });
+    d = gateDecision(st, by, wo, gateId, fx.now.getTime(), { override: true });
+  } else if (d.allowed && d.override) stopKind = d.overrideKind ?? stopKind;
+  if (stopKind && !reason5) throw refuse("denied", `${covering ? covering.reason : "A stop is in force"} As Factory Admin you can approve anyway. Give a reason of at least 5 characters; it is recorded in the audit.`, { needs: "override_reason", rule: { kind: "stop", id: "STOP-" + (covering?.scope ?? "project").toUpperCase(), name: "Stop state" } });
   if (!d.allowed) throw refuse("denied", d.reason, { rule: d.rule, ...(d.needs ? { needs: d.needs } : {}) });
-  await insertVote(fx, w, inst.id, by, "approve", "", via ?? actor.channel);
+  if (gateId === "G5") await requireMergeablePr(fx, w);
+  await insertVote(fx, w, inst.id, by, "approve", "", via ?? actor.channel, d.override ? null : delegatedSeat(st, by, wo, gateId, fx.now.getTime()));
   const after = await flowFor(fx, w);
   const project = after.st.projects.find((p) => p.id === w.project)!;
   const prog = gateProgress(project, after.wo, gateId, after.st.people);
-  const need = Math.max(prog.need, Number(inst.basis.required) || 0);
+  // The count never drops below what the instance opened with, except where the rule lists this class: that override is the owner's setting and applies live.
+  const classSet = !!project.approvers[gateId]?.classRequired && Object.prototype.hasOwnProperty.call(project.approvers[gateId]!.classRequired, w.cls);
+  const need = classSet ? prog.need : Math.max(prog.need, Number(inst.basis.required) || 0);
   const ruled = gateId === "G0G1" ? true : prog.passes && prog.have >= need;
-  // Factory Admin break-glass: a vote the rule would not let pass the gate (author under separation of duties, N of M not reached,
-  // requester alone) passes it as an override, with a reason, flagged in the audit. Nobody else can override.
+  // Factory Admin is a normal approver on every gate (owner decision 2026-11-19): their vote is an ordinary vote, counted toward N of M.
+  // Break-glass is only for a vote the rule cannot accept from them: the author under separation of duties, or the author alone / an unmet
+  // condition blocking an otherwise full count. It needs a reason and is flagged in the audit. Nobody else can override.
   const isAdmin = (after.st.people.find((p) => p.id === by)?.roles ?? []).some((r) => r.role === "factory_admin" && r.scope === "factory");
   // Bypassing separation of duties is always an override, even when the count would be met with the author's vote.
   const sodBypass = isAdmin && gateId !== "G0G1" && !!project.approvers[gateId]?.sod && wo.requestedBy === by;
-  const override = isAdmin && (!ruled || sodBypass);
+  // N of M that cannot be reached (fewer eligible people than the gate needs) is a break-glass case too: the admin passes it with a reason.
+  const eligible = new Set((after.wo.gates[gateId]?.approvals ?? []).filter((a) => after.st.people.find((pp) => pp.id === a.by)?.status !== "deactivated").map((a) => a.by));
+  if (isAdmin && !ruled && gateId !== "G0G1") for (const pp of after.st.people) if (pp.status === "active" && !eligible.has(pp.id) && gateDecision(after.st, pp.id, after.wo, gateId, fx.now.getTime()).allowed) eligible.add(pp.id);
+  const unreachable = isAdmin && !ruled && gateId !== "G0G1" && eligible.size < need;
+  const override = isAdmin && ((!ruled && (prog.onlyRequester || prog.unmet.length > 0 || unreachable)) || sodBypass);
   if (override && (!overrideReason || overrideReason.trim().length < 5)) {
-    throw refuse("denied", `As Factory Admin you can override ${g.label} (it needs ${need} approval${need === 1 ? "" : "s"}${prog.onlyRequester || wo.requestedBy === by ? ", and you are the author" : ""}). Give a reason of at least 5 characters; it is recorded in the audit.`, { needs: "override_reason", rule: { kind: "approver", id: "APR-" + gateId, name: "Factory Admin override" } });
+    throw refuse("denied", `As Factory Admin you can override ${g.label} (it needs ${need} approval${need === 1 ? "" : "s"}${prog.onlyRequester || wo.requestedBy === by ? ", and you are the author" : ""}${unreachable ? `; only ${eligible.size} ${eligible.size === 1 ? "person" : "people"} can approve it, so it cannot be reached` : ""}). Give a reason of at least 5 characters; it is recorded in the audit.`, { needs: "override_reason", rule: { kind: "approver", id: "APR-" + gateId, name: "Factory Admin override" } });
   }
   const passes = (ruled && !sodBypass) || override;
   const voter = { personId: by, via: via ?? actor.channel, channel: actor.channel };
   if (override) {
     const why = overrideReason!.trim();
     note(w, fx, by, `${g.label} passed by Factory Admin override (${prog.have} of ${need} approvals): ${why}`);
-    ev(fx, w, "gate.override", { gate: gateId, by, text: why, have: prog.have, need, author: wo.requestedBy === by, instance: inst.id }, { category: "approvals" });
+    ev(fx, w, "gate.override", { gate: gateId, by, text: why, have: prog.have, need, author: wo.requestedBy === by, instance: inst.id, ...(unreachable ? { unreachable: true, eligible: eligible.size } : {}) }, { category: "approvals" });
+  }
+  if (stopKind) {
+    note(w, fx, by, `${g.label} approved by Factory Admin override during ${stopKind === "freeze" ? "a release freeze" : "a halt"}: ${reason5}`);
+    ev(fx, w, "gate.override", { gate: gateId, by, text: reason5, kind: stopKind, have: prog.have, need, author: wo.requestedBy === by, instance: inst.id }, { category: "approvals" });
   }
   if (!passes) {
     const unmet = prog.unmet.length ? `; still needs: ${prog.unmet.map((c) => c.text).join("; ")}` : prog.onlyRequester ? "; the requester cannot be the only approver" : "";
-    note(w, fx, by, `${g.label} approval ${prog.have} of ${need}.`);
-    ev(fx, w, "gate.vote", { gate: gateId, by, text: `${prog.have} of ${need}`, instance: inst.id }, { category: "approvals" });
+    const excl = `${prog.authorExcluded ? " (the author's vote does not count)" : ""}${prog.leaverExcluded ? " (a vote by someone who has left does not count)" : ""}`;
+    note(w, fx, by, `${g.label} approval ${prog.have} of ${need}${excl}.`);
+    ev(fx, w, "gate.vote", { gate: gateId, by, text: `${prog.have} of ${need}${excl}`, instance: inst.id }, { category: "approvals" });
     await saveWo(fx.tx, fx.orgId, w);
-    return done(fx, `${g.label} approval recorded (${prog.have} of ${need}${unmet}).`, w.project, { passed: false, have: prog.have, need, instance: inst.id, version: w.version });
+    return done(fx, `${g.label} approval recorded (${prog.have} of ${need}${excl}${unmet}).`, w.project, { passed: false, have: prog.have, need, authorExcluded: prog.authorExcluded, leaverExcluded: prog.leaverExcluded, instance: inst.id, version: w.version });
   }
-  await recordDecision(fx, w, inst, gateId, "approved", voter, { approvals: prog.have, ...(override ? { override: true, reason: overrideReason!.trim() } : {}) });
+  await recordDecision(fx, w, inst, gateId, "approved", voter, { approvals: prog.have, override: override || !!stopKind, ...(override || stopKind ? { reason: (overrideReason ?? reason5).trim() } : {}) });
   await closeInstance(fx, inst.id, "decision");
   note(w, fx, by, `${g.label} ${g.name} approved${via && via !== "web" ? ` via ${via}` : ""}.`);
-  ev(fx, w, "gate.decision", { gate: gateId, mode: "human", by, trust: null, instance: inst.id }, { category: "approvals" });
+  // Phase 3: what the approver had in front of them, recorded with the decision (not a block): assumptions nobody confirmed, objections nobody decided.
+  const openNotes = (await fx.tx.query<{ a: number; o: number }>(`select (select count(*)::int from wo_assumptions where org_id = $1 and wo_id = $2 and status = 'open') as a, (select count(*)::int from wo_objections where org_id = $1 and wo_id = $2 and status = 'open') as o`, [fx.orgId, w.id])).rows[0]!;
+  ev(fx, w, "gate.decision", { gate: gateId, mode: "human", by, trust: null, instance: inst.id, openAssumptions: openNotes.a, openObjections: openNotes.o }, { category: "approvals" });
   let msg = "";
   if (gateId === "G0G1") await confirmBrief(fx, w, by);
   if (gateId === "G6") {
@@ -124,8 +171,53 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   return done(fx, `${msg} ${w.id} is at ${fx.catalog.bays.find((b) => b.id === here)?.name ?? stationDef(fx.catalog, here)?.name ?? here}.`, w.project, { passed: true, have: prog.have, need, instance: inst.id, version: w.version });
 }
 
-/** G0+G1 passed: the brief becomes version N, the conversation closes and the route starts. */
-async function confirmBrief(fx: Fx, w: Wo, by: string): Promise<void> {
+/**
+ * G0+G1 switched off by a Factory Admin override: once the intake conversation is done and the brief is written, the work order leaves Intake with no person
+ * confirming. The gate's instance is passed as an automatic decision that names the override (who turned it off, when, why), so nothing waits at it forever.
+ * Returns false when there is nothing to pass (the gate is on, the brief is not complete, or the work order is not at Intake).
+ */
+export async function passBriefIfGateOff(fx: Fx, w: Wo): Promise<boolean> {
+  const project = await pinned(fx, w);
+  if (!briefGateOff(project)) return false;
+  if (bayOf(fx.catalog, w) || stationIdOf(fx.catalog, w) !== "intake") return false;
+  const inst = await openInstanceOf(fx.tx, fx.orgId, w.id, "G0G1");
+  if (!inst) return false;
+  const { wo } = await flowFor(fx, w);
+  if (!wo.conv.done) return false;
+  const mark = project.flow?.gates.G0G1?.override?.off;
+  const why = mark ? `turned off by ${mark.byName} on ${new Date(mark.at).toISOString().slice(0, 10)}: ${mark.reason}` : "turned off";
+  await fx.tx.query(
+    `insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, rule, flow_version, detail, at) values ($1,$2,$3,$4,'auto_passed',$5,$6,$7::jsonb,$8)`,
+    [fx.orgId, `GD-${inst.id}`, inst.id, w.id, "OVERRIDE-G0G1", w.flowVersion, JSON.stringify({ mode: "override", override: true, overrideBy: mark?.by ?? null, reason: mark?.reason ?? "", channel: "system" }), fx.now],
+  );
+  await closeInstance(fx, inst.id, "decision");
+  note(w, fx, "system", `G0+G1 brief gate is off (${why}); the brief goes on without a person confirming it.`);
+  ev(fx, w, "gate.decision", { gate: "G0G1", mode: "override", by: "system", instance: inst.id, text: why, override: true }, { category: "approvals" });
+  await confirmBrief(fx, w, "system", `Brief complete. The brief gate (G0+G1) is switched off by an administrator override, so no person confirms it.`);
+  await advance(fx, w, "system");
+  return true;
+}
+
+/**
+ * G5 approves a pull request to merge. A class that changes code (its route has the Build station) on a repository with a GitHub identity needs an open pull
+ * request (or one already merged) when the gate is approved; otherwise the approval would send the work order on to Close without merging anything, which a person
+ * reading "approved" would take for a merge. The reason names the way forward. Classes whose route never builds (and repositories with no GitHub identity,
+ * which cannot hold a pull request) are not asked for one.
+ */
+async function requireMergeablePr(fx: Fx, w: Wo): Promise<void> {
+  const project = await pinned(fx, w);
+  if (!route(fx.catalog, project, w.cls).includes("build") || !w.repo) return;
+  const gh = (await fx.tx.query<{ full: string | null }>(`select github_full_name as full from repos where org_id = $1 and id = $2`, [fx.orgId, w.repo])).rows[0];
+  if (!gh?.full) return;
+  const prs = (await fx.tx.query<{ state: string }>(`select state from pull_requests where org_id = $1 and wo_id = $2`, [fx.orgId, w.id])).rows;
+  if (prs.some((p) => p.state === "open" || p.state === "merged")) return;
+  throw refuse("conflict", prs.length
+    ? `There is no open pull request to merge: ${prs.length === 1 ? "the pull request was" : "the pull requests were"} closed without merging. Send ${w.id} back to Build so the agent opens a new one, or reopen it on GitHub first.`
+    : `There is no open pull request to merge: Build never opened one. Send ${w.id} back to Build so the agent opens one.`, { needs: "open pull request" });
+}
+
+/** G0+G1 passed: the brief becomes version N, the conversation closes and the route starts. `autoText` is the conversation line when no person confirmed it. */
+async function confirmBrief(fx: Fx, w: Wo, by: string, autoText?: string): Promise<void> {
   const brief = w.data.brief ?? {};
   const v = Number((await fx.tx.query(`select coalesce(max(version), 0) + 1 as v from brief_versions where org_id = $1 and wo_id = $2`, [fx.orgId, w.id])).rows[0].v);
   const project = (await flowFor(fx, w)).st.projects.find((p) => p.id === w.project)!;
@@ -133,10 +225,11 @@ async function confirmBrief(fx: Fx, w: Wo, by: string): Promise<void> {
   await fx.tx.query(`insert into brief_versions (org_id, wo_id, version, body, class, route, confirmed_by, confirmed_at) values ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8)`, [fx.orgId, w.id, v, JSON.stringify(brief), w.cls, JSON.stringify(r), by, fx.now]);
   const names = r.map((s) => stationDef(fx.catalog, s)?.name ?? s).join(" → ");
   const who = (await fx.tx.query<{ name: string }>(`select name from people where org_id = $1 and id = $2`, [fx.orgId, by])).rows[0]?.name ?? by;
-  await appendMessage(fx, w.id, "ag-intake", `Brief confirmed by ${who}. Starting the route: ${names}.`);
+  await recordBriefDocument(fx.tx, { orgId: fx.orgId, woId: w.id, version: v, brief: brief as Record<string, unknown>, cls: w.cls, route: r.map((s) => stationDef(fx.catalog, s)?.name ?? s), by, byName: who });
+  await appendMessage(fx, w.id, "system", `${autoText ?? `Brief confirmed by ${who}.`} Starting the route: ${names}.`);
   await closeConversation(fx, w.id);
   closeEntry(w, fx, "passed");
-  note(w, fx, by, "G0+G1 brief confirmed.");
+  note(w, fx, by, autoText ? "G0+G1 brief passed (gate off)." : "G0+G1 brief confirmed.");
 }
 
 /** Approving the merge gate asks the GitHub broker to merge the pull request at the approved head commit (F4: the intent is the job's dedupe key). Returns false when there is no pull request to merge. */

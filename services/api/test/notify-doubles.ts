@@ -52,7 +52,7 @@ export class Double {
 
 /** A Slack that knows one bot token. Fake credential-shaped strings are assembled at runtime (push protection). */
 export const fakeBotToken = (): string => "xoxb" + "-" + "1".repeat(12) + "-" + "a".repeat(24);
-export const fakeSigningSecret = (): string => "sg" + "n".repeat(30);
+export const fakeSigningSecret = (): string => "sgn" + "a1b2c3d4e5f60718".repeat(2);
 
 export async function slackDouble(token = fakeBotToken()): Promise<Double> {
   const d = await new Double().start();

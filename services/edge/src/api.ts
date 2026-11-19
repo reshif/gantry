@@ -49,6 +49,8 @@ export interface Route {
   crossModel?: boolean;
   /** Tried in order when the vendor fails before any byte reached the run (spec 10.4 Fallback). */
   alternates?: Alternate[];
+  /** LAN ranges a Factory Admin opened for on-prem vendor endpoints (S-68). Absent: public addresses only. */
+  lan?: string[];
 }
 export interface Alternate {
   vendor: string;

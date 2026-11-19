@@ -1,0 +1,16 @@
+
+.view-access > .lock-note { margin-bottom: 0; }
+.wk { display: grid; gap: 2px; }
+.acc-body { display: grid; gap: var(--s3); min-width: 0; margin-top: calc(-1 * var(--s2)); }
+.freeze { border-radius: var(--r2); }
+.freeze.is-past { opacity: 0.6; }
+.freeze.is-hl { box-shadow: 0 0 0 3px var(--accent); }
+.matrix th[scope="row"] { min-width: 170px; }
+.mx-cell.is-on { background: var(--accent-soft); }
+.mx-cell.is-hl, th.mx-role.is-hl { box-shadow: inset 0 0 0 2px var(--accent); }
+.matrix tr.is-hl th[scope="row"] { color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+th.mx-role.is-custom { background: var(--accent-soft); }
+th.mx-role.is-new { box-shadow: inset 0 -3px 0 var(--accent); }
+.mx-cell.is-custom { border-left: 1px dashed var(--accent-line); }
+.view-access .acc-body { display: block; }
+.view-access .acc-body { margin-top: 0; }

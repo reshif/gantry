@@ -1,0 +1,1 @@
+# Production ingress: no development routes. /mail and anything else unmatched falls through to the app.

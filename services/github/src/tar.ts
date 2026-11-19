@@ -150,7 +150,7 @@ export async function extractTar(src: AsyncIterable<Buffer | Uint8Array>, dest: 
       else if (type === "x") paxName = paxPath(data);
       continue;
     }
-    let name = longName ?? paxName ?? ((): string => { const p = str(h, 345, 155); const n = str(h, 0, 100); return p && str(h, 257, 5) === "ustar" ? `${p}/${n}` : n; })();
+    const name = longName ?? paxName ?? ((): string => { const p = str(h, 345, 155); const n = str(h, 0, 100); return p && str(h, 257, 5) === "ustar" ? `${p}/${n}` : n; })();
     longName = paxName = null;
     const isDir = type === "5" || name.endsWith("/");
     const isFile = type === "0" || type === "7" || type === "\0";

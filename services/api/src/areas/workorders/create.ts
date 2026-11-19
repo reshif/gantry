@@ -54,6 +54,9 @@ export async function createWorkOrder(fx: Fx, i: CreateInput): Promise<Created> 
   const data = {
     description: built.description, attachments: built.attachments, clsConfidence: built.clsConfidence, clsRationale: built.clsRationale, clsSuggested: built.clsSuggested, clsOverridden: null, requestedCls: built.requestedCls,
     progress: 0, history: [], log: [{ at: now, who: i.requestedBy, text: `Submitted from ${i.source}.` }], diff: { plus: 0, minus: 0, files: 0 }, tests: { passed: 0, failed: 0, added: 0 },
+    clsBy: i.requestedCls || i.forceCls ? { kind: "person", at: now } : { kind: "rule", at: now },
+    // No class was requested: the Intake agent classifies it next (a job). Until then the keyword match above is provisional.
+    ...(!i.requestedCls && !i.forceCls && !i.childOf && !["eval", "onboarding"].includes(i.source) ? { classifyPending: "pending" } : {}),
     blockReason: null, failReason: null, paths: built.paths, brief: built.brief, children: [], gateStatus: {}, ...(i.submittedBy ? { submittedBy: i.submittedBy } : {}),
   };
   await fx.tx.query(
@@ -72,7 +75,7 @@ export async function createWorkOrder(fx: Fx, i: CreateInput): Promise<Created> 
     built.conv.done = true;
     built.conv.qi = built.conv.questions.length;
     await fx.tx.query(`update conversations set status = 'closed', data = data || $3::jsonb, updated_at = now() where org_id = $1 and wo_id = $2 and kind = 'intake'`, [fx.orgId, i.id, JSON.stringify({ done: true, qi: built.conv.qi })]);
-    await fx.tx.query(`insert into messages (org_id, id, conversation_id, author, author_kind, body, data) values ($1,$2,$3,'ag-intake','agent',$4,$5::jsonb)`, [fx.orgId, `${i.id}:m99999`, `CONV-${i.id}`, `Created from epic ${i.childOf.parent}; brief inherited.`, JSON.stringify({ at: now + 3000 })]);
+    await fx.tx.query(`insert into messages (org_id, id, conversation_id, author, author_kind, body, data) values ($1,$2,$3,'system','system',$4,$5::jsonb)`, [fx.orgId, `${i.id}:m99999`, `CONV-${i.id}`, `Created from epic ${i.childOf.parent}; brief inherited.`, JSON.stringify({ at: now + 3000 })]);
     w.state = "waiting";
     const inst = await openInstance(fx.tx, fx.orgId, w, "G0G1", { station: "intake", flowVersion, now: fx.now });
     await closeInstance(fx, inst, "decision");
@@ -83,12 +86,16 @@ export async function createWorkOrder(fx: Fx, i: CreateInput): Promise<Created> 
       if (g && gates.includes(g.id)) skipped[g.id] = "skipped";
     }
     w.data.gateStatus = skipped;
-    w.data.history = [{ station: "intake", agent: "ag-intake", model: "", startedAt: now, endedAt: now, tokens: 0, cost: 0, outcome: "passed", note: "" }];
+    // No agent ran at Intake for an inherited brief: no history entry is invented.
+    w.data.history = [];
     note(w, fx, by, `Created from epic ${i.childOf.parent}.`);
+    // An epic child enters Build through the WIP check: when Build is full it waits (at Intake, with the usual "Waiting: Build is full") until a place frees.
+    // While it waits it is parked and not counted, so it takes no Intake seat (the Intake limit bounds only send-backs and returns); it enters Build in the normal promotion order.
+    w.state = "parked";
     await enterStation(fx, w, "build", { project });
     await saveWo(fx.tx, fx.orgId, w);
   } else {
-    await enterStation(fx, w, "intake", { project });
+    await enterStation(fx, w, "intake", { project, noWip: true });
     await saveWo(fx.tx, fx.orgId, w);
   }
   return {

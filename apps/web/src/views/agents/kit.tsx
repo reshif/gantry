@@ -4,6 +4,7 @@
  * The server decides every change; the autonomy check here only disables a choice and says why.
  */
 import { useSyncExternalStore, type ReactNode } from "react";
+import { navigate } from "../../lib/router";
 import { fmt, type Agent, type AgentVersion, type Policy, type Project } from "@gantry/domain";
 import { useAudit, useRouting, useVendors } from "../../api/queries";
 import type { AuditEntry } from "../../api/types";
@@ -68,7 +69,7 @@ export function nextVersion(a: AgentRow): string {
 
 /* ---------- screen state, kept across tabs and screens like legacy `ui` ---------- */
 
-export const ui = { sel: null as string | null, draft: null as Draft | null, draftFor: null as string | null, tab: "config", ctxProject: null as string | null, ctxRepo: null as string | null, newVer: "", newNote: "" };
+export const ui = { sel: null as string | null, tab: "config", ctxProject: null as string | null, ctxRepo: null as string | null, newVer: "", newNote: "" };
 let tick = 0;
 const listeners = new Set<() => void>();
 export const rerender = (): void => {
@@ -76,12 +77,12 @@ export const rerender = (): void => {
   listeners.forEach((l) => l());
 };
 export const useAgentsUi = (): number => useSyncExternalStore((l) => (listeners.add(l), () => listeners.delete(l)), () => tick);
-/** Other screens (evals, skills, palette) can ask for an agent. */
+/** Other screens (skills, palette) open an agent: its page, on the tab asked for. */
 export const agentsSelect = (id: string, tab?: string): void => {
   ui.sel = id;
-  ui.draft = null;
   if (tab) ui.tab = tab;
   rerender();
+  navigate("agents", id);
 };
 
 /* ---------- models and stations ---------- */
@@ -93,9 +94,11 @@ export function useModels() {
   const routing = useRouting().data;
   const list: ModelOpt[] = [];
   for (const v of vendors) for (const m of v.models ?? []) if (m.enabled && v.connected) list.push({ id: m.id, name: m.name, vendor: v.name });
+  const all: ModelOpt[] = vendors.flatMap((v) => (v.models ?? []).map((m) => ({ id: m.id, name: m.name, vendor: v.name })));
   const find = (id: string) => vendors.flatMap((v) => (v.models ?? []).map((m) => ({ m, v }))).find((x) => x.m.id === id);
   return {
     list,
+    all,
     name: (id: string): string => find(id)?.m.name ?? id,
     usable: (id: string): boolean => { const x = find(id); return !!(x && x.m.enabled && x.v.connected); },
     defaultModel: routing?.defaultModel ?? "",

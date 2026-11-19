@@ -1,87 +1,103 @@
 /**
- * MCP servers (spec 8.8, 12.4). Port of legacy/js/views/mcp.js against /api/v1/mcp/*: the registry (transport, URL, masked auth, health, tools with the
- * admin-set read or write class, sensitivity), the Add dialog with real tool discovery through the edge, scope by project, repo, agent, station and work
- * class, per-tool allow and deny, an effective-access checker and the usage log.
- * Not ported, on purpose: stdio servers (they run on the runner, outside the registry), the OAuth, mTLS and Vault auth modes (the edge injects a bearer
- * token or an API key header), the write-gate switch (write tools always need a pre-authorisation, so it is shown on and locked), the "gated" call
- * outcome (a write call without its pre-authorisation is denied) and every "simulated" label: discovery and the calls are real.
+ * MCP servers (spec 8.8, 12.4), in the Blueprint prototype's layout: a registry and a usage log (tabs in the URL), and one page per server at
+ * #mcp/<id> with Overview, Tools, Scope, Access check and Recent calls tabs. Real behaviour kept: the Register dialog discovers tools through the
+ * edge, scope by project, repo, agent, station and work class, per-tool allow and class, the effective-access check, re-approval and removal.
+ * Not offered, on purpose: stdio servers (they run on the runner), OAuth / mTLS / Vault auth (the edge injects a bearer token or an API key
+ * header), a write-gate switch (write tools always need a pre-authorisation, so it is shown on and locked) and the "gated" call outcome
+ * (a write call without its pre-authorisation is denied).
  */
-import { useState } from "react";
-import { DAY } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, useMcpCalls, useMcpServers, useProjects } from "../api/queries";
-import { Btn, Empty, Panel, Tabs, ViewHead } from "../ui/primitives";
+import { Btn, Empty, Panel, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
+import { Async, qState } from "../ui/async";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
+import { useHash, hashFor, navigate } from "../lib/router";
 import { useCatalog } from "./projects/kit";
 import { useAllRepos } from "./govern/data";
+import { ReposReadNote } from "./govern/ReposReadNote";
 import { AddMcp } from "./mcp/AddDialog";
 import { Detail } from "./mcp/Detail";
-import { Health, SensChip, dec, scopeText } from "./mcp/kit";
+import { dec, mcpState } from "./mcp/kit";
 import { UsageTab } from "./mcp/Usage";
+import { ListView, healthTone, useTab } from "./connect/kit";
+import type { McpServer } from "@gantry/domain";
+import "../styles/views/mcp.css";
+
+const down = (m: McpServer): boolean => m.enabled !== false && (m.health === "failing" || m.health === "offline" || (m.health as string) === "down");
 
 export default function McpView() {
   const ui = useUI();
+  const hash = useHash();
   const perm = dec(useCan("mcp.edit"));
-  const servers = useMcpServers().data ?? [];
+  const serversQ = useMcpServers();
+  const servers = serversQ.data ?? [];
   const callsQ = useMcpCalls({ limit: 500 });
   const calls = Array.isArray(callsQ.data) ? callsQ.data : callsQ.data?.items ?? [];
   const projects = useProjects().data ?? [];
   const agents = useAgents().data ?? [];
   const cat = useCatalog();
-  const { repos } = useAllRepos();
+  const { repos, read: reposRead } = useAllRepos();
   const actor = useActors();
-  const [tab, setTab] = useState("registry");
-  const [sel, setSel] = useState<string | null>(null);
-  const current = servers.find((m) => m.id === sel) ?? servers[0] ?? null;
+  const [tab, setTab] = useTab(["registry", "usage"]);
   const actorName = (id: string): string => actor(id).name;
-  const day = calls.filter((u) => u.at > Date.now() - DAY).length;
-  const writeTools = servers.reduce((n, m) => n + m.tools.filter((t) => t.write).length, 0);
+
+  if (hash.param) {
+    return (
+      <Async query={serversQ} what="MCP servers" id="mcp">
+        {() => <><ReposReadNote read={reposRead} /><Detail srv={servers.find((m) => m.id === hash.param) ?? null} cat={cat} projects={projects} agents={agents} repos={repos} calls={calls} actorName={actorName} /></>}
+      </Async>
+    );
+  }
+
+  const exposed = servers.reduce((n, m) => n + m.tools.filter((t) => t.allowed).length, 0);
+  const total = servers.reduce((n, m) => n + m.tools.length, 0);
+  const gated = calls.filter((u) => u.outcome === "gated").length;
+  const stateOf = mcpState;
 
   const registry = (
-    <div className="mcp-split">
-      <Panel title="Registry" flush>
-        <div className="table-scroll">
-          <table className="table table-compact mcp-reg">
-            <thead><tr><th>Server and scope</th><th>Health</th><th>Tools</th><th>Sensitivity</th></tr></thead>
-            <tbody>
-              {servers.map((m) => {
-                const w = m.tools.filter((t) => t.write).length;
-                const den = m.tools.filter((t) => !t.allowed).length;
-                return (
-                  <tr key={m.id} className={`row-link${m.id === current?.id ? " is-selected" : ""}`} id={`mcp-row-${m.id}`} onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; setSel(m.id); }}>
-                    <td>
-                      <button type="button" className="linkish mcp-name" id={`mcp-open-${m.id}`} onClick={() => setSel(m.id)}>{m.name}</button>
-                      <div className="mono small muted mcp-url">{m.transport} · {m.url}</div>
-                      <div className="small muted">{m.auth} <span className="mono">{m.authMask}</span></div>
-                      <div className="small mcp-scopeline">{`${scopeText(m.projects, "projects")} · ${scopeText(m.repos, "repos")} · ${scopeText(m.agents, "agents")} · ${scopeText(m.stations, "stations")} · ${scopeText(m.classes ?? "all", "classes")}`}</div>
-                    </td>
-                    <td><Health st={m.health} />{m.enabled === false ? <div className="small neg">disabled</div> : null}</td>
-                    <td className="mono small mcp-tc">{`${m.tools.length - w} R · ${w} W`}{den ? <div className="neg">{den} denied</div> : null}</td>
-                    <td><SensChip s={m.sensitivity} /></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-      {current ? <Detail key={current.id} srv={current} cat={cat} projects={projects} agents={agents} repos={repos} calls={calls} actorName={actorName} onRemoved={() => setSel(null)} /> : <Empty title="No servers" text="Add an MCP server to give agents tools." />}
-    </div>
+    <Async query={serversQ} what="MCP servers" id="mcp" empty={<Empty id="mcp-empty" title="No MCP servers yet" text="An MCP server gives agents tools: a tracker, docs or a database. Register one, then choose the projects, stations and agents that may use it." />}>
+      {() => (
+        <Panel title="MCP servers" flush id="mcp-registry">
+          <ListView<McpServer>
+            id="mcp" noun="server" rows={servers} rowKey={(m) => m.id} rowId={(m) => `mcp-row-${m.id}`} onRow={(m) => navigate("mcp", m.id)}
+            text={(m) => `${m.name} ${m.url} ${m.transport}`}
+            filters={[
+              { key: "health", label: "Health", options: ["healthy", "degraded", "down", "disabled", "needs re-approval"], test: (m, v) => (v === "needs re-approval" ? !!m.needsReapproval : v === "disabled" ? m.enabled === false : v === "down" ? down(m) : m.enabled !== false && m.health === v) },
+              { key: "sensitivity", label: "Sensitivity", options: ["public", "internal", "confidential", "restricted"] },
+            ]}
+            columns={[
+              { key: "n", label: "Server", sort: (m) => m.name.toLowerCase(), render: (m) => <div><a className="pri" id={`mcp-open-${m.id}`} href={hashFor("mcp", m.id)}>{m.name}</a><span className="sub mono">{m.url}</span></div> },
+              { key: "h", label: "Health", sort: (m) => stateOf(m), render: (m) => <span className={`chip ${healthTone(stateOf(m))}`}>{stateOf(m)}</span> },
+              { key: "s", label: "Sensitivity", render: (m) => m.sensitivity },
+              { key: "t", label: "Tools", align: "end", sort: (m) => m.tools.length, render: (m) => `${m.tools.filter((t) => t.allowed).length}/${m.tools.length}` },
+              { key: "w", label: "Writes", render: (m) => (m.writeGate ? <span className="chip ok">gated</span> : <span className="chip warn">open</span>) },
+              { key: "a", label: "Agents", align: "end", render: (m) => (m.agents === "all" ? "all" : m.agents.length) },
+            ]}
+          />
+        </Panel>
+      )}
+    </Async>
   );
 
   return (
     <div className="view cx mcp-view">
       <ViewHead
-        kicker="Connect · MCP servers"
-        title="MCP servers"
-        sub="Tools agents may call, and exactly where. Scope by project, repo, agent, station and work class; deny single tools; write tools need a pre-authorisation at the station. The edge makes every connection and holds every credential."
-        meta={[["Servers", String(servers.length)], ["Not healthy", String(servers.filter((m) => m.health !== "healthy").length)], ["Write tools", String(writeTools)], ["Calls 24h", String(day)]]}
-        actions={<Btn label="Add server" kind="primary" icon="plus" id="mcp-add" guard={perm} onClick={() => ui.open((close) => <AddMcp close={close} onAdded={(id) => { setSel(id); setTab("registry"); }} />)} />}
+        title="MCP servers" kicker="All lines"
+        sub="External tools agents may call, with write gates and per-agent scope."
+        actions={<Btn label="Register server" kind="primary" icon="plus" id="mcp-add" guard={perm} onClick={() => ui.open((close) => <AddMcp close={close} onAdded={(id) => navigate("mcp", id)} />)} />}
       />
+      <StatRow id="mcp-stats">
+        <Stat label="Servers" value={qState(serversQ, (d) => String(d.length))} tone="info" />
+        <Stat label="Healthy" value={qState(serversQ, () => String(servers.filter((m) => m.enabled !== false && m.health === "healthy").length))} tone="done" />
+        <Stat label="Tools exposed" value={qState(serversQ, () => String(exposed))} sub={`of ${total}`} />
+        <Stat label="Calls logged" value={qState(callsQ, () => String(calls.length))} sub={`${gated} gated`} tone="wait" />
+      </StatRow>
       <Tabs idPrefix="mcp-tab" items={[{ id: "registry", label: "Registry", count: servers.length }, { id: "usage", label: "Usage log", count: calls.length }]} active={tab} onChange={setTab} />
       <div id="mcp-tab-panel" role="tabpanel" aria-labelledby={`mcp-tab-${tab}`}>
-        {tab === "usage" ? <UsageTab calls={calls} servers={servers} agents={agents} projects={projects} actorName={actorName} /> : registry}
+        {tab === "usage" ? (
+          <Async query={callsQ} what="the MCP usage log" id="mcp-usage">{() => <UsageTab calls={calls} servers={servers} projects={projects} actorName={actorName} />}</Async>
+        ) : registry}
       </div>
     </div>
   );

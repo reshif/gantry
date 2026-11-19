@@ -108,5 +108,15 @@ export async function setAppPassword(client: pg.Client | pg.PoolClient, password
     role,
     scramVerifier(password),
   ]);
-  await client.query(rows[0]!.stmt);
+  // Roles are cluster-wide: two databases on one cluster setting the same role's password at the same moment can make
+  // Postgres refuse one with "tuple concurrently updated". The statement is idempotent, so retry a few times.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await client.query(rows[0]!.stmt);
+      return;
+    } catch (e) {
+      if (attempt >= 15 || !/tuple concurrently updated/i.test((e as Error).message)) throw e;
+      await new Promise((r) => setTimeout(r, Math.random() * 25 * attempt)); // jitter, so the retries do not collide again
+    }
+  }
 }

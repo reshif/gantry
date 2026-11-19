@@ -5,15 +5,18 @@
  * Not ported, on purpose: the legacy "Runs are simulated locally" timer and its random pass/fail. A model-graded check is advisory only; deterministic checks decide.
  */
 import { fmt } from "@gantry/domain";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
+import { navigateTab, useTabParam, useScope } from "./tabparam";
 import { usePrefs } from "../lib/prefs";
-import { Tabs, ViewHead, Empty } from "../ui/primitives";
+import { Empty, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
+import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useProjects } from "../api/queries";
 import { FactoryTab } from "./evals/Factory";
 import { LinkedOutcomes, ScorecardsTab } from "./evals/Scorecards";
 import { SuitesTab } from "./evals/Suites";
-import { agentOf, evalsUi, rerender, suiteOf, useEvalsData, useEvalsUi, type EvalsData, type EvalsTab, type RunRow } from "./evals/kit";
+import { agentOf, evalsUi, suiteOf, useEvalsData, useEvalsUi, type EvalsData, type RunRow } from "./evals/kit";
+import "../styles/views/evals.css";
 
 const DAY = 86_400_000;
 
@@ -41,28 +44,41 @@ export function regressionsOf(d: EvalsData, now = Date.now()): Regression[] {
   return out;
 }
 
+const TABS = ["cards", "suites", "factory"] as const;
+
 export default function EvalsView() {
   useEvalsUi();
+  const scope = useScope();
+  const [tab, setTab] = useTabParam("evals", TABS);
+  // another screen (an agent's Evals button) asked for a tab: put it in the URL once
+  useEffect(() => {
+    if (evalsUi.detail && window.location.hash.replace(/^#\/?/, "") === "evals" && evalsUi.tab !== "cards") navigateTab("evals", evalsUi.tab);
+  }, []);
   const d = useEvalsData();
   usePrefs();
-  const projects = useProjects().data ?? [];
+  const projectsData = useProjects().data;
   const label = useMemo(() => (c: { agent: string; cls: string; project: string; repo: string | null }): string => {
     const a = d.agents.find((x) => x.id === c.agent)?.name ?? c.agent;
-    const p = projects.find((x) => x.id === c.project)?.name ?? c.project;
+    const p = (projectsData ?? []).find((x) => x.id === c.project)?.name ?? c.project;
     return `${a} · ${c.cls} · ${p}${c.repo ? ` · ${c.repo}` : ""}`;
-  }, [d.agents, projects]);
-  if (d.pending && !d.agents.length) return <div className="view view-evals"><ViewHead kicker="Agents · Sheet 16" title="Evals" /><div className="skeleton" aria-busy="true" /></div>;
-  if (!d.agents.length) return <div className="view view-evals"><ViewHead kicker="Agents · Sheet 16" title="Evals" /><Empty title="No agents" text="Create an agent to see how it does its job." /></div>;
+  }, [d.agents, projectsData]);
+  if (d.q.data === undefined) return <div className="view view-evals"><ViewHead title="Evals" /><Async query={d.q as never} what="evals" id="evals">{() => null}</Async></div>;
+  if (!d.agents.length) return <div className="view view-evals"><ViewHead title="Evals" /><Empty title="No agents" text="Create an agent to see how it does its job." /></div>;
   const regs = regressionsOf(d);
-  let eligible = 0;
-  for (const a of d.agents) for (const v of a.versions) if (v.rc && v.eligibility.ok) eligible++;
-  const tab = evalsUi.tab as EvalsTab;
   const body = tab === "suites" ? <SuitesTab d={d} /> : tab === "factory" ? <FactoryTab d={d} /> : <ScorecardsTab d={d} label={label} />;
   const overall = d.extra?.overrideRate ?? 0;
+  const cards = Object.values(d.scorecards);
+  const avg = (k: "taskSuccess" | "firstPass" | "rework"): string => { const v = cards.map((c) => c[k]).filter((x): x is number => typeof x === "number"); return v.length ? fmt.pct(v.reduce((x, y) => x + y, 0) / v.length) : "–"; };
   return (
     <div className="view view-evals">
-      <ViewHead kicker="Agents · Sheet 16" title="Evals" sub="How well each agent does its job, on golden suites and on live work. Suite runs use the same runtime as work, in sandboxes with no write access to real repositories."
-        meta={[["Suites", String(d.suites.length)], ["Runs", String(d.runs.length)], ["Regressions", String(regs.length)], ["Candidates eligible", String(eligible)], ["Override rate", fmt.pct(overall)]]} />
+      <ViewHead title="Evals" kicker={scope.kicker} sub="Golden-set suites decide whether an agent version is allowed to serve." />
+      <StatRow id="ev-stats">
+        <Stat label="Task success" value={avg("taskSuccess")} sub="7-day, all agents" tone="done" />
+        <Stat label="First pass" value={avg("firstPass")} sub="no rework" tone="done" />
+        <Stat label="Rework rate" value={avg("rework")} tone="wait" />
+        <Stat label="Human override" value={fmt.pct(overall)} sub="of classifications" tone="info" />
+        <Stat label="Suites" value={String(d.suites.length)} sub={`${d.runs.length} runs`} />
+      </StatRow>
       {regs.length ? (
         <div className="callout callout-fail ev-regs" role="note">
           <Icon name="st-fail" />
@@ -71,7 +87,7 @@ export default function EvalsView() {
             <ul className="plain-list">
               {regs.map((r, i) => (
                 <li key={`${r.run.id}`}>
-                  <button type="button" className="linkish" id={`ev-reg-${i}`} onClick={() => { evalsUi.tab = "suites"; evalsUi.suite = r.suite.id; evalsUi.run = r.run.id; evalsUi.a = r.run.id; evalsUi.b = r.base.id; rerender(); }}>
+                  <button type="button" className="linkish" id={`ev-reg-${i}`} onClick={() => { evalsUi.suite = r.suite.id; evalsUi.run = r.run.id; evalsUi.a = r.run.id; evalsUi.b = r.base.id; evalsUi.detail = true; evalsUi.tab = "suites"; navigateTab("evals", "suites"); }}>
                     {`${r.suite.id}: ${r.agentName} ${r.run.version} on ${r.run.model || "stub"} scored ${fmt.pct(r.run.score)} vs ${fmt.pct(r.base.score)} for the floor version (${r.delta >= 0 ? "+" : ""}${fmt.pct(r.delta)}). Compare`}
                   </button>
                   <LinkedOutcomes agentId={r.agentId} idp={`ev-reg-${i}`} />
@@ -81,7 +97,7 @@ export default function EvalsView() {
           </div>
         </div>
       ) : null}
-      <Tabs idPrefix="ev-tab" items={[{ id: "agents", label: "Scorecards" }, { id: "suites", label: "Suites and runs", count: d.suites.length }, { id: "factory", label: "Factory-wide" }]} active={tab} onChange={(t) => { evalsUi.tab = t as EvalsTab; rerender(); }} />
+      <Tabs idPrefix="ev-tab" items={[{ id: "cards", label: "Scorecards" }, { id: "suites", label: "Suites and runs", count: d.suites.length }, { id: "factory", label: "Factory-wide" }]} active={tab} onChange={setTab} />
       {body}
     </div>
   );

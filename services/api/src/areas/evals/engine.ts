@@ -136,7 +136,7 @@ export async function progressEval(tx: Tx, orgId: string, runId: string, now: Da
 }
 
 /** Writes the per-case results, the score and the run's final state, and the event the notifications and the audit read. */
-async function finalize(tx: Tx, orgId: string, run: RunRow, d: RunData, now: Date): Promise<string> {
+async function finalize(tx: Tx, orgId: string, run: RunRow, d: RunData, _now: Date): Promise<string> {
   const caseIds = [...new Set(d.items.map((i) => i.case))];
   let passed = 0;
   let graded = 0;

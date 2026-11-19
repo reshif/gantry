@@ -1,0 +1,7 @@
+
+.conv-view { display: flex; flex-direction: column; height: calc(100dvh - 52px - 40px); min-height: 420px; gap: 12px; }
+.content:has(.conv-view) { padding-bottom: 20px; }
+.conv-view > .view-head, .conv-view > header { flex: none; }
+@media (max-width: 767px) {
+  .conv-view { height: calc(100dvh - 61px - 40px); }
+  .conv-view[data-open="chat"] > .view-head, .conv-view[data-open="chat"] > header { display: none; } }

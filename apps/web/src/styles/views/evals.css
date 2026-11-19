@@ -6,7 +6,7 @@
 .ev-p { margin-bottom: 10px; }
 
 /* scorecards */
-.ev-agents { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--s4); align-items: start; }
+.ev-agents { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s4); align-items: start; }
 .ev-agmain { display: grid; gap: var(--s4); min-width: 0; }
 .ev-aglist { list-style: none; display: grid; max-height: 760px; overflow-y: auto; }
 .ev-agitem { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); cursor: pointer; border-left: 3px solid transparent; }
@@ -81,10 +81,8 @@
 
 .ev-factory { display: grid; gap: var(--s4); }
 .ev-two { align-items: start; }
-.ev-two.two-col { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 
 @media (max-width: 1200px) {
-  .ev-two.two-col { grid-template-columns: minmax(0, 1fr); }
   .ev-suites { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 900px) {
@@ -115,3 +113,11 @@
 .ev-n { margin: 8px 0 0; }
 .ev-scoren { display: inline-flex; gap: 2px; align-items: baseline; }
 .ev-range { margin: 4px 0 8px; }
+
+/* Factory-wide tab in the prototype's stack: wide extras scroll inside their panel instead of widening the page. */
+.ev-factory, .ev-suites-stack { min-width: 0; }
+.ev-factory > .panel, .ev-factory .cols > .panel { min-width: 0; }
+.ev-factory .panel-body { overflow-x: auto; }
+.ev-factory .barlist-l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev-more { margin: 8px 0 0; }
+.ev-su-acts { justify-content: flex-end; flex-wrap: nowrap; }

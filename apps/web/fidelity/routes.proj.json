@@ -1,0 +1,20 @@
+{
+ "project-config?tab=flow": "?tab=flow#/p/payments/project-config",
+ "project-config?tab=approvers": "?tab=approvers#/p/payments/project-config",
+ "project-config?tab=mcp": "?tab=mcp#/p/payments/project-config",
+ "project-config?tab=budget": "?tab=budget#/p/payments/project-config",
+ "project-config?tab=repos": "?tab=repos#/p/payments/project-config",
+ "project-config?tab=danger": "?tab=danger#/p/payments/project-config",
+ "project-config?tab=members": "?tab=members#/p/payments/project-config",
+ "project-config?tab=classes": "?tab=classes#/p/payments/project-config",
+ "project-config?tab=notifications": "?tab=notifications#/p/payments/project-config",
+ "project-config?tab=history": "?tab=history#/p/payments/project-config",
+ "project-config?tab=more": "?tab=more#/p/payments/project-config",
+ "project-config?tab=flow-advanced": "?tab=flow-advanced#/p/payments/project-config",
+ "project-config?tab=rules": "?tab=rules#/p/payments/project-config",
+ "project-config?tab=spend": "?tab=spend#/p/payments/project-config",
+ "projects?view=table": "?view=table#/projects",
+ "onboarding?tab=guidelines": "?tab=guidelines#/p/payments/onboarding",
+ "onboarding/acme--billing-ui?tab=pr": "?tab=pr#/p/payments/onboarding/acme--billing-ui",
+ "onboarding/acme--billing-ui?tab=settings": "?tab=settings#/p/payments/onboarding/acme--billing-ui"
+}

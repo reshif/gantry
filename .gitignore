@@ -8,3 +8,8 @@ deploy/secrets/*
 !deploy/secrets/generate.sh
 !deploy/secrets/create-github-app.mjs
 .DS_Store
+deploy/tls/*
+!deploy/tls/README.md
+deploy/prod.env
+apps/web/e2e/test-results/
+apps/web/e2e/report/

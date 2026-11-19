@@ -4,11 +4,12 @@
  * (N of M, author cannot approve, risk tags force human), slots, queue order, submit guard and move rules.
  */
 import { DEFAULT_CATALOG, ONBOARD_STAGES, RISK_TAG_RULES } from "./catalog.js";
+import { gateModeLock, requiredFor } from "./gates.js";
 import { HOUR } from "./format.js";
-import { actorName, can, effectiveStop, findPerson, findProject, findRepo, rolesIn } from "./policy.js";
-import type { PolicyState } from "./policy.js";
+import { actorName, can, effectiveStop, findPerson, findProject, findRepo, isFactoryAdmin, isOnCall, rolesIn } from "./policy.js";
+import type { OverrideMarks, PolicyState } from "./policy.js";
 import type {
-  ApproverCondition, ApproverNeeds, ApproverRule, Bay, Brief, Catalog, Conversation, ConvMiss, ConvQuestion, Decision, DecisionRule, Gate, GateKind, GateInstance,
+  Approval, ApproverCondition, ApproverNeeds, ApproverRule, Bay, Brief, Catalog, Conversation, ConvMiss, ConvQuestion, Decision, DecisionRule, Gate, GateKind, GateInstance,
   Person, Priority, Project, Repo, Station, WorkClass, WorkOrder,
 } from "./types.js";
 
@@ -91,12 +92,15 @@ export function flowOf(c: Catalog, project: Project | null | undefined): FlowDef
     const g = gateAfter(c, st.id);
     if (!g) continue;
     const cfg = f?.gates[g.id] ?? { enabled: true, mode: g.kind };
-    gates.push({ ...g, enabled: g.id === "G0G1" ? true : !!cfg.enabled && st.enabled, mode: cfg.mode || g.kind });
+    gates.push({ ...g, enabled: !!cfg.enabled && st.enabled, mode: cfg.mode || g.kind });
   }
   const bayIds = f?.bays ?? c.bays.filter((b) => !b.custom).map((b) => b.id);
   const bays = bayIds.map((id) => bayDef(c, id)).filter((b): b is Bay => !!b);
   return { stations, active: stations.filter((s) => s.enabled), gates, bays, classes: classesOf(c, project) };
 }
+
+/** The brief gate (G0+G1) is switched off in this project (a Factory Admin override). Intake itself is never off: the work order still enters there and the brief is written. */
+export const briefGateOff = (project: Project | null | undefined): boolean => !!project?.flow && project.flow.gates.G0G1?.enabled === false && !project.flow.gates.G0G1.absent;
 
 /** Ordered station ids a class travels in a project (follows project.flow.order and station toggles). */
 export function route(c: Catalog, project: Project | null | undefined, clsId: string): string[] {
@@ -120,6 +124,7 @@ export function routeGates(c: Catalog, project: Project | null | undefined, clsI
     const g = gateAfter(c, sid);
     if (!g) continue;
     const cfg = project?.flow?.gates[g.id];
+    // G0+G1 stays on the route even when switched off by an override: the work order still waits at Intake for its brief, and the runtime passes the gate by itself (briefGateOff) once the brief is written.
     if (project?.flow && (!cfg || cfg.absent || (!cfg.enabled && g.id !== "G0G1"))) continue;
     if (g.id === "G6" && cl.endsAfter) continue;
     if (cl.gates && cl.gates.length && g.id !== "G0G1" && !cl.gates.includes(g.id) && g.kind !== "auto") continue;
@@ -135,6 +140,23 @@ export function nextStationId(c: Catalog, project: Project | null | undefined, w
   return i >= 0 && i < r.length - 1 ? (r[i + 1] as string) : null;
 }
 
+/** A station's WIP limit in a project: 0 or unset means no limit. */
+export function wipLimit(project: Pick<Project, "flow"> | null | undefined, stationId: string): number {
+  const n = Number(project?.flow?.stations?.[stationId]?.wip);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/**
+ * The live count against a station's limit: running or waiting there (on its gate, or finished and waiting for the next station), never parked, declined, done or killed.
+ * Work waiting in the Queue bay for a coding slot was let into Build, so it counts there. The server counts the same way under a lock (`wipLive` in the API).
+ */
+export function wipStatus(c: Catalog, project: Project | null | undefined, workOrders: readonly WorkOrder[], stationId: string): { live: number; limit: number; full: boolean } {
+  const limit = wipLimit(project, stationId);
+  const idx = c.stations.findIndex((s) => s.id === stationId);
+  const live = workOrders.filter((w) => w.project === project?.id && (w.state === "running" || w.state === "waiting" ? !w.bay && w.station === idx : stationId === "build" && w.state === "parked" && w.bay === "queue" && w.bayFrom === "build")).length;
+  return { live, limit, full: limit > 0 && live >= limit };
+}
+
 /** The gate a work order waits behind at its current station, if its class passes it. */
 export function gateForWO(c: Catalog, project: Project | null | undefined, wo: Pick<WorkOrder, "cls" | "station">): Gate | null {
   const g = gateAfter(c, stationOf(c, wo).id);
@@ -147,7 +169,11 @@ export function gateKind(c: Catalog, project: Project | null | undefined, gateId
   const g = gateDef(c, gateId);
   if (!g) return "human";
   const cfg = project?.flow?.gates[gateId];
-  return cfg?.mode || g.kind;
+  const mode = cfg?.mode || g.kind;
+  // Runtime guard: a mode stored before a lock existed (or written around the API) never lowers a gate a person must decide. (The regulated-project rule is enforced on edits only.)
+  // A locked mode a Factory Admin chose with a reason (recorded on the gate) is honoured, except where it is a correctness or G5 rule.
+  if (cfg?.mode && mode !== "human" && gateModeLock(g, mode, null, { override: !!cfg.override?.mode }) !== null) return "human";
+  return mode;
 }
 
 /* ------------------------------------------------------------------ classification ------ */
@@ -190,48 +216,33 @@ export function classify(c: Catalog, text: string, requested: string | null | un
 
 type WoText = Pick<WorkOrder, "title" | "description" | "cls">;
 
-/** What the brief is missing for its class (legacy `misses`). */
-export function intakeMisses(wo: WoText): ConvMiss[] {
-  const d = (wo.title + " " + wo.description).toLowerCase();
-  const out: ConvMiss[] = [];
-  if (["hotfix", "feature", "refactor", "epic", "security"].includes(wo.cls) && !/rollback|revert|flag/.test(d)) out.push({ id: "rollback", text: "No rollback plan", resolved: false });
-  if (["feature", "epic"].includes(wo.cls) && !/v\d|version|release/.test(d)) out.push({ id: "version", text: "Unclear target version", resolved: false });
-  if (!["spike", "docs"].includes(wo.cls) && !/test/.test(d)) out.push({ id: "testdata", text: "Missing test data or test strategy", resolved: false });
-  if (wo.cls === "bug" && !/repro|steps/.test(d)) out.push({ id: "repro", text: "No reproduction steps", resolved: false });
-  return out;
+/**
+ * No-model fallback only. Which gaps a brief has is the Intake agent's judgement (it reads the request, the repository and AGENTS.md), never a keyword check, so the
+ * fallback finds none and says nothing about them.
+ */
+export function intakeMisses(_wo: WoText): ConvMiss[] {
+  return [];
 }
 
-const AC: Record<string, string[]> = {
-  feature: ["New behaviour covered by tests", "Metric and alert added", "Both of those"],
-  bug: ["Regression test fails before and passes after", "Error rate back to baseline", "Both of those"],
-  hotfix: ["Error rate back to baseline within 30 min", "Regression test added", "Both of those"],
-  security: ["Vulnerability no longer reproducible", "Scanner shows clean", "Both of those"],
-  epic: ["Each child has its own acceptance criteria", "Feature flag controls rollout"],
-  chore: ["Build and tests green on the new version", "No API changes"],
-  refactor: ["Behaviour identical, all tests green", "Benchmark within 5%"],
-  docs: ["Reviewed by the owning team", "Linked from the README"],
-  spike: ["A one-page report answers the question", "Report includes a recommendation"],
-};
-
+/**
+ * The no-model fallback form: three plain fields, no agent voice and no canned answers (no chips). It is shown only when no Intake agent can talk (see `scripted` messages,
+ * labelled "Rule-based (no agent)" by the page). With an agent, the agent decides what is missing and asks it in its own words.
+ */
 export function convQuestions(wo: Pick<WorkOrder, "cls" | "title" | "repo"> & { conv: Pick<Conversation, "misses"> }): ConvQuestion[] {
-  const repo = wo.repo;
-  const qs: ConvQuestion[] = [];
-  if (wo.cls === "spike") qs.push({ id: "question", field: "scope", text: "What question should the report answer?", chips: ["Is it feasible on our stack?", "What would it cost to run?", "Which option should we pick?"] });
-  else qs.push({ id: "scope", field: "scope", text: "I read this as: " + wo.title + ". What is in scope?", chips: ["Only " + repo, repo + " and its direct clients", "Suggest a scope for me"] });
-  qs.push({ id: "ac", field: "ac", text: "How will we know it is done?", chips: AC[wo.cls] ?? (AC.feature as string[]) });
-  for (const m of wo.conv.misses) {
-    if (m.id === "rollback") qs.push({ id: "rollback", field: "rollback", text: "I could not find a rollback plan. How do we undo this if it goes wrong?", chips: ["Revert the PR", "Turn the feature flag off", "Needs a migration rollback"] });
-    if (m.id === "version") qs.push({ id: "version", field: "version", text: "Which release should this land in?", chips: ["Next patch release", "Next minor release", "Internal only, no release"] });
-    if (m.id === "testdata") qs.push({ id: "testdata", field: "testdata", text: "What test data can the agents use?", chips: ["Fixtures already in the repo", "Generate synthetic data", "I will attach a sample"] });
-    if (m.id === "repro") qs.push({ id: "repro", field: "repro", text: "How do we reproduce it?", chips: ["Steps are in the linked issue", "Happens on every request with JPY", "I will describe them"] });
-  }
-  if (wo.cls === "epic") qs.push({ id: "children", field: "children", text: "I propose splitting this into 3 child work orders: data model, API, and UI. Create them after Plan?", chips: ["Yes, create all 3", "Only data model and API", "Do not split"] });
-  qs.push({ id: "extra", field: "extra", text: "Anything else the factory should know?", chips: ["No, that is everything"] });
-  return qs;
+  void wo;
+  return [
+    { id: "scope", field: "scope", text: "Scope (form field, no agent is reading this request): what is in scope?", chips: [] },
+    { id: "ac", field: "ac", text: "Acceptance (form field): how will we know it is done?", chips: [] },
+    { id: "extra", field: "extra", text: "Note (form field): anything else to add? Leave it empty or write \"no\" if not.", chips: [] },
+  ];
 }
 
 const FIELD_LABEL: Record<string, string> = { scope: "Scope", ac: "Acceptance", rollback: "Rollback", version: "Target release", testdata: "Test data", repro: "Reproduction", children: "Split", extra: "Note" };
 const fieldLabel = (f: string) => FIELD_LABEL[f] ?? f;
+
+/** Placeholders Gantry seeds into a brief before anyone has written it: dropping one is not taking away something a person wrote. */
+export const BRIEF_SCAFFOLD_OUT = { spike: ["Code changes"], other: ["UI changes unless stated", "Data backfills unless stated"] } as const;
+export const isBriefScaffold = (x: string): boolean => (BRIEF_SCAFFOLD_OUT.spike as readonly string[]).includes(x) || (BRIEF_SCAFFOLD_OUT.other as readonly string[]).includes(x);
 
 /** The brief derived from the conversation so far (legacy G.buildBrief). */
 export function buildBrief(c: Catalog, project: Project | null | undefined, wo: Pick<WorkOrder, "cls" | "title" | "conv">): Brief {
@@ -241,14 +252,15 @@ export function buildBrief(c: Catalog, project: Project | null | undefined, wo: 
   const b: Brief = {
     goal: wo.title,
     scopeIn: a.scope ? [a.scope] : a.question ? [a.question] : [],
-    scopeOut: wo.cls === "spike" ? ["Code changes"] : ["UI changes unless stated", "Data backfills unless stated"],
+    scopeOut: wo.cls === "spike" ? [...BRIEF_SCAFFOLD_OUT.spike] : [...BRIEF_SCAFFOLD_OUT.other],
     ac: a.ac ? [a.ac] : [],
     risks: wo.conv.misses.filter((m) => !m.resolved).map((m) => m.text),
     open: wo.conv.done ? [] : wo.conv.questions.slice(wo.conv.qi).map((q) => q.text),
     decisions: wo.conv.decisions.map((d) => d.text),
     estimate: (cls ? cls.est : "M") + (wo.cls === "epic" ? " (split)" : ""),
     route: rt,
-    children: wo.cls === "epic" && a.children && !/do not/i.test(a.children) ? (/only/i.test(a.children) ? ["Data model", "API"] : ["Data model", "API", "UI"]) : [],
+    // Children are authored by the Plan agent (or proposed by the Intake agent / edited by a person), never derived from a scripted answer.
+    children: [],
   };
   if (a.rollback) b.risks.push("Rollback: " + a.rollback);
   return b;
@@ -264,12 +276,13 @@ export function startConversation(
   const misses = intakeMisses(wo);
   const cls = c.classes.find((x) => x.id === wo.cls);
   const conv: Conversation = { messages: [], qi: 0, answers: {}, misses, decisions: [], awaiting: awaiting || "submitter", done: false, raised: [], questions: [] };
-  conv.messages.push({ from: "ag-classifier", at: wo.createdAt, text: "Classified as " + (cls ? cls.name : wo.cls) + " (confidence " + Math.round(wo.clsConfidence * 100) + "%). " + wo.clsRationale });
+  // Scripted notes are Gantry's, not an agent's: they are authored by "system" and marked scripted so the page can label them (and hide them when an agent talks).
+  conv.messages.push({ from: "system", at: wo.createdAt, text: "Class: " + (cls ? cls.name : wo.cls) + ". " + wo.clsRationale, scripted: true });
   const qs = convQuestions({ cls: wo.cls, title: wo.title, repo: wo.repo, conv: { misses } });
   conv.questions = qs;
-  conv.messages.push({ from: "ag-intake", at: wo.createdAt + 1000, text: "Hi, I am the Intake Clerk. A few questions so the brief is complete." + (misses.length ? " I noticed: " + misses.map((m) => m.text.toLowerCase()).join("; ") + "." : "") });
+  conv.messages.push({ from: "system", at: wo.createdAt + 1000, text: "Fallback intake form (no agent is reading this request).", scripted: true });
   const q0 = qs[0] as ConvQuestion;
-  conv.messages.push({ from: "ag-intake", at: wo.createdAt + 2000, text: q0.text, qid: q0.id, chips: q0.chips });
+  conv.messages.push({ from: "system", at: wo.createdAt + 2000, text: q0.text, qid: q0.id, chips: q0.chips, scripted: true });
   return { conv, brief: buildBrief(c, project, { cls: wo.cls, title: wo.title, conv }) };
 }
 
@@ -309,10 +322,12 @@ export function answerConversation(
   conv.qi++;
   if (conv.qi < conv.questions.length) {
     const n = conv.questions[conv.qi] as ConvQuestion;
-    conv.messages.push({ from: "ag-intake", at: at + 600, text: n.text, qid: n.id, chips: n.chips });
+    conv.messages.push({ from: "system", at: at + 600, text: n.text, qid: n.id, chips: n.chips, scripted: true });
   } else {
     conv.done = true;
-    conv.messages.push({ from: "ag-intake", at: at + 600, text: "The brief is ready. Confirm it to pass G0+G1 and start the route, or decline it to the Declined bay." });
+    // The submitter has answered everything: the brief now waits for an approver, not for the submitter.
+    conv.awaiting = "approver";
+    conv.messages.push({ from: "system", at: at + 600, scripted: true, text: "The brief is ready. Confirm it to pass G0+G1 and start the route, or decline it to the Declined bay." });
   }
   return done({ next: !conv.done });
 }
@@ -337,26 +352,36 @@ export interface NewWorkOrderInput {
   risk?: string;
 }
 
+/** The label on a class guessed by keywords before the Intake agent has read the request. */
+export const PROVISIONAL_CLS_PREFIX = "Provisional rule-based keyword match (no agent has read the request yet; the Intake agent classifies it next, and this stands only if no model is usable). ";
+
 /** Build a work order at Intake with its classification, gates and conversation (legacy G.buildWO, with the clock and id supplied). */
 export function buildWorkOrder(c: Catalog, project: Project, o: NewWorkOrderInput): WorkOrder {
   const cl = classify(c, o.title + " " + (o.description || ""), o.requestedCls, project);
-  const cls = o.forceCls || (o.requestedCls && cl.confidence < 0.8 ? o.requestedCls : cl.cls);
+  // A person's explicit class is theirs and is kept; the keyword heuristic is only a first guess for requests that name none (an agent or a person may reclassify at Intake).
+  const cls = o.forceCls || o.requestedCls || cl.cls;
+  const chosen = !o.forceCls && !!o.requestedCls;
+  const clsName = (id: string) => c.classes.find((x) => x.id === id)?.name ?? id;
   const classDef = classOf(c, project, cls);
   const created = o.createdAt;
   const gates: Record<string, GateInstance> = {};
   for (const g of routeGates(c, project, cls)) gates[g] = { status: "pending", approvals: [], rejections: [], checks: [] };
   const g0 = gates.G0G1;
   if (g0) g0.status = "waiting";
+  const clsConfidence = chosen ? 1 : cl.confidence;
+  const clsRationale = chosen
+    ? "Chosen by the submitter: " + clsName(cls) + "." + (cl.cls !== cls ? " A rule-based keyword match (no agent read the request) would have said " + clsName(cl.cls) + "; the choice stands unless a person changes it." : "")
+    : PROVISIONAL_CLS_PREFIX + cl.rationale;
   const base = {
-    cls, title: o.title, description: o.description || "", repo: o.repo, createdAt: created, clsConfidence: cl.confidence, clsRationale: cl.rationale,
+    cls, title: o.title, description: o.description || "", repo: o.repo, createdAt: created, clsConfidence, clsRationale,
   };
   const { conv, brief } = startConversation(c, project, base, o.awaiting);
   return {
     id: o.id, project: o.project, repo: o.repo, title: o.title, description: o.description || "", attachments: o.attachments || [],
-    cls, clsConfidence: cl.confidence, clsRationale: cl.rationale, clsSuggested: cl.cls, clsOverridden: null, requestedCls: o.requestedCls || null,
+    cls, clsConfidence, clsRationale, clsSuggested: cl.cls, clsOverridden: null, requestedCls: o.requestedCls || null,
     priority: o.priority || classDef.priority, source: o.source || "console", requestedBy: o.requestedBy, createdAt: created,
     station: 0, state: "waiting", bay: null, bayReason: "", bayFrom: null, progress: 100, slot: null,
-    history: [{ station: "intake", agent: "ag-intake", model: "claude-haiku-5-5", startedAt: created, endedAt: null, tokens: 4200, cost: 0.02, outcome: null, note: "" }],
+    history: [{ station: "intake", agent: "ag-intake", model: "", startedAt: created, endedAt: null, tokens: 0, cost: 0, outcome: null, note: "" }],
     gates, log: [{ at: created, who: o.requestedBy, text: "Submitted from " + (o.source || "console") + "." }],
     diff: { plus: 0, minus: 0, files: 0 }, tests: { passed: 0, failed: 0, added: 0 }, pr: null,
     blockReason: null, failReason: null, doneAt: null, killed: null, parent: o.parent || null, children: [], risk: o.risk || (project.regulated ? "high" : "normal"),
@@ -375,7 +400,8 @@ export function riskTagsFor(paths: readonly string[]): string[] {
 
 /** Risk tags on a work order: from its changed files (or declared paths) plus a `high` risk level. Any tag forces a human vote. */
 export function riskTagsOf(wo: Pick<WorkOrder, "files" | "paths" | "risk">): string[] {
-  const paths = wo.files && wo.files.length ? wo.files.map((f) => f.path) : wo.paths;
+  // Every file the work order changed, across all Build rounds: `files` is the latest publish only, `paths` accumulates, so a change flagged in round 1 stays flagged in round 2.
+  const paths = [...new Set([...(wo.files ?? []).map((f) => f.path), ...(wo.paths ?? [])])];
   const tags = riskTagsFor(paths);
   if (wo.risk === "high" && !tags.includes("high-risk")) tags.push("high-risk");
   return tags;
@@ -406,7 +432,18 @@ export function conditionsFor(project: Project, wo: Pick<WorkOrder, "cls" | "ris
 function satisfies(person: Person, project: Project, needs: ApproverNeeds): boolean {
   const roles = rolesIn(person, project.id);
   const ok = needs.people.includes(person.id) || needs.roles.some((r) => roles.includes(r));
-  return ok && (!needs.oncall || person.oncall);
+  return ok && (!needs.oncall || isOnCall({ projects: [project] }, person, project.id));
+}
+
+/** Can this voter still approve under the rule? Active, and a Factory Admin, a role or name the rule lists, a condition they meet, the escalation fallback, or a delegate for someone. */
+function stillMayVote(person: Person, people: Person[], project: Project, rule: ApproverRule, conds: ApproverCondition[], escalated: boolean): boolean {
+  if (person.status !== "active") return false;
+  const roles = rolesIn(person, project.id);
+  if (roles.includes("factory_admin")) return true;
+  if (rule.roles.some((r) => roles.includes(r)) || rule.people.includes(person.id)) return true;
+  if (conds.some((cd) => satisfies(person, project, cd.needs))) return true;
+  if (escalated && (rule.fallback ?? project.owner) === person.id) return true;
+  return people.some((x) => x.away && x.away.delegate === person.id);
 }
 
 export interface GateProgress {
@@ -417,6 +454,10 @@ export interface GateProgress {
   /** Every approval so far came from the requester (I4: never the sole approver). */
   onlyRequester: boolean;
   passes: boolean;
+  /** Separation of duties is on and the author had voted: that vote is on record but does not count ("1 of 2 (the author's vote does not count)"). */
+  authorExcluded: boolean;
+  /** A vote on record came from someone who is deactivated or no longer holds a role the rule accepts: it does not count ("1 of 2 (a vote by someone who has left does not count)"). */
+  leaverExcluded: boolean;
 }
 
 /** N of M: approvals so far against the rule, unmet conditions, and I4. G0+G1 is the submitter's own confirmation, so I4 does not apply to it. */
@@ -424,13 +465,55 @@ export function gateProgress(project: Project, wo: Pick<WorkOrder, "cls" | "risk
   const rule = project.approvers[gateId] ?? { ...NO_RULE };
   const st = wo.gates[gateId] ?? { approvals: [] };
   const conds = conditionsFor(project, wo, gateId);
-  const unmet = conds.filter((cd) => !st.approvals.some((a) => {
+  // Separation of duties is judged when votes are counted, not only when one is cast: a vote the author made while it was off stays on record and stops counting once it is on.
+  const sodNow = gateId !== "G0G1" && !!rule.sod;
+  const bySod = sodNow ? st.approvals.filter((a) => a.by !== wo.requestedBy && (a.for ?? a.by) !== wo.requestedBy) : st.approvals;
+  const authorExcluded = bySod.length !== st.approvals.length;
+  // The same holds for who voted: a vote counts while its voter can still approve (S-46). A person who has left (deactivated), or whose role no longer reaches the rule, drops out;
+  // the vote stays on record. Factory Admin stays a normal approver; a voter this list does not know (an agent id, a partial list) is left alone.
+  const stillIn = gateId === "G0G1" ? bySod : bySod.filter((a) => {
+    const pp = people.find((x) => x.id === a.by);
+    return !pp || stillMayVote(pp, people, project, rule, conds, !!(st as { escalated?: boolean }).escalated);
+  });
+  const leaverExcluded = stillIn.length !== bySod.length;
+  // N approvals are N different seats (S-53): a named approver and their stand-in fill one seat.
+  const counted = stillIn.filter((a, i) => stillIn.findIndex((b) => (b.for ?? b.by) === (a.for ?? a.by)) === i);
+  const unmet = conds.filter((cd) => !counted.some((a) => {
     const pp = people.find((x) => x.id === a.by);
     return !!pp && satisfies(pp, project, cd.needs);
   }));
-  const need = Math.max(1, rule.required || 1);
-  const onlyRequester = gateId !== "G0G1" && st.approvals.length > 0 && st.approvals.every((a) => a.by === wo.requestedBy);
-  return { have: st.approvals.length, need, unmet, conds, onlyRequester, passes: st.approvals.length >= need && !unmet.length && !onlyRequester };
+  // The count the server enforces: never below what this opening was opened with (tightening applies at once, loosening never approves waiting work, spec 9.3),
+  // except where the rule lists this class: that override is the owner's setting and applies live.
+  const classSet = !!rule.classRequired && Object.prototype.hasOwnProperty.call(rule.classRequired, wo.cls);
+  const need = classSet ? requiredFor(rule, wo.cls) : Math.max(requiredFor(rule, wo.cls), Number((st as { openedRequired?: number }).openedRequired) || 0);
+  const onlyRequester = gateId !== "G0G1" && counted.length > 0 && counted.every((a) => a.by === wo.requestedBy);
+  return { have: counted.length, need, unmet, conds, onlyRequester, passes: counted.length >= need && !unmet.length && !onlyRequester, authorExcluded, leaverExcluded };
+}
+
+/**
+ * The away person whose seat this voter would fill as their stand-in, or why no seat is open (S-53, S-54). A stand-in never votes for someone separation of
+ * duties refuses on this work order (the author), and a seat already voted (by the away person) is not filled twice.
+ */
+function delegateSeat(state: FlowState, project: Project, rule: ApproverRule, approvals: Approval[], wo: Pick<WorkOrder, "requestedBy" | "id">, gateId: string, personId: string, now: number): { seat: Person | undefined; refused: string | null } {
+  const cands = state.people.filter((x) => x.away && x.away.delegate === personId && x.away.from <= now && x.away.to > now && (rule.people.includes(x.id) || rule.roles.some((r) => rolesIn(x, project.id).includes(r))));
+  let refused: string | null = null;
+  for (const x of cands) {
+    if (rule.sod && gateId !== "G0G1" && wo.requestedBy === x.id) { refused ??= "Separation of duties: " + x.name + " is the author of " + wo.id + ", so a stand-in cannot approve for them."; continue; }
+    if (approvals.some((a) => (a.for ?? a.by) === x.id)) { refused ??= x.name + " already has a vote on this gate; a seat counts once, so their stand-in does not vote too."; continue; }
+    return { seat: x, refused: null };
+  }
+  return { seat: undefined, refused };
+}
+
+/** The seat a vote fills: the away person the voter stands in for, only when no other way lets them in (their own seat otherwise). Null for the voter's own seat. */
+export function delegatedSeat(state: FlowState, personId: string, wo: WorkOrder, gateId: string, now: number): string | null {
+  const project = state.projects.find((p) => p.id === wo.project) as Project;
+  const rule = project.approvers[gateId] ?? { ...NO_RULE };
+  const person = findPerson(state, personId);
+  if (!person) return null;
+  const roles = rolesIn(person, project.id);
+  if (rule.people.includes(personId) || rule.roles.some((r) => roles.includes(r))) return null;
+  return delegateSeat(state, project, rule, wo.gates[gateId]?.approvals ?? [], wo, gateId, personId, now).seat?.id ?? null;
 }
 
 function deny(reason: string, needs?: string, rule?: string): Decision {
@@ -439,7 +522,14 @@ function deny(reason: string, needs?: string, rule?: string): Decision {
 }
 
 /** May this person approve this gate on this work order right now? Adds approver rules on top of can(). */
-export function gateDecision(state: FlowState, personId: string | null | undefined, wo: WorkOrder, gateId: string, now: number): Decision {
+export function gateDecision(state: FlowState, personId: string | null | undefined, wo: WorkOrder, gateId: string, now: number, opts: { override?: boolean } = {}): Decision {
+  const marks: OverrideMarks = { kind: null };
+  const d = gateDecisionCore(state, personId, wo, gateId, now, opts, marks);
+  if (d.allowed && marks.kind) return { ...d, override: true, overrideKind: marks.kind };
+  return d;
+}
+
+function gateDecisionCore(state: FlowState, personId: string | null | undefined, wo: WorkOrder, gateId: string, now: number, opts: { override?: boolean }, marks: OverrideMarks): Decision {
   const c = cat(state);
   const person = findPerson(state, personId);
   const project = state.projects.find((p) => p.id === wo.project) as Project;
@@ -450,11 +540,18 @@ export function gateDecision(state: FlowState, personId: string | null | undefin
   const st = wo.gates[gateId];
   if (!st || st.status !== "waiting") return deny(wo.id + " is not waiting at " + g.label + ".", "", "STATE");
   const stop = effectiveStop(state, { project: project.id, repo: wo.repo, wo });
-  if (stop) return deny(stop.reason, stop.mode === "halt" ? "Resume first" : "Restore first", stop.mode === "halt" ? "HALT" : "KILL");
+  if (stop) {
+    // Owner decision 2026-11-19: a Factory Admin may approve a gate during a halt with a reason ("Approve anyway"); a kill, and everyone else, stay blocked.
+    if (stop.mode === "halt" && isFactoryAdmin(state, personId as string)) {
+      if (!opts.override) return { ...deny(stop.reason, "override_reason", "HALT"), override: true, overrideKind: "halt" as const };
+      marks.kind = "halt";
+    } else return deny(stop.reason, stop.mode === "halt" ? "Resume first" : "Restore first", stop.mode === "halt" ? "HALT" : "KILL");
+  }
 
   if (gateId === "G0G1") {
-    const d0 = can(state, personId, "brief.confirm", { project: project.id, time: now });
+    const d0 = can(state, personId, "brief.confirm", { project: project.id, time: now, ...(opts.override ? { override: true } : {}) });
     if (!d0.allowed) return d0;
+    if (d0.overrideKind) marks.kind = d0.overrideKind;
     const roles0 = rolesIn(person, project.id);
     const senior = roles0.some((r) => ["line_lead", "project_admin", "factory_admin"].includes(r));
     if (!senior && wo.requestedBy !== personId) return deny("Engineers may confirm only briefs they submitted. " + actorName(state, wo.requestedBy) + " submitted this one.", "Submitter, Line Lead or Project Admin", "APR-G0G1");
@@ -462,28 +559,36 @@ export function gateDecision(state: FlowState, personId: string | null | undefin
     return { allowed: true, reason: wo.requestedBy === personId ? "You submitted this work order." : "Line Leads and Project Admins may confirm any brief.", rule: { kind: "approver", id: "APR-G0G1", name: "Brief confirmation" }, needs: "" };
   }
 
-  const base = can(state, personId, g.action || "gate.approve", { project: project.id, repo: wo.repo, time: now });
+  const base = can(state, personId, g.action || "gate.approve", { project: project.id, repo: wo.repo, time: now, ...(opts.override ? { override: true } : {}) });
   if (!base.allowed) return base;
+  if (base.overrideKind) marks.kind = base.overrideKind;
   const rule = project.approvers[gateId] ?? { ...NO_RULE };
   if (st.approvals.some((a) => a.by === personId)) return deny("You already approved " + g.label + " on " + wo.id + ".", "Another approver", "APR-" + gateId);
+  if (st.approvals.some((a) => a.for === personId)) return deny("Your stand-in already approved " + g.label + " on " + wo.id + " for you; a seat counts once.", "Another approver", "APR-" + gateId);
   const roles = rolesIn(person, project.id);
   const aprRule: DecisionRule = { kind: "approver", id: "APR-" + gateId, name: g.label + " approvers" };
-  // Factory Admin may decide any gate, including their own work order (user decision 2026-11-14): when the ordinary rule would not let
-  // the vote pass the gate (separation of duties, N of M, I4), the API turns it into a break-glass override that needs a reason and is audited.
+  // Factory Admin is universal (owner decision 2026-11-19): a normal approver on every gate. Only the author under separation of duties (or the
+  // author alone, I4) is outside the ordinary rule: the API turns that vote into a break-glass override that needs a reason and is audited.
   if (roles.includes("factory_admin")) {
     const own = wo.requestedBy === personId;
-    return { allowed: true, reason: "Factory Admin may approve any gate" + (own && rule.sod ? ", including their own work order" : "") + " (break-glass override when the rule would not pass it; needs a reason and is flagged in audit).", rule: aprRule, needs: "" };
+    return { allowed: true, reason: "Factory Admin may approve any gate" + (own && rule.sod ? ", including their own work order" : "") + (own && rule.sod ? " (break-glass override: needs a reason and is flagged in audit)." : "."), rule: aprRule, needs: "" };
   }
   if (rule.sod && wo.requestedBy === personId) return deny("Separation of duties on " + g.label + ": the author of " + wo.id + " cannot approve it.", "Someone other than the author", "APR-" + gateId);
   const byRole = rule.roles.some((r) => roles.includes(r));
   const byName = rule.people.includes(personId as string);
-  const delegateFor = state.people.find((x) => x.away && x.away.delegate === personId && x.away.to > now && (rule.people.includes(x.id) || rule.roles.some((r) => rolesIn(x, project.id).includes(r))));
+  const delegation = delegateSeat(state, project, rule, st.approvals, wo, gateId, personId as string, now);
+  const delegateFor = delegation.seat;
   const conds = conditionsFor(project, wo, gateId);
   const byCond = conds.find((cd) => satisfies(person, project, cd.needs));
-  if (!byRole && !byName && !delegateFor && !byCond) {
+  // Once the gate has waited past its escalation limit the rule's fallback approver (the project owner when none is named) may approve it. Only after escalation, and still under
+  // can() and separation of duties above: the fallback gains no right to approve that the person's own roles do not give.
+  const fallbackId = st.escalated ? rule.fallback ?? project.owner : null;
+  const byFallback = !!fallbackId && fallbackId === personId;
+  if (!byRole && !byName && !delegateFor && !byCond && !byFallback) {
+    if (delegation.refused) return deny(delegation.refused, "Someone who is not the author's stand-in", "APR-" + gateId);
     const cn = conds.filter((cd) => cd.needs.oncall && cd.needs.roles.some((r) => roles.includes(r)));
     const roleList = (rs: string[]) => rs.map((r) => state.catalog.roles.find((x) => x.id === r)?.name ?? r).join(" or ");
-    if (cn.length && !person.oncall) return deny((cn[0] as ApproverCondition).text + "; " + person.name + " is not on call.", "On-call " + roleList((cn[0] as ApproverCondition).needs.roles), "APR-" + gateId);
+    if (cn.length && !isOnCall({ projects: [project] }, person, project.id)) return deny((cn[0] as ApproverCondition).text + "; " + person.name + " is not on call.", "On-call " + roleList((cn[0] as ApproverCondition).needs.roles), "APR-" + gateId);
     return deny(
       "Approver rule for " + g.label + " on " + project.name + " lists " + (rule.roles.length ? roleList(rule.roles) : "no roles") + (rule.people.length ? " and " + rule.people.map((p) => actorName(state, p)).join(", ") : "") + ".",
       "Needs " + (rule.roles.length ? roleList(rule.roles) : rule.people.map((p) => actorName(state, p)).join(", ")),
@@ -491,7 +596,7 @@ export function gateDecision(state: FlowState, personId: string | null | undefin
     );
   }
   /* I4: with separation of duties off the requester may vote, but never alone. Their vote is accepted; the gate needs someone else too (see gateProgress). */
-  const why = byName ? "Named approver for " + g.label + "." : byRole ? "Approver rule allows " + rule.roles.map((r) => state.catalog.roles.find((x) => x.id === r)?.name ?? r).join(" or ") + "." : delegateFor ? "Delegate for " + delegateFor.name + " while they are away." : "Meets condition: " + (byCond as ApproverCondition).text + ".";
+  const why = byName ? "Named approver for " + g.label + "." : byRole ? "Approver rule allows " + rule.roles.map((r) => state.catalog.roles.find((x) => x.id === r)?.name ?? r).join(" or ") + "." : delegateFor ? "Delegate for " + delegateFor.name + " while they are away." : byCond ? "Meets condition: " + (byCond as ApproverCondition).text + "." : "Fallback approver for " + g.label + ": the gate has waited past its escalation limit.";
   return { allowed: true, reason: why + (base.rule.kind === "policy" ? " " + base.reason : ""), rule: aprRule, needs: "" };
 }
 
@@ -592,6 +697,7 @@ export function moveCheck(state: FlowState, principalId: string | null | undefin
     return db.allowed ? { allowed: true, kind: "back", reason: "Sends back to " + stName(target) + "." } : { allowed: false, reason: why(db) };
   }
   if (ti > ci + 1) return { allowed: false, reason: "Work moves one station at a time; " + stName(r[ci + 1] as string) + " comes first." };
+  if (wo.wipWait) return { allowed: false, reason: "Waiting: " + stName(wo.wipWait.station) + " is full. It moves in when a place frees." };
   const g = gateForWO(c, project, wo);
   if (wo.state === "running") return { allowed: false, reason: "Still running at " + stName(cur) + "; it moves when the station finishes" + (g ? " and " + g.label + " passes" : "") + "." };
   if (!g) return { allowed: false, reason: "It moves automatically when the station finishes." };

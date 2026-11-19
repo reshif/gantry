@@ -118,11 +118,29 @@ d("integrations (spec 8.8, 12.1)", () => {
     expect((await w.call(NOBODY, "POST", `/api/v1/integrations/${inst.id}/test`)).status).toBe(403);
   });
 
+  it("S-23: a connection never tested is 'unknown' (not healthy) when switched on; editing its settings resets health to unknown", async () => {
+    const inst = (await add(ADMIN, { name: "Untested" })).body.integration as Record<string, any>;
+    const ver = async () => w.ifm((await w.q(`select version from integration_instances where id = $1`, [inst.id]))[0].version);
+    const on = await w.call(ADMIN, "PATCH", `/api/v1/integrations/${inst.id}`, { connected: true }, await ver());
+    expect(on.status, JSON.stringify(on.body)).toBe(200);
+    expect(on.body.integration).toMatchObject({ connected: true, status: "unknown" });
+    // tested: healthy, and an edit of the settings makes it unknown again and drops the old test result
+    expect((await w.call(ADMIN, "POST", `/api/v1/integrations/${inst.id}/test`)).body.integration.status).toBe("healthy");
+    const edit = await w.call(ADMIN, "PATCH", `/api/v1/integrations/${inst.id}`, { config: { workspace: "other" } }, await ver());
+    expect(edit.status, JSON.stringify(edit.body)).toBe(200);
+    expect(edit.body.integration.status).toBe("unknown");
+    expect(edit.body.integration.lastTest).toBeUndefined();
+    expect((await w.q(`select health from integration_instances where id = $1`, [inst.id]))[0].health).toBe("unknown");
+    // a rename alone does not discard a test result
+    await w.call(ADMIN, "POST", `/api/v1/integrations/${inst.id}/test`);
+    expect((await w.call(ADMIN, "PATCH", `/api/v1/integrations/${inst.id}`, { name: "Renamed" }, await ver())).body.integration.status).toBe("healthy");
+  });
+
   it("a webhook test sends a signed ping, and the instance is switched on deliberately", async () => {
     const hook = await new Double().start();
     hook.on("/in", () => [200, { ok: true }]);
     try {
-      const secret = "whsec" + "_".repeat(1) + "x".repeat(20);
+      const secret = "whsec" + "_".repeat(1) + "x7Kq2mZp9Rt4".repeat(3);
       const r = await w.call(ADMIN, "POST", "/api/v1/integrations", { type: "webhook", name: "Audit lake", config: { url: `${hook.url}/in`, format: "json" }, secrets: { secret }, targetId: "audit-lake", projects: ["payments"] });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
       const inst = r.body.integration as Record<string, any>;

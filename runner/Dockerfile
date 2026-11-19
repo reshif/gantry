@@ -3,7 +3,11 @@
 # Holds no secrets. Runs as uid 10001 with a read-only root: writable paths are /workspace (volume) and /tmp (tmpfs).
 # Behind a TLS-intercepting proxy, add: --secret id=cacert,src=/path/to/ca-bundle.crt (optional; used only for npm).
 # Variants for other tech stacks: FROM gantry-runner:dev as a base (as root), install the toolchain, then `USER 10001:10001`.
-ARG NODE_IMAGE=node:22-bookworm-slim
+ARG NODE_IMAGE=node:22.23.5-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+
+# uv, pinned, copied as a static binary (no install script runs). Python 3.12 is installed from it at build time into a root-owned, read-only path.
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.5.11
+FROM ${UV_IMAGE} AS uv
 
 FROM ${NODE_IMAGE} AS wrapper-build
 WORKDIR /src/runner/wrapper
@@ -23,9 +27,28 @@ RUN --mount=type=secret,id=cacert,required=false \
     if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
     npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
+# The agent harness (pinned release, unverified against a live model: see runner/README.md), installed from runner/harness/package-lock.json
+# (exact versions and integrity hashes for the whole tree) with `npm ci --ignore-scripts`: no transitive package runs code at build time and the
+# tree changes only when the lock does. HARNESS_LOCK=require (CI, releases) fails the build when there is no lock; `allow` (the default, until a
+# maintainer commits the lock with runner/harness/relock.sh) falls back to an unlocked install of the pinned top-level version and says so.
+FROM ${NODE_IMAGE} AS harness
+ARG CLAUDE_CODE_VERSION=
+ARG HARNESS_LOCK=allow
+WORKDIR /opt/harness
+COPY runner/harness/ ./
+RUN --mount=type=secret,id=cacert,required=false \
+    if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
+    if [ -f package-lock.json ]; then \
+      npm ci --omit=dev --ignore-scripts --no-audit --no-fund; \
+    elif [ "$HARNESS_LOCK" = "require" ]; then \
+      echo "runner/harness/package-lock.json is missing: run runner/harness/relock.sh and commit it" >&2; exit 1; \
+    else \
+      echo "WARNING: no runner/harness/package-lock.json; the harness's transitive tree is resolved fresh and its install scripts run" >&2; \
+      npm install --omit=dev --no-audit --no-fund "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION:-$(node -p "require('./package.json').dependencies['@anthropic-ai/claude-code']")}"; \
+    fi; \
+    npm cache clean --force
+
 FROM ${NODE_IMAGE}
-# Pinned harness release (stable channel at the time of writing). Unverified against a live model: see runner/README.md.
-ARG CLAUDE_CODE_VERSION=2.1.311
 # `full` installs git and the common build tools. `minimal` skips the OS packages (for hosts that cannot reach the
 # Debian mirrors at build time); a minimal image has no git, so it cannot run build stations.
 ARG RUNNER_TOOLCHAIN=full
@@ -35,14 +58,30 @@ RUN if [ "$RUNNER_TOOLCHAIN" = "full" ]; then \
       && apt-get install -y --no-install-recommends git ca-certificates build-essential python3 pkg-config jq \
       && rm -rf /var/lib/apt/lists/*; \
     fi
+# Python test toolchain (owner decision 2026-11-18): uv and a Python 3.12 so Verify can run a repository's confirmed test command ("make test" ->
+# "uv run pytest"). Package downloads at run time go only to pypi.org and files.pythonhosted.org through the edge allow-list; the interpreter itself
+# is baked in (UV_PYTHON_DOWNLOADS=never, so uv never fetches one from GitHub). The environment lives in /workspace. The wrapper sets UV_CACHE_DIR (and the pip, npm and XDG caches) to /workspace/.gantry-cache at run time, kept out of git; /tmp is only a small tmpfs.
+ARG PYTHON_VERSION=3.12
+COPY --from=uv /uv /uvx /usr/local/bin/
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_PYTHON_PREFERENCE=only-managed UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy UV_NO_PROGRESS=1
 RUN --mount=type=secret,id=cacert,required=false \
-    if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
-    npm install -g --no-audit --no-fund @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && npm cache clean --force
+    if [ "$RUNNER_TOOLCHAIN" = "full" ]; then \
+      if [ -f /run/secrets/cacert ]; then export SSL_CERT_FILE=/run/secrets/cacert; fi; \
+      UV_PYTHON_DOWNLOADS=automatic uv python install "$PYTHON_VERSION" \
+      && chmod -R a+rX /opt/uv-python \
+      && ln -s "$(uv python find "$PYTHON_VERSION")" /usr/local/bin/python3.12; \
+    else \
+      rm -f /usr/local/bin/uv /usr/local/bin/uvx; \
+    fi
+COPY --from=harness /opt/harness /opt/harness
+RUN ln -s /opt/harness/node_modules/.bin/claude /usr/local/bin/claude && claude --version
 RUN groupadd -g 10001 runner \
  && useradd -u 10001 -g 10001 -M -d /workspace -s /usr/sbin/nologin runner \
  && mkdir -p /workspace && chown 10001:10001 /workspace
 COPY --from=wrapper-deps /opt/gantry-wrapper /opt/gantry-wrapper
 COPY --from=wrapper-build /src/runner/wrapper/dist /opt/gantry-wrapper/dist
+# The git front the agent's shell finds first on PATH (S-91): refuses config-borne commands. Root-owned, not writable by the runner.
+COPY --chmod=0755 runner/wrapper/bin/git /opt/gantry-wrapper/bin/git
 # Hooks never run inside git operations the agent performs (spec 5.4 T9): hooksPath points at nothing.
 # The agent commits locally as Gantry; it never pushes (gantry-github publishes after the step).
 ENV NODE_ENV=production \

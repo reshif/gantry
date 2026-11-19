@@ -1,0 +1,47 @@
+/* Home, Projects and Project settings: layout that belongs to these screens only. Buttons, tables, chips, tabs and
+   dialogs come from foundation.css; this file uses tokens, never hex values. Prefixes: hm- (home), hk- (health), pf- (portfolio), prj- (projects), pcf- (settings). */
+
+/* ---------- home: one column of cards ---------- */
+.hm-sec { min-width: 0; }
+.hm-count { margin-left: 8px; padding: 0 7px; border-radius: 3px; background: var(--panel); color: var(--muted); font-size: var(--t-sm); font-weight: 500; }
+.hm-quiet { margin: 0; }
+.hm-sec .panel-head { border-bottom: 1px solid var(--line); }
+
+/* needs attention and waiting on you: rows that touch the card edges */
+.hm-att { list-style: none; margin: 0; padding: 0; display: grid; }
+.hm-att-ic .ic { width: 18px; height: 18px; }
+.hm-att-t { font-weight: 600; font-size: var(--t-md); }
+.hm-att-w { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.hm-att-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* set up the factory */
+.hm-steps { list-style: none; margin: 0; padding: 8px; display: grid; gap: 2px; }
+.hm-step { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 10px; border: 1px solid transparent; border-radius: var(--r1); }
+.hm-step.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.hm-step.is-todo { color: var(--muted); }
+.hm-step .hm-step-n { width: 22px; height: 22px; display: grid; place-items: center; border: 1.5px solid var(--line-strong); border-radius: 50%; font-size: var(--t-xs); font-weight: 600; flex: none; }
+.hm-step.is-active .hm-step-n { border-color: var(--accent); color: var(--accent); }
+.hm-step.is-done .hm-step-n { background: var(--done); border-color: var(--done); color: var(--surface); }
+.hm-step-t { font-weight: 600; }
+
+/* in motion */
+.hm-motion .panel-body { display: grid; gap: var(--s3); }
+
+/* projects: a heading row, then cards */
+
+/* project card: shared by Home and the Portfolio */
+.hk-card-killed { border-color: var(--block); }
+.hk-card-halted { border-color: var(--wait); }
+.hk-card-archived { opacity: 0.8; }
+
+/* factory health */
+@media (max-width: 640px) {
+  .hm-att-acts { grid-column: 1 / -1; justify-content: flex-start; }
+  .hm-att-acts .btn, .hm-step .btn { min-height: 44px; }
+  .hm-step { grid-template-columns: 24px minmax(0, 1fr); }
+  .hm-step .btn { grid-column: 1 / -1; }
+}
+
+/* ---------- projects: the portfolio card ---------- */
+
+/* Projects page, prototype layout: toggle in the head, search + collapsed filters above the card grid. */

@@ -1,30 +1,36 @@
 /** Top bar: brand, environment badge, breadcrumb, palette button, status cluster, inbox, user menu. */
 import { useRef } from "react";
-import { ROLES } from "@gantry/domain";
-import { useHome, useSessions } from "../api/queries";
+import { useHome } from "../api/queries";
 import { ops } from "../api/ops";
 import type { Me } from "../api/types";
-import { applyTheme, setProject, updatePrefs, usePrefs, type Theme } from "../lib/prefs";
-import { Icon, Logo } from "../ui/Icon";
-import { Avatar, Btn, Chip, Table } from "../ui/primitives";
+import { applyTheme, updatePrefs, usePrefs, type Theme } from "../lib/prefs";
+import { Icon } from "../ui/Icon";
+import { Avatar } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { StatusCluster } from "./StatusCluster";
-import { useOpenTraveler } from "./useTraveler";
+import { openNotifications, useUnread } from "./NotificationsDrawer";
 import { navigate } from "../lib/router";
-import { isProjectRoute } from "../lib/routes";
+import { useCanMany } from "../api/can";
 
+const PERSONAS: Record<string, string> = { admin: "Factory admin", approver: "Approver", viewer: "Read-only viewer" };
 const isMac = () => /Mac|iPhone|iPad/.test(navigator.platform || "");
 
-export function TopBar({ me, crumb, project, current, onOpenNav, onOpenPalette }: { me: Me; crumb: string[]; project: Me["projects"][number] | null; current: string; onOpenNav: () => void; onOpenPalette: () => void }) {
+export function TopBar({ me, project, current, onOpenNav, onOpenPalette }: { me: Me; project: Me["projects"][number] | null; current: string; onOpenNav: () => void; onOpenPalette: () => void }) {
   const ui = useUI();
   const prefs = usePrefs();
   const home = useHome().data;
-  const inboxRef = useRef<HTMLButtonElement>(null);
   const userRef = useRef<HTMLButtonElement>(null);
-  const n = (home?.approvals.length ?? 0) + (home?.conversations.length ?? 0);
+  const waiting = (home?.approvals.length ?? 0) + (home?.conversations.length ?? 0);
+  const unread = useUnread(waiting);
   const v = me.person;
-  
+  // Which sheet the server gives this session: the same three the prototype lists under "View as".
+  // the session's own decisions (not the preview): they decide which sheets it may preview
+  const ownChecks = useCanMany([{ action: "kill.factory" }, { action: "wo.submit" }, { action: "line.halt" }], { raw: true });
+  const admin = ownChecks[0];
+  const ownReadOnly = ownChecks.every((c) => !c.pending && !c.allowed);
+  const own = ownReadOnly ? "viewer" : admin?.allowed ? "admin" : "approver";
+  const persona = prefs.viewAs || own;
   const signOut = async (what?: string) => {
     ui.closeAllDialogs();
     ui.drawer.close();
@@ -39,189 +45,71 @@ export function TopBar({ me, crumb, project, current, onOpenNav, onOpenPalette }
 
   const openUserMenu = () => {
     if (!userRef.current) return;
-    const theme = prefs.theme;
-    ui.menu(userRef.current, `${v.name} · ${v.email}`, [
-      ...(me.config.demoAccounts ? [{ label: "Environment: local stack · demo accounts on", icon: "info" }, { sep: true }] : []),
-      { label: "Profile", icon: "user", onClick: () => ui.dialog({ title: v.name, kicker: "Profile", body: <ProfileBody me={me} /> }) },
-      { label: "My roles per project", icon: "lock", onClick: () => ui.dialog({ title: "My roles", kicker: "Access", sub: "Roles are granted at factory level or per project. Projects where you hold no role are hidden from you.", body: <RolesBody me={me} /> }) },
-      { label: "My sessions", icon: "key", onClick: () => ui.dialog({ title: "My sessions", kicker: "Security", body: <SessionsBody me={me} /> }) },
+    // "View as": a preview of a less privileged sheet. It only removes rights from what the server decided (never grants one), so a session can look
+    // at what an approver or a read-only viewer would see; a role above the session's own needs another sign-in.
+    const rank: Record<string, number> = { admin: 2, approver: 1, viewer: 0 };
+    const viewAs = (Object.entries(PERSONAS) as Array<[string, string]>).map(([k, label]) => ({
+      label,
+      icon: "user",
+      sel: persona === k,
+      onClick: () => {
+        if ((rank[k] ?? 0) > (rank[own] ?? 0)) {
+          if (me.config.demoAccounts) void signOut(`Signed out. Sign in as ${label} to view as that role.`);
+          else ui.toast("Your session holds a lower role. Sign in with an account that has this role to view as it.", "warn");
+          return;
+        }
+        updatePrefs({ viewAs: k === own ? "" : (k as "approver" | "viewer") });
+        ui.toast(`Viewing as ${label}`);
+      },
+    }));
+    ui.menu(userRef.current, null, [
+      { head: prefs.viewAs ? `${v.name} · viewing as ${PERSONAS[prefs.viewAs]}` : `${v.name} · ${v.email}` },
+      // the Account page (profile, access, sessions, preferences, linked accounts); its Profile tab links on to the person page
+      { label: "My account", icon: "user", onClick: () => navigate("account") },
       { sep: true },
-      { label: "Theme: system", icon: "auto", hint: theme === "system" ? "on" : "", onClick: () => setTheme("system") },
-      { label: "Theme: light", icon: "sun", hint: theme === "light" ? "on" : "", onClick: () => setTheme("light") },
-      { label: "Theme: dark", icon: "moon", hint: theme === "dark" ? "on" : "", onClick: () => setTheme("dark") },
+      { head: "View as (preview only)" },
+      ...viewAs,
       { sep: true },
-      ...(me.config.demoAccounts ? [{ label: "Switch demo account (demo only)", icon: "swap", onClick: () => void signOut("Signed out. Pick another demo account.") }] : []),
       { label: "Sign out", icon: "logout", onClick: () => void signOut() },
     ]);
   };
 
-  const openInbox = () => {
-    if (!inboxRef.current) return;
-    ui.popover(inboxRef.current, (close) => <InboxBody name={v.name} close={close} />);
+  const themeRef = useRef<HTMLButtonElement>(null);
+  const openTheme = () => {
+    if (!themeRef.current) return;
+    ui.menu(themeRef.current, null, [
+      { head: "Theme" },
+      { label: "System", icon: "grid", sel: prefs.theme === "system", onClick: () => setTheme("system") },
+      { label: "Light · paper drawing", icon: "sun", sel: prefs.theme === "light", onClick: () => setTheme("light") },
+      { label: "Dark · blueprint", icon: "moon", sel: prefs.theme === "dark", onClick: () => setTheme("dark") },
+    ]);
   };
+  const dark = prefs.theme === "dark" || (prefs.theme === "system" && typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches);
 
   return (
-    <header className="topbar" id="topbar">
-      <button type="button" className="icon-btn nav-toggle" aria-label="Toggle navigation" aria-controls="nav" onClick={onOpenNav}>
+    <header className="top" id="topbar" role="banner">
+      <button type="button" className="btn icon ghost burger" aria-label="Open navigation" aria-controls="side" onClick={onOpenNav}>
         <Icon name="menu" />
       </button>
-      <a href="#home" className="brand">
-        <Logo />
-        <span className="brand-name">Gantry</span>
-        {me.config.demoAccounts ? <span className="dev-dot" role="img" aria-label="Non-production: local stack, demo accounts on" title="Non-production: local stack, demo accounts on" /> : null}
-      </a>
       <ProjectSwitcher me={me} project={project} current={current} />
-      <nav className={`crumb${isProjectRoute(current) ? "" : " crumb-factory"}`} id="crumb" aria-label="Breadcrumb">
-        {crumb.map((c, i) => (
-          <span key={i} className={i === crumb.length - 1 ? "crumb-cur" : "crumb-part"} aria-current={i === crumb.length - 1 ? "page" : undefined}>{c}</span>
-        ))}
-      </nav>
-      <button type="button" className="palette-btn" id="palette-btn" onClick={onOpenPalette} aria-label="Open command palette">
+      <button type="button" className="search-btn palette-btn" id="palette-btn" onClick={onOpenPalette} aria-label="Open command palette">
         <Icon name="search" />
-        <span className="palette-label">Search</span>
+        <span className="t palette-label">Search or jump to…</span>
         <kbd>{isMac() ? "⌘K" : "Ctrl K"}</kbd>
       </button>
-      <div className="top-right">
-        <StatusCluster />
-        <button ref={inboxRef} type="button" className="icon-btn inbox-btn" id="inbox-btn" aria-label={`Waiting for you: ${n}`} aria-haspopup="dialog" aria-expanded="false" onClick={openInbox}>
-          <Icon name="bell" />
-          {n ? <span className="inbox-count mono">{String(n)}</span> : null}
-        </button>
-        <button ref={userRef} type="button" className="user-btn" id="user-menu" aria-haspopup="menu" aria-label={`Account menu for ${v.name}`} aria-expanded="false" title={v.name} onClick={openUserMenu}>
-          <Avatar id={v.id} size="sm" />
-          <Icon name="down" />
-        </button>
-      </div>
+      <div className="grow" />
+      <StatusCluster />
+      <button type="button" className="btn icon ghost inbox-btn" id="inbox-btn" aria-label="Notifications" title="Notifications" aria-haspopup="dialog" onClick={() => openNotifications(ui, waiting)}>
+        <Icon name="bell" />
+        {unread ? <span className="inbox-count mono" aria-hidden="true" /> : null}
+      </button>
+      <button ref={themeRef} type="button" className="btn icon ghost" aria-label={`Theme: ${prefs.theme}. Click to change`} title={`Theme: ${prefs.theme}`} aria-haspopup="menu" onClick={openTheme}>
+        <Icon name={dark ? "moon" : "sun"} />
+      </button>
+      <button ref={userRef} type="button" className="btn ghost user-btn" id="user-menu" aria-haspopup="menu" aria-label={`Account menu for ${v.name}`} aria-expanded="false" title={me.config.demoAccounts ? `${v.name} · non-production: local stack, demo accounts on` : v.name} onClick={openUserMenu}>
+        <Avatar id={v.id} size="sm" />
+        <span className="trunc small" style={{ maxWidth: 110 }}>{v.name.split(" ")[0]}</span>
+      </button>
     </header>
   );
 }
-
-function ProfileBody({ me }: { me: Me }) {
-  const v = me.person;
-  const rows: Array<[string, string]> = [
-    ["Title", v.title],
-    ["Email", v.email],
-    ["GitHub", v.github || "not linked"],
-    ["Teams", v.teams.join(", ") || "none"],
-    ["On call", v.oncall ? "yes" : "no"],
-    ["Signed in via", me.session.method],
-  ];
-  return (
-    <dl className="titleblock">
-      {rows.map(([k, val]) => (
-        <div key={k}>
-          <dt>{k}</dt>
-          <dd>{val}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
-function RolesBody({ me }: { me: Me }) {
-  return (
-    <Table compact>
-      <thead>
-        <tr>
-          <th scope="col">Scope</th>
-          <th scope="col">Role</th>
-        </tr>
-      </thead>
-      <tbody>
-        {me.person.roles.map((g, i) => (
-          <tr key={`${g.scope}-${g.role}-${i}`}>
-            <td>{g.scope === "factory" ? "Factory" : (me.projects.find((p) => p.id === g.scope)?.name ?? g.scope)}</td>
-            <td>{ROLES.find((r) => r.id === g.role)?.name ?? g.role}</td>
-          </tr>
-        ))}
-      </tbody>
-    </Table>
-  );
-}
-
-function SessionsBody({ me }: { me: Me }) {
-  const ui = useUI();
-  const q = useSessions();
-  const mine = (q.data ?? []).filter((s) => s.person === me.person.id && !s.revoked);
-  if (q.isPending) return <p className="muted small">Loading sessions…</p>;
-  if (q.isError) return <p className="muted small">Sessions could not be loaded.</p>;
-  return (
-    <ul className="plain-list">
-      {mine.map((s) => {
-        const cur = s.id === me.session.id || s.current;
-        return (
-          <li key={s.id} className="sess-row">
-            <span>
-              <strong>{s.device}</strong>
-              {` · ${s.method} · ${s.ip}`}
-            </span>
-            <span className="muted small">{`since ${new Date(s.started).toLocaleString()}`}</span>
-            {cur ? (
-              <Chip text="this session" cls="chip-accent" />
-            ) : (
-              <Btn
-                label="Revoke"
-                small
-                id={`rev-${s.id}`}
-                onClick={async () => {
-                  const r = await ops.revokeSession(s.id);
-                  ui.toast(r.msg, r.ok ? "ok" : "error");
-                }}
-              />
-            )}
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function InboxBody({ name, close }: { name: string; close: () => void }) {
-  const home = useHome().data;
-  const openTraveler = useOpenTraveler();
-  const ap = home?.approvals ?? [];
-  const conv = home?.conversations ?? [];
-  const item = (key: string, icon: string, main: string, sub: string, fn: () => void) => (
-    <li key={key}>
-      <button type="button" className="inbox-item" onClick={() => { close(); fn(); }}>
-        <Icon name={icon} className="c-wait" />
-        <span className="inbox-main">
-          <span>{main}</span>
-          <span className="muted small">{sub}</span>
-        </span>
-      </button>
-    </li>
-  );
-  return (
-    <div>
-      <div className="pop-head">
-        <strong>{`Waiting for ${name}`}</strong>
-        <span className="muted small">{`${ap.length} approvals · ${conv.length} conversations`}</span>
-      </div>
-      {ap.length + conv.length ? (
-        <ul className="inbox">
-          {ap.map((a, i) =>
-            a.repo
-              ? item(`r${i}`, "rocket", a.note ? `Onboarding ${a.repoName ?? a.repo}` : `Merge onboarding PR ${a.repoName ?? a.repo}#${a.pr ?? ""}`, a.note ?? "Checks green", () => {
-                  if (a.project) setProject(a.project);
-                  navigate("onboarding", a.repo);
-                })
-              : item(`a${i}`, "st-wait", `${a.wo} · ${a.gateLabel ?? a.gate ?? ""} ${a.gateName ?? ""}`.trim(), `${a.title ?? ""} · ${a.projectName ?? a.project ?? ""}`, () => a.wo && openTraveler(a.wo)),
-          )}
-          {conv.map((w) =>
-            item(`c${w.wo}`, "chat", `${w.wo} · questions for you`, w.title, () => {
-              updatePrefs({ project: w.project, openConversation: w.wo });
-              navigate("conversations");
-            }),
-          )}
-        </ul>
-      ) : (
-        <div className="empty">
-          <div className="empty-title">Nothing waiting for you</div>
-          <p>Approvals you may give and questions addressed to you appear here.</p>
-        </div>
-      )}
-    </div>
-  );
-}
-

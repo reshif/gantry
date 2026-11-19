@@ -1,26 +1,34 @@
 /**
- * Floor (#floor): the live plant for the current project. Ported from legacy/js/views/floor.js.
- * Three views: Belt (serpentine conveyor with gates, bays and a shipped strip), Board (kanban with pointer drag and a
- * keyboard "Move to" menu) and List (sortable table). The header carries the project figures, new work order, the andon and
- * the project kill switch. Replay rebuilds the floor from the event log at a chosen past time (read-only). All data comes
- * from GET /projects/{id}/floor; every control is a command through the API.
+ * Floor (#floor): the live plant for the current project. One drawing of the line (stations across, work orders down, gates between, the
+ * shipped strip and the bays under it) with the project figures above it. The board and the list of work orders live in Work orders.
+ * The header carries the project's state, new work order, Line control (andon, kill and restore for the project or one repo) and the
+ * Live / Replay switch. Replay rebuilds the floor from the event log at a chosen past time (read-only). All data comes from
+ * GET /projects/{id}/floor; every control is a command through the API.
  */
-import { useEffect, useRef, useState } from "react";
-import { DAY, MIN, fmt } from "@gantry/domain";
-import { useCan } from "../api/can";
-import { useMe } from "../api/queries";
-import { Btn, Empty, Segmented, ViewHead, type Decision } from "../ui/primitives";
-import { Icon } from "../ui/Icon";
-import { useUI } from "../ui/overlay-context";
-import { pickProject } from "../lib/routes";
-import { setReplay, updatePrefs, usePrefs } from "../lib/prefs";
+import { useEffect, useState } from "react";
+import { flowOf, fmt, wipStatus } from "@gantry/domain";
+import { useCan, useCanMany } from "../api/can";
 import { makeStopActions } from "../shell/stopActions";
+import { useUI } from "../ui/overlay-context";
+import { useAgents, useMe } from "../api/queries";
+import { Btn, Empty, Panel, ViewHead, type Decision } from "../ui/primitives";
+import { Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
+import { pickProject } from "../lib/routes";
+import { hashFor } from "../lib/router";
+import { monthlyCap } from "../lib/budget";
+import { usePrefs } from "../lib/prefs";
 import { Belt } from "./floor/Belt";
-import { Board, ListView } from "./floor/Board";
+import { NeedBar } from "./floor/Need";
+import { PartsList, type PartsSort } from "./floor/Parts";
+import { buildModel, dur, type FloorModel } from "./floor/model";
+import type { LineHandlers } from "./floor/Line";
 import { useDrawers } from "./floor/Drawers";
-import { FloorCtx, isLive, replayRange, since, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
-import { ReplayBar } from "./floor/Replay";
+import { FloorCtx, WoChip, isLive, stationIdx, useFloorCtx, useFloorState, type FloorCtxValue, type FWo } from "./floor/kit";
+import { useQueryParam } from "./floor/urlState";
+import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
+import "../styles/views/floor.css";
+import "../styles/views/floor-line.css";
 
 const REPLAY_LOCK: Decision = { allowed: false, reason: "Replay is showing the past. Go back to live to act.", needs: "" };
 
@@ -32,162 +40,212 @@ function useTick(ms: number): void {
   }, [ms]);
 }
 
-function Kpis() {
-  const ctx = useFloorCtx();
-  const { project: p, wos, now } = ctx;
-  const live = wos.filter((w) => isLive(w) && w.bay !== "declined");
-  const waiting = live.filter((w) => w.state === "waiting" && !w.bay);
-  const oldest = waiting.reduce((m, w) => Math.max(m, now - since(w)), 0);
-  const shipped7 = wos.filter((w) => w.state === "done" && !w.split && (w.doneAt ?? 0) > now - 7 * DAY).length;
-  const shipped24 = wos.filter((w) => w.state === "done" && !w.split && (w.doneAt ?? 0) > now - DAY).length;
-  const stuck = live.filter((w) => w.state === "blocked" || w.state === "failed" || w.bay === "sechold" || w.bay === "person").length;
-  const slots = ctx.replay ? wos.filter((w) => !w.bay && w.state === "running" && ctx.cat.stations[w.station]?.id === "build").slice(0, p.flow.slots).length : ctx.floor.slots.used;
-  const spendPct = p.budget.monthly ? p.budget.mtd / p.budget.monthly : 0;
-  const killed = wos.filter((w) => w.state === "killed").length;
-  const items: Array<{ k: string; v: string; sub: string; tone?: string }> = [
-    { k: "Work in flight", v: String(live.length), sub: `${live.filter((w) => w.state === "running").length} running now` },
-    { k: "Gates waiting", v: String(waiting.length), sub: waiting.length ? `oldest ${fmt.dur(oldest)}` : "none waiting", tone: waiting.length ? "wait" : "" },
-    { k: "Stuck", v: String(stuck), sub: "blocked, failed, held, asking", tone: stuck ? "block" : "" },
-    { k: "Coding slots", v: `${slots}/${p.flow.slots}`, sub: slots >= p.flow.slots ? "all busy" : `${p.flow.slots - slots} free` },
-    { k: "Shipped", v: String(shipped7), sub: `${shipped24} in 24h, 7 days total` },
-    { k: "Spend MTD", v: fmt.money0(p.budget.mtd), sub: ctx.replay ? "live figure, not replayed" : `${fmt.pct(spendPct)} of ${fmt.money0(p.budget.monthly)}`, tone: spendPct >= p.budget.alertAt ? "wait" : "" },
-  ];
-  if (killed) items.push({ k: "Killed", v: String(killed), sub: "work orders stopped", tone: "kill" });
+/** The ticker beside the title: how much is on the line, where it is jammed, the longest wait at a person's gate, and what shipped. */
+function Ticker({ model }: { model: FloorModel }) {
+  const facts = useFacts();
+  const { project: pj } = useFloorCtx();
+  const cap = monthlyCap(pj.budget);
+  const bn = model.bottleneck;
+  const old = model.oldest;
   return (
-    <div className="fl-kpis" role="list" aria-label="Project figures">
-      {items.map((x) => (
-        <div key={x.k} className={`fl-kpi${x.tone ? ` tone-${x.tone}` : ""}`} role="listitem">
-          <div className="fl-kpi-k">{x.k}</div>
-          <div className="fl-kpi-v">{x.v}</div>
-          <div className="fl-kpi-sub">{x.sub}</div>
-        </div>
-      ))}
+    <div className="fp-ticker" id="floor-kpis" aria-label="Line summary">
+      <div className="tk" title={facts}>
+        <span className="k">ON THE LINE</span>
+        <span className="v">{model.live.length}<small>{`of ${model.all.filter((b) => b.w.bay !== "declined").length}`}</small></span>
+      </div>
+      <div className={`tk${bn ? " bott" : ""}`}>
+        <span className="k">BOTTLENECK</span>
+        <span className="v">{bn ? `${bn.st.s.no} ${bn.st.live}/${bn.st.lim}` : "none"}<small>{bn ? `+${bn.over} over` : "all within limit"}</small></span>
+      </div>
+      <div className="tk" title={old ? `Oldest has waited ${fmt.dur(old.ms)}` : undefined}>
+        <span className="k">{old ? `OLDEST AT ${old.gate}` : "OLDEST AT GATE"}</span>
+        <span className="v">{old ? dur(old.ms) : "—"}<small>{old ? old.wo : "nobody waiting"}</small></span>
+      </div>
+      <div className="tk done">
+        <span className="k">RELEASED</span>
+        <span className="v">{model.done.length}<small>shipped</small></span>
+      </div>
+      <div className="tk" id="floor-spend">
+        <span className="k">SPEND MTD</span>
+        <span className="v">{fmt.money0(pj.budget.mtd)}<small>{cap === null ? "No cap" : `of ${fmt.money0(cap)}`}</small></span>
+      </div>
     </div>
   );
 }
 
-function Header() {
+/** Coding slots and month-to-date spend (kept from the platform): they ride as the tooltip of the In flight figure, so the strip stays the prototype's five cells. */
+function useFacts(): string {
   const ctx = useFloorCtx();
+  const { project: p, wos } = ctx;
+  const slots = ctx.replay ? wos.filter((w) => !w.bay && w.state === "running" && ctx.cat.stations[w.station]?.id === "build").slice(0, p.flow.slots).length : ctx.floor.slots.used;
+  const cap = monthlyCap(p.budget);
+  return `Coding slots ${slots}/${p.flow.slots} · Spend, month to date ${fmt.money0(p.budget.mtd)} (${cap === null ? "no cap" : `${fmt.pct(p.budget.mtd / cap)} of ${fmt.money0(cap)}`})${ctx.replay ? ", live figure" : ""}`;
+}
+
+/** Line control in the Floor header: halt or resume this project's line, and the factory emergency stop (each asks for step-up in its dialog). */
+function LineControl() {
+  const ctx = useFloorCtx();
+  const me = useMe();
   const ui = useUI();
+  const p = ctx.project;
+  const killed = !!me?.factory.killed;
+  const halted = !!me?.projects.find((x) => x.id === p.id)?.halted;
+  // S-42: a killed project is restored here (Halt is refused by the server on it, so it is not offered)
+  const projKilled = !!(p.killed ?? me?.projects.find((x) => x.id === p.id)?.killed);
+  const checks = useCanMany([{ action: halted ? "line.resume" : "line.halt", project: p.id }, { action: killed ? "restore.factory" : "kill.factory" }, { action: "line.halt", project: p.id }, { action: "line.resume", project: p.id }, { action: "restore.project", project: p.id }]);
+  if (!me) return null;
+  const stop = makeStopActions(ui, me);
+  const guardOf = (i: number) => (ctx.replay ? REPLAY_LOCK : checks[i]?.pending ? undefined : checks[i]);
+  return (
+    <Btn
+      label={projKilled ? "Line control: killed" : halted ? "Line control: halted" : "Line control"}
+      icon={projKilled ? "stop" : "pause"}
+      kind={projKilled ? "danger" : undefined}
+      id="floor-line-control"
+      aria-haspopup="menu"
+      onClick={(e) =>
+        ui.menu(e.currentTarget as HTMLElement, null, [
+          { head: "Line control" },
+          ...(projKilled
+            ? [{ label: checks[4]?.override ? "Restore project with a reason" : "Restore project", icon: "right", guard: guardOf(4), onClick: () => stop.restore("project", p.id) }]
+            : [{ label: halted ? "Resume line" : "Halt line (pause the project)", icon: halted ? "right" : "pause", guard: guardOf(0), onClick: () => (halted ? void stop.resume(p.id) : stop.halt(p.id)) }]),
+          ...(ctx.repos.length && !projKilled ? [{ head: "Pause one repo" }] : []),
+          ...(projKilled ? [] : ctx.repos).map((r) => ({ label: r.halted ? `Resume ${r.name}` : `Pause ${r.name}`, icon: r.halted ? "right" : "pause", guard: guardOf(r.halted ? 3 : 2), onClick: () => (r.halted ? void stop.resumeRepo(r.id) : stop.haltRepo(r.id, p.id)) })),
+          { head: "Whole factory" },
+          { label: killed ? (checks[1]?.override ? "Restore with a reason" : "Restore factory") : "Emergency stop", icon: "stop", guard: guardOf(1), onClick: () => (killed ? stop.restore("factory", null) : stop.kill("factory", null)) },
+        ])
+      }
+    />
+  );
+}
+
+function Header({ view, onView, model, parts, onParts, focus, onFocus, replaying, onReplay }: { view: string; onView: (v: string | null) => void; model: FloorModel; parts: boolean; onParts: () => void; focus: boolean; onFocus: () => void; replaying: boolean; onReplay: (on: boolean) => void }) {
+  const ctx = useFloorCtx();
   const me = useMe();
   const p = ctx.project;
   const newWo = useNewWorkOrder();
   const dSubmit = useCan("wo.submit", { project: p.id });
-  const dHalt = useCan("line.halt", { project: p.id });
-  const dResume = useCan("line.resume", { project: p.id });
-  const dKill = useCan("kill.project", { project: p.id });
-  const dRestore = useCan("restore.project", { project: p.id });
   if (!me) return null;
-  const stop = makeStopActions(ui, me);
-  const lockIf = (d: Decision | null): Decision | null => (ctx.replay ? REPLAY_LOCK : d);
   const block = projectSubmitBlock(me, p, ctx.repos);
-  const newGuard = lockIf(!dSubmit.allowed && !dSubmit.pending ? dSubmit : block ? { allowed: false, reason: block, needs: "" } : null);
-  const factoryKilled = !!me.factory.killed;
-  const killBtn = p.killed ? (
-    <Btn label="Restore project" icon="power" id="floor-restore" guard={lockIf(dRestore.pending ? null : dRestore)} onClick={() => stop.restore("project", p.id)} />
-  ) : (
-    <Btn label="Kill project" kind="danger" icon="st-kill" id="floor-kill" guard={lockIf(factoryKilled ? { allowed: false, reason: "The whole factory is killed; restore it from Home.", needs: "" } : dKill.pending ? null : dKill)} onClick={() => stop.kill("project", p.id)} />
-  );
-  const andonMenu = (anchor: HTMLElement) => {
-    const items = [
-      p.halted
-        ? { label: `Resume ${p.name}`, icon: "play", hint: "whole project", guard: dResume.pending ? null : dResume, onClick: () => void stop.resume(p.id) }
-        : { label: `Halt ${p.name}`, icon: "halt", hint: "whole project", guard: dHalt.pending ? null : dHalt, onClick: () => stop.halt(p.id) },
-      { sep: true },
-      ...ctx.repos.map((r) =>
-        r.halted
-          ? { label: `Resume ${r.name}`, icon: "play", hint: "halted", guard: dResume.pending ? null : dResume, onClick: () => void stop.resumeRepo(r.id) }
-          : { label: `Halt ${r.name}`, icon: "halt", hint: "repo", guard: dHalt.pending ? null : dHalt, onClick: () => stop.haltRepo(r.id, p.id) },
-      ),
-    ];
-    ui.menu(anchor, "Andon: pull the cord", items);
-  };
+  const newGuard: Decision | null = ctx.replay ? REPLAY_LOCK : !dSubmit.allowed && !dSubmit.pending ? dSubmit : block ? { allowed: false, reason: block, needs: "" } : null;
+  const partsN = model.all.filter((b) => b.w.bay !== "declined").length;
   return (
-    <>
-      <div id="floor-head">
-        <ViewHead
-          kicker={`Project · Floor · ${p.key}`}
-          title={
-            <>
-              {p.name}
-              {ctx.replay ? (
-                <span className="vtitle-badge">
-                  <span className="chip fl-rp-chip">
-                    <Icon name="replay" />
-                    Replay · not live
-                  </span>
-                </span>
-              ) : null}
-            </>
-          }
-          sub={p.desc}
-          actions={
-            <>
-              <Btn label="New work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
-              <Btn label={p.halted ? "Andon: halted" : "Andon"} kind="andon" icon="halt" id="floor-andon" aria="Andon controls: halt or resume the project or a repo" guard={lockIf(null)} onClick={(e) => andonMenu(e.currentTarget)} aria-haspopup="menu" />
-              {killBtn}
-            </>
-          }
-        />
+    <div id="floor-head">
+      <ViewHead
+        title="Floor"
+        kicker={p.key}
+        sub={`${p.name} · flow v${ctx.floor.flowVersion}`}
+        actions={
+          <>
+            <Btn label={`Parts list (${partsN})`} id="floor-parts-toggle" title="Show the bill of materials: every work order as a numbered part" aria-pressed={parts} aria-controls="floor-parts" aria-expanded={parts} onClick={onParts} />
+            <Btn label="Focus on me" icon="eye" id="floor-focus" title="Dim everything that does not need a person" aria-pressed={focus} onClick={onFocus} />
+            <div className="seg" role="group" aria-label="Live or replay">
+              <Btn label="Live" id="floor-mode-live" aria-pressed={!replaying} onClick={() => onReplay(false)} />
+              <Btn label="Replay" id="floor-mode-replay" title="Rebuild the floor from the event log at a past time (read-only)" aria-pressed={replaying} onClick={() => onReplay(true)} />
+            </div>
+            <div className="seg" role="group" aria-label="View">
+              {(["belt", "board"] as const).map((v) => (
+                <Btn key={v} label={v === "belt" ? "Belt" : "Board"} id={`floor-view-${v}`} aria-pressed={view === v} onClick={() => onView(v === "board" ? "board" : null)} />
+              ))}
+            </div>
+            <LineControl />
+            <Btn label="Submit work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
+          </>
+        }
+      />
+      <Ticker model={model} />
+    </div>
+  );
+}
+
+function BoardCol({ id, title, list, needs, station }: { id: string; title: string; list: FWo[]; needs: Set<string>; station?: string }) {
+  const ctx = useFloorCtx();
+  // A station with a WIP limit shows live/limit (amber when full); no limit shows the plain count.
+  const wip = station ? wipStatus(ctx.cat, ctx.project, ctx.wos, station) : null;
+  return (
+    <div className="col" data-station={id}>
+      <h3><span>{title}</span>{wip && wip.limit > 0 ? <span className={wip.live > wip.limit ? "chip bad" : wip.full ? "chip warn" : ""} title={wip.live > wip.limit ? `Over the WIP limit of ${wip.limit}` : wip.full ? "Full: orders wait before this station" : `WIP limit ${wip.limit}`}>{`${wip.live}/${wip.limit}`}</span> : <span>{list.length}</span>}</h3>
+      <div className="cards">
+        {list.length ? list.map((w) => (
+          <a key={w.id} className={`card${needs.has(w.id) ? " need" : ""}`} data-wo={w.id} id={`floor-tok-${w.id}`} href={hashFor("record", w.id, ctx.project.id)}>
+            <div className="row"><span className="mono small">{w.id}</span><span className="spacer" /><WoChip w={w} /></div>
+            <div>{w.title}</div>
+            <div className="small muted">{`${ctx.project.name} · ${w.priority}`}</div>
+          </a>
+        )) : <div className="small muted">Empty</div>}
       </div>
-      <Kpis />
-    </>
+    </div>
+  );
+}
+
+function BoardPanel({ model, focus }: { model: FloorModel; focus: boolean }) {
+  const ctx = useFloorCtx();
+  const needs = new Set([...model.groups.flatMap((g) => g.wos.map((w) => w.id)), ...model.all.filter((b) => b.kind === "stuck" || b.kind === "gate").map((b) => b.w.id)]);
+  const line = ctx.project.flow.order.map((id) => ctx.cat.stations.find((s) => s.id === id)).filter((s): s is NonNullable<typeof s> => !!s && !!ctx.project.flow.stations[s.id]?.enabled);
+  const bays = flowOf(ctx.cat, ctx.project).bays.filter((b) => b.id !== "declined");
+  const killedList = ctx.wos.filter((w) => w.state === "killed" && w.bay !== "declined");
+  return (
+    <Panel title="Board" flush>
+      <div className={`board board-fit${focus ? " is-focus" : ""}`} id="floor-board">
+        {line.map((s) => (
+          <BoardCol key={s.id} id={s.id} station={s.id} title={`${s.no} ${s.name}`} list={ctx.wos.filter((w) => w.station === stationIdx(ctx.cat, s.id) && !w.bay && isLive(w))} needs={needs} />
+        ))}
+        {/* S-41: orders parked in a bay and killed ones are on the Board too, as columns after the stations (declined orders stay out, as in the Parts list and the ticker) */}
+        {bays.map((b) => {
+          // Only a bay that holds something gets a column, so empty bays do not crowd the line.
+          const list = ctx.wos.filter((w) => w.bay === b.id && w.state !== "killed" && w.state !== "done");
+          return list.length ? <BoardCol key={b.id} id={`bay-${b.id}`} title={`Bay · ${b.name}`} list={list} needs={needs} /> : null;
+        })}
+        {killedList.length ? <BoardCol id="killed" title="Killed" list={killedList} needs={needs} /> : null}
+      </div>
+    </Panel>
   );
 }
 
 function FloorBody({ projectId }: { projectId: string }) {
-  const prefs = usePrefs();
   const ctx = useFloorCtx();
   const drawers = useDrawers(projectId);
-  const view = prefs.floorView || "belt";
-  const [playing, setPlaying] = useState(false);
   const rp = ctx.replay;
-  const rpRef = useRef(rp);
-  rpRef.current = rp;
+  const { playing, setPlaying, enter, exit } = useReplayPlayer(projectId, rp, "floor-mode-live");
   useTick(30_000);
-
-  // play: advance the replay clock; each step is one read of the floor at that time
-  useEffect(() => {
-    if (!playing || !rp) return;
-    const t = setInterval(() => {
-      const c = rpRef.current;
-      if (!c) return;
-      const base = c.span === "7d" ? 60 * MIN : 10 * MIN;
-      let next = c.at + base * c.speed * 0.5;
-      if (next >= c.to) {
-        setPlaying(false);
-        next = c.to;
-      }
-      setReplay({ at: next });
-    }, 500);
-    return () => clearInterval(t);
-  }, [playing, !!rp]);
-  useEffect(() => {
-    if (!rp) setPlaying(false);
-  }, [rp]);
-  useEffect(() => {
-    if (playing && rp && rp.at >= rp.to - MIN) setReplay({ at: rp.from });
-  }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const enter = () => {
-    const rg = replayRange("24h");
-    setReplay({ at: rg.to - 6 * 3_600_000, span: "24h", project: projectId, speed: 1, from: rg.from, to: rg.to });
-  };
-  const exit = () => {
-    setPlaying(false);
-    setReplay(null);
-    setTimeout(() => document.getElementById("floor-replay-enter")?.focus(), 60);
-  };
+  const agents = useAgents().data;
+  const model = buildModel(ctx, agents);
+  const [viewQ, setView] = useQueryParam("view");
+  const [partsQ, setParts] = useQueryParam("parts");
+  const [sortQ, setSort] = useQueryParam("psort");
+  const [focusQ, setFocus] = useQueryParam("focus");
+  const [hl, setHl] = useState<string[] | null>(null);
+  const view = viewQ === "board" ? "board" : "belt";
+  const parts = partsQ === "open";
+  const focus = focusQ === "1";
+  const sort: PartsSort = sortQ === "wait" || sortQ === "rev" ? sortQ : "group";
+  const h: Omit<LineHandlers, "route"> = { onStation: drawers.station, onGate: drawers.gate, onBay: (sid, bayId) => drawers.bay(bayId, sid), onOut: drawers.out, onWo: drawers.wo, hl: new Set(hl ?? []), hover: setHl };
+  const showParts = parts;
   return (
     <>
-      <Header />
-      <div className="fl-switch">
-        <Segmented name="floor-view" label="Floor view" items={[{ id: "belt", label: "Belt", icon: "belt" }, { id: "board", label: "Board", icon: "board" }, { id: "list", label: "List", icon: "list" }]} value={view} onChange={(v) => updatePrefs({ floorView: v })} />
-        {rp ? null : <Btn label="Replay" icon="replay" id="floor-replay-enter" aria="Replay the floor over the last 24 hours or 7 days" onClick={enter} />}
-        <span className="muted small">{rp ? "Replaying recorded history. Nothing here changes the live floor." : "Live: changes from other people and the factory appear as they happen."}</span>
-      </div>
+      <Header view={view} onView={setView} model={model} parts={parts} onParts={() => setParts(parts ? null : "open")} focus={focus} onFocus={() => setFocus(focus ? null : "1")} replaying={!!rp} onReplay={(on) => (on ? enter() : exit())} />
       {rp ? <ReplayBar rp={rp} playing={playing} setPlaying={setPlaying} onExit={exit} /> : null}
-      {view === "board" ? <Board /> : view === "list" ? <ListView /> : <Belt onStation={drawers.station} onGate={drawers.gate} />}
+      {view === "board" ? (
+        <>
+          <NeedBar model={model} h={{ ...h, route: null }} onMore={() => { setParts("open"); setSort(null); }} />
+        <div className={`fp-main${showParts ? " has-parts" : ""}`}>
+          <div className="fp-left">
+            <BoardPanel model={model} focus={focus} />
+          </div>
+          {showParts ? <PartsList model={model} sort={sort} onSort={(s) => setSort(s === "group" ? null : s)} onClose={() => setParts(null)} h={{ ...h, route: null }} /> : null}
+        </div>
+        </>
+      ) : (
+        <>
+          <NeedBar model={model} h={{ ...h, route: null }} onMore={() => { setParts("open"); setSort(null); }} />
+          <div className={`fp-main${showParts ? " has-parts" : ""}${focus ? " is-focus" : ""}`}>
+            <div className="fp-left">
+              <Belt model={model} h={h} focus={focus} showHint={!showParts} />
+            </div>
+            {showParts ? <PartsList model={model} sort={sort} onSort={(s) => setSort(s === "group" ? null : s)} onClose={() => setParts(null)} h={{ ...h, route: null }} /> : null}
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -196,17 +254,7 @@ export default function FloorView() {
   const me = useMe();
   const prefs = usePrefs();
   const projectId = me ? pickProject(me, prefs.project) : null;
-  const r = prefs.replay;
-  const rpBase = r && projectId
-    ? (() => {
-        const span: "24h" | "7d" = r.span === "7d" ? "7d" : "24h";
-        const rg = replayRange(span);
-        const from = typeof r.from === "number" ? r.from : rg.from;
-        const to = typeof r.to === "number" ? r.to : rg.to;
-        const at = Math.max(from, Math.min(to, typeof r.at === "number" ? r.at : to));
-        return { at: Math.round(at / MIN) * MIN, span, from, to, speed: typeof r.speed === "number" ? r.speed : 1 };
-      })()
-    : null;
+  const rpBase = useReplayBase(projectId);
   const { value, error } = useFloorState(projectId, rpBase);
   if (!me) return null;
   if (!projectId) {
@@ -216,23 +264,17 @@ export default function FloorView() {
       </div>
     );
   }
-  if (!value && error) {
-    return (
-      <div className="view view-floor">
-        <Empty title="The floor could not be loaded" text="Reload the page, or try again in a moment." />
-      </div>
-    );
-  }
   if (!value) {
+    const f = error ? failureOf(error) : null;
     return (
       <div className="view view-floor">
-        <p className="muted small">Loading the floor…</p>
+        {!f ? <Loading id="floor-loading" label="the floor" /> : f.hidden ? <NotVisible id="floor-hidden" what="this floor" reason={f.msg} /> : <LoadFailed id="floor-error" what="the floor" msg={f.msg} onRetry={() => window.location.reload()} />}
       </div>
     );
   }
   return (
     <FloorCtx.Provider value={value as FloorCtxValue}>
-      <div className={`view view-floor${value.replay ? " is-replaying" : ""}`}>
+      <div className={`view view-floor floorpg${value.replay ? " is-replaying" : ""}`}>
         <FloorBody projectId={projectId} />
       </div>
     </FloorCtx.Provider>

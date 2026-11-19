@@ -3,9 +3,11 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fmt, flowOf } from "@gantry/domain";
 import { api, get, getText } from "../../api/client";
 import { Btn, Empty } from "../../ui/primitives";
+import { Loading, NotVisible, failureOf } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { reducedMotion } from "../../lib/prefs";
+import { navigate } from "../../lib/router";
 import { useOpenRecordRoute } from "./nav";
 import { journeyOf, stName, toRecEvent, type RecEvent, type TWo } from "../traveler/model";
 import { Fold, useName } from "./bits";
@@ -192,7 +194,33 @@ function sectionBody(id: SectionId, c: Ctx): ReactNode {
 }
 
 export function Sections({ c }: { c: Ctx }) {
-  const { rec, pre, compact } = c;
+  const { rec, pre, compact, doc } = c;
+  if (doc) {
+    return (
+      <article className="dz-doc" aria-label="Work order document">
+        {SECTIONS.map((s, i) => (
+          <section key={s.id} className="dz-sec" id={`${pre}sec-${s.id}`} aria-labelledby={`${pre}sec-${s.id}-h`}>
+            <details open>
+              <summary>
+                <h2 className="rec-sec-title" id={`${pre}sec-${s.id}-h`}>
+                  <span className="dz-n mono">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="dz-t">{s.label}</span>
+                </h2>
+                {rec.completeness.sections[s.id] ? null : <span className="chip dz-meta">no data yet</span>}
+                <span className="dz-chev" aria-hidden="true"><Icon name="down" /></span>
+              </summary>
+              <div className="dz-sbody">
+                {sectionBody(s.id, c)}
+                {s.id === "changes" && rec.completeness.sections.changes ? (
+                  <div className="dz-actions"><Btn label="Open full review (file tree, diff, commits)" kind="primary" small icon="branch" id={`${pre}open-changes`} onClick={() => navigate("changes", c.wo.id, c.wo.project)} /></div>
+                ) : null}
+              </div>
+            </details>
+          </section>
+        ))}
+      </article>
+    );
+  }
   return (
     <>
       {SECTIONS.map((s, i) => {
@@ -230,8 +258,12 @@ export function Lifecycle({ woId, compact = false }: { woId: string; compact?: b
   const d = useRecordData(woId);
   const copy = useCopyMarkdown();
   const openRecord = useOpenRecordRoute();
-  if (d.loading) return <p className="muted small">Loading the record…</p>;
-  if (d.error || !d.wo || !d.rec || !d.project || !d.cat) return <Empty title="Record unavailable" text={d.error instanceof Error ? d.error.message : "It may have been removed, or you cannot see its project."} />;
+  if (d.loading) return <Loading label="the record" />;
+  if (d.error || !d.wo || !d.rec || !d.project || !d.cat) {
+    const f = d.error ? failureOf(d.error) : null;
+    if (f?.hidden) return <NotVisible id="lc-hidden" what="this record" reason={f.msg} />;
+    return <Empty title="Record unavailable" text={d.error instanceof Error ? d.error.message : "It may have been removed, or you cannot see its project."} />;
+  }
   const pre = compact ? "lc-" : "rec-";
   const c: Ctx = { wo: d.wo, rec: d.rec, project: d.project, cat: d.cat as Catalog, pre, compact };
   const events = journeyOf(d.rec.events.map(toRecEvent));
@@ -256,7 +288,7 @@ export function Lifecycle({ woId, compact = false }: { woId: string; compact?: b
         </div>
         <div className="lc-btns">
           <Btn label="Copy as Markdown" small icon="copy" id={`${pre}copy-${d.wo.id}`} onClick={() => void copy(d.wo!.id)} />
-          <Btn label="Open full record" small kind="primary" icon="record" id={`${pre}open-${d.wo.id}`} onClick={() => openRecord(d.wo!.id, d.wo!.project, true)} />
+          <Btn label="Open full record" small kind="primary" icon="record" id={`${pre}open-${d.wo.id}`} onClick={() => openRecord(d.wo!.id, d.wo!.project, true, true)} />
         </div>
       </div>
       <KillBanner wo={d.wo} />

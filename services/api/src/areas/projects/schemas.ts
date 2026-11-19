@@ -17,6 +17,8 @@ export const RuleSchema = z.object({
   roles: ids,
   people: ids,
   required: z.number().int().min(0).max(9),
+  /** Per-class override of the approvals count (class id -> count). Whole numbers; range and class ids are checked with the rule. */
+  classRequired: z.record(z.string().min(1).max(60), z.number().int()).optional(),
   sod: z.boolean(),
   conditions: z.array(Condition).max(20),
   escalateH: z.number().int().min(0).max(240),
@@ -53,7 +55,7 @@ export const ClassSchema = z.object({
 });
 
 /** PATCH /projects/{id}/config: a path/value edit or a gate mode change. */
-export const ConfigBody = z.union([z.object({ path: str(200).min(1), value: z.unknown() }), z.object({ gate: id, mode: str(20) })]);
+export const ConfigBody = z.union([z.object({ path: str(200).min(1), value: z.unknown(), reason: str(1000).optional() }), z.object({ gate: id, mode: str(20), reason: str(1000).optional() })]);
 
 export const NewProject = z.object({
   name: str(80),

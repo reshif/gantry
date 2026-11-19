@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import Docker from "dockerode";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { BIG_HOST } from "./host.js";
 import { RunManager } from "../src/manager.js";
 import { buildServer } from "../src/server.js";
 
@@ -12,6 +13,9 @@ const EDGE = `${P}-edge`;
 const EDGE_NET = `${P}-edge-net`;
 const TOKEN = "i".repeat(48);
 const RUN_TOKEN = "run-token-0123456789";
+/** Run ids this suite uses; cleanup never touches any other gantry.run value. */
+const TEST_RUN_IDS = ["it1", "it2", "it3", "it4", "it5"];
+const BYSTANDER = `${P}-bystander`;
 
 function dockerUp(): boolean {
   try {
@@ -54,23 +58,31 @@ d("launcher against real Docker", () => {
   const auth = { authorization: `Bearer ${TOKEN}` };
   const body = (runId: string, extra: object = {}) => ({ runId, workspaceRef: "test/ref", variant: "base", runToken: RUN_TOKEN, ...extra });
 
+  /** Removes only this suite's resources: managed-by label AND one of our run ids (and the test image for containers). */
   function cleanup() {
-    for (const c of shOk("ps", "-aq", "--filter", `label=gantry.managed-by=gantry-launcher`).out.split("\n").filter(Boolean)) shOk("rm", "-fv", c);
+    const lines = (out: string) => out.split("\n").filter(Boolean);
+    for (const id of TEST_RUN_IDS) {
+      const f = ["--filter", "label=gantry.managed-by=gantry-launcher", "--filter", `label=gantry.run=${id}`];
+      for (const c of lines(shOk("ps", "-aq", ...f, "--filter", `ancestor=${IMAGE}`).out)) shOk("rm", "-fv", c);
+      for (const n of lines(shOk("network", "ls", "-q", ...f).out)) shOk("network", "rm", n);
+      for (const v of lines(shOk("volume", "ls", "-q", ...f).out)) shOk("volume", "rm", v);
+    }
     shOk("rm", "-fv", EDGE);
-    for (const n of shOk("network", "ls", "-q", "--filter", "label=gantry.managed-by=gantry-launcher").out.split("\n").filter(Boolean)) shOk("network", "rm", n);
     shOk("network", "rm", EDGE_NET);
-    for (const v of shOk("volume", "ls", "-q", "--filter", "label=gantry.managed-by=gantry-launcher").out.split("\n").filter(Boolean)) shOk("volume", "rm", v);
     shOk("rmi", IMAGE);
   }
 
   beforeAll(() => {
     cleanup();
-    execFileSync("docker", ["build", "-t", IMAGE, "-"], { input: 'FROM node:22-alpine\nCMD ["sleep","3600"]\n', stdio: ["pipe", "ignore", "ignore"] });
+    execFileSync("docker", ["build", "-t", IMAGE, "-"], { input: 'FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a\nCMD ["sleep","3600"]\n', stdio: ["pipe", "ignore", "ignore"] });
     sh("network", "create", EDGE_NET);
     // Stands in for gantry-edge: any running container is attachable; the launcher only needs its name.
     sh("run", "-d", "--name", EDGE, "--network", EDGE_NET, IMAGE);
   });
-  afterAll(() => cleanup());
+  afterAll(() => {
+    shOk("rm", "-fv", BYSTANDER);
+    cleanup();
+  });
 
   it("starts a run from the fixed template and isolates it", async () => {
     const r = await app.inject({ method: "POST", url: "/v1/runs", headers: auth, payload: body("it1") });
@@ -98,7 +110,12 @@ d("launcher against real Docker", () => {
     expect(hc.Tmpfs["/tmp"]).toMatch(/noexec/);
     expect(c.Mounts.map((m: { Type: string; Name: string; Destination: string }) => [m.Type, m.Name, m.Destination])).toEqual([["volume", "ws-it1", "/workspace"]]);
     const env = (c.Config.Env as string[]).map((e) => e.split("=")[0]);
-    for (const k of ["EDGE_URL", "HTTPS_PROXY", "GANTRY_RUN_TOKEN", "GANTRY_RUN_ID"]) expect(env).toContain(k);
+    for (const k of ["EDGE_URL", "HTTPS_PROXY", "GANTRY_RUN_ID"]) expect(env).toContain(k);
+    expect(env).not.toContain("GANTRY_RUN_TOKEN");
+    expect(JSON.stringify(c.Config.Env)).not.toContain(RUN_TOKEN);
+    // The token arrived as a file in the workspace volume (copied into the created container, through a read-only root), owned by the runner uid, mode 0400.
+    expect(sh("exec", "gantry-runner-it1", "cat", "/workspace/.gantry-run-token")).toBe(RUN_TOKEN);
+    expect(sh("exec", "gantry-runner-it1", "stat", "-c", "%a %u:%g", "/workspace/.gantry-run-token").trim()).toBe("400 10001:10001");
     expect(Object.keys(c.NetworkSettings.Networks)).toEqual(["run-it1"]);
 
     const net = JSON.parse(sh("network", "inspect", "run-it1"))[0];
@@ -186,7 +203,7 @@ d("launcher against real Docker", () => {
   });
 
   it("refuses to start when the image is missing and leaves nothing behind", async () => {
-    const cfg2 = loadConfig({ RUNNER_VARIANTS: `base=${P}-missing:none`, RUN_SUBNET_POOL: "10.213.200.0/24", MAX_CONCURRENT_RUNS: "2", EDGE_CONTAINER: EDGE });
+    const cfg2 = loadConfig({ RUNNER_VARIANTS: `base=${P}-missing:none`, RUN_SUBNET_POOL: "10.213.200.0/24", MAX_CONCURRENT_RUNS: "2", EDGE_CONTAINER: EDGE }, BIG_HOST);
     if (!cfg2.ok) throw new Error(cfg2.error.msg);
     const app2 = buildServer({ cfg: cfg2.value, manager: new RunManager(docker, cfg2.value), token: TOKEN, logger: false });
     const r = await app2.inject({ method: "POST", url: "/v1/runs", headers: auth, payload: body("it5") });
@@ -194,5 +211,17 @@ d("launcher against real Docker", () => {
     expect(r.json().kind).toBe("image_missing");
     expect(exists("network", "run-it5")).toBe(false);
     expect(exists("volume", "ws-it5")).toBe(false);
+  });
+
+  // Keep last: cleanup() also removes the edge stand-in and the image.
+  it("cleanup leaves an unrelated launcher-labelled container alone", () => {
+    try {
+      sh("run", "-d", "--name", BYSTANDER, "--label", "gantry.managed-by=gantry-launcher", "--label", "gantry.run=live-other-run", IMAGE);
+      cleanup();
+      expect(exists("container", BYSTANDER)).toBe(true);
+    } finally {
+      shOk("rm", "-fv", BYSTANDER);
+    }
+    expect(exists("container", BYSTANDER)).toBe(false);
   });
 });

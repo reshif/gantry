@@ -17,9 +17,21 @@ export interface RecGate {
   openedAt: string | null;
   closedAt: string | null;
   pinned: { flowVersion: number; ruleVersion: number | null; policyVersion: number | null };
-  basis: { checks?: Array<{ name: string; ok: boolean }>; required?: number; riskTags?: string[]; forcedHuman?: boolean };
+  basis: { checks?: Array<{ name: string; ok: boolean }>; required?: number; riskTags?: string[]; forcedHuman?: boolean; review?: ReviewVerdict | null };
   votes: Array<{ by: string; vote: string; comment: string; at: string | null; via: string; role: string | null }>;
   decision: { decision: string; decided_by: string | null; rule: string | null; trust_level: string | null; detail: { mode?: string; reason?: string; via?: string; reasonCode?: string; samplingReason?: string } | null; at: string } | null;
+}
+/** What the Review agent recorded (data.review on the work order): its verdict, the per-criterion result and its findings. Gantry only relays it. */
+export interface ReviewVerdict {
+  verdict: "approve" | "changes_requested" | "none";
+  reported?: string;
+  criteria: Array<{ criterion: string; result: "pass" | "fail" | "untested"; evidence: string }>;
+  findings: Array<{ severity: string; file: string; line: number | null; issue: string; fix: string }>;
+  notes?: string;
+  sendBackTo?: string | null;
+  description?: { title: string | null; body: string } | null;
+  headSha?: string | null;
+  at?: number;
 }
 export interface RecPr {
   number: number;
@@ -48,6 +60,22 @@ export interface RecFile {
   state?: string;
   preview?: Array<{ t: string; s: string }>;
 }
+/** What instructions the work order runs on (GET .../record `context`): the pin written at its first dispatch, every re-pin, and per run the seed commit and what was read as conventions. */
+export interface RecContext {
+  pin: { id: string; pinnedAt: string; base: number | null; project: number | null; guidelines: { hash: string; commit: string | null } | null; agents: Record<string, { version: number; skills: Record<string, number> }> } | null;
+  repins: Array<{ seq: number; at: string | null; by: string; detail: { reason?: string; trigger?: string; id?: string } | null }>;
+  runs: Array<{
+    run: string;
+    station: string;
+    contextPin: string | null;
+    seed: { commit: string | null; source: string | null; why: string | null } | null;
+    conventions: { state: "read"; commit: string; hash: string | null } | { state: "unavailable"; reason: string | null } | { state: "none" };
+    proposedChanges: Array<{ path: string; status: string }>;
+    promptDrift: boolean;
+  }>;
+  notices: Array<{ kind: "conventions_unavailable" | "prompt_drift"; run: string; station: string; text: string }>;
+}
+
 export interface RecordData {
   id: string;
   version: number;
@@ -64,12 +92,17 @@ export interface RecordData {
   brief: Brief;
   criteria: Criterion[];
   journey: HistoryEntry[];
+  /** The instructions the work order runs on; absent from a server that does not pin context. */
+  context?: RecContext;
   gates: RecGate[];
+  /** The Review agent's verdict, or null before Review has run. */
+  review?: ReviewVerdict | null;
   sendbacks: Sendback[];
   bayStays: Array<{ bay: string; reason: string; by: string | null; from: string | null; to: string | null }>;
   attempts: Array<{ id: string; station: string; visit: number; fencing: number; state: string; outcome: string | null; startedAt: string | null; endedAt: string | null; agent: string | null }>;
   results: Array<{ id: string; attempt: string; station: string; outcome: string; summary: string; at: string | null; output: unknown }>;
   runs: Array<{ id: string; attempt: string; state: string; model: string | null; at: string | null }>;
+  wait?: { label: string; reason: string | null; since: string | null; kind: "slot" | "disk" | "disk_critical" } | null;
   code: { pullRequests: RecPr[]; commits: RecCommit[]; files: RecFile[]; diff: { plus: number; minus: number; files: number }; tests: { passed: number; failed: number; added: number } };
   outcomes: Outcome[];
   totals: { tokens: number; cost: number };

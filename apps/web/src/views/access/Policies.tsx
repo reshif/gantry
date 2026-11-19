@@ -2,7 +2,11 @@ import { useState } from "react";
 import { DAYS, type Action, type Person, type Policy, type Project, type Role } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
-import { Btn, Chip, Field, LockNote, Segmented, Toggle, type Decision } from "../../ui/primitives";
+import { useAccessMatrix } from "../../api/queries";
+import { Btn, Chip, Field, FilterBar, LockNote, SearchBox, Segmented, Toggle, type Decision } from "../../ui/primitives";
+import { DataTable } from "../../ui/DataTable";
+import { RELEASE_MANAGER } from "../../lib/roles";
+import { CountClear, setQS, useQS } from "../govern/kit";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { ifMatchOf, lockd, useOutcome, usePolicyWording, versionOf } from "../govern/data";
@@ -22,7 +26,7 @@ const draftOf = (existing: Policy | null): Draft => {
     d.where = d.where ?? {};
     return d as Draft;
   }
-  return { id: "NEW", name: "", effect: "allow", enabled: true, roles: ["release_manager"], actions: ["release"], where: { projects: [] }, when: { days: [1, 2, 3, 4, 5], from: "09:00", to: "18:00" }, oncallOnly: false, extend: false, custom: true };
+  return { id: "NEW", name: "", effect: "allow", enabled: true, roles: [RELEASE_MANAGER], actions: ["release"], where: { projects: [] }, when: { days: [1, 2, 3, 4, 5], from: "09:00", to: "18:00" }, oncallOnly: false, extend: false, custom: true };
 };
 
 function Checks({ prefix, items, list, onChange }: { prefix: string; items: Array<{ value: string; label: string }>; list: string[]; onChange: (v: string, on: boolean) => void }) {
@@ -153,45 +157,56 @@ export function usePolicyDialog(args: { perm: Decision; roles: Role[]; actions: 
   };
 }
 
-export function PolicyCards({ policies, hl, people, onEdit, onSimulate }: { policies: Policy[]; hl: string | null; people: Person[]; onEdit: (p: Policy) => void; onSimulate: (p: Policy, who: Person | undefined) => void }) {
+export function PolicyTable({ policies, people, onEdit, onSimulate }: { policies: Policy[]; people: Person[]; onEdit: (p: Policy | null) => void; onSimulate: (p: Policy, who: Person | undefined) => void }) {
   const outcome = useOutcome();
   const perm = useCan("policy.edit");
+  const ui = useUI();
   const wording = usePolicyWording();
-  const list = [...policies].sort((a, b) => (a.id < b.id ? -1 : 1));
+  const roleList = useAccessMatrix().data?.roles ?? [];
+  const roleName = (id: string) => roleList.find((x) => x.id === id)?.name ?? id;
+  const [q, setQ] = useQS("acc.pq");
+  const s = q.trim().toLowerCase();
+  const list = [...policies].sort((a, b) => (a.id < b.id ? -1 : 1)).filter((p) => !s || p.name.toLowerCase().includes(s));
+  const clear = () => setQS({ "acc.pq": "" });
   return (
-    <ul className="policy-cards">
-      {list.map((p) => {
-        const kind = p.effect === "deny" ? "Deny" : p.extend ? "Extend" : "Narrow";
-        const isHl = hl === p.id;
-        const proj = p.where.projects?.[0] ?? "";
-        const who = people.find((x) => x.status === "active" && x.roles.some((g) => p.roles.includes(g.role) && (g.scope === "factory" || g.scope === proj || !p.where.projects?.length)));
-        const custom = (p as Policy & { custom?: boolean }).custom;
-        return (
-          <li key={p.id} className={`policy-card eff-${p.effect}${p.extend ? " is-extend" : ""}${p.enabled ? "" : " is-off"}${isHl ? " is-hl" : ""}`} id={`acc-pol-${p.id}`}>
-            <div className="pc-top">
-              <span className="mono strong">{p.id}</span>
-              <span className="pc-effect"><Icon name={p.effect === "deny" ? "halt" : p.extend ? "plus" : "clock"} />{kind}</span>
-              {isHl ? <Chip text="deciding rule" cls="chip-accent" /> : null}
-              <span className="pc-toggle">
-                <Toggle id={`acc-pol-on-${p.id}`} checked={p.enabled} decision={perm} label={`Enable ${p.id}`} onChange={async (v) => void outcome(await ops.setPolicyEnabled(p.id, v, ifMatchOf(p)))} />
-              </span>
-            </div>
-            <h3 className="pc-name">{p.name}</h3>
-            <p className="pc-sentence">{wording.sentence(p)}</p>
-            <dl className="pc-grid">
-              <div><dt>Who</dt><dd>{wording.roles(p)}</dd></div>
-              <div><dt>What</dt><dd className="mono small">{p.actions.join(", ")}</dd></div>
-              <div><dt>Where</dt><dd>{wording.where(p)}</dd></div>
-              <div><dt>When</dt><dd>{p.effect === "deny" ? (p.where.freeze ? "while a freeze is active" : "always") : wording.when(p.when) + (p.oncallOnly ? ", on call" : "")}</dd></div>
-            </dl>
-            <div className="pc-actions">
-              <Btn label="Edit" small kind="ghost" icon="page" id={`acc-pol-edit-${p.id}`} guard={!perm.allowed ? perm : SPECIAL[p.id] ? lockd(SPECIAL[p.id]!) : null} onClick={() => onEdit(p)} />
-              <Btn label="Simulate" small kind="ghost" icon="play" id={`acc-pol-sim-${p.id}`} onClick={() => onSimulate(p, who)} />
-              {custom ? <Btn label="Delete" small kind="ghost" icon="x" id={`acc-pol-del-${p.id}`} guard={perm} onClick={async () => void outcome(await ops.deletePolicy(p.id, ifMatchOf(p)))} /> : null}
-            </div>
-          </li>
-        );
-      })}
-    </ul>
+    <div>
+      <FilterBar label="Filter policies" count={<CountClear n={list.length} of={policies.length} noun="policy" many="policies" active={!!q} onClear={clear} />}>
+        <SearchBox id="acc-pol-q" value={q} onChange={setQ} placeholder={"Search\u2026"} label="Search policy" />
+      </FilterBar>
+      <DataTable<Policy>
+        id="acc-policies"
+        caption="Conditional policies"
+        rows={list}
+        rowKey={(p) => p.id}
+        rowId={(p) => `acc-pol-${p.id}`}
+        empty={policies.length ? { title: "Nothing matches these filters", text: "Loosen the search or clear the filters.", action: <Btn label="Clear filters" id="acc-pol-clear" onClick={clear} /> } : { title: "No policies yet", text: "Roles alone decide who can do what. Add a policy to narrow a right to certain hours or projects, or to extend it." }}
+        columns={[
+          { key: "n", label: "Policy", render: (p) => {
+            const proj = p.where.projects?.[0] ?? "";
+            const who = people.find((x) => x.status === "active" && x.roles.some((g) => p.roles.includes(g.role) && (g.scope === "factory" || g.scope === proj || !p.where.projects?.length)));
+            const custom = (p as Policy & { custom?: boolean }).custom;
+            return (
+              // Static in the prototype: no visible control. Policy administration stays on the cell's context menu (right click).
+              <div onContextMenu={(e) => { e.preventDefault(); ui.menu(e.currentTarget, p.name, [
+                { label: "Edit policy", icon: "page", guard: !perm.allowed ? perm : SPECIAL[p.id] ? lockd(SPECIAL[p.id]!) : null, onClick: () => onEdit(p) },
+                { label: "Simulate", icon: "play", onClick: () => onSimulate(p, who) },
+                ...(custom ? [{ label: "Delete policy", icon: "x", kind: "danger", guard: perm, onClick: () => void ouDelete(p) }] : []),
+                { sep: true },
+                { label: "Add policy", icon: "plus", guard: perm, onClick: () => onEdit(null) },
+              ]); }}>
+                <b>{p.name}</b><span className="sub">{`${p.effect} ${p.actions.join(", ")} for ${p.roles.length ? p.roles.map(roleName).join(", ") : "everyone"}`}</span>
+              </div>
+            );
+          } },
+          { key: "w", label: "Where", render: (p) => (p.where.projects?.length ? wording.where(p) : "Everywhere") },
+          { key: "t", label: "When", render: (p) => (p.when ? `${p.when.from}\u2013${p.when.to}, days ${p.when.days.join("")}` : "Always") },
+          { key: "e", label: "Effect", render: (p) => <Chip text={p.effect} cls={p.effect === "allow" ? "ok" : "bad"} /> },
+          { key: "on", label: "On", render: (p) => <Toggle id={`acc-pol-on-${p.id}`} checked={p.enabled} decision={perm} label="Enabled" onChange={async (v) => void outcome(await ops.setPolicyEnabled(p.id, v, ifMatchOf(p)), `${p.name} ${v ? "on" : "off"}`)} /> },
+        ]}
+      />
+    </div>
   );
+  async function ouDelete(p: Policy) {
+    outcome(await ops.deletePolicy(p.id, ifMatchOf(p)));
+  }
 }

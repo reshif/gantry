@@ -3,17 +3,25 @@
  * "decision" is a can() result: { allowed, reason, needs }. A forbidden control stays visible and
  * focusable, carries aria-disabled and data-reason, and shows the reason in the tooltip.
  */
-import { useId, useRef, type ButtonHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
 import { WO_STATES } from "@gantry/domain";
 import { Icon } from "./Icon";
 import { tip } from "./Tip";
 import { useActors } from "./actors";
 import { useUI } from "./overlay-context";
+import { usePrefs } from "../lib/prefs";
+import { useHash } from "../lib/router";
+import { isProjectRoute } from "../lib/routes";
+import { useMe } from "../api/queries";
+import { drawingNo } from "../lib/sheets";
 
 export interface Decision {
   allowed: boolean;
   reason: string;
   needs?: string | undefined;
+  /** Only a Factory Admin override would allow it (a halt or freeze on a gate or release): the control offers "<verb> anyway" with a reason. */
+  override?: boolean | undefined;
+  overrideKind?: string | undefined;
 }
 
 /** Text shown for a locked control: "<needs>. <reason>". */
@@ -40,24 +48,46 @@ export interface BtnProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 
   children?: ReactNode;
 }
 
+/** The overlay API when there is one (a control may render outside the provider, e.g. in a test). */
+function useOptionalUI(): ReturnType<typeof useUI> | null {
+  try {
+    return useUI();
+  } catch {
+    return null;
+  }
+}
+
 export function Btn({ label, kind, small, cls, icon, aria, disabledReason, guard, onClick, type = "button", children, ...rest }: BtnProps) {
   const g = guardProps(guard);
+  const uiApi = useOptionalUI();
   const reason = disabledReason || g["data-reason"];
   const locked = !!disabledReason || g.locked;
-  const className = `btn ${kind ? `btn-${kind}` : ""}${small ? " btn-sm" : ""}${cls ? ` ${cls}` : ""}${locked ? " is-locked" : ""}`;
+  // the prototype's modifiers (.btn.primary .danger .ghost .sm); the legacy btn-* names ride along for screens and tests not yet moved
+  const tone = kind === "quiet" ? "ghost" : kind;
+  const className = `btn${tone ? ` ${tone} btn-${kind}` : ""}${small ? " sm btn-sm" : ""}${cls ? ` ${cls}` : ""}${locked ? " is-locked" : ""}`;
+  const showWhy = locked && !!reason;
+  // allowed, but the server will ask for a fresh sign-in first (the step-up rail): say so instead of locking
+  const stepUp = !locked && guard?.allowed === true && guard.needs === "step_up" ? guard.reason || "You'll be asked to sign in again to confirm." : undefined;
   return (
     <button
       {...rest}
       type={type}
       className={className}
       aria-label={aria}
-      aria-disabled={locked ? "true" : undefined}
+      // why it is locked, read by screen readers with the control (the tooltip shows it on hover, focus and tap)
+      aria-description={locked && reason ? reason : undefined}
+      // the shared tooltip node (ui/Tip) carries this control's reason while it has focus
+      aria-describedby={showWhy ? "tip" : rest["aria-describedby"]}
+      aria-disabled={locked ? "true" : rest["aria-disabled"]}
       data-reason={reason || undefined}
+      title={locked && reason && /read-only/i.test(reason) ? reason : (rest.title ?? stepUp)}
+      data-step-up={stepUp ? "true" : undefined}
       onClick={(e) => {
         if (locked) {
           e.preventDefault();
           e.stopPropagation();
           tip.show(e.currentTarget);
+          if (reason && /read-only/i.test(reason)) uiApi?.toast(reason, "error");
           return;
         }
         onClick?.(e);
@@ -72,7 +102,7 @@ export function Btn({ label, kind, small, cls, icon, aria, disabledReason, guard
 
 export function IconBtn({ icon, label, className = "", onClick, ...rest }: { icon: string; label: string; className?: string; onClick?: () => void } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick">) {
   return (
-    <button type="button" {...rest} className={`icon-btn ${className}`} aria-label={label} onClick={onClick}>
+    <button type="button" {...rest} className={`btn icon ghost icon-btn ${className}`} aria-label={label} onClick={onClick}>
       <Icon name={icon} />
     </button>
   );
@@ -81,16 +111,20 @@ export function IconBtn({ icon, label, className = "", onClick, ...rest }: { ico
 /* ---------- form controls ---------- */
 
 /** Switch (checkbox with role=switch). A forbidden decision locks it and shows the reason on click. */
-export function Toggle({ id, checked, onChange, decision, label }: { id: string; checked: boolean; onChange?: (v: boolean) => void; decision?: Decision | null; label?: string }) {
+export function Toggle({ id, checked, onChange, decision, label, variant, disabled }: { id: string; /** A hard-disabled control (prototype: locked checkbox, dashed grey). */ disabled?: boolean; checked: boolean; onChange?: (v: boolean) => void; decision?: Decision | null; label?: string; /** "check" draws the prototype's square matrix checkbox instead of the switch. */ variant?: "check" }) {
   const g = guardProps(decision);
+  const uiApi = useOptionalUI();
+  const box = variant === "check";
   return (
-    <span className={`switch${g.locked ? " is-locked" : ""}`}>
+    <span className={`${box ? "checkbox" : "switch"}${g.locked ? " is-locked" : ""}`}>
       <input
+        aria-description={g["data-reason"]}
         type="checkbox"
-        role="switch"
+        role={box ? undefined : "switch"}
         id={id}
-        className={`switch-input${g.locked ? " is-locked" : ""}`}
+        className={`${box ? "mx" : "sw switch-input"}${g.locked ? " is-locked" : ""}`}
         checked={checked}
+        disabled={disabled}
         aria-label={label}
         aria-disabled={g["aria-disabled"]}
         data-reason={g["data-reason"]}
@@ -98,13 +132,14 @@ export function Toggle({ id, checked, onChange, decision, label }: { id: string;
           if (g.locked) {
             e.preventDefault();
             tip.show(e.currentTarget);
+            const why = g["data-reason"];
+            if (why && /read-only/i.test(why)) uiApi?.toast(why, "error");
           }
         }}
         onChange={(e) => {
           if (!g.locked) onChange?.(e.target.checked);
         }}
       />
-      <span className="switch-track" aria-hidden="true" />
     </span>
   );
 }
@@ -113,6 +148,14 @@ export interface Option {
   value: string;
   label: string;
   disabled?: boolean;
+}
+
+/** A text input and a multi-line input in the one field style. Put them in a <Field>, which wires the label, hint and error to them. */
+export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement> & { id: string }) {
+  return <input {...props} className={`input${props.className ? ` ${props.className}` : ""}`} />;
+}
+export function TextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { id: string }) {
+  return <textarea {...props} className={`input${props.className ? ` ${props.className}` : ""}`} />;
 }
 
 export function Select({ id, options, value, onChange, ...rest }: { id: string; options: Array<string | Option>; value: string | null | undefined; onChange?: (v: string) => void } & Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "onChange" | "value" | "id">) {
@@ -130,17 +173,51 @@ export function Select({ id, options, value, onChange, ...rest }: { id: string; 
   );
 }
 
-/** Label + control + hint. Pass the control's id as `htmlFor`. */
-export function Field({ label, htmlFor, hint, children }: { label: ReactNode; htmlFor?: string; hint?: ReactNode; children: ReactNode }) {
+/**
+ * Label + control + description + error, wired for assistive tech.
+ *  - When the child is one element (an input, textarea, Select ...) Field gives it an id (its own, or one it generates),
+ *    `aria-describedby` pointing at the description and error, `aria-invalid` while there is an error, and `aria-required`.
+ *  - With several children, pass the control's id as `htmlFor`; the description and error then describe the whole group.
+ * `hint` and `description` are the same slot. The error is spoken when it appears (role="alert").
+ */
+export function Field({ label, htmlFor, hint, description, error, required, children }: { label: ReactNode; htmlFor?: string; hint?: ReactNode; description?: ReactNode; error?: ReactNode; required?: boolean; children: ReactNode }) {
+  const gen = useFieldId("fld");
+  const desc = description ?? hint;
+  const el = isValidElement(children) ? (children as ReactElement<Record<string, unknown>>) : null;
+  // wire the child only when it is a native control, or a component that names its own id (so unknown props never leak into custom controls)
+  const only = el && (typeof el.type === "string" ? ["input", "textarea", "select"].includes(el.type) : typeof el.props.id === "string") ? el : null;
+  const ownId = typeof only?.props.id === "string" ? (only.props.id as string) : undefined;
+  const controlId = ownId ?? htmlFor ?? gen;
+  const descId = desc ? `desc-${controlId}` : undefined;
+  const errId = error ? `err-${controlId}` : undefined;
+  const describedBy = [only?.props["aria-describedby"] as string | undefined, descId, errId].filter(Boolean).join(" ") || undefined;
+  const control = only
+    ? cloneElement(only, {
+        id: controlId,
+        ...(describedBy ? { "aria-describedby": describedBy } : {}),
+        ...(error ? { "aria-invalid": true } : {}),
+        ...(required ? { "aria-required": true } : {}),
+      })
+    : children;
+  const groupProps = !only && (descId || errId) ? { role: "group", "aria-labelledby": `lbl-${controlId}`, "aria-describedby": [descId, errId].filter(Boolean).join(" ") } : {};
   return (
-    <div className="field">
-      <label className="field-label" htmlFor={htmlFor}>
+    <div className={`field${error ? " invalid" : ""}`} {...groupProps}>
+      <label className="field-label" id={`lbl-${controlId}`} htmlFor={controlId}>
         {label}
+        {required ? <span className="field-req" aria-hidden="true"> *</span> : null}
       </label>
-      {children}
-      {hint ? <div className="field-hint">{hint}</div> : null}
+      {control}
+      {desc ? <div className="field-hint hint" id={descId}>{desc}</div> : null}
+      {error ? <div className="field-error err" id={errId} role="alert">{error}</div> : null}
     </div>
   );
+}
+
+/** Moves focus to the first control inside `root` marked aria-invalid (call after a failed submit). Returns whether one was found. */
+export function focusFirstInvalid(root: ParentNode): boolean {
+  const el = root.querySelector<HTMLElement>('[aria-invalid="true"]');
+  el?.focus();
+  return !!el;
 }
 
 export function LockNote({ decision, what }: { decision: Decision | null | undefined; what?: string }) {
@@ -158,11 +235,46 @@ export function LockNote({ decision, what }: { decision: Decision | null | undef
 export interface TabItem {
   id: string;
   label: ReactNode;
-  count?: number | null;
+  count?: number | string | null;
 }
 
-export function Tabs({ items, active, onChange, idPrefix = "tab" }: { items: TabItem[]; active: string; onChange: (id: string) => void; idPrefix?: string }) {
+export function Tabs({ items, active, onChange, idPrefix = "tab", revealActive }: { items: TabItem[]; active: string; onChange: (id: string) => void; idPrefix?: string; /** scroll the active tab to the middle of a strip that overflows (the Blueprint does, so a deep link at phone width opens on its tab) */ revealActive?: boolean }) {
   const bar = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState("");
+  useEffect(() => {
+    if (!revealActive) return;
+    const t = setTimeout(() => {
+      const el = bar.current;
+      const on = el?.querySelector<HTMLElement>(".tab.is-active");
+      if (el && on && el.scrollWidth > el.clientWidth) el.scrollTo({ left: on.offsetLeft - (el.clientWidth - on.offsetWidth) / 2 });
+    }, 30);
+    return () => clearTimeout(t);
+  }, [active, revealActive]);
+  useEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const measure = () => {
+      const start = el.scrollLeft > 2;
+      const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+      setMore([start ? "start" : "", end ? "end" : ""].filter(Boolean).join(" "));
+    };
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    window.addEventListener("resize", measure);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", measure);
+    };
+  }, [items.length]);
+  // the active tab is brought into view inside the strip (the page itself never scrolls), as the prototype does for a deep link to a far tab
+  useEffect(() => {
+    const el = bar.current;
+    const t = el?.querySelector<HTMLElement>(".tab.is-active");
+    if (!el || !t || !el.clientWidth) return;
+    const left = t.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft;
+    if (left < el.scrollLeft) el.scrollLeft = left - 8;
+    else if (left + t.offsetWidth > el.scrollLeft + el.clientWidth - 40) el.scrollLeft = left + t.offsetWidth - el.clientWidth + 48;
+  }, [active]);
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     const tabs = Array.from(bar.current?.querySelectorAll<HTMLButtonElement>(".tab") ?? []);
@@ -172,20 +284,41 @@ export function Tabs({ items, active, onChange, idPrefix = "tab" }: { items: Tab
     n?.focus();
     n?.click();
   };
+  const scrollBy = (d: number) => bar.current?.scrollBy({ left: d, behavior: "smooth" });
   return (
-    <div className="tabs" role="tablist" ref={bar} onKeyDown={onKey}>
-      {items.map((it) => (
-        <button key={it.id} type="button" role="tab" id={`${idPrefix}-${it.id}`} className={`tab${it.id === active ? " is-active" : ""}`} aria-selected={it.id === active ? "true" : "false"} onClick={() => onChange(it.id)}>
-          {it.label}
-          {it.count != null ? <span className="tab-count">{String(it.count)}</span> : null}
-        </button>
-      ))}
+    <div className={`tabswrap${more.includes("start") ? " ml" : ""}${more.includes("end") ? " mr" : ""}`}>
+      <div className="fade l" aria-hidden="true" />
+      <div className="fade r" aria-hidden="true" />
+      <button type="button" className="chev l" aria-label="Scroll tabs left" tabIndex={-1} onClick={() => scrollBy(-200)}><Icon name="left" /></button>
+      <button type="button" className="chev r" aria-label="Scroll tabs right" tabIndex={-1} onClick={() => scrollBy(200)}><Icon name="right" /></button>
+      <div className="tabs" role="tablist" data-more={more || undefined} ref={bar} onKeyDown={onKey}>
+        {items.map((it) => (
+          <button key={it.id} type="button" role="tab" id={`${idPrefix}-${it.id}`} className={`tab${it.id === active ? " is-active" : ""}`} aria-selected={it.id === active ? "true" : "false"} onClick={() => onChange(it.id)}>
+            {it.label}
+            {it.count != null ? <span className="n tab-count">{String(it.count)}</span> : null}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
 
+/** A text-like input in the standard control style (the `input` class). Put it inside a Field. */
+export function Input({ className = "", ...rest }: React.InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...rest} className={`input${className ? ` ${className}` : ""}`} />;
+}
+
 /** Radio group styled as buttons. */
-export function Segmented({ name, items, value, onChange, label }: { name: string; items: Array<{ id: string; label: string; icon?: string }>; value: string; onChange: (id: string) => void; label?: string }) {
+export function Segmented({ name, items, value, onChange, label, pressed }: { name: string; items: Array<{ id: string; label: string; icon?: string }>; value: string; onChange: (id: string) => void; label?: string; /** Prototype `.seg` of toggle buttons (aria-pressed) instead of radios: a view switch such as Cards / Table. */ pressed?: boolean }) {
+  if (pressed) {
+    return (
+      <div className="seg" role="group" aria-label={label || name}>
+        {items.map((it) => (
+          <button key={it.id} type="button" id={`${name}-${it.id}`} aria-pressed={it.id === value ? "true" : "false"} onClick={() => onChange(it.id)}>{it.label}</button>
+        ))}
+      </div>
+    );
+  }
   return (
     <div className="seg" role="radiogroup" aria-label={label || name}>
       {items.map((it) => {
@@ -206,12 +339,13 @@ export function Segmented({ name, items, value, onChange, label }: { name: strin
 
 const STATE_FALLBACK = { label: "", glyph: "dots" };
 
+const STATE_TONE: Record<string, string> = { running: "info", working: "info", waiting: "warn", gate: "warn", blocked: "bad", failed: "bad", stuck: "bad", killed: "bad", done: "ok", shipped: "ok", released: "ok", complete: "ok" };
 export function StateChip({ state, compact }: { state: string; compact?: boolean }) {
   const def = (WO_STATES as Record<string, { label: string; glyph: string }>)[state] ?? { ...STATE_FALLBACK, label: state };
+  // prototype chip: a leading shape (square, triangle, diamond, dot by tone), the word in mono capitals
   return (
-    <span className={`state state-${state}${compact ? " compact" : ""}`}>
-      <Icon name={def.glyph} />
-      {compact ? null : <span>{def.label}</span>}
+    <span className={`chip ${STATE_TONE[state] ?? "plain"} state state-${state}${compact ? " compact" : ""}`} title={compact ? def.label : undefined}>
+      {compact ? <Icon name={def.glyph} /> : <span>{def.label}</span>}
     </span>
   );
 }
@@ -222,7 +356,7 @@ export const Mono = ({ children, cls = "" }: { children: ReactNode; cls?: string
 export function Avatar({ id, size }: { id: string | null | undefined; size?: string }) {
   const actor = useActors()(id);
   return (
-    <span className={`av ${actor.kind === "agent" ? "av-agent" : "av-person"}${size ? ` av-${size}` : ""}`} title={actor.name} aria-hidden="true">
+    <span className={`avatar av ${actor.kind === "agent" ? "bot av-agent" : "av-person"}${size ? ` av-${size}` : ""}`} title={actor.name} aria-hidden="true">
       {actor.initials}
     </span>
   );
@@ -240,68 +374,157 @@ export function Who({ id }: { id: string | null | undefined }) {
 
 /* ---------- layout pieces ---------- */
 
-export function Empty({ title, text, action, id }: { title: ReactNode; text?: ReactNode; action?: ReactNode; /** Legacy G.emptyState id, kept for fidelity and tests. */ id?: string }) {
+const STATE_ART: Record<string, string> = { empty: "M4 7h16v11H4zM4 7l3-3h10l3 3M9 12h6", error: "M12 3l10 18H2zM12 10v5M12 18h.01", lock: "M6 11h12v9H6zM8 11V8a4 4 0 018 0v3" };
+/** The one empty state (prototype .state): a drawn glyph, a title, a line of text, an optional action. `icon` and `tone` are for the shared
+ *  not-visible and failed states (ui/async); a screen's own empty state is usually quiet. */
+export function Empty({ title, text, action, id, icon, tone }: { title: ReactNode; text?: ReactNode; action?: ReactNode; id?: string; icon?: string; tone?: "block" }) {
+  const art = STATE_ART[icon === "lock" ? "lock" : icon === "alert" || tone ? "error" : "empty"];
   return (
-    <div className="empty" id={id}>
-      <div className="empty-title">{title}</div>
+    <div className={`state empty${icon ? " empty-state" : ""}${tone ? ` empty-${tone}` : ""}`} id={id} role={tone ? "alert" : undefined}>
+      <svg className="art" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><path d={art} /></svg>
+      <h3 className="empty-title">{title}</h3>
       {text != null ? <p>{text}</p> : null}
-      {action ?? null}
+      {action ? <div className="row">{action}</div> : null}
     </div>
   );
 }
 
-export function ViewHead({ kicker, title, sub, meta, actions }: { kicker: ReactNode; title: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
+/** One linked ancestor in a sub-page's back trail (`Work orders / WO-2417`); the last has no href. */
+export interface Crumb {
+  label: ReactNode;
+  href?: string;
+  onClick?: () => void;
+}
+
+/** Page header (prototype .ph): eyebrow with the sheet's drawing number, one h1, a quiet subtitle, the action cluster. */
+export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, crumbs, plain }: { crumbs?: Crumb[]; /** Crumb headers (prototype): no drawing number before the crumb. */ plain?: boolean; sheet?: string; kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
+  const loc = useHash();
+  const hashId = loc.id || "home";
+  const route = sheet ?? hashId;
+  const me = useMe();
+  // the scope key follows the page: a project page shows that project, a factory page shows the chosen scope
+  const prefs = usePrefs();
+  const allLines = typeof kicker === "string" && kicker.toUpperCase() === "ALL LINES"; // a page that is about every line says so, whatever the switcher holds
+  const key = allLines ? undefined : isProjectRoute(route) ? me?.projects.find((p) => p.id === loc.project)?.key : (prefs.scopeAll ? undefined : me?.projects.find((p) => p.id === prefs.project)?.key);
+  const Eyebrow = (crumbs ? "nav" : "div") as "div";
   return (
-    <header className="vhead">
-      <div className="vhead-main">
-        <div className="kicker">{kicker}</div>
-        <h1 className="vtitle">{title}</h1>
-        {sub ? <p className="vsub">{sub}</p> : null}
+    <header className="ph vhead">
+      <div className="title vhead-main">
+        <Eyebrow className="eyebrow kicker" {...(crumbs ? { "aria-label": "Breadcrumb" } : {})}>
+          {crumbs ? (
+            crumbs.map((c, i) => (
+              <span key={i} className="crumb">
+                {i ? <span aria-hidden="true">/</span> : null}
+                {c.href ? <a href={c.href} onClick={c.onClick ? (e) => { e.preventDefault(); c.onClick?.(); } : undefined}>{c.label}</a> : <span aria-current="page">{c.label}</span>}
+              </span>
+            ))
+          ) : (
+            <>
+              {plain ? null : <span title="Drawing number">{drawingNo(route)}</span>}
+              {plain ? null : <span aria-hidden="true">·</span>}
+              <span>{key ?? "ALL LINES"}</span>
+            </>
+          )}
+          {kicker && !crumbs && !(typeof kicker === "string" && kicker.toUpperCase() === (key ?? "ALL LINES").toUpperCase()) ? <><span aria-hidden="true">·</span><span>{kicker}</span></> : null}
+        </Eyebrow>
+        {status ? <div className="row vtitle-row"><h1 className="vtitle">{title}</h1>{status}</div> : <h1 className="vtitle">{title}</h1>}
+        {sub ? <p className="sub vsub">{sub}</p> : null}
+        {meta ? (
+          <dl className="row small muted titleblock">
+            {meta.map((m, i) => (
+              <div key={i}><dt className="sr">{m[0]}</dt><dd style={{ margin: 0 }}>{m[1]}</dd></div>
+            ))}
+          </dl>
+        ) : null}
       </div>
-      {meta ? (
-        <dl className="titleblock">
-          {meta.map((m, i) => (
-            <div key={i}>
-              <dt>{m[0]}</dt>
-              <dd>{m[1]}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
-      {actions ? <div className="vhead-actions">{actions}</div> : null}
+      {actions ? <div className="acts vhead-actions">{actions}</div> : null}
     </header>
   );
 }
 
-export function Panel({ title, children, cls = "", tools, flush }: { title?: ReactNode; children: ReactNode; cls?: string; tools?: ReactNode; flush?: boolean }) {
+/** One stat tile: a quiet label, a big value, an optional note. Put them in <StatRow>. `value` may be the result of qState(). */
+export function Stat({ label, value, sub, tone, icon, id, action, href }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: "wait" | "block" | "done" | "info"; icon?: string; id?: string; action?: ReactNode; /** Makes the tile a link (the prototype's tile that opens its page). */ href?: string }) {
+  const t = tone === "wait" ? "warn" : tone === "block" ? "bad" : tone === "done" ? "ok" : tone === "info" ? "info" : "";
+  const Root = (href ? "a" : "div") as "div";
   return (
-    <section className={`panel ${cls}`} aria-label={typeof title === "string" ? title : undefined}>
-      {title ? (
-        <div className="panel-head">
-          <h2 className="panel-title">{title}</h2>
-          {tools ? <div className="panel-tools">{tools}</div> : null}
+    <Root className={`stat${t ? ` ${t}` : ""} stat-tile${tone ? ` stat-${tone}` : ""}${href ? " stat-link" : ""}`} id={id} {...(href ? { href } : {})}>
+      <div className="micro stat-lbl">
+        <span>{label}</span>
+        {icon ? <Icon name={icon} /> : null}
+      </div>
+      <div className="v stat-val">{value}</div>
+      {sub ? <div className="s stat-sub">{sub}</div> : null}
+      {action ? <div className="stat-act">{action}</div> : null}
+    </Root>
+  );
+}
+
+/** A single row of equal stat tiles under the page header (two columns on a phone). */
+export function StatRow({ children, id }: { children: ReactNode; id?: string }) {
+  const n = Children.toArray(children).filter(Boolean).length;
+  return (
+    <div className="stats stat-row" id={id} style={{ "--n": Math.min(Math.max(n, 1), 6) } as CSSProperties}>
+      {children}
+    </div>
+  );
+}
+
+/** The one filter toolbar: filters and search on the left (children), the result count and secondary actions on the right. */
+export function FilterBar({ children, count, actions, label = "Filters" }: { children?: ReactNode; count?: ReactNode; actions?: ReactNode; label?: string }) {
+  const n = Math.max(0, Children.toArray(children).filter(Boolean).length - 1);
+  return (
+    <div className="fbar filterbar" role="search" aria-label={label} style={{ "--fs": n } as CSSProperties}>
+      {children}
+      {count != null || actions ? (
+        <div className="tail">
+          {count != null ? <span className="count filterbar-count" role="status">{count}</span> : null}
+          {actions}
         </div>
       ) : null}
-      <div className={`panel-body${flush ? " flush" : ""}`}>{children}</div>
+    </div>
+  );
+}
+
+/** A search box for a FilterBar: icon inside, labelled for screen readers. */
+export function SearchBox({ id, value, onChange, placeholder = "Search", label, caption }: { id?: string; value: string; onChange: (v: string) => void; placeholder?: string; label?: string; /** The small caps label above the box (default "Search"). */ caption?: string }) {
+  return (
+    <label className="q searchbox">
+      <span>{caption ?? "Search"}</span>
+      <input id={id} className="input" type="search" value={value} placeholder={placeholder} aria-label={label ?? placeholder} onChange={(e) => onChange(e.target.value)} />
+    </label>
+  );
+}
+
+/** Prototype .panel: drafting corner marks, a header with the section number (counted by CSS per page), a body. */
+export function Panel({ title, children, cls = "", tools, flush, id, hot }: { title?: ReactNode; children: ReactNode; cls?: string; tools?: ReactNode; flush?: boolean; id?: string; /** The one drawing canvas of a page (Flow, Replay): keeps the corner ticks. */ hot?: boolean }) {
+  return (
+    <section id={id} className={`panel ${cls}`.trim()} {...(hot ? { "data-hot": "" } : {})} aria-label={typeof title === "string" ? title : undefined}>
+      {title || tools ? (
+        <header className="panel-head">
+          {title ? <h2 className="panel-title"><span className="sec" aria-hidden="true" />{title}</h2> : <span />}
+          {tools ? <div className="row panel-tools">{tools}</div> : null}
+        </header>
+      ) : null}
+      <div className={`body panel-body${flush ? " flush" : ""}`}>{children}</div>
     </section>
   );
 }
 
 /** Horizontal meter (value vs budget). */
-export function Meter({ value, max, label, warnAt = 0.85 }: { value: number; max: number; label?: string; warnAt?: number }) {
+export function Meter({ value, max, label, warnAt = 0.85, plain }: { value: number; max: number; label?: string; warnAt?: number; /** Never turns warn or bad: a count against a scale, not a budget. */ plain?: boolean }) {
   const pct = max ? Math.min(1, value / max) : 0;
   return (
-    <div className={`meter${pct >= warnAt ? " meter-warn" : ""}`} role="meter" aria-valuemin={0} aria-valuemax={max} aria-valuenow={Math.round(value)} aria-label={label || "Usage"}>
-      <span className="meter-fill" style={{ width: `${(pct * 100).toFixed(1)}%` }} />
+    <div className={`meter${plain ? "" : pct >= 1 ? " bad" : pct >= warnAt ? " warn" : ""}`} role="meter" aria-valuemin={0} aria-valuemax={max} aria-valuenow={Math.round(value)} aria-label={label || "Usage"}>
+      <i style={{ width: `${(pct * 100).toFixed(1)}%` }} />
     </div>
   );
 }
 
-/** Table in the standard scroll wrapper. */
+/** Table in the standard scroll wrapper (prototype .tw > table.tbl). */
 export function Table({ compact, children, className = "" }: { compact?: boolean; children: ReactNode; className?: string }) {
   return (
-    <div className="table-scroll">
-      <table className={`table${compact ? " table-compact" : ""} ${className}`.trim()}>{children}</table>
+    <div className="tw table-scroll">
+      <table className={`tbl table${compact ? " table-compact" : ""} ${className}`.trim()}>{children}</table>
     </div>
   );
 }
@@ -325,3 +548,18 @@ export function useCopy(): (text: string) => void {
 
 /** Stable unique id for form controls inside a component. */
 export const useFieldId = (prefix = "f"): string => `${prefix}-${useId().replace(/:/g, "")}`;
+
+/* ---------- status (docs/ui/design-system.md §2) ---------- */
+
+export type Tone = "run" | "wait" | "block" | "fail" | "done" | "accent" | "neutral";
+const TONE_CHIP: Record<Tone, string> = { run: "info", wait: "warn", block: "bad", fail: "bad", done: "ok", accent: "info", neutral: "plain" };
+
+/** The one status badge (prototype chip): a leading shape and a word on a soft tone. Colour never carries meaning alone. */
+export function Status({ tone, icon, children, title, id }: { tone: Tone; icon?: string | null; children: ReactNode; title?: string; id?: string }) {
+  return (
+    <span className={`chip ${TONE_CHIP[tone]} status tone-${tone}`} title={title} id={id}>
+      {icon ? <Icon name={icon} /> : null}
+      <span>{children}</span>
+    </span>
+  );
+}

@@ -2,11 +2,13 @@
  * Shared pieces of the Onboarding screen (legacy onboarding.js helpers): stage and status of a repo, the stepper, the settings draft the wizard and the settings dialog share,
  * and the reads the screen needs beyond the repo list (source integrations, available repositories, the pull request's files).
  */
+import { qk } from "../../api/keys";
 import { useQuery } from "@tanstack/react-query";
 import { NOTIFY_EVENTS, ONBOARD_STAGES, type IntegrationInstance, type IntegrationType, type NotifyOverride, type Project, type Repo } from "@gantry/domain";
 import { api, get } from "../../api/client";
 import { useIntegrationTypes, useIntegrations } from "../../api/queries";
-import { Icon } from "../../ui/Icon";
+import { PipelineRail } from "../../ui/pipeline";
+import { Status as UiStatus, type Tone } from "../../ui/primitives";
 import { useTeams } from "../projects/kit";
 
 export type RepoV = Repo & { version?: number };
@@ -57,12 +59,14 @@ export function status(r: RepoV): Status {
   return { id: "progress", label: "In progress", glyph: "st-run" };
 }
 
+const STATUS_TONE: Record<Status["id"], Tone> = { ready: "done", exception: "wait", person: "block", failed: "fail", merge: "wait", openpr: "wait", progress: "run" };
+
+/** The repo's state as the one shared status badge. The wrapper keeps the `onb-st-<id>` hook. */
 export function StatusChip({ r }: { r: RepoV }) {
   const s = status(r);
   return (
     <span className={`onb-status onb-st-${s.id}`}>
-      <Icon name={s.glyph} />
-      <span>{s.label}</span>
+      <UiStatus tone={STATUS_TONE[s.id]} icon={s.glyph}>{s.label}</UiStatus>
     </span>
   );
 }
@@ -76,18 +80,22 @@ export const BUSY: Record<string, string> = {
   verifying: "Gantry is running the live checks against GitHub.",
 };
 
+/** Where the repo is on the seven stages. Small: a row of marks for tables. Big: the large rail for the repo page. */
 export function Steps({ r, big }: { r: RepoV; big?: boolean }) {
   const idx = stageIndex(r);
   const stop = isStopped(r);
   const ready = r.onboarding.stage === "ready";
+  const label = `Onboarding stage: ${stageName(r.onboarding.stage)} (${idx + 1} of 7)`;
+  const state = (i: number): "done" | "now" | "stop" | "todo" => (i < idx || (ready && i === idx) ? "done" : i === idx ? (stop ? "stop" : "now") : "todo");
+  if (big) return <div className="onb-rail"><PipelineRail label={label} steps={STAGES.map((s, i) => ({ key: s.id, name: s.name, tone: ({ done: "done", now: "run", stop: "warn", todo: "todo" } as const)[state(i)] }))} /></div>;
   return (
-    <ol className={`onb-steps${big ? " is-big" : ""}`} aria-label={`Onboarding stage: ${stageName(r.onboarding.stage)} (${idx + 1} of 7)`}>
+    <ol className="onb-steps" aria-label={label}>
       {STAGES.map((s, i) => {
-        const cls = i < idx || (ready && i === idx) ? "is-done" : i === idx ? (stop ? "is-stop" : "is-now") : "";
+        const st = state(i);
         return (
-          <li key={s.id} className={cls} title={s.name + (cls === "is-done" ? ": done" : cls === "is-now" ? ": current" : cls === "is-stop" ? ": stopped here" : "")}>
-            <span className="onb-step-mark mono" aria-hidden="true">{cls === "is-done" ? "✓" : cls === "is-stop" ? "!" : String(i + 1)}</span>
-            {big ? <span className="onb-step-l">{s.name}</span> : null}
+          <li key={s.id} className={st === "todo" ? "" : `is-${st}`} title={s.name + (st === "done" ? ": done" : st === "now" ? ": current" : st === "stop" ? ": stopped here" : "")}>
+            <span className="onb-step-mark" aria-hidden="true" />
+            <span className="sr">{`${s.name}${st === "done" ? ", done" : st === "now" ? ", current" : st === "stop" ? ", stopped here" : ""}`}</span>
           </li>
         );
       })}
@@ -120,7 +128,9 @@ export function useIntegrationsFor(project: string): { sources: SourceInfo[]; de
     dests: list.filter((x) => !!x.type.destination && open(x.inst, project)),
   };
 }
-export const instLabel = (i: IntegrationInstance): string => i.name + (i.status !== "healthy" ? ` (${i.status})` : "");
+/** An integration health word for a person: "unknown" is a connection nobody has tested yet. */
+export const healthWord = (status: string): string => (status === "unknown" ? "not tested yet" : status);
+export const instLabel = (i: IntegrationInstance): string => i.name + (i.status !== "healthy" ? ` (${healthWord(i.status)})` : "");
 export const orgOf = (i: IntegrationInstance | null | undefined): string => {
   const c = i?.config ?? {};
   return String(c.org || c.group || c.workspace || "");
@@ -136,7 +146,7 @@ export interface AvailableRepos {
 }
 /** Repositories the GitHub App can see and Gantry has not connected yet. */
 export const useAvailableRepos = (projectId: string, enabled: boolean) =>
-  useQuery({ queryKey: ["repos", projectId, "available"], queryFn: () => get<AvailableRepos>(api(`projects/${encodeURIComponent(projectId)}/repos/available`)), enabled, staleTime: 15_000, retry: false });
+  useQuery({ queryKey: qk.reposAvailable(projectId), queryFn: () => get<AvailableRepos>(api(`projects/${encodeURIComponent(projectId)}/repos/available`)), enabled, staleTime: 15_000, retry: false });
 
 export interface PrFiles {
   number: number | null;
@@ -144,7 +154,7 @@ export interface PrFiles {
 }
 /** The onboarding pull request's files with the lines each adds. */
 export const usePrFiles = (repoId: string, enabled: boolean, key: unknown) =>
-  useQuery({ queryKey: ["repos", "pr", repoId, key], queryFn: () => get<PrFiles>(api(`repos/${encodeURIComponent(repoId)}/onboarding/pr`)), enabled, retry: false });
+  useQuery({ queryKey: qk.repoPr(repoId, key), queryFn: () => get<PrFiles>(api(`repos/${encodeURIComponent(repoId)}/onboarding/pr`)), enabled, retry: false });
 
 /* ---------- settings draft (shared by the wizard and the settings dialog) ---------- */
 
@@ -182,9 +192,9 @@ export function draftFrom(r: RepoV | null, project: Project, dests: SourceInfo[]
         const d0 = n.dest[0] ?? { channel: "slack", target: "" };
         return { event: n.event, integration: d0.integration ?? null, channel: d0.channel, target: d0.target, template: n.template || defaultTemplate(n.event), mode: n.mode };
       })
-    : chat ? [{ event: "onboarding.pr", integration: chat.inst.id, channel: chat.inst.type, target: chat.inst.type === "email" ? "project admins" : `#${project.teams[0] ?? "platform"}-eng`, template: "onboarding" }] : [];
+    : chat ? [{ event: "onboarding.pr", integration: chat.inst.id, channel: chat.inst.type, target: chat.inst.type === "email" ? "project admins" : `#${project.teams[0] ?? project.id}-eng`, template: "onboarding" }] : [];
   return {
-    name: "", source: r?.source ?? "", team: r ? r.team : project.teams[0] ?? "platform", mcp: r ? r.mcp.slice() : project.mcp.slice(0, 2), triggers: r ? !!r.triggers : true, notify,
+    name: "", source: r?.source ?? "", team: r ? r.team ?? "" : project.teams[0] ?? "", mcp: r ? r.mcp.slice() : project.mcp.slice(0, 2), triggers: r ? !!r.triggers : true, notify,
     defaultBranch: c.defaultBranch, branchPrefix: c.branchPrefix, merge: c.merge, tagging: c.tagging, requiredChecks: c.requiredChecks.join(", "), protectedPaths: c.protectedPaths.join("\n"),
   };
 }
@@ -192,7 +202,7 @@ export function draftFrom(r: RepoV | null, project: Project, dests: SourceInfo[]
 export function patchFrom(d: Draft): Record<string, unknown> {
   const events = new Set(NOTIFY_EVENTS.map((e) => e.id));
   return {
-    team: d.team, mcp: d.mcp.slice(), triggers: d.triggers, source: d.source || null,
+    ...(d.team ? { team: d.team } : {}), mcp: d.mcp.slice(), triggers: d.triggers, source: d.source || null,
     notifyOverrides: d.notify.filter((n) => n.target.trim() && n.integration && events.has(n.event)).map((n, i) => ({ id: `RO-${i + 1}`, event: n.event, dest: [{ channel: n.channel, target: n.target.trim(), integration: n.integration }], template: n.template, mode: n.mode || "also" })),
     config: {
       defaultBranch: d.defaultBranch.trim() || "main", branchPrefix: d.branchPrefix.trim() || "gantry/", merge: d.merge, tagging: d.tagging,

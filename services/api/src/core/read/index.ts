@@ -1,7 +1,7 @@
 import type {
   Action, Away, Catalog, Freeze, KillInfo, HaltInfo, Matrix, Org, Person, Policy, Project, ProjectFlow, Repo, Role, SecuritySettings, Team, Template,
 } from "@gantry/domain";
-import { ACTIONS, DEFAULT_CATALOG, defaultMatrix } from "@gantry/domain";
+import { ACTIONS, DEFAULT_CATALOG, actionScopeOf, defaultMatrix } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { ms, num, obj, reads } from "./rows.js";
 
@@ -36,6 +36,7 @@ export interface ActiveStop {
   wo: string | null;
   mode: "halt" | "kill";
   reason: string;
+  cause: string;
   inFlight: "hold" | "cancel" | null;
   by: string;
   at: number;
@@ -45,23 +46,25 @@ export interface ActiveStop {
 /** Active (not lifted) stops. The `stops` table is the one source of stop state. */
 export async function readActiveStops(db: Queryable, orgId: string): Promise<ActiveStop[]> {
   const { rows } = await db.query(
-    `select id, scope_type, project_id, repo_id, wo_id, mode, reason, in_flight, set_by, set_at, version from stops where org_id = $1 and lifted_at is null order by set_at, id`,
+    `select id, scope_type, project_id, repo_id, wo_id, mode, reason, cause, in_flight, set_by, set_at, version from stops where org_id = $1 and lifted_at is null order by set_at, id`,
     [orgId],
   );
   return rows.map((r) => ({
-    id: r.id, scope: r.scope_type, project: r.project_id, repo: r.repo_id, wo: r.wo_id, mode: r.mode, reason: r.reason,
+    id: r.id, scope: r.scope_type, project: r.project_id, repo: r.repo_id, wo: r.wo_id, mode: r.mode, reason: r.reason, cause: String(r.cause ?? "manual"),
     inFlight: r.in_flight === "cancel" ? "cancel" : r.in_flight === "hold" ? "hold" : null, by: r.set_by, at: ms(r.set_at) ?? 0, version: r.version,
   }));
 }
 
 export const killInfo = (s: ActiveStop): KillInfo => ({ by: s.by, at: s.at, reason: s.reason, scope: s.scope === "wo" ? "workorder" : s.scope, mode: s.inFlight ?? "hold" });
-export const haltInfo = (s: ActiveStop): HaltInfo => ({ by: s.by, at: s.at, reason: s.reason });
+export const haltInfo = (s: ActiveStop): HaltInfo => ({ by: s.by, at: s.at, reason: s.reason, cause: s.cause });
 
 /* ---------------------------------------------------------------- people --- */
 
 export async function readPeople(db: Queryable, orgId: string): Promise<Person[]> {
   const { rows } = await db.query(
-    `select p.id, p.name, p.title, p.email, p.github_login, p.status, p.mfa, p.oncall, p.away, p.data, p.version,
+    `select p.id, p.name, p.title, p.email, p.github_login, p.status, p.mfa, p.mfa_checked_at, p.away, p.data, p.version,
+       (exists (select 1 from projects pr where pr.org_id = p.org_id and pr.config -> 'oncall' ? p.id)
+         or exists (select 1 from role_assignments fa where fa.org_id = p.org_id and fa.person_id = p.id and fa.role_id = 'factory_admin' and fa.project_id is null and fa.revoked_at is null)) as oncall,
        coalesce((select jsonb_agg(jsonb_build_object('role', ra.role_id, 'scope', coalesce(ra.project_id, 'factory')) || case when ra.via_team is null then '{}'::jsonb else jsonb_build_object('via', ra.via_team) end order by (ra.via_team is not null), ra.created_at, ra.id)
                  from effective_role_assignments ra where ra.org_id = p.org_id and ra.person_id = p.id and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now())), '[]'::jsonb) as roles,
        coalesce((select array_agg(tm.team_id order by tm.created_at, tm.team_id) from team_members tm where tm.org_id = p.org_id and tm.person_id = p.id), '{}') as teams
@@ -71,7 +74,7 @@ export async function readPeople(db: Queryable, orgId: string): Promise<Person[]
   return rows.map((r) => ({
     ...obj(r.data),
     id: r.id, name: r.name, title: r.title, email: r.email, teams: r.teams, roles: r.roles, status: r.status, oncall: r.oncall,
-    github: r.github_login ?? "", away: (r.away as Away | null) ?? null, mfa: r.mfa, version: r.version,
+    github: r.github_login ?? "", away: (r.away as Away | null) ?? null, mfa: r.mfa === true ? true : r.mfa === false ? false : null, version: r.version,
   }) as Person);
 }
 
@@ -93,7 +96,7 @@ export async function readTeams(db: Queryable, orgId: string): Promise<Team[]> {
 /* ---------------------------------------------------------------- projects -- */
 
 export async function readProjects(db: Queryable, orgId: string, stops?: ActiveStop[]): Promise<Project[]> {
-  const [pr, teams, flows, rules, notes, budgets, gl, st] = await reads(db, [
+  const [pr, teams, flows, rules, notes, budgets, gl, st, spend] = await reads(db, [
     () => db.query(`select id, key, name, description, status, owner_id, template_id, regulated, overlay, config, created_at, version from projects where org_id = $1 order by position nulls last, created_at, id`, [orgId]),
     () => db.query(`select project_id, team_id from project_teams where org_id = $1 order by created_at, team_id`, [orgId]),
     () => db.query(`select f.project_id, f.doc, f.version from flow_versions f join projects p on p.org_id = f.org_id and p.id = f.project_id and p.current_flow_version = f.version where f.org_id = $1`, [orgId]),
@@ -107,6 +110,9 @@ export async function readProjects(db: Queryable, orgId: string, stops?: ActiveS
     // The project's onboarding guidelines (spec 8.6): every published version, newest last.
     () => db.query(`select project_id, version, body, note, published_at, published_by from guideline_versions where org_id = $1 and scope = 'project' and published_at is not null order by project_id, version`, [orgId]),
     () => (stops ? Promise.resolve(stops) : readActiveStops(db, orgId)),
+    // Month to date is metered spend, never the figure a project's config once carried: every metered call that names the project counts (station runs, console turns, side threads).
+    // The same sum (UTC month) drives the budget gate and the 80% alert, so the number shown and the number acted on cannot differ.
+    () => db.query(`select project_id, coalesce(sum(cost_micros), 0)::text as micros from usage_meter where org_id = $1 and project_id is not null and at >= date_trunc('month', now() at time zone 'UTC') at time zone 'UTC' group by project_id`, [orgId]),
   ]);
   const stopList = st;
   return pr.rows.map((r) => {
@@ -126,7 +132,10 @@ export async function readProjects(db: Queryable, orgId: string, stops?: ActiveS
         id: String(x.id).slice(String(r.id).length + 1), event: x.event, dest: x.destinations, template: x.template, cond: x.conditions, enabled: x.enabled, fields: x.fields,
       })),
       mcp: Array.isArray(cfg.mcp) ? cfg.mcp : [],
-      budget: { monthly: b ? Math.round(num(b.monthly_limit_micros) / 1_000_000) : 0, mtd: num(cfg.mtd), alertAt: b ? num(b.alert_at) : 0.8 },
+      pageOnCall: cfg.oncallPage !== false,
+      pagedFor: pagedFor(cfg.oncallPage !== false),
+      oncall: Array.isArray(cfg.oncall) ? (cfg.oncall as unknown[]).filter((x): x is string => typeof x === "string") : [],
+      budget: { monthly: b ? Math.round(num(b.monthly_limit_micros) / 1_000_000) : 0, capped: b ? num(b.monthly_limit_micros) > 0 : false, mtd: num(spend.rows.find((x) => x.project_id === r.id)?.micros) / 1_000_000, alertAt: b ? num(b.alert_at) : 0.8 },
       created: ms(r.created_at) ?? 0,
       halted: halt ? haltInfo(halt) : null,
       killed: kill ? killInfo(kill) : null,
@@ -237,9 +246,12 @@ export async function readSecurity(db: Queryable, orgId: string): Promise<Versio
   return r ? { version: r.version, value: { ...DEFAULT_SECURITY, ...(r.body as SecuritySettings) } } : { version: 0, value: DEFAULT_SECURITY };
 }
 
+/** What the on-call page covers, in words the page shows: kill and restore always, the rest while the project keeps the default page on. */
+const pagedFor = (on: boolean): string[] => (on ? ["kill", "restore", "halts", "blocked", "security hold", "escalations"] : ["kill", "restore"]);
+
 export const DEFAULT_SECURITY: SecuritySettings = {
   sso: { provider: "OpenID Connect", domain: "", enforced: false, entity: "" },
-  mfa: { policy: "admins", methods: [] },
+  mfa: { policy: "everyone", methods: ["totp", "webauthn", "recovery"] },
   sessionHours: 12,
   idleMin: 30,
   domains: [],
@@ -248,6 +260,9 @@ export const DEFAULT_SECURITY: SecuritySettings = {
   killNeedsStepUp: true,
   stepUpWindowMinutes: 15,
   githubLogin: false,
+  researchHosts: [],
+  vendorLanRanges: [],
+  chatCapUsdPerDay: null,
 };
 
 /* ---------------------------------------------------------------- catalog ---- */
@@ -263,6 +278,10 @@ export async function readCatalog(db: Queryable, orgId: string, org?: OrgRow): P
     bays: pick("bays", DEFAULT_CATALOG.bays),
     classes: pick("classes", DEFAULT_CATALOG.classes),
     roles: roles.length ? roles : DEFAULT_CATALOG.roles,
-    actions: pick("actions", DEFAULT_CATALOG.actions),
+    // The scope of a built-in action is fixed by the code, not by an org's stored copy (which once carried the Read rights as project scope).
+    actions: pick<Action>("actions", [...DEFAULT_CATALOG.actions]).map((a) => {
+      const scope = actionScopeOf([], a.id);
+      return scope && scope !== a.scope ? { ...a, scope } : a;
+    }),
   };
 }

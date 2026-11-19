@@ -3,9 +3,9 @@
  * (Slack, Teams, email, webhook). Previews are drawn from the server's rendering (`POST /card-templates/preview`), which uses the same builders the producer
  * uses, so what shows here is what goes out. Nothing is sent by a preview.
  */
+import { qk } from "../../api/keys";
 import { useQuery } from "@tanstack/react-query";
 import { CARD_ACTIONS, CARD_DEFAULTS, CARD_TEMPLATES, NOTIFY_EVENTS, fmt, type CardTemplate, type IntegrationInstance, type NotificationRoute, type Project } from "@gantry/domain";
-import { api } from "../../api/client";
 import { ops } from "../../api/ops";
 import { useCardTemplates, useIntegrations, useIntegrationTypes, useMe, useProjects, useRoutes } from "../../api/queries";
 import { usePrefs } from "../../lib/prefs";
@@ -51,7 +51,8 @@ export function defaultTarget(type: string, p: Pick<Project, "key">, inst: Integ
 export function useNtData() {
   const me = useMe();
   const prefs = usePrefs();
-  const projects = useProjects().data ?? [];
+  const projectsQ = useProjects();
+  const projects = projectsQ.data ?? [];
   const types = (useIntegrationTypes().data ?? []) as TypeRow[];
   const insts = useIntegrations().data ?? [];
   const customCards = useCardTemplates().data ?? [];
@@ -89,7 +90,7 @@ export function useNtData() {
     for (const p of projects) for (const r of p.notifications ?? []) if (r.template === id) out.push(`${p.key} ${r.id}`);
     return out;
   };
-  return { me, project, visible, projects, types, insts, destInsts, instOf, typeOf, tplInfo, tplOptions, customCards, routesUsingTpl, versions, routes: project?.notifications ?? [] };
+  return { me, project, visible, projects, projectsQ, types, insts, destInsts, instOf, typeOf, tplInfo, tplOptions, customCards, routesUsingTpl, versions, routes: project?.notifications ?? [] };
 }
 
 export function targetError(d: Dest, ctx: { project: Project; instOf: (d: Dest) => IntegrationInstance | null; typeOf: (id: string) => TypeRow }): string | null {
@@ -100,7 +101,7 @@ export function targetError(d: Dest, ctx: { project: Project; instOf: (d: Dest) 
   const ty = ctx.typeOf(inst.type);
   if (!t && inst.type !== "webhook") return `${inst.name} needs a ${(ty.targetLabel || "target").toLowerCase()}.`;
   if (inst.type === "slack" && !/^[#@][a-z0-9._-]+$/i.test(t)) return "Slack targets start with # (channel) or @ (person or role).";
-  if (inst.type === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t) && !["submitter", "approvers", "project admins"].includes(t)) return "Email targets are an address or one of: submitter, approvers, project admins.";
+  if (inst.type === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t) && !["submitter", "approvers", "on-call", "project admins"].includes(t)) return "Email targets are an address or one of: submitter, approvers, on-call, project admins.";
   return null;
 }
 
@@ -123,12 +124,14 @@ export interface Preview { sample: PreviewSample; rows: Array<[string, string]>;
 
 export function usePreview(project: string | null | undefined, o: { event: string; template: string; fields: Partial<Fields>; actions?: string[] | undefined }) {
   return useQuery({
-    queryKey: ["cardPreview", project, o.event, o.template, o.fields, o.actions ?? null],
+    queryKey: qk.cardPreview(project, o.event, o.template, o.fields, o.actions ?? null),
     enabled: !!project,
     queryFn: async () => {
       const r = await ops.previewCardTemplate({ project, event: o.event, template: o.template, fields: o.fields, ...(o.actions ? { actions: o.actions } : {}) });
       if (!r.ok) throw new Error(r.msg);
-      return r as unknown as Preview;
+      const pv = r as unknown as Preview;
+      if (!pv.sample) throw new Error("The preview came back empty.");
+      return pv;
     },
     staleTime: 15_000,
   });
@@ -137,7 +140,7 @@ export function usePreview(project: string | null | undefined, o: { event: strin
 /** The buttons a card shows for one destination: approve only where that connection allows approving from chat, and never on email. */
 export function actionsFor(pv: Preview, fields: Partial<Fields>, channel: string, inst: IntegrationInstance | null): { list: string[]; note: string | null } {
   if (!fieldOn(fields, "actions")) return { list: [], note: "Action buttons are off for this route." };
-  let list = pv.actions.slice();
+  let list = (pv.actions ?? []).slice();
   let note: string | null = null;
   const can = inst?.config.approve === true;
   if (list.includes("approve") && !can) {

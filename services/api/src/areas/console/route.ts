@@ -1,6 +1,7 @@
 import type { Queryable, Tx } from "@gantry/db";
 import { callableModels, type CallableModel } from "../models/default.js";
 import { modelRows } from "../models/store.js";
+import { readSecurity } from "../../core/read/index.js";
 import { loadFacts } from "../models/facts.js";
 import { resolveModel, type Pick } from "../models/resolve.js";
 import type { ModelRoute } from "../internal/route.js";
@@ -21,10 +22,11 @@ export async function resolveServiceRoute(db: Queryable, orgId: string, opts: { 
   if (!res.pick) return { ok: false, reason: res.blocked ?? "No vendor is available for the console's model." };
   const vendors = new Map(facts.vendors.map((v) => [v.id, v]));
   const v = vendors.get(res.pick.vendor)!;
+  const lan = (await readSecurity(db, orgId)).value.vendorLanRanges ?? [];
   const base = (v.endpoint || (/anthropic|claude/i.test(`${v.id} ${v.product}`) ? ANTHROPIC_BASE_URL : "")).replace(/\/+$/, "");
   if (!base) return { ok: false, reason: `Vendor ${v.name} has no endpoint.` };
   const keyless = (p: Pick): boolean => !v.hasSecret && v.endpoint !== "" && (v.custom || p.vendor === "local");
-  return { ok: true, route: { vendor: res.pick.vendor, baseUrl: base, modelId: res.pick.model, upstreamModel: res.pick.upstream, ...(keyless(res.pick) ? { keyless: true } : {}) } };
+  return { ok: true, route: { vendor: res.pick.vendor, baseUrl: base, modelId: res.pick.model, upstreamModel: res.pick.upstream, ...(keyless(res.pick) ? { keyless: true } : {}), ...(lan.length ? { lan } : {}) } };
 }
 
 /** The console's model for one person (the one resolver the status, the picker and the message handler share): their saved choice when it is still callable, else the routing default. */

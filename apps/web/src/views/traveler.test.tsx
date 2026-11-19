@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useOpenTraveler } from "../shell/useTraveler";
+import { setTravelerTab } from "./traveler/state";
 import { mockApi, mount, resetApp } from "./floor/testkit";
 import { allow, deny, posts, readsFor, travelerOf, waitingWo } from "./traveler/testkit";
 
@@ -26,21 +27,61 @@ async function show(extra: Parameters<typeof mockApi>[0] = {}, o: Parameters<typ
   return calls;
 }
 
+describe("Traveler drawer in the URL", () => {
+  it("writes the open work order and tab to the URL (F-15) and takes them out when it closes", async () => {
+    await show();
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("traveler")).toBe(W.id));
+    fireEvent.click(screen.getByRole("tab", { name: "History" }));
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("ttab")).toBe("history"));
+    fireEvent.click(document.getElementById("trv-close") as HTMLElement);
+    await waitFor(() => expect(window.location.search).toBe(""));
+    setTravelerTab("journey"); // the tab is remembered across drawers: leave it as the other tests expect it
+  });
+});
+
+describe("Traveler drawer: why the run is not running (R1)", () => {
+  it("says it is waiting for a run slot, or for host disk, and shows a stop for a critically low disk as an alert", async () => {
+    await show({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ body: travelerOf(W, { wait: { label: "Waiting for a run slot (2 queued)", reason: "at the concurrent run limit (3)", since: null, kind: "slot" } }) }) });
+    await waitFor(() => expect(document.getElementById("trv-wait")?.textContent).toMatch(/Waiting for a run slot \(2 queued\)/));
+    expect(document.getElementById("trv-wait")?.getAttribute("role")).toBe("status");
+    cleanup();
+    resetApp();
+    await show({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ body: travelerOf(W, { wait: { label: "Host disk critically low", reason: null, since: null, kind: "disk_critical" } }) }) });
+    await waitFor(() => expect(document.getElementById("trv-wait")?.textContent).toMatch(/Host disk critically low/));
+    expect(document.getElementById("trv-wait")?.getAttribute("role")).toBe("alert");
+  });
+
+  it("T-61: a work order stopped on a critical disk does not say RUNNING or that the agent is waiting for you", async () => {
+    const wait = { label: "Host disk critically low", reason: "Free space is under the limit", since: null, kind: "disk_critical" as const };
+    await show({
+      [`GET /api/v1/work-orders/${W.id}`]: () => ({ body: travelerOf(W, { state: "running", wait }) }),
+      "GET /api/v1/work-order-sessions": () => ({ body: { items: [{ id: W.id, waitingOn: "you", agentName: "Builder", closed: false, unread: false }] } }),
+    });
+    await waitFor(() => expect(document.getElementById("wait-chip")?.textContent).toBe("Host disk critically low"));
+    const head = document.querySelector(".trv-drawer .drawer-id")!.textContent ?? "";
+    expect(head).not.toMatch(/Running/i);
+    await waitFor(() => expect(document.getElementById("trv-conversation")?.textContent).toMatch(/Host disk critically low: Free space/));
+    expect(document.getElementById("trv-conversation")?.textContent).not.toMatch(/waiting for you/);
+  });
+});
+
 describe("Traveler drawer", () => {
   it("shows the position, the waiting gate with its progress and the title block", async () => {
     await show();
     expect(await screen.findByText("Traveler · routing sheet · Payments Platform")).toBeTruthy();
     expect(await screen.findByText(/waiting \(0 of 1\)/)).toBeTruthy();
+    // a waiting gate is worded as what it needs, never as the outcome it waits for ("Spec approved")
+    expect((await screen.findByText(/waiting \(0 of 1\)/)).textContent).toMatch(/^[\w+]+ (Approve|Confirm|Review|Check|Wait|Decide)/);
     expect(screen.getByText("Coding slot")).toBeTruthy();
   });
 
   it("approves the waiting gate with the work order version in If-Match", async () => {
-    const calls = await show({ [`POST /api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/approve`]: () => ({ body: { ok: true, msg: "Approved." } }) });
+    const calls = await show({ [`POST /api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}:1`)}/approve`]: () => ({ body: { ok: true, msg: "Approved." } }) });
     const btn = await screen.findByRole("button", { name: /Approve/ });
     expect(btn.getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(btn);
-    await waitFor(() => expect(posts(calls, `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/approve`)).toHaveLength(1));
-    expect(posts(calls, `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/approve`)[0]!.headers["if-match"]).toBe("7");
+    await waitFor(() => expect(posts(calls, `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}:1`)}/approve`)).toHaveLength(1));
+    expect(posts(calls, `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}:1`)}/approve`)[0]!.headers["if-match"]).toBe("7");
     expect(await screen.findByText("Approved.")).toBeTruthy();
   });
 
@@ -54,9 +95,14 @@ describe("Traveler drawer", () => {
   });
 
   it("shows a stale refusal from the server instead of pretending it worked", async () => {
-    await show({ [`POST /api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/approve`]: () => ({ status: 409, body: { ok: false, msg: `${W.id} changed since you opened it. Reload and try again.` } }) });
-    fireEvent.click(await screen.findByRole("button", { name: /Approve/ }));
-    expect(await screen.findByText(/changed since you opened it/)).toBeTruthy();
+    const calls = await show({ [`POST /api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}:1`)}/approve`]: () => ({ status: 409, body: { ok: false, msg: `${W.id} is no longer waiting at ${gate} on that instance.`, current: { instance: `${W.id}:${gate}:2`, gate, wo: W.id } } }) });
+    await screen.findByRole("button", { name: /Approve/ });
+    const reads = () => calls.filter((c) => c.method === "GET" && c.path === `/api/v1/work-orders/${W.id}`).length;
+    const before = reads();
+    fireEvent.click(screen.getByRole("button", { name: /Approve/ }));
+    // The person is told what changed and that nothing was decided, and the screen refetches.
+    expect(await screen.findByText(/no longer waiting.*It is now at instance 2\. Nothing was decided\. The screen was refreshed/)).toBeTruthy();
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
   });
 
   it("refuses moves while a stop covers the work order and says why", async () => {
@@ -83,7 +129,7 @@ describe("Traveler drawer", () => {
   });
 
   it("rejects a gate with a reason of at least five characters", async () => {
-    const path = `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/reject`;
+    const path = `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}:1`)}/reject`;
     const calls = await show({ [`POST ${path}`]: () => ({ body: { ok: true, msg: "Rejected." } }) });
     fireEvent.click(await screen.findByRole("button", { name: /Reject/ }));
     const ta = await screen.findByPlaceholderText("What must change before this passes?");
@@ -100,7 +146,7 @@ describe("Traveler drawer", () => {
     const path = `/api/v1/work-orders/${W.id}/send-back`;
     const calls = await show({ [`POST ${path}`]: () => ({ body: { ok: true, msg: "Sent back." } }) });
     fireEvent.click(await screen.findByRole("button", { name: /Send back/ }));
-    fireEvent.change(await screen.findByLabelText("Note for the agent"), { target: { value: "Cover the retry case" } });
+    fireEvent.change(await screen.findByLabelText("What to fix (required)"), { target: { value: "Cover the retry case" } });
     fireEvent.click(document.getElementById("sb-submit") as HTMLElement);
     await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
     expect(posts(calls, path)[0]!.body).toMatchObject({ note: "Cover the retry case" });
@@ -111,7 +157,7 @@ describe("Traveler drawer", () => {
     const path = `/api/v1/work-orders/${W.id}/park`;
     const calls = await show({ [`POST ${path}`]: () => ({ body: { ok: true, msg: "Moved." } }) });
     fireEvent.click(await screen.findByRole("button", { name: /Move to bay/ }));
-    fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Waiting for the vendor" } });
+    fireEvent.change(await screen.findByLabelText("Reason (required)"), { target: { value: "Waiting for the vendor" } });
     fireEvent.click(document.getElementById("park-submit") as HTMLElement);
     await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
     expect(posts(calls, path)[0]!.body).toMatchObject({ reason: "Waiting for the vendor" });
@@ -153,3 +199,27 @@ describe("Traveler drawer", () => {
   });
 });
 void allow;
+
+describe("Run tab of the Traveler drawer", () => {
+  const body = (b: unknown) => ({ [`GET /api/v1/work-orders/${W.id}/timeline`]: () => ({ body: b }) });
+  const toRun = async (b: unknown) => {
+    await show(body(b));
+    fireEvent.click(screen.getByRole("tab", { name: "Run" }));
+  };
+  afterEach(() => setTravelerTab("journey"));
+  it("says the timeline could not be shown when the read is [] or {}", async () => {
+    await toRun([]);
+    expect(await screen.findByText("The run timeline could not be shown")).toBeTruthy();
+    cleanup();
+    await toRun({});
+    expect(await screen.findByText("The run timeline could not be shown")).toBeTruthy();
+  });
+  it("says No runs yet for an empty list and renders a run without entries as its header only", async () => {
+    await toRun({ runs: [] });
+    expect(await screen.findByText("No runs yet")).toBeTruthy();
+    cleanup();
+    await toRun({ runs: [{ runId: "r1", station: "spec", state: "running", turn: 2, calls: 1, tokens: 10, costUsd: 0.1 }] });
+    expect(await screen.findByText("Spec")).toBeTruthy();
+    expect(document.querySelector(".tl-list")).toBeNull();
+  });
+});

@@ -1,8 +1,10 @@
 /* Access: simulator, policy cards, freezes, role matrix. Tokens only. */
-.view-access > .lock-note { margin-bottom: 0; }
-.acc-sim { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 20px; align-items: start; }
-.acc-sim-form { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
-.acc-sim-form .sim-go { grid-column: 1 / -1; }
+.acc-sim { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s4); align-items: start; }
+.acc-sim-hint { margin: 0 0 12px; }
+.acc-sim-empty { margin: 0; }
+.acc-from { align-items: center; }
+.acc-from > div { flex: 1; min-width: 0; }
+.acc-sim-form { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .acc-presets { margin-top: 12px; align-items: center; }
 .acc-presets .kicker { margin-right: 4px; }
 .acc-out { display: grid; gap: 10px; min-width: 0; }
@@ -13,29 +15,12 @@
 .acc-wk-h .sub-h { margin: 4px 0 0; display: block; }
 
 /* week strip: allowed cells are solid, denied cells are hatched, so the answer does not rely on colour */
-.wk { display: grid; gap: 2px; }
-.wk-row { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px; align-items: center; }
-.wk-d { font-size: 10px; color: var(--muted); white-space: nowrap; }
-.wk-cells { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 1px; }
-.wk-axis .wk-cells { font-size: 9px; color: var(--faint); }
-.wk-tick { border-left: 1px solid var(--line-strong); padding-left: 2px; }
-.wk-c { display: inline-block; height: 13px; min-width: 6px; border-radius: 1px; }
-.wk-c.is-yes { background: var(--done); }
-.wk-c.is-no { background: repeating-linear-gradient(-45deg, var(--block-soft) 0 2px, var(--surface) 2px 4px); border: 1px solid var(--line); }
-.wk-c.is-sel { outline: 2px solid var(--ink); outline-offset: 0; position: relative; z-index: 1; }
-.wk-legend { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
-.wk-legend .wk-c { width: 14px; height: 10px; }
 
 /* rules panel with tabs */
-.acc-rules > .acc-tabbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; padding: 6px 12px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-.acc-rules > .acc-tabbar .tabs { border-bottom: 0; min-width: 0; }
+.acc-tabbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: var(--s2); }
+.acc-tabbar .tabs { flex: 1; min-width: 0; overflow-x: auto; }
 .acc-tab-tools { padding-bottom: 6px; }
-.policy-card.is-extend { border-left-color: var(--accent); }
-.policy-card.is-extend .pc-effect { color: var(--accent); }
-.pc-actions { display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px dotted var(--line); padding-top: 6px; width: 100%; }
 .acc-freezes { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
-.freeze.is-past { opacity: 0.6; }
-.freeze.is-hl { box-shadow: 0 0 0 3px var(--accent); }
 
 .acc-mx-tools { padding: 12px 12px 0; overflow-x: auto; }
 .acc-mx-tools .seg { flex-wrap: nowrap; }
@@ -43,16 +28,12 @@
 .acc-mx-note { padding: 8px 12px; max-width: 90ch; }
 .acc-mx-scroll { max-height: 70vh; overflow-y: auto; border-top: 1px solid var(--line); }
 .acc-mx-scroll thead th { position: sticky; top: 0; background: var(--panel); z-index: 2; }
-.matrix th[scope="row"] { min-width: 200px; }
 .mx-aid { display: block; font-size: 10px; font-weight: 400; }
 .mx-lvl { display: block; font-size: 9px; color: var(--faint); font-weight: 400; text-transform: uppercase; letter-spacing: 0.06em; }
 .mx-grp th { background: var(--sunk); font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
 .mx-grp-stop th { color: var(--kill); background: var(--kill-soft); }
 .mx-grp-stop .ic { width: 12px; height: 12px; vertical-align: -2px; }
 .mx-stop th[scope="row"] > span:first-child { color: var(--kill); font-weight: 600; }
-.mx-cell.is-on { background: var(--accent-soft); }
-.mx-cell.is-hl, th.mx-role.is-hl { box-shadow: inset 0 0 0 2px var(--accent); }
-.matrix tr.is-hl th[scope="row"] { color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 
 .acc-acts { display: grid; gap: 6px; max-height: 260px; overflow-y: auto; border: 1px solid var(--line); padding: 8px; }
 .acc-fs { border: 0; padding: 0; margin: 0; }
@@ -61,8 +42,6 @@
 
 @media (max-width: 1100px) { .acc-sim { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 560px) {
-  .wk-row { grid-template-columns: 60px minmax(0, 1fr); }
-  .wk-d { overflow: hidden; text-overflow: ellipsis; }
   .acc-trace li { grid-template-columns: 16px 1fr; }
   .acc-trace li > .muted { grid-column: 2; }
 }
@@ -71,10 +50,8 @@
 .acc-warn[hidden] { display: none; }
 
 /* round three: custom roles, explain */
-th.mx-role.is-custom { background: var(--accent-soft); }
 th.mx-role.is-custom .mx-lvl { color: var(--accent); }
-th.mx-role.is-new { box-shadow: inset 0 -3px 0 var(--accent); }
-.mx-cell.is-custom { border-left: 1px dashed var(--accent-line); }
-.acc-roles { display: grid; gap: 4px; padding: 0 12px 12px; }
+.acc-roles { display: grid; gap: 4px; padding: 0; }
+.acc-roles > .acc-mx-note { padding: 12px 16px 4px; }
 .acc-role-name { display: inline-flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
 .acc-role-tools { flex-wrap: wrap; justify-content: flex-end; }
