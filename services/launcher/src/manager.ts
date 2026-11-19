@@ -1,9 +1,10 @@
 import type Dockerode from "dockerode";
 import type { ContainerInspectInfo, NetworkInspectInfo } from "dockerode";
 import { firstFreeBlock, formatCidr, parseCidr, type Cidr } from "./cidr.js";
+import { statfs } from "node:fs/promises";
 import type { LauncherConfig } from "./config.js";
 import { err, ok, type Result } from "./result.js";
-import { LABEL_MANAGED, LABEL_RUN, LABEL_VARIANT, LABEL_WORKSPACE, MANAGED_BY, names, networkOptions, createRequest, runLabels, runnerContainerOptions, tokenArchive, WORKSPACE_PATH, type StartRunInput } from "./template.js";
+import { LABEL_MANAGED, LABEL_RUN, LABEL_VARIANT, LABEL_WORKSPACE, MANAGED_BY, names, networkOptions, createRequest, runLabels, runnerContainerOptions, tokenArchive, volumeDriverOpts, WORKSPACE_PATH, type StartRunInput } from "./template.js";
 
 export type LauncherError =
   | { kind: "capacity"; msg: string }
@@ -136,7 +137,11 @@ export class RunManager {
     if (net.value.subnet) base.subnet = net.value.subnet;
     if (!startNow) return ok(base);
 
+    let tokenFiled: { putArchive: (b: Buffer, o: { path: string }) => Promise<unknown> } | undefined;
     const rollback = async () => {
+      // S-96: the volume is kept when it was not created in this call (it holds the seeded repository), so the token file must not stay in it.
+      // The proxy's only PUT is a token archive: overwrite the file with a one-byte stand-in while the container still exists.
+      if (tokenFiled) await Promise.resolve().then(() => tokenFiled!.putArchive(tokenArchive("x", this.cfg.limits.uid, this.cfg.limits.gid), { path: WORKSPACE_PATH })).catch(() => undefined);
       await this.removeContainerQuiet(cname);
       await this.detachAll(names.network(id));
       if (net.value.created) await this.removeNetworkQuiet(names.network(id));
@@ -162,6 +167,7 @@ export class RunManager {
     try {
       const container = await this.docker.createContainer(createRequest(runnerContainerOptions(this.cfg, input)));
       // The token goes into the workspace volume as a file the wrapper reads and unlinks first thing; it is never in the create body or the environment.
+      tokenFiled = container;
       await container.putArchive(tokenArchive(input.runToken, this.cfg.limits.uid, this.cfg.limits.gid), { path: WORKSPACE_PATH });
       await this.attachEdge(names.network(id), edge);
       await container.start();
@@ -199,12 +205,33 @@ export class RunManager {
     } catch (e) {
       if (statusOf(e) !== 404) return err({ kind: "docker", msg: messageOf(e) });
     }
+    // S-90: no new run starts on a nearly full disk (the database and the object store share it). Deferred by the worker like any capacity answer.
+    const low = await this.lowDisk();
+    if (low) return err({ kind: "capacity", msg: low });
     try {
-      await this.docker.createVolume({ Name: name, Driver: "local", Labels: runLabels(input) });
+      const opts = volumeDriverOpts(this.cfg);
+      await this.docker.createVolume({ Name: name, Driver: "local", Labels: runLabels(input), ...(opts ? { DriverOpts: opts } : {}) });
       return ok({ created: true });
     } catch (e) {
       return err({ kind: "docker", msg: messageOf(e) });
     }
+  }
+
+  /** A message when the host's free disk is under the floor; undefined when there is room, or when no probe path is configured. */
+  async lowDisk(): Promise<string | undefined> {
+    const d = this.cfg.disk;
+    if (!d.probePath || d.minFreeBytes <= 0) return undefined;
+    let free: number;
+    try {
+      const s = await statfs(d.probePath);
+      free = Number(s.bavail) * Number(s.bsize);
+    } catch (e) {
+      // fail closed: a disk that cannot be measured is not known to have room
+      return `host free disk cannot be measured (${messageOf(e)}); not starting new runs`;
+    }
+    if (free >= d.minFreeBytes) return undefined;
+    const gb = (n: number) => (n / 2 ** 30).toFixed(1);
+    return `host free disk is ${gb(free)} GB, under the ${gb(d.minFreeBytes)} GB floor; not starting new runs until it recovers`;
   }
 
   private async ensureNetwork(input: StartRunInput): Promise<Result<{ created: boolean; subnet?: string }, LauncherError>> {

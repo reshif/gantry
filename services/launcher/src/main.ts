@@ -10,6 +10,8 @@ async function main(): Promise<number> {
     console.error("launcher: bad configuration:", cfg.error.msg);
     return 2;
   }
+  const z = cfg.value.sizing;
+  console.error(`launcher: ${cfg.value.maxConcurrentRuns} concurrent runs (${z.source}) on a host of ${(z.hostMemBytes / 2 ** 30).toFixed(1)} GiB and ${z.hostCpus} CPUs; ${cfg.value.limits.memoryBytes / 2 ** 20} MB and ${cfg.value.limits.nanoCpus / 1e9} CPUs per run; control plane keeps ${(z.reserveBytes / 2 ** 30).toFixed(1)} GiB; workspace cap ${cfg.value.workspace.maxMb} MB (${cfg.value.workspace.backing}); free-disk floor ${(cfg.value.disk.minFreeBytes / 2 ** 30).toFixed(0)} GiB${cfg.value.disk.probePath ? "" : " (NOT enforced: DISK_PROBE_PATH is unset)"}`);
   const token = await readToken(cfg.value.tokenFile);
   if (!token.ok) {
     console.error("launcher:", token.error.msg);

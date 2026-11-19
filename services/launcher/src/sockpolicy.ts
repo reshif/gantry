@@ -102,7 +102,7 @@ const HOST_KEYS = new Set([
   "RestartPolicy", "AutoRemove", "PublishAllPorts", "IpcMode", "PidMode", "UsernsMode", "Binds", "Devices", "DeviceCgroupRules", "ExtraHosts",
   "Dns", "Links", "VolumesFrom", "Ulimits", "LogConfig",
 ]);
-const RUN_ENV = /^(EDGE_URL|HTTPS_PROXY|GANTRY_RUN_ID)=/;
+const RUN_ENV = /^(?:(?:EDGE_URL|HTTPS_PROXY|GANTRY_RUN_ID)=|GANTRY_WORKSPACE_MAX_MB=\d{1,9}$)/;
 const TMP_OPTS = /^rw,noexec,nosuid,nodev,size=\d+$/;
 
 /**
@@ -120,6 +120,9 @@ export interface RunnerLimits {
 }
 /** The launcher's own defaults (config.ts). The proxy builds its own from the same environment variables. */
 export const DEFAULT_LIMITS: RunnerLimits = { uid: 10001, gid: 10001, memoryBytes: 4096 * 1024 * 1024, pids: 512, nanoCpus: 2e9 };
+/** The workspace volume ceiling the proxy enforces (WORKSPACE_MAX_MB). */
+export interface VolumeLimits { maxMb: number; uid: number; gid: number }
+export const DEFAULT_VOLUME_LIMITS: VolumeLimits = { maxMb: 10240, uid: 10001, gid: 10001 };
 
 const posInt = (v: unknown, max: number): boolean => typeof v === "number" && Number.isSafeInteger(v) && v > 0 && v <= max;
 const LABEL_KEYS = new Set(["gantry.run", "gantry.managed-by", "gantry.variant", "gantry.workspace-ref"]);
@@ -143,7 +146,7 @@ export function checkContainer(body: unknown, query: URLSearchParams, images: Re
   if (body.Env !== undefined) {
     // The run token is never in the environment (it would be readable from /proc/1/environ): not as GANTRY_RUN_TOKEN, and not as proxy credentials.
     if (!Array.isArray(body.Env) || body.Env.some((e) => typeof e !== "string" || /GANTRY_RUN_TOKEN/i.test(e))) return deny("A runner's environment must not carry the run token; it is delivered in a file.");
-    if (body.Env.some((e) => !RUN_ENV.test(e as string))) return deny("A runner's environment is only the three variables the template sets.");
+    if (body.Env.some((e) => !RUN_ENV.test(e as string))) return deny("A runner's environment is only the four variables the template sets.");
     for (const e of body.Env as string[]) {
       if (!e.startsWith("HTTPS_PROXY=")) continue;
       let u: URL;
@@ -237,12 +240,22 @@ export function checkNetwork(body: unknown): Decision {
   return allow;
 }
 
-/** A workspace volume: local, named ws-<id>, owned, no driver options (which could bind a host path). */
-export function checkVolume(body: unknown): Decision {
+/**
+ * A workspace volume: local, named ws-<id>, owned. Driver options are refused (they can bind a host path), with one exception (S-90): exactly the
+ * size-limited tmpfs the launcher sets, `type=tmpfs device=tmpfs o=size=<n>m,uid=<runner>,gid=<runner>,mode=0755`, n at or under the ceiling. No other key,
+ * no other option, nothing that names a host path.
+ */
+export function checkVolume(body: unknown, limits: VolumeLimits = DEFAULT_VOLUME_LIMITS): Decision {
   if (!isObj(body)) return deny("The body is not a JSON object.");
   if (typeof body.Name !== "string" || !/^ws-[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(body.Name)) return deny("Only workspace volumes (ws-<run>) may be created.");
   if (body.Driver !== undefined && body.Driver !== "local") return deny("A workspace volume uses the local driver.");
-  if (!empty(body.DriverOpts)) return deny("Volume driver options are refused (they can bind a host path).");
+  if (!empty(body.DriverOpts)) {
+    const o = body.DriverOpts;
+    const keys = isObj(o) ? Object.keys(o).sort().join(",") : "";
+    const m = isObj(o) && typeof o.o === "string" ? /^size=([1-9]\d{0,8})m,uid=(\d+),gid=(\d+),mode=0755$/.exec(o.o) : null;
+    const ok = isObj(o) && keys === "device,o,type" && o.type === "tmpfs" && o.device === "tmpfs" && m !== null && Number(m[1]) <= limits.maxMb && Number(m[2]) === limits.uid && Number(m[3]) === limits.gid;
+    if (!ok) return deny("Volume driver options are refused (they can bind a host path); only the size-limited tmpfs workspace is allowed.");
+  }
   if (!managed(body.Labels as Record<string, string>)) return deny("A workspace volume must carry the launcher's managed-by label.");
   return allow;
 }

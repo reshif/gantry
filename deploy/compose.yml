@@ -20,6 +20,15 @@ x-hardened: &hardened
   restart: unless-stopped
 
 # Non-secret configuration shared by the services that talk to the database and object storage.
+# Room for the control plane (S-93): a burst of runs must not push these out of memory. Generous ceilings (each service uses well under 100 MB
+# idle), a reservation the kernel honours under pressure, and a negative oom score so the kernel picks a run before it picks one of these.
+# Override per service with GANTRY_<NAME>_MEMORY. The launcher refuses a MAX_CONCURRENT_RUNS that would not fit beside them (CONTROL_PLANE_MEMORY_MB).
+x-control: &control
+  mem_limit: 1g
+  mem_reservation: 128m
+  pids_limit: 512
+  oom_score_adj: -300
+
 x-data-env: &data-env
   GANTRY_ORG_ID: ${GANTRY_ORG_ID:-acme}
   GANTRY_PUBLIC_URL: https://${GANTRY_HOSTNAME:-localhost}
@@ -82,7 +91,7 @@ services:
     networks: [control]
 
   gantry-api:
-    <<: *hardened
+    <<: [*hardened, *control]
     build: { context: .., dockerfile: services/api/Dockerfile }
     image: ${GANTRY_IMAGE_PREFIX:-}gantry-api:${GANTRY_VERSION:-dev}
     environment:
@@ -132,7 +141,7 @@ services:
     networks: [control]
 
   gantry-worker:
-    <<: *hardened
+    <<: [*hardened, *control]
     build: { context: .., dockerfile: services/worker/Dockerfile }
     image: ${GANTRY_IMAGE_PREFIX:-}gantry-worker:${GANTRY_VERSION:-dev}
     environment:
@@ -169,7 +178,7 @@ services:
   # The only container with the host's Docker socket. It lets through only the launcher's own calls, on resources the
   # launcher owns, and container/network/volume creates that match the runner template (services/launcher/src/sockpolicy.ts).
   gantry-sockproxy:
-    <<: *hardened
+    <<: [*hardened, *control]
     image: ${GANTRY_IMAGE_PREFIX:-}gantry-launcher:${GANTRY_VERSION:-dev}
     command: ["node", "dist/sockproxy.js"]
     # The Docker socket is group-owned by the host's docker group. Set DOCKER_GID to `stat -c %g /var/run/docker.sock`.
@@ -179,6 +188,8 @@ services:
       RUNNER_VARIANTS: ${RUNNER_VARIANTS:-base=${GANTRY_IMAGE_PREFIX:-}gantry-runner:${GANTRY_VERSION:-dev}}
       EDGE_COMPOSE_SERVICE: gantry-edge
       EDGE_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-gantry}
+      # The ceiling the proxy allows for a size-limited workspace volume (S-90); the same value the launcher uses.
+      WORKSPACE_MAX_MB: ${WORKSPACE_MAX_MB:-10240}
     volumes:
       - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     healthcheck:
@@ -193,7 +204,7 @@ services:
   # no network, one ws-<id> volume), its archive calls and its removal, and nothing else (sockpolicy.ts routeWorkspace). The broker
   # no longer mounts the Docker socket. deploy/ci/compose-socket.mjs fails CI if any other service does.
   gantry-sockproxy-ws:
-    <<: *hardened
+    <<: [*hardened, *control]
     image: ${GANTRY_IMAGE_PREFIX:-}gantry-launcher:${GANTRY_VERSION:-dev}
     command: ["node", "dist/sockproxy.js"]
     group_add: ["${DOCKER_GID:-999}"]
@@ -212,7 +223,7 @@ services:
     networks: [wsapi]
 
   gantry-launcher:
-    <<: *hardened
+    <<: [*hardened, *control]
     build: { context: .., dockerfile: services/launcher/Dockerfile }
     image: ${GANTRY_IMAGE_PREFIX:-}gantry-launcher:${GANTRY_VERSION:-dev}
     # No Docker socket here: every Docker call goes through gantry-sockproxy.
@@ -223,12 +234,26 @@ services:
       # Dedicated pool for run networks (/28 each). Keep it clear of every other network on this host. See deploy/README.md.
       RUN_SUBNET_POOL: ${RUN_SUBNET_POOL:-10.213.0.0/16}
       RUN_SUBNET_PREFIX: "28"
-      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-32}
+      # Unset: derived from this host's memory and CPUs at start (S-93). Set: refused if it would overcommit (see deploy/README.md, "Sandbox hardening").
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-}
+      RUN_MEMORY_OVERCOMMIT_RATIO: ${RUN_MEMORY_OVERCOMMIT_RATIO:-1.5}
+      CONTROL_PLANE_MEMORY_MB: ${CONTROL_PLANE_MEMORY_MB:-4096}
+      # Each run's /workspace: capped at this size. WORKSPACE_BACKING=tmpfs makes it a hard, size-limited volume (RAM-backed); disk (default) is
+      # measured by the wrapper and the run is stopped when over (S-90).
+      WORKSPACE_MAX_MB: ${WORKSPACE_MAX_MB:-10240}
+      WORKSPACE_BACKING: ${WORKSPACE_BACKING:-disk}
+      # No new run starts when the host disk (the filesystem of the diskprobe volume, which is the one the run volumes, Postgres and MinIO share) has less free than this.
+      DISK_PROBE_PATH: /diskprobe
+      MIN_FREE_DISK_GB: ${MIN_FREE_DISK_GB:-20}
+      # Must agree with the edge's: the launcher refuses to start when its pool is not inside it (S-102).
+      EDGE_RUN_SUBNET: ${RUN_SUBNET_POOL:-10.213.0.0/16}
       EDGE_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-gantry}
       EDGE_COMPOSE_SERVICE: gantry-edge
       EDGE_URL: http://gantry-edge:8443
       RUNNER_PROXY_URL: http://gantry-edge:8444
     secrets: [launcher_token]
+    volumes:
+      - diskprobe:/diskprobe:ro
     healthcheck:
       <<: *http-check
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9100/healthz"]
@@ -251,7 +276,12 @@ services:
     secrets: [data_key, edge_token, vendor_keys.json, minio_root_password]
     # The edge is shared by every run and the model gateway: bound what one run's traffic can take (the per-run caps are in proxy.ts).
     mem_limit: ${GANTRY_EDGE_MEMORY:-768m}
+    mem_reservation: 128m
     pids_limit: 512
+    oom_score_adj: -300
+    # The edge serves each run from its own interface and must never forward between run networks, the control network and the egress network (S-98).
+    sysctls:
+      net.ipv4.ip_forward: "0"
     ulimits:
       nofile: { soft: 8192, hard: 8192 }
     depends_on:
@@ -263,7 +293,7 @@ services:
     networks: [control, egress]
 
   gantry-github:
-    <<: *hardened
+    <<: [*hardened, *control]
     build: { context: .., dockerfile: services/github/Dockerfile }
     image: ${GANTRY_IMAGE_PREFIX:-}gantry-github:${GANTRY_VERSION:-dev}
     # The broker seeds and reads ws-<id> volumes through the Docker API (services/github/src/workspace.ts). It holds no Docker socket (it is
@@ -293,6 +323,10 @@ services:
       - no-new-privileges:true
     # uid 70 is the image's postgres user; a new pgdata volume inherits that ownership from the image.
     user: "70:70"
+    mem_limit: ${GANTRY_POSTGRES_MEMORY:-2g}
+    mem_reservation: 512m
+    pids_limit: 512
+    oom_score_adj: -500
     environment:
       POSTGRES_USER: gantry_owner
       POSTGRES_DB: gantry
@@ -321,6 +355,10 @@ services:
     security_opt:
       - no-new-privileges:true
     user: "10001:10001"
+    mem_limit: ${GANTRY_MINIO_MEMORY:-1g}
+    mem_reservation: 128m
+    pids_limit: 512
+    oom_score_adj: -300
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: gantry
@@ -556,6 +594,8 @@ networks:
     driver: bridge
 
 volumes:
+  # Empty; only its filesystem is read (free space), by the launcher's free-disk guard.
+  diskprobe:
   pgdata:
   objdata:
   caddydata:

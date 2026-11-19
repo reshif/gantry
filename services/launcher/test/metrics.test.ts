@@ -1,10 +1,11 @@
 import Docker from "dockerode";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { BIG_HOST } from "./host.js";
 import { RunManager } from "../src/manager.js";
 import { buildServer } from "../src/server.js";
 
-const cfgR = loadConfig({});
+const cfgR = loadConfig({}, BIG_HOST);
 if (!cfgR.ok) throw new Error(cfgR.error.msg);
 const TOKEN = "t".repeat(40);
 const MT = "m".repeat(24);

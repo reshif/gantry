@@ -1,0 +1,42 @@
+#!/bin/sh
+# Gantry's git front for the agent's shell (S-91). Put first on the harness's PATH by the wrapper; the image keeps it root-owned.
+# An agent that may "write the branch" can run only git add / commit / status / diff / log / show. Git can run programs from configuration
+# (filter, textconv, diff.external, aliases, sshCommand ...) and write files with --output, so this front:
+#   1. refuses global options (-c, --git-dir, --exec-path ...) and options that run or write (--output, --ext-diff, --textconv ...);
+#   2. refuses to run at all when the repository's own config (.git/config, worktree config) defines anything that executes a program;
+#   3. runs the real git with system and global config off, hooks off, fsmonitor off, no external diff or textconv and no editor.
+REAL="${GANTRY_REAL_GIT:-/usr/bin/git}"
+refuse() { echo "git: refused by the Gantry sandbox: $1" >&2; exit 126; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-pager | --no-optional-locks) shift ;;
+    -*) refuse "the global option $1 is not allowed" ;;
+    *) break ;;
+  esac
+done
+if [ $# -eq 0 ]; then exec "$REAL" --version; fi
+sub="$1"; shift
+
+for a in "$@"; do
+  [ "$a" = "--" ] && break
+  case "$a" in
+    --ou | --out* | --ext* | --text | --textc* | --git* | --work* | --exec* | --conf* | --upload-pack* | --receive-pack*)
+      refuse "the option $a is not allowed" ;;
+  esac
+done
+
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true GIT_PAGER=cat GIT_ATTR_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0
+unset GIT_EXTERNAL_DIFF GIT_SSH GIT_SSH_COMMAND GIT_ASKPASS GIT_PROXY_COMMAND GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE GIT_EXEC_PATH
+
+# What the repository's own config may not hold: anything that starts a program.
+listed=$("$REAL" config --list --show-scope --no-includes 2>/dev/null) || refuse "the repository config cannot be read"
+bad=$(printf '%s\n' "$listed" | grep -Ei '^(local|worktree)[[:space:]]+(filter\..*\.(clean|smudge|process|required)|(diff|merge)\..*\.(textconv|command|driver|cmd)|diff\.external|core\.(sshcommand|gitproxy|askpass|editor|pager|fsmonitor|hookspath|attributesfile)|sequence\.editor|alias\.|include\.|includeif\.|credential\.|gpg\..*program|gpg\.program|pager\.|submodule\..*\.update|protocol\.|http\.proxy|url\..*)' | head -1)
+if [ -n "$bad" ]; then
+  refuse "the repository config defines something that runs a program (${bad#*[[:space:]]}); remove it from .git/config"
+fi
+
+case "$sub" in
+  diff | log | show | whatchanged) set -- --no-ext-diff --no-textconv "$@" ;;
+esac
+exec "$REAL" -c core.hooksPath=/dev/null -c core.fsmonitor=false -c diff.external= -c core.pager=cat -c protocol.ext.allow=never "$sub" "$@"

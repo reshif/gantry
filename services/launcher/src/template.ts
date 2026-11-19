@@ -37,6 +37,16 @@ export const names = {
 };
 
 export const WORKSPACE_PATH = "/workspace";
+
+/**
+ * The workspace volume (S-90). `disk`: a plain local volume (host ext4, no kernel quota: the wrapper measures and stops the run). `tmpfs`: the local
+ * driver's tmpfs mount with `size=`, a hard cap the run cannot change; its pages are memory, charged to the run's own memory limit, so only use it where
+ * RAM allows. The driver options are exactly this shape and the socket proxy allows exactly this shape (sockpolicy.ts checkVolume).
+ */
+export function volumeDriverOpts(cfg: LauncherConfig): Record<string, string> | undefined {
+  if (cfg.workspace.backing !== "tmpfs") return undefined;
+  return { type: "tmpfs", device: "tmpfs", o: `size=${cfg.workspace.maxMb}m,uid=${cfg.limits.uid},gid=${cfg.limits.gid},mode=0755` };
+}
 export const TMP_OPTIONS = (bytes: number) => `rw,noexec,nosuid,nodev,size=${bytes}`;
 
 export function runLabels(input: Pick<StartRunInput, "runId" | "workspaceRef" | "variant">): Record<string, string> {
@@ -133,6 +143,8 @@ export function runnerContainerOptions(cfg: LauncherConfig, input: StartRunInput
       `EDGE_URL=${cfg.runnerEnv.edgeUrl}`,
       `HTTPS_PROXY=${proxyUrlPlain(cfg.runnerEnv.proxyUrl)}`,
       `GANTRY_RUN_ID=${input.runId}`,
+      // The wrapper's own measurement of /workspace (S-90); the volume is also size-limited when the backing is tmpfs.
+      `GANTRY_WORKSPACE_MAX_MB=${cfg.workspace.maxMb}`,
     ],
     Labels: runLabels(input),
     StopSignal: "SIGTERM",

@@ -46,7 +46,7 @@ Every Gantry container is read-only with a `/tmp` tmpfs, `cap_drop: ALL`, `no-ne
 
 ## Run networks and the address pool
 
-Docker's default pools allow only a few dozen bridge networks. The launcher therefore gives each run an explicit `/28` taken from a dedicated range, `10.213.0.0/16` by default (`RUN_SUBNET_POOL`), capped at `MAX_CONCURRENT_RUNS` (32). Keep that range free on the host: do not use it for a VPN, a LAN or Docker's own `default-address-pools` in `/etc/docker/daemon.json`. Compose's own networks come from Docker's defaults, which do not overlap it. The launcher also checks every existing network's subnet before choosing one.
+Docker's default pools allow only a few dozen bridge networks. The launcher therefore gives each run an explicit `/28` taken from a dedicated range, `10.213.0.0/16` by default (`RUN_SUBNET_POOL`), capped at `MAX_CONCURRENT_RUNS` (unset by default: derived from the host's memory and CPUs at launcher start, at most 32; see "Sandbox hardening"). Keep that range free on the host: do not use it for a VPN, a LAN or Docker's own `default-address-pools` in `/etc/docker/daemon.json`. Compose's own networks come from Docker's defaults, which do not overlap it. The launcher also checks every existing network's subnet before choosing one.
 
 ## Launcher
 
@@ -62,7 +62,27 @@ Seeding order (spec 4.3): the launcher does not clone. Call `POST /v1/runs` with
 
 ## Configuration
 
-Non-secret settings come from environment variables in `compose.yml`; override them in your shell or a `deploy/.env` file: `GANTRY_ORG_ID`, `GANTRY_ORG_NAME`, `GANTRY_DEV_SEED`, `GANTRY_BOOTSTRAP_ADMIN_USERNAME`, `GANTRY_BOOTSTRAP_ADMIN_EMAIL` (deprecated), `OIDC_GITHUB_IDP_ALIAS`, `RUNNER_VARIANTS`, `RUN_SUBNET_POOL`, `MAX_CONCURRENT_RUNS`, `DOCKER_GID`, `DOCKER_SOCKET`, `GANTRY_SECRETS_DIR`, `MINIO_IMAGE`, `KEYCLOAK_IMAGE`, `GANTRY_HOSTNAME`, `GANTRY_TLS`, `GANTRY_IMAGE_PREFIX`, `GANTRY_VERSION`, and the `GANTRY_BACKUP_*` settings (PRODUCTION.md). Set `COMPOSE_PROJECT_NAME` (or `-p`) to run a second copy; the launcher finds the edge through the compose project label.
+Non-secret settings come from environment variables in `compose.yml`; override them in your shell or a `deploy/.env` file: `GANTRY_ORG_ID`, `GANTRY_ORG_NAME`, `GANTRY_DEV_SEED`, `GANTRY_BOOTSTRAP_ADMIN_USERNAME`, `GANTRY_BOOTSTRAP_ADMIN_EMAIL` (deprecated), `OIDC_GITHUB_IDP_ALIAS`, `RUNNER_VARIANTS`, `RUN_SUBNET_POOL`, `MAX_CONCURRENT_RUNS`, `WORKSPACE_MAX_MB`, `WORKSPACE_BACKING`, `MIN_FREE_DISK_GB`, `RUN_MEMORY_OVERCOMMIT_RATIO`, `CONTROL_PLANE_MEMORY_MB`, `DOCKER_GID`, `DOCKER_SOCKET`, `GANTRY_SECRETS_DIR`, `MINIO_IMAGE`, `KEYCLOAK_IMAGE`, `GANTRY_HOSTNAME`, `GANTRY_TLS`, `GANTRY_IMAGE_PREFIX`, `GANTRY_VERSION`, and the `GANTRY_BACKUP_*` settings (PRODUCTION.md). Set `COMPOSE_PROJECT_NAME` (or `-p`) to run a second copy; the launcher finds the edge through the compose project label.
+
+## Sandbox hardening
+
+Limits and host settings the run sandbox relies on (findings S-90 to S-102 of the sandbox review).
+
+**Workspace size (S-90).** Each run's `/workspace` is capped at `WORKSPACE_MAX_MB` (default 10240). The wrapper inside the run measures it every 5 seconds and, over the cap, stops the run with the failure `workspace_over_limit` ("workspace over N GB"). For a hard cap set `WORKSPACE_BACKING=tmpfs`: the launcher then creates the volume as a size-limited tmpfs (`type=tmpfs`, `o=size=<n>m,uid=10001,gid=10001,mode=0755`; the socket proxy allows exactly that shape and nothing else). A tmpfs workspace is memory, charged to the run's own memory limit, so use it only where RAM allows (ext4 has no per-volume quota without special mount options). The default is `disk`.
+
+**Free-disk floor (S-90).** The launcher refuses to start a new run when the host's free disk is under `MIN_FREE_DISK_GB` (default 20). It measures the filesystem of the read-only `diskprobe` volume, which is the one run volumes, Postgres and MinIO share; the dispatch is deferred with the reason "host free disk is X GB, under the Y GB floor". Alert on host disk as well (node exporter or equivalent); the guard does not replace an alert.
+
+**Concurrency against the host (S-93).** At start the launcher compares `MAX_CONCURRENT_RUNS` x `RUNNER_MEMORY_MB` with the host's memory minus `CONTROL_PLANE_MEMORY_MB` (default 4096), times `RUN_MEMORY_OVERCOMMIT_RATIO` (default 1.5), and the CPUs likewise (`RUN_CPU_OVERCOMMIT_RATIO`, default 2). With `MAX_CONCURRENT_RUNS` unset it picks the largest value that fits (a 14 GiB, 12 CPU host gets 3). A value that does not fit is refused at start with the numbers in the log. The control-plane services carry `mem_limit`, `mem_reservation`, `pids_limit` and a negative `oom_score_adj` in `compose.yml` (production values stay in `compose.prod.yml`).
+
+**Per-source caps at the edge (S-92, S-102).** `EDGE_SOURCE_MAX_CONNECTIONS` (128 per listener), `EDGE_SOURCE_REQUESTS_PER_MINUTE` (1200) and `EDGE_TOKEN_FAILURES_PER_MINUTE` (20) bound what one run (one source address) can do; over a cap the edge answers 429 and logs `edge source over its cap`. `EDGE_RUN_SUBNET` must be a valid CIDR (the edge refuses to start otherwise) and must contain the launcher's `RUN_SUBNET_POOL` (the launcher refuses to start otherwise); compose derives both from `RUN_SUBNET_POOL`.
+
+**Host settings to apply (not done by compose).**
+
+* S-99 `ptrace_scope`: the run token lives in the wrapper's memory, protected from tool processes of the same uid only by Yama. Require `kernel.yama.ptrace_scope` of 1 or higher: `echo 'kernel.yama.ptrace_scope = 1' | sudo tee /etc/sysctl.d/60-gantry-yama.conf && sudo sysctl --system`, and verify with `cat /proc/sys/kernel/yama/ptrace_scope`. A host without Yama is not supported.
+* S-97 host services: a run's internal network still reaches the host through the bridge address. Bind every host service to `127.0.0.1` (sshd `ListenAddress`, dev servers, node exporter `--web.listen-address=127.0.0.1:9100`), check with `ss -ltn` (only `127.0.0.x` and `::1`), and drop run traffic to the host: `sudo iptables -I DOCKER-USER -s 10.213.0.0/16 -d <host addresses> -j DROP` for each non-loopback host address (or an equivalent `INPUT` rule for `10.213.0.0/16`), adjusted if `RUN_SUBNET_POOL` differs. Repeat for IPv6 if enabled.
+* S-98 edge forwarding: compose sets `net.ipv4.ip_forward=0` on `gantry-edge`. Confirm with `docker exec <edge> cat /proc/sys/net/ipv4/ip_forward` (0) after a deploy.
+* S-100 cost and turns: set a per-run or project cost ceiling for every project (without one a run spends until its wall clock); `--max-turns` is a harness flag only. Not fixed in code yet.
+* S-101 egress hosts: `DEFAULT_RUN_HOSTS` gives every station GitHub, npm, yarn, Go, crates, Maven and RubyGems; a station that builds nothing does not need them. Trim per project. Per-station defaults are not implemented yet.
 
 ## Keycloak realm
 
