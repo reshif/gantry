@@ -372,6 +372,8 @@ export const ops = {
     ),
   reactivatePerson: (personId: string, reason: string, v?: Versioned) =>
     run(["people", "me", "matrix"], post(api(`people/${enc(personId)}/reactivate`), { reason }, opts(v))),
+  /** Resets a person's authenticator (S-124): removes their second factors at the identity provider, ends their sessions, and emails a one-time enrolment link. Another administrator, a reason, a fresh two-factor sign-in. */
+  resetMfa: (personId: string, reason: string) => run(["people", "sessions"], post(api(`people/${enc(personId)}/mfa-reset`), { reason })),
   setTeams: (personId: string, teams: string[]) => run(["people"], put(api(`people/${enc(personId)}/teams`), { teams })),
   createTeam: (o: { name: string; desc?: string; id?: string }) => run(["teams", "people"], post(api("teams"), o, create)),
   updateTeam: (teamId: string, o: { name?: string; desc?: string }) => run(["teams", "people", "projects"], patch(api(`teams/${enc(teamId)}`), o)),

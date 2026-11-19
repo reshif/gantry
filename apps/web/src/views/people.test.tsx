@@ -277,6 +277,35 @@ describe("People & teams: deactivate", () => {
     await waitFor(() => expect(dlg.textContent).toContain("Some lists could not be read"));
   });
 
+  it("S-124: Reset authenticator sends a reason (not under 5 characters) to the mfa-reset route, and is locked on yourself", async () => {
+    const calls = setup({ "POST /api/v1/people/p-tomas/mfa-reset": () => ({ body: { ok: true, msg: "Reset.", removed: 1, linkValidMinutes: 60 } }) });
+    mount("p-tomas");
+    fireEvent.click(await byId("ppl-reset-mfa"));
+    const ta = await waitFor(() => { const e = document.querySelector<HTMLTextAreaElement>("dialog textarea, [role=dialog] textarea, .dlg textarea"); if (!e) throw new Error("no reason box"); return e; });
+    fireEvent.change(ta, { target: { value: "no" } });
+    const ok = Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Reset and send link")!;
+    fireEvent.click(ok);
+    expect(writes(calls)).toEqual([]);
+    fireEvent.change(ta, { target: { value: "Lost phone, identity checked by video call" } });
+    fireEvent.click(ok);
+    await waitFor(() => expect(writes(calls).length).toBe(1));
+    expect(writes(calls)[0]!.path).toBe("/api/v1/people/p-tomas/mfa-reset");
+    expect(writes(calls)[0]!.body).toEqual({ reason: "Lost phone, identity checked by video call" });
+  });
+
+  it("S-124: nobody resets their own authenticator here; the button says who to ask", async () => {
+    setup();
+    mount("p-asha");
+    const btn = await byId("ppl-reset-mfa");
+    expect(btn.getAttribute("aria-description") ?? btn.title).toMatch(/another administrator/i);
+  });
+
+  it("S-127: the MFA stat shows the real enrolment, not a flag nothing wrote", async () => {
+    setup({ "GET /api/v1/people": () => ({ body: [{ ...PEOPLE[0], mfa: true }, { ...PEOPLE[1], mfa: false }] }) });
+    mount("p-tomas");
+    await waitFor(() => expect(document.getElementById("ppl-stats")!.textContent).toContain("Not enrolledneeds an enrolment link"));
+  });
+
   it("Reactivate sends a reason and If-Match", async () => {
     const off = { ...person("p-ines", "Inés Alvarez", ["payments"], []), status: "deactivated", version: 5 };
     const calls = setup({ "GET /api/v1/people": () => ({ body: [PEOPLE[0], off, PEOPLE[1]] }), "POST /api/v1/people/p-ines/reactivate": () => ({ body: { ok: true, msg: "Active again." } }) });

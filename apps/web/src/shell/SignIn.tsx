@@ -43,22 +43,21 @@ function ThemeBtn() {
   return <Btn small kind="ghost" id="auth-theme" icon={dark ? "moon" : "sun"} label="Theme" onClick={() => { updatePrefs({ theme: next }); applyTheme(next); }} />;
 }
 
-/** The guided screen for a Factory Admin whose sign-in had no second factor (the server answered `needs: "mfa_setup"`). */
+/** The guided screen for a person whose sign-in had no second factor (the server answered `needs: "mfa_setup"`): MFA is required for everyone. */
 function MfaSetup() {
-  const sp = new URLSearchParams({ mfa: "1" });
+  const sp = new URLSearchParams();
   if (window.location.hash.length > 1) sp.set("return_to", `/${window.location.hash}`);
   return (
     <div id="auth-mfa" aria-labelledby="auth-h" role="region">
       <Brand sub="SOFTWARE FACTORY · TWO-STEP SIGN-IN" />
-      <h2 className="auth-h" id="mfa-h" style={{ fontSize: 16, marginBottom: 6 }}>Set up two-step sign-in</h2>
-      <p className="muted small">Factory Admins can stop the line and change who may do what, so they sign in with a password and a one-time code.</p>
+      <h2 className="auth-h" id="mfa-h" style={{ fontSize: 16, marginBottom: 6 }}>Two-step sign-in is required</h2>
+      <p className="muted small">Everyone signs in with a password and a second factor: an authenticator app, a security key or a recovery code.</p>
       <ol className="auth-steps" style={{ margin: "12px 0" }}>
-        <li>Install an authenticator app on your phone (any app that makes six-digit codes).</li>
-        <li>Continue below and sign in. Your identity provider shows a QR code the first time: scan it and enter the code it gives you.</li>
-        <li>Next time, you enter the code from the app after your password.</li>
+        <li>Open the one-time link your identity provider emailed you. It makes you choose a password and set up an authenticator app, and shows recovery codes to keep.</li>
+        <li>Then sign in below: your password first, then the code from the app.</li>
       </ol>
-      <Btn label="Set up and sign in" kind="primary" id="auth-mfa-go" icon="key" cls="block" onClick={() => window.location.assign(`/auth/login?${sp.toString()}`)} />
-      <p className="muted small" style={{ marginTop: 12 }}>If you have lost your authenticator app, ask another Factory Admin or your identity provider's administrator to reset it.</p>
+      <Btn label="Sign in with two steps" kind="primary" id="auth-mfa-go" icon="key" cls="block" onClick={() => window.location.assign(`/auth/login${sp.size ? `?${sp.toString()}` : ""}`)} />
+      <p className="muted small" style={{ marginTop: 12 }}>No link, or it expired? Ask an administrator to send you a new one (People, Reset authenticator). The link works once and lasts one hour. Your password alone never lets you set up an authenticator.</p>
       <div className="row" style={{ marginTop: 8 }}><ThemeBtn /></div>
     </div>
   );
@@ -122,7 +121,7 @@ export function SignIn({ config, error, needs }: { config: PublicConfig | null; 
                   </div>
                 ) : null}
                 <p className="small muted" style={{ marginTop: 12 }}>
-                  MFA is required for admins.{demo ? " Development sign-in is on." : ""}
+                  MFA is required for everyone.{demo ? " Development sign-in is on." : ""}
                 </p>
                 <div className="row" style={{ marginTop: 8 }}><ThemeBtn /></div>
               </>

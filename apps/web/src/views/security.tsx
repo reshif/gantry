@@ -62,7 +62,7 @@ export default function SecurityView() {
       <ViewHead title="Security" kicker="All lines" sub="Who can sign in, how, and from where." actions={<Btn label="Emergency stop" kind="ghost" icon="halt" id="sec-jump-stop" aria="Jump to Emergency stop" onClick={jumpToStop} />} />
       <StatRow id="sec-stats">
         <Stat label="SSO" value={sec.sso.enforced ? "Enforced" : "Optional"} sub={sec.sso.provider} tone={sec.sso.enforced ? "done" : "wait"} />
-        <Stat label="MFA" value={<span title="Recorded only: Gantry does not check it at sign-in.">{sec.mfa.policy}</span>} sub={sec.mfa.methods.length ? sec.mfa.methods.join(", ") : "no methods"} />
+        <Stat label="MFA" value={sec.mfa.waived ? "Waived (dev)" : "Required for everyone"} tone={sec.mfa.waived ? "wait" : "done"} sub="authenticator app, security key, recovery codes" />
         <Stat label="Session" value={`${sec.sessionHours} h`} sub={`${sec.idleMin} min idle`} />
         <Stat label="Failed sign-ins" value={qState(signinsQ, () => String(fails))} sub="recent" tone={fails ? "wait" : undefined} />
       </StatRow>

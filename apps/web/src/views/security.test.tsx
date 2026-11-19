@@ -16,7 +16,7 @@ const ME = { person: { ...PEOPLE[0], email: "asha@acme.dev" }, session: { id: "s
 
 const SEC = {
   sso: { provider: "Okta", domain: "acme.dev", enforced: true, entity: "https://acme.okta.com/metadata" },
-  mfa: { policy: "admins", methods: ["totp"] }, sessionHours: 12, idleMin: 30, domains: ["acme.dev", "partner.example"], ipAllow: ["10.0.0.0/8"],
+  mfa: { policy: "everyone", methods: ["totp", "webauthn", "recovery"], required: true, waived: false }, sessionHours: 12, idleMin: 30, domains: ["acme.dev", "partner.example"], ipAllow: ["10.0.0.0/8"],
   restoreFactoryNeedsTwo: true, githubLogin: false, researchHosts: ["docs.example.com"], chatCapUsdPerDay: null, version: 3,
 };
 const NOW = Date.now();
@@ -88,11 +88,22 @@ describe("Security screen", () => {
     expect(locked(await byId("sec-sso-domain"))).toBe(false);
   });
 
-  it("shows the MFA policy as recorded, with the methods, and keeps the not-enforced note as a tooltip", async () => {
+  it("S-127: shows the real MFA rule (required for everyone, TOTP, security key, recovery codes) with no dead choices, and the real enrolment count", async () => {
     setup();
     mount();
-    await waitFor(() => expect(text()).toContain("MFAadminstotp"));
-    expect(((await byId("sec-mfa-policy")) as HTMLSelectElement).title).toContain("Recorded only");
+    await waitFor(() => expect(text()).toContain("MFARequired for everyone"));
+    expect((await byId("sec-mfa-policy")).textContent).toBe("MFA required for everyone");
+    expect(document.querySelector("select#sec-mfa-policy")).toBeNull(); // the Nobody / Admins / Everyone radios did nothing: gone
+    expect(document.getElementById("sec-mfa-m-sms")).toBeNull(); // SMS was never a factor
+    expect((await byId("sec-mfa-methods")).textContent).toMatch(/Authenticator app.*Security key or passkey.*Recovery codes/);
+    expect((await byId("sec-mfa-status")).textContent).toMatch(/Required at every sign-in.*\d+ of \d+ people have signed in with a second factor/);
+  });
+
+  it("S-120: when the dev waiver is on the page says so instead of claiming MFA is required", async () => {
+    setup({ "GET /api/v1/security": () => ({ body: { ...SEC, mfa: { policy: "everyone", methods: ["totp"], required: true, waived: true }, version: 3 } }) });
+    mount();
+    await waitFor(() => expect(text()).toContain("MFAWaived (dev)"));
+    expect((await byId("sec-mfa-policy")).textContent).toBe("Waived on this development stack");
   });
 
   it("has the three prototype tabs, in the URL, and no Network, History or Emergency stop tabs", async () => {
@@ -122,10 +133,11 @@ describe("Security screen", () => {
     const calls = setup({ "PATCH /api/v1/security": () => ({ body: { ok: true, msg: "Saved.", version: ++v } }) });
     mount();
     fireEvent.change(await byId("sec-hours"), { target: { value: "8" } });
-    fireEvent.change(await byId("sec-mfa-policy"), { target: { value: "all" } });
+    fireEvent.change(await byId("sec-idle"), { target: { value: "20" } });
     fireEvent.click(await byId("sec-save"));
     await waitFor(() => expect(writes(calls)).toHaveLength(2));
-    expect(writes(calls).map((c) => [c.body.path, c.body.value])).toEqual([["mfa.policy", "all"], ["sessionHours", 8]]);
+    expect(writes(calls).map((c) => [c.body.path, c.body.value])).toEqual([["sessionHours", 8], ["idleMin", 20]]);
+    expect(writes(calls).every((c) => c.body.path !== "mfa.policy")).toBe(true); // MFA is not a setting
     expect(writes(calls).map((c) => c.ifMatch)).toEqual(["3", "4"]);
   });
 
