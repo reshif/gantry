@@ -42,7 +42,6 @@ function useTick(ms: number): void {
 /** The ticker beside the title: how much is on the line, where it is jammed, the longest wait at a person's gate, and what shipped. */
 function Ticker({ model }: { model: FloorModel }) {
   const facts = useFacts();
-  const ctx = useFloorCtx();
   const bn = model.bottleneck;
   const old = model.oldest;
   return (
