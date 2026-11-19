@@ -27,6 +27,7 @@ export const commands = {
   setMemberRole: ops.setMemberRole,
   setProjectOncall: ops.setProjectOncall,
   handOverOncall: ops.handOverOncall,
+  sendTest: ops.sendTest,
   addStation: ops.addStation,
   moveStation: ops.moveStation,
   removeStation: ops.removeStation,

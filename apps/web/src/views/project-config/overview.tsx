@@ -197,6 +197,7 @@ function OnCallPanel({ p, people, canSet }: { p: PcProps["p"]; people: PcProps["
   const mine = !!me && list.includes(me.person.id);
   const handTo = pool.filter((x) => x.id !== me?.person.id);
   const admins = people.filter((x) => x.status === "active" && isFA(x));
+  const notify = useCan("notify.edit", { project: p.id });
   const save = (next: string[]) => ops.setProjectOncall(p.id, next, { ifMatch: v }).then((r) => res(r));
   return (
     <Panel title="On call">
@@ -214,6 +215,10 @@ function OnCallPanel({ p, people, canSet }: { p: PcProps["p"]; people: PcProps["
         ) : (
           <p className="small muted" id="pcf-oncall-none">Nobody besides the Factory Admins is on call for {p.name}.</p>
         )}
+        <p className="small muted" id="pcf-oncall-paged">Paged for: kill, restore, halts, blocked, security hold, escalations.</p>
+        <div className="filters">
+          <Btn small icon="send" id="pcf-oncall-test" guard={notify} label="Send test page" onClick={async () => res(await ops.sendTest(p.id, { channel: "email", target: "on-call", integration: null }, "", "andon"))} />
+        </div>
         <p className="small muted">{`Always on call: ${admins.map((x) => x.name).join(", ") || "no Factory Admin"} (Factory Admin).`}</p>
         <div className="filters">
           <Field label="Put on call" htmlFor="pcf-oncall-pick">

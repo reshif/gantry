@@ -101,7 +101,7 @@ export function targetError(d: Dest, ctx: { project: Project; instOf: (d: Dest) 
   const ty = ctx.typeOf(inst.type);
   if (!t && inst.type !== "webhook") return `${inst.name} needs a ${(ty.targetLabel || "target").toLowerCase()}.`;
   if (inst.type === "slack" && !/^[#@][a-z0-9._-]+$/i.test(t)) return "Slack targets start with # (channel) or @ (person or role).";
-  if (inst.type === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t) && !["submitter", "approvers", "project admins"].includes(t)) return "Email targets are an address or one of: submitter, approvers, project admins.";
+  if (inst.type === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t) && !["submitter", "approvers", "on-call", "project admins"].includes(t)) return "Email targets are an address or one of: submitter, approvers, on-call, project admins.";
   return null;
 }
 

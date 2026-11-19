@@ -36,7 +36,7 @@ function Card({ p, owner }: { p: PView; owner: string }) {
       <div className="prj-card-foot">
       <div className="row small"><span className="num">{String(m.wip)}</span> in flight · <span className="num">{String(m.gates)}</span> at gates · <Done id={p.id} /></div>
       <Meter value={p.budget.mtd} max={p.budget.monthly} label={`${p.name} spend`} warnAt={p.budget.alertAt} />
-      <div className="small muted">{`${fmt.money0(p.budget.mtd)} ${p.budget.capped === false ? "· no cap" : `of ${fmt.money0(p.budget.monthly)}${p.budget.monthly === 0 ? " cap" : ""}`} · owner ${owner}`}</div>
+      <div className="small muted">{`${fmt.money0(p.budget.mtd)} ${p.budget.monthly <= 0 ? "· no cap" : `of ${fmt.money0(p.budget.monthly)}`} · owner ${owner}`}</div>
       <div className="row">
         <Btn small kind="primary" id={`prj-floor-${p.id}`} aria={`Open the floor for ${p.name}`} label="Open Floor" onClick={() => goProject(p.id, "floor")} />
         <Btn small id={`prj-cfg-${p.id}`} aria={`Configure ${p.name}`} label="Config" onClick={() => goProject(p.id, "project-config")} />
