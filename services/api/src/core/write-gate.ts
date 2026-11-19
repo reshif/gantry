@@ -66,7 +66,7 @@ export const WRITE_GATES: Readonly<Record<string, WriteGate>> = {
   [`POST ${P}/api-keys`]: A("api.keys"), [`DELETE ${P}/api-keys/:id`]: A("api.keys"), [`PATCH ${P}/api-config`]: A("integration.edit"),
   // console: the person's own threads and the assistant's tools, each decided by console rights inside
   [`PUT ${P}/console/model`]: SELF(PERSONAL), [`PUT ${P}/console/settings`]: SELF("retired; always refused"), [`DELETE ${P}/console/threads/:id`]: SELF(PERSONAL),
-  [`PATCH ${P}/console/threads/:id`]: SELF(PERSONAL), [`PUT ${P}/console/threads/:id/pinned`]: SELF(PERSONAL), [`PUT ${P}/console/messages/:id/proposals/:pid`]: SELF(PERSONAL),
+  [`PATCH ${P}/console/threads/:id`]: SELF(PERSONAL), [`PUT ${P}/console/threads/:id/pinned`]: SELF(PERSONAL), [`PUT ${P}/console/messages/:id/proposals/:pid`]: SELF(PERSONAL), [`POST ${P}/console/messages/:id/proposals/:pid/confirm`]: SELF("runs the card's own endpoint as the person, which decides it"),
   [`POST ${P}/console/tools/:name`]: SELF("decided by console rights per tool"), [`POST ${P}/console/explain`]: SELF("a read-only question"), [`POST ${P}/console/messages`]: SELF("the person's own console conversation"),
   // evals
   [`POST ${P}/suites/:id/runs`]: A("eval.run"), [`POST ${P}/suites/:id/runs/:run/cancel`]: A("eval.run"), [`POST ${P}/suites/:id/cases`]: A("eval.run"),
@@ -100,7 +100,7 @@ export const WRITE_GATES: Readonly<Record<string, WriteGate>> = {
   // people
   [`POST ${P}/teams`]: A("people.manage"), [`PATCH ${P}/teams/:id`]: A("people.manage"), [`DELETE ${P}/teams/:id`]: A("people.manage"),
   [`POST ${P}/teams/:id/roles`]: A("people.manage"), [`DELETE ${P}/teams/:id/roles/:grant`]: A("people.manage"),
-  [`POST ${P}/invites`]: A("people.manage"), [`POST ${P}/invites/:id/accept`]: A("people.manage"),
+  [`POST ${P}/invites`]: A("people.manage"), [`POST ${P}/invites/:id/accept`]: A("people.manage"), [`POST ${P}/invites/:id/resend`]: A("people.manage"),
   [`PUT ${P}/people/:id/factory-roles/:role`]: A("people.manage"), [`DELETE ${P}/people/:id/factory-roles/:role`]: A("people.manage"),
   [`POST ${P}/people/:id/deactivate`]: A("people.manage"), [`POST ${P}/people/:id/reactivate`]: A("people.manage"), [`PUT ${P}/people/:id/teams`]: A("people.manage"),
   [`PUT ${P}/people/:id/oncall`]: SELF("retired; always answers 410"), [`PUT ${P}/people/:id/away`]: SELF("a person sets their own away status; for someone else the handler needs people.manage or approvers.edit"),

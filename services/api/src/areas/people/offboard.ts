@@ -13,6 +13,7 @@ import { revokeSessions } from "../../core/auth/sessions.js";
 import { conflict, notFound, refuse, Refusal } from "../../core/errors.js";
 import { OPEN_STATES, loadFlow, stateWithPinned } from "../workorders/model.js";
 import { lockOrgConfig, stateIn } from "../access/config.js";
+import { issueInvite } from "./people.js";
 import type { z } from "zod";
 import type { DeactivateBody, ReactivateBody } from "./schemas.js";
 
@@ -151,7 +152,7 @@ export async function deactivatePerson(tx: Tx, a: Actor, id: string, body: z.inf
   };
 }
 
-export async function reactivatePerson(tx: Tx, a: Actor, id: string, body: z.infer<typeof ReactivateBody>): Promise<Out> {
+export async function reactivatePerson(tx: Tx, a: Actor, id: string, body: z.infer<typeof ReactivateBody>, publicUrl = ""): Promise<Out> {
   await lockOrgConfig(tx, a.orgId);
   const st = await stateIn(tx, a.orgId);
   const p = st.people.find((x) => x.id === id);
@@ -161,6 +162,20 @@ export async function reactivatePerson(tx: Tx, a: Actor, id: string, body: z.inf
   if (isFactoryAdminPerson(p) && !actor?.roles.some((g) => g.role === "factory_admin" && g.scope === "factory"))
     throw refuse("denied", "Only a Factory Admin can reactivate a Factory Admin.", { needs: "factory_admin" });
   if (p.status !== "deactivated") throw conflict(`${p.name} is not deactivated.`);
+  // 'active' implies 'linked' (acceptInvite's rule): someone who never signed in has no identity to come back as, and would be active but unable to sign in
+  // (the old invite is spent or expired). They go back to invited with a fresh invite instead, which they accept by signing in.
+  // Seeded and imported people are unlinked too but are signed in by Gantry id; only someone who was invited and never accepted is waiting on an invite.
+  const waiting = (await tx.query(`select (p.idp_subject is null and exists (select 1 from invites i where i.org_id = p.org_id and i.id = p.id and i.status <> 'accepted')) as waiting from people p where p.org_id = $1 and p.id = $2`, [a.orgId, id])).rows[0]?.waiting === true;
+  if (waiting) {
+    await tx.query(`update people set status = 'invited' where org_id = $1 and id = $2`, [a.orgId, id]);
+    const inv = await issueInvite(tx, a.orgId, publicUrl, a.id, { id, name: p.name, email: p.email }, `reactivated without a sign-in: ${body.reason}`);
+    const v = (await bump(tx, a.orgId, id)).rows[0]!.version;
+    return {
+      msg: `${p.name} never signed in, so they are invited again rather than active: a new invite was sent to ${p.email}. Their roles are unchanged.`,
+      events: [{ type: "people.reactivate", category: "access", subject: { type: "person", id }, projectId: null, before: "deactivated", after: { status: "invited", reason: body.reason, invite: inv.expiresAt } }, inv.event],
+      outbox: inv.outbox, extra: { version: v, status: "invited" }, changes: ["people", "matrix"], project: null,
+    };
+  }
   await tx.query(`update people set status = 'active' where org_id = $1 and id = $2`, [a.orgId, id]);
   const version = (await bump(tx, a.orgId, id)).rows[0]!.version;
   return {

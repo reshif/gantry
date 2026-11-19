@@ -438,19 +438,21 @@ describe("console", () => {
         perm: { action: "line.halt", project: "payments" }, check: { allowed: true },
       });
       expect((await q(`select count(*)::int as n from stops where org_id = $1`, [t.orgId])).rows[0].n).toBe(0);
-      // Confirming = the ordinary endpoint, under the person's own authority, recorded as the console channel.
       const h = await as(ASHA);
-      const call = await t.app.inject({ method: "POST", url: prop.call.path, headers: { ...h, "idempotency-key": "card-1" }, payload: prop.call.body });
-      expect(call.statusCode).toBe(200);
+      const done = r.events.at(-1)!.data;
+      // The browser cannot write a card's outcome itself (S-19); the server records it when it runs the card.
+      const mark = await t.app.inject({ method: "PUT", url: `/api/v1/console/messages/${done.messageId}/proposals/PROP-1`, headers: h, payload: { status: "done", result: "Halted." } });
+      expect(mark.statusCode).toBe(409);
+      const conf = await t.app.inject({ method: "POST", url: `/api/v1/console/messages/${done.messageId}/proposals/PROP-1/confirm`, headers: h, payload: { reason: "duplicate refunds seen" } });
+      expect(conf.statusCode, conf.body).toBe(200);
+      expect(conf.json()).toMatchObject({ status: "done", recorded: true });
+      const th = (await get(ASHA, `/api/v1/console/threads/${r.events[0]!.data.threadId}`)).json();
+      expect(th.messages[1].data.proposals[0]).toMatchObject({ id: "PROP-1", status: "done" });
+      expect(th.messages[1].data.proposals[0].result).not.toBe("Halted.");
+      // Confirming = the ordinary endpoint, under the person's own authority, recorded as the console channel.
       const ev = (await audit("halt")).at(-1);
       expect(ev.channel).toBe("console");
       expect(ev.actor).toBe(ASHA);
-      // The card's end state is saved on the message.
-      const done = r.events.at(-1)!.data;
-      const mark = await t.app.inject({ method: "PUT", url: `/api/v1/console/messages/${done.messageId}/proposals/PROP-1`, headers: h, payload: { status: "done", result: "Halted." } });
-      expect(mark.statusCode).toBe(200);
-      const th = (await get(ASHA, `/api/v1/console/threads/${r.events[0]!.data.threadId}`)).json();
-      expect(th.messages[1].data.proposals[0]).toMatchObject({ id: "PROP-1", status: "done", result: "Halted." });
       expect((await t.app.inject({ method: "PUT", url: `/api/v1/console/messages/${done.messageId}/proposals/PROP-1`, headers: await as(TOMAS), payload: { status: "done" } })).statusCode).toBe(404);
     });
 

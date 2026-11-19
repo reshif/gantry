@@ -19,8 +19,8 @@ import { allowedTools, consoleRights, missingRightText, type ConsoleRights } fro
 import { composeSessionContext, consoleAgent, recordedTurn } from "../areas/session/context.js";
 import { completeOnce, consoleFacts, consoleRails, ModelUnavailable, readiness, runConversation, systemPrompt, type Readiness } from "../areas/console/model.js";
 import { consoleModel, setModelPref } from "../areas/console/route.js";
-import { ExplainBody, MessageBody, ModelBody, StatusQuery, PinnedBody, ProposalBody, ProposalParams, SettingsBody, ThreadId, ToolBody, ToolParams } from "../areas/console/schemas.js";
-import { addMessage, chatAccess, chatReach, deleteThread, ensureThread, listMessages, listThreads, newMessageId, purgeExpired, readChat, renameThread, setPinned, setProposalStatus } from "../areas/console/threads.js";
+import { ExplainBody, MessageBody, ModelBody, StatusQuery, PinnedBody, ProposalBody, ProposalConfirmBody, ProposalParams, SettingsBody, ThreadId, ToolBody, ToolParams } from "../areas/console/schemas.js";
+import { addMessage, chatAccess, chatReach, deleteThread, ensureThread, listMessages, listThreads, newMessageId, purgeExpired, readChat, renameThread, setPinned, setProposalStatus, readProposal, recordProposalOutcome } from "../areas/console/threads.js";
 import { agentOf, scopeContext, sideSystem } from "../areas/workspace/side.js";
 import { chatSpendMicros } from "../areas/workspace/spend.js";
 import { stationAgentGate, turnCostMicros } from "../areas/session/core.js";
@@ -155,14 +155,65 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
+  /** The browser may only dismiss a card. Done and failed are what the server saw when it ran the card (POST .../confirm); a client-sent outcome is refused (S-19). */
   app.put("/api/v1/console/messages/:id/proposals/:pid", async (req) => {
     const who = requirePerson(req);
     const { id, pid } = ProposalParams.parse(req.params);
     const b = ProposalBody.parse(req.body);
     return command(req, { action: null }, async (tx, a) => {
-      if (!(await setProposalStatus(tx, a.orgId, who.id, id, pid, b.status, b.result))) throw refuse("not_found", "No such proposal.");
+      const card = await readProposal(tx, a.orgId, who.id, id, pid);
+      if (!card) throw refuse("not_found", "No such proposal.");
+      if (b.status !== "dismissed") throw refuse("conflict", "A card's outcome is recorded by the server when it runs the action. Confirm the card to run it; the result is saved from what happened.", { needs: "Confirm the card" });
+      if (card.status !== "pending") throw refuse("conflict", `This card is already ${String(card.status)}.`);
+      if (!(await setProposalStatus(tx, a.orgId, who.id, id, pid, "dismissed", "Dismissed."))) throw refuse("not_found", "No such proposal.");
       return { msg: "Saved.", events: [], changes: ["console"], project: null, audience: [who.id] };
     });
+  });
+
+  /**
+   * Runs a card: the server calls the ordinary endpoint the card stored (never one the browser names), as the person, with the reason / typed phrase they gave,
+   * and records the outcome from that response. A card that is still missing a reason or phrase, or that hit a transient refusal (429, 5xx), stays pending so it
+   * can be fixed or retried; any other refusal ends it as failed with the server's own `needs` line and rule so the screen can show a way forward.
+   */
+  app.post("/api/v1/console/messages/:id/proposals/:pid/confirm", async (req) => {
+    const who = requirePerson(req);
+    const { id, pid } = ProposalParams.parse(req.params);
+    const edits = ProposalConfirmBody.parse(req.body ?? {});
+    const card = await readProposal(g.pool, g.orgId, who.id, id, pid);
+    if (!card) throw refuse("not_found", "No such proposal.");
+    if (card.status !== "pending") throw refuse("conflict", `This card is already ${String(card.status)}.`);
+    const call = card.call as { method: "POST" | "DELETE"; path: string; body: Record<string, unknown>; idempotent: boolean };
+    if (typeof call?.path !== "string" || !call.path.startsWith("/api/v1/")) throw refuse("invalid", "This card carries no action to run.");
+    const body: Record<string, unknown> = { ...call.body };
+    if (card.needsReason !== null && card.needsReason !== undefined) body.reason = (edits.reason ?? "").trim();
+    if (card.phrase) body.confirmText = edits.confirmText ?? "";
+    if (card.kind === "kill" && call.body.inFlight !== undefined) body.inFlight = edits.inFlight ?? "hold";
+    const h = req.headers;
+    const headers: Record<string, string> = { "content-type": "application/json", "x-gantry-console": "card" };
+    for (const k of ["cookie", "x-csrf-token", "authorization", "user-agent", "origin"] as const) if (typeof h[k] === "string") headers[k] = h[k] as string;
+    if (call.idempotent) headers["idempotency-key"] = `console-card-${id}-${pid}`;
+    const res = await app.inject({ method: call.method, url: call.path, headers, payload: JSON.stringify(body), remoteAddress: req.ip });
+    let out: Record<string, unknown> = {};
+    try {
+      out = res.json() as Record<string, unknown>;
+    } catch {
+      /* a body that is not JSON carries no message */
+    }
+    const msg = typeof out.msg === "string" ? out.msg : res.statusCode < 300 ? "Done." : `The action was refused (${res.statusCode}).`;
+    const needs = typeof out.needs === "string" ? out.needs : "";
+    const ok = res.statusCode >= 200 && res.statusCode < 300;
+    const asksMore = res.statusCode === 422 && (/reason|confirm/i.test(msg) || /reason|confirm/i.test(needs));
+    const transient = res.statusCode === 429 || res.statusCode >= 500;
+    if (!ok && (asksMore || transient)) {
+      req.gx.reply.code(res.statusCode);
+      return { ok: false, recorded: false, status: "pending", httpStatus: res.statusCode, msg, ...(needs ? { needs } : {}), retry: true };
+    }
+    const refusal = ok ? undefined : { code: res.statusCode, ...(out.rule ? { rule: out.rule } : {}), ...(typeof out.overrideKind === "string" ? { overrideKind: out.overrideKind } : {}) };
+    await command(req, { action: null }, async (tx, a) => {
+      if (!(await recordProposalOutcome(tx, a.orgId, who.id, id, pid, { status: ok ? "done" : "failed", result: msg, ...(needs ? { needs } : {}), ...(refusal ? { refusal } : {}) }))) throw refuse("not_found", "No such proposal.");
+      return { msg: "Saved.", events: [], changes: ["console"], project: null, audience: [who.id] };
+    }).catch(() => undefined);
+    return { ok, recorded: true, status: ok ? "done" : "failed", httpStatus: res.statusCode, msg, ...(needs ? { needs } : {}), ...(refusal ? { refusal } : {}), result: out };
   });
 
   /* ------------------------------------------------------------------ tools, directly */
