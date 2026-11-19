@@ -21,7 +21,7 @@ import { ProtoList } from "../projects/protolist";
 import { nextVersion } from "../govern/data";
 import { useQueryParam } from "../projects/urlState";
 import type { PcProps } from "./ctx";
-import { RulePanel, isDirty } from "./approvers";
+import { AwayPanel, RulePanel, isDirty } from "./approvers";
 import { ArchivePanel, SpendBreakdown } from "./misc";
 import { FlowLine } from "./flow-line";
 
@@ -55,7 +55,8 @@ export function ApproversProto(props: PcProps) {
           ]}
         />
       </Panel>
-      {rule ? <RulePanel {...props} gid={rule} onClose={() => setRule(null)} /> : <p className="small muted">Edit a gate to set its roles, named people, approvals needed, per-class counts, conditions, escalation, fallback, separation of duties, who is away, and to test a scenario.</p>}
+      <AwayPanel p={p} cat={cat} people={props.people} />
+      {rule ? <RulePanel {...props} gid={rule} onClose={() => setRule(null)} /> : <p className="small muted">Edit a gate to set its roles, named people, approvals needed, per-class counts, conditions, escalation, fallback, separation of duties, and to test a scenario.</p>}
     </div>
   );
 }

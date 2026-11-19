@@ -44,9 +44,11 @@ export const EMPTY_METRICS: Metrics = {
 export const metricsOf = (p: PView): Metrics => p.metrics ?? EMPTY_METRICS;
 
 /** The catalogue: built-in plus custom stations, gates, bays, classes, roles and actions. Refetched whenever projects change (a flow edit can append to it). */
+export function useCatalogQuery() {
+  return useQuery({ queryKey: qk.catalog(), queryFn: () => get<Catalog>(api("catalog")), staleTime: 30_000 });
+}
 export function useCatalog(): Catalog | null {
-  const q = useQuery({ queryKey: qk.catalog(), queryFn: () => get<Catalog>(api("catalog")), staleTime: 30_000 });
-  return q.data ?? null;
+  return useCatalogQuery().data ?? null;
 }
 
 export const classOf = (cat: Catalog, p: Project | null, id: string): WorkClass =>
