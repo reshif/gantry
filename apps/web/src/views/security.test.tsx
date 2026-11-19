@@ -101,7 +101,7 @@ describe("Security screen", () => {
     await byId("sec-sso-domain");
     expect(Array.from(document.querySelectorAll("[role=tab]")).map((t) => t.textContent)).toEqual(["Authentication", "Sessions2", "Sign-in log2"]);
     fireEvent.click(await byId("sec-tab-sessions"));
-    expect(window.location.search).toContain("tab=sessions");
+    expect(window.location.hash).toContain("tab=sessions");
     await byId("sec-ses-rv-s2");
   });
 
@@ -176,7 +176,7 @@ describe("Security screen", () => {
     fireEvent.change(await byId("sec-hist-f-outcome"), { target: { value: "success" } });
     await waitFor(() => expect(text()).not.toContain("mallory@evil.test"));
     expect(text()).toContain("1 of 2 sign-ins");
-    expect(window.location.search).toContain("go=success");
+    expect(window.location.hash).toContain("go=success");
   });
 
   it("shows an empty sign-in history as zero rows rather than a blank panel", async () => {
@@ -340,3 +340,30 @@ describe("Security screen: emergency stop section", () => {
     window.history.replaceState(null, "", "/");
   });
 });
+
+describe("Security (T-32)", () => {
+  it("a stops read that comes back empty says so in plain words, never the query key, and offers Try again", async () => {
+    setup({ "GET /api/v1/stops": () => ({ body: {} }) });
+    mount();
+    const box = await byId("sec-stops-error");
+    expect(box.textContent).not.toMatch(/factory|\[|undefined/);
+    expect(box.textContent).toContain("Couldn't load stops");
+    expect(document.getElementById("sec-stops-error-retry")).toBeTruthy();
+  });
+
+  it("has a jump to Emergency stop at the top, on every tab", async () => {
+    setup({ "GET /api/v1/stops": () => ({ body: { items: [] } }) });
+    mount();
+    const jump = (await byId("sec-jump-stop")) as HTMLElement;
+    const scroll = vi.fn();
+    await byId("sec-stop-section");
+    (document.getElementById("sec-stop-section") as HTMLElement).scrollIntoView = scroll;
+    fireEvent.click(jump);
+    await waitFor(() => expect(scroll).toHaveBeenCalled());
+    fireEvent.click(await byId("sec-tab-sessions"));
+    expect(document.getElementById("sec-jump-stop")).toBeTruthy();
+    fireEvent.click(document.getElementById("sec-jump-stop") as HTMLElement);
+    await waitFor(() => expect(document.getElementById("sec-stop-section")).toBeTruthy());
+  });
+});
+

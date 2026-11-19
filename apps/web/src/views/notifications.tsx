@@ -6,6 +6,7 @@
  * Delivery is not simulated: a test send and a retry queue a real delivery that the worker sends, and the log shows what happened.
  */
 import { useCan } from "../api/can";
+import { usePrefs } from "../lib/prefs";
 import { useDeliveries } from "../api/queries";
 import { Empty, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
@@ -17,6 +18,7 @@ import "../styles/views/notifications.css";
 
 export default function NotificationsView() {
   const nt = useNtData();
+  const allLines = usePrefs().scopeAll; // the switcher says "All projects": the page still edits one project, and says which
   const p = nt.project;
   const perm = dec(useCan("notify.edit", p ? { project: p.id } : {}));
   const [tab, setTab] = useTab(["routes", "templates", "overrides", "log"]);
@@ -36,7 +38,7 @@ export default function NotificationsView() {
   }
   return (
     <div className="view cx nt-view">
-      <ViewHead title="Notifications" kicker="All lines" sub={`Routes, cards and the delivery log for ${p.name}.`} />
+      <ViewHead title="Notifications" kicker={allLines ? "All lines" : p.key} sub={allLines ? `Routes, cards and the delivery log. Showing ${p.name}; pick a project in the switcher to edit another.` : `Routes, cards and the delivery log for ${p.name}.`} />
       <StatRow id="nt-stats">
         <Stat label="Routes" value={String(p.notifications.length)} sub={`${p.notifications.filter((r) => r.enabled).length} on`} tone="info" />
         <Stat label="Delivered" value={qState(logQ, () => String(delivered))} sub="last 24 h" tone="done" />

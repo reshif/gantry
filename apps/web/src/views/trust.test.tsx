@@ -237,16 +237,22 @@ describe("Trust screen: ladder", () => {
   it("follows the project switcher: the eyebrow shows the project key and the ladder lists only that project's cells", async () => {
     const me = { ...ME, projects: [{ id: "payments", name: "Payments", key: "PAY" }, { id: "risk", name: "Risk", key: "RSK" }] };
     setup({ "GET /api/v1/me": () => ({ body: me }) });
-    updatePrefs({ project: "risk" });
+    updatePrefs({ project: "risk", scopeAll: false });
     mount();
     await waitFor(() => expect(document.querySelector(".view-trust .eyebrow")!.textContent).toContain("RSK"));
     expect(document.querySelector(".view-trust .eyebrow")!.textContent).not.toContain("All lines");
     expect(document.getElementById("tr-row-ag-spec-feature-payments")).toBeNull();
     cleanup();
-    updatePrefs({ project: "payments" });
+    updatePrefs({ project: "payments", scopeAll: false });
     mount();
     await byId("tr-row-ag-spec-feature-payments");
     expect(document.querySelector(".view-trust .eyebrow")!.textContent).toContain("PAY");
+    cleanup();
+    updatePrefs({ project: "payments", scopeAll: true }); // All projects wins over the project chosen last (T-30)
+    mount();
+    await byId("tr-row-ag-spec-feature-payments");
+    expect(document.querySelector(".view-trust .eyebrow")!.textContent).toMatch(/ALL LINES$/i);
+    expect(document.querySelector(".view-trust .eyebrow")!.textContent).not.toContain("PAY");
     updatePrefs({ project: null });
   });
   it("opens at the cell another screen asks for", async () => {

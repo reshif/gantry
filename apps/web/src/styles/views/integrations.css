@@ -25,6 +25,9 @@
 .int-scope-all { font-weight: 600; }
 
 /* ---------- key-value blocks ---------- */
+.int-card-kv { grid-template-columns: minmax(0, 1fr); margin: 0; }
+.int-card-kv dt { border-bottom: 0; padding: 6px 0 0; }
+.int-card-kv dd { padding: 0 0 6px; overflow-wrap: break-word; }
 .int-kv { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--line); }
 .int-kv > div { padding: 5px 0; border-bottom: 1px dotted var(--line); min-width: 0; }
 .int-kv > div:nth-child(odd) { padding-right: var(--s2); }

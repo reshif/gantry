@@ -21,7 +21,8 @@ export function useTabParam<T extends string>(route: string, ids: readonly T[]):
 
 /** The project chosen in the switcher (null = all lines) with its key, for the eyebrow and the ladder filter. */
 export function useScope(): { id: string | null; key: string | null; kicker: string } {
-  const id = usePrefs().project;
+  const prefs = usePrefs();
+  const id = prefs.scopeAll ? null : prefs.project; // "All projects" in the switcher wins over the last project chosen
   const me = useMe();
   const p = id ? me?.projects.find((x) => x.id === id) : undefined;
   return { id: p ? p.id : null, key: p?.key ?? null, kicker: p?.key ?? "All lines" };

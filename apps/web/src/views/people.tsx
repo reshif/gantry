@@ -3,7 +3,7 @@
  * Teams card grid. A person opens their own page (views/person.tsx). Team administration (invite to, edit, roles, delete)
  * sits behind each card's menu, so the card face stays the prototype's.
  */
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import type { Person, Project, Role, Team } from "@gantry/domain";
 import { useAccessMatrix, useMe, usePeople, useProjects, useSecurity } from "../api/queries";
 import { useCan } from "../api/can";
@@ -62,12 +62,12 @@ export default function PeopleView() {
         actions={<><Btn label="New team" id="ppl-team-new" guard={perm} onClick={teamDlg.create} /><Btn label="Invite person" kind="primary" icon="plus" id="ppl-invite" guard={perm} onClick={() => invite()} /></>}
       />
       <StatRow id="ppl-stats">
-        <Stat label="People" tone="info" value={qState(peopleQ, () => String(people.length))} sub={`${people.filter((p) => p.status === "active").length} active`} />
+        <Stat label="People" tone="info" value={qState(peopleQ, () => String(people.length))} sub={peopleQ.isSuccess ? `${people.filter((p) => p.status === "active").length} active` : ""} />
         <Stat label="On call" value={qState(peopleQ, () => String(people.filter((p) => p.oncall).length))} tone="done" />
         <Stat label="Without MFA" value={qState(peopleQ, () => String(noMfa))} tone={noMfa ? "wait" : "done"} />
         <Stat label="Teams" value={qState(teamsQ, () => String(teams.length))} />
       </StatRow>
-      <Tabs idPrefix="ppl-tab" active={active} onChange={(t) => setQS({ "ppl.tab": t === "people" ? "" : t, "ppl.page": "" })} items={[{ id: "people", label: "People", count: people.length }, { id: "teams", label: "Teams", count: teams.length }]} />
+      <Tabs idPrefix="ppl-tab" active={active} onChange={(t) => setQS({ "ppl.tab": t === "people" ? "" : t, "ppl.page": "" })} items={[{ id: "people", label: "People", count: peopleQ.isSuccess ? people.length : null }, { id: "teams", label: "Teams", count: teamsQ.isSuccess ? teams.length : null }]} />
       <div id="ppl-tab-panel" role="tabpanel" aria-labelledby={`ppl-tab-${active}`}>
         <Async query={peopleQ} what="people" id="ppl">{() => active === "teams" ? (
           <><ReposReadNote read={reposRead} /><TeamGrid people={people} teams={teams} projects={projects as Project[]} repos={repos} roles={roles} perm={perm} invite={invite} teamDlg={teamDlg} ui={ui} /></>
@@ -120,6 +120,15 @@ function TeamGrid({ people, teams, projects, repos, roles, perm, invite, teamDlg
   );
 }
 
+/** One chip per distinct role: a role held in several places reads "Project Admin \u00d72" instead of repeating the chip. */
+function roleChips(grants: Person["roles"], roleName: (id: string) => string): ReactNode[] {
+  const counts = new Map<string, number>();
+  for (const g of grants) counts.set(g.role, (counts.get(g.role) ?? 0) + 1);
+  const all = [...counts.entries()];
+  const shown = all.slice(0, 3).map(([id, n]) => <Chip key={id} text={n > 1 ? `${roleName(id)} \u00d7${n}` : roleName(id)} cls="plain" />);
+  return all.length > 3 ? [...shown, <span key="more" className="small muted">{`+${all.length - 3}`}</span>] : shown;
+}
+
 function PeopleTable({ people, teams, roles }: { people: Person[]; teams: Team[]; roles: Role[] }) {
   const [q, setQ] = useQS("ppl.q");
   const [status] = useQS("ppl.status");
@@ -167,7 +176,7 @@ function PeopleTable({ people, teams, roles }: { people: Person[]; teams: Team[]
               <div><a className="pri" href={hashFor("person", p.id)} onClick={(e) => e.stopPropagation()}>{p.name}</a><span className="sub">{p.title}</span></div>
             </div>
           ) },
-          { key: "roles", label: "Roles", render: (p) => <div className="row">{p.roles.length ? p.roles.slice(0, 2).map((g, i) => <Chip key={i} text={roleName(g.role)} cls="plain" />) : <Chip text="No roles" cls="warn" />}</div> },
+          { key: "roles", label: "Roles", render: (p) => <div className="row">{p.roles.length ? roleChips(p.roles, roleName) : <Chip text="No roles" cls="warn" />}</div> },
           { key: "teams", label: "Teams", render: (p) => (p.teams ?? []).map((t) => teams.find((x) => x.id === t)?.name ?? t).join(", ") || "\u2014" },
           { key: "mfa", label: "MFA", render: (p) => <Chip text={p.mfa ? "on" : "off"} cls={p.mfa ? "ok" : "warn"} /> },
           { key: "oncall", label: "On call", render: (p) => (p.oncall ? <Chip text="on call" cls="info" /> : "\u2014") },

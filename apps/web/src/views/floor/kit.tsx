@@ -2,6 +2,7 @@
  * Shared pieces of the Floor (legacy floor.js and the work-order token of shared.js): the floor read and its context,
  * work-order token, gate state and the small helpers every view of the floor uses. Same DOM and classes as legacy.
  */
+import { gateLabelOf } from "../../lib/gate-label";
 import { createContext, useContext, useMemo } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { DAY, HOUR, MIN, WO_STATES, requiredFor, bayDef, classesOf, fmt, gateAfter, gateDef, gateForWO, gateKind, type Bay, type Catalog, type EventEntry, type Gate, type Project, type Repo, type StateAt, type WorkOrder } from "@gantry/domain";
@@ -267,7 +268,7 @@ const WO_TONE: Record<string, string> = { running: "info", waiting: "warn", park
 export function WoChip({ w }: { w: FWo }) {
   const ctx = useFloorCtx();
   const g = waitingGateId(ctx, w);
-  if (w.state === "waiting" && g) return <span className="chip warn">{`At ${g}`}</span>;
+  if (w.state === "waiting" && g) return <span className="chip warn">{`At ${gateLabelOf(null, g)}`}</span>;
   if (w.state === "parked") return <span className="chip plain">{`Parked · ${ctx.cat.bays.find((b) => b.id === w.bay)?.name ?? "bay"}`}</span>;
   return <span className={`chip ${WO_TONE[w.state] ?? "plain"}`}>{w.state}</span>;
 }

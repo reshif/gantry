@@ -1,4 +1,5 @@
 /** Project config > Approvers: the full rule editor (roles, people, approvals required, per-class counts, conditions, escalation, fallback, SoD, away and delegates, a test scenario) and the away dialog. */
+import { gateLabelOf } from "../../lib/gate-label";
 import { useState } from "react";
 import { DAY, fmt, flowOf, requiredFor, type ApproverCondition, type ApproverRule, type Catalog, type Person } from "@gantry/domain";
 import { commands as ops } from "../../api/commands";
@@ -93,7 +94,7 @@ function AwayDialog({ p, cat, person, people, close }: { p: PView; cat: Catalog;
 export function RulePanel({ p, cat, people, s, set, gid, onClose }: PcProps & { gid: string; onClose: () => void }) {
   const d = useCan("approvers.edit", { project: p.id });
   const g = flowOf(cat, p).gates.find((x) => x.id === gid);
-  if (!g) return <Panel title="Gate not found" id="pcf-rule" tools={<Btn small kind="ghost" id="pcf-ap-close" label="Close" onClick={onClose} />}><p className="small">{`${gid} is not a gate in ${p.name}'s flow (it may have been removed). Pick a gate from the table above.`}</p></Panel>;
+  if (!g) return <Panel title="Gate not found" id="pcf-rule" tools={<Btn small kind="ghost" id="pcf-ap-close" label="Close" onClick={onClose} />}><p className="small">{`${gateLabelOf(null, gid)} is not a gate in ${p.name}'s flow (it may have been removed). Pick a gate from the table above.`}</p></Panel>;
   if (g.mode === "auto") {
     return (
       <Panel title={`${g.label} ${g.name}`} id="pcf-rule" tools={<Btn small kind="ghost" id="pcf-ap-close" label="Close" onClick={onClose} />}>
@@ -168,7 +169,7 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked, onClose }: PcP
     <section className="panel pcf-rule" id="pcf-rule" aria-label={`${g.label} approver rule`}>
       <div className="panel-head">
         <h2 className="panel-title"><span className="mono">{g.label}</span>{` ${g.name}`}</h2>
-        <span className="row">{dirty ? <span className="chip chip-warn">Unsaved changes</span> : <span className="muted small mono">{`APR-${gid}`}</span>}<Btn small kind="ghost" id="pcf-ap-close" label="Close" onClick={onClose} /></span>
+        <span className="row">{dirty ? <span className="chip chip-warn">Unsaved changes</span> : <span className="muted small mono">{`APR-${gateLabelOf(null, gid)}`}</span>}<Btn small kind="ghost" id="pcf-ap-close" label="Close" onClick={onClose} /></span>
       </div>
       <div className="panel-body form-grid">
         <p className="small">{g.purpose}{r.note ? <span className="muted">{` ${r.note}`}</span> : null}</p>

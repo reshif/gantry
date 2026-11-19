@@ -1,4 +1,5 @@
 /** The Document tab's first panels and the Gates and Runs tabs of a work order page (Blueprint prototype: Brief, Acceptance criteria, Plan; Gate decisions; Station runs). */
+import { gateLabelOf } from "../../lib/gate-label";
 import { fmt, type Catalog, type Criterion } from "@gantry/domain";
 import { Btn, Chip, Empty, Panel } from "../../ui/primitives";
 import { useActionSpecs } from "../traveler/Actions";
@@ -108,9 +109,9 @@ export function GatesPanel({ wo, cat }: { wo: TWo; cat: Catalog }) {
   const rows = Object.entries(wo.gates ?? {}).map(([k, g]) => ({ k, ...g }));
   const def = (k: string) => cat.gates.find((x) => x.id === k);
   const cols: Col<(typeof rows)[number]>[] = [
-    { key: "k", label: "Gate", render: (g) => <span className="pri-cell"><b className="mono">{g.k}</b><span className="sub">{def(g.k)?.name}</span></span> },
+    { key: "k", label: "Gate", render: (g) => <span className="pri-cell"><b className="mono">{gateLabelOf(def(g.k)?.label, g.k)}</b><span className="sub">{def(g.k)?.name}</span></span> },
     { key: "kind", label: "Kind", render: (g) => def(g.k)?.kind ?? "" },
-    { key: "n", label: "Approvals", render: (g) => { const p = wo.gateProgress?.[g.k]; return def(g.k)?.kind === "auto" ? "—" : p ? <span className="num" id={`gt-count-${g.k}`}>{`${p.have} of ${p.need} approvals`}</span> : "—"; } },
+    { key: "n", label: "Approvals", render: (g) => { const p = wo.gateProgress?.[g.k]; return def(g.k)?.kind === "auto" ? "—" : p ? <span className="num" id={`gt-count-${g.k}`}>{`${g.status === "passed" ? Math.max(p.have, p.need) : p.have} of ${p.need} approvals`}</span> : "—"; } },
     { key: "s", label: "Status", render: (g) => <Chip text={g.status} cls={g.status === "passed" ? "ok" : g.status === "waiting" ? "warn" : g.status === "failed" ? "bad" : "plain"} /> },
     { key: "by", label: "Decided by", render: (g) => { const d = g.approvals[0] ?? g.rejections[0]; return d ? actor(d.by).name : g.decision?.mode === "auto" ? "Automatic" : g.decision?.mode === "trust" ? "Under trust" : "—"; } },
     { key: "at", label: "When", render: (g) => { const d = g.approvals[0] ?? g.rejections[0]; return d ? ago(d.at) : "—"; } },

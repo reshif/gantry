@@ -117,15 +117,6 @@ describe("shell fidelity", () => {
     expect(screen.getByRole("tab", { name: "Linked accounts" })).toBeTruthy();
   });
 
-  it("drops stale acc.* and ppl.* query keys when another screen opens", async () => {
-    api();
-    window.history.replaceState(null, "", "/?acc.tab=check&ppl.tab=teams");
-    window.location.hash = "#/home";
-    render(<App />);
-    await nav();
-    await waitFor(() => expect(window.location.search).toBe(""));
-  });
-
   it("opens the Notifications drawer from the bell, with its two footer actions", async () => {
     api({ approvals: [{ wo: "WO-2417", gate: "G3", gateLabel: "G3", title: "Refund keys", project: "payments" }], conversations: [] });
     render(<App />);
@@ -244,7 +235,7 @@ describe("shell fidelity", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: /Payments Platform/ }));
     await waitFor(() => expect(screen.getByRole("button", { name: /Project Payments Platform/ })).toBeTruthy());
     expect(window.location.hash).toBe("#/home");
-    expect(document.querySelector(".eyebrow")?.textContent).toContain("PAY");
+    await waitFor(() => expect(document.querySelector(".eyebrow")?.textContent ?? "").toContain("PAY"));
     expect((await nav()).getByText("Inbox").closest("a")?.querySelector(".cnt")?.textContent).toBe("1");
   });
 

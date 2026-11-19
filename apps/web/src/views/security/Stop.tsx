@@ -29,7 +29,7 @@ export function StopTab({ sec }: { sec: SecuritySettings }) {
   const killed = me.factory.killed;
   const act = makeStopActions(ui, me);
   return (
-    <div className="sec-stop">
+    <div className="sec-stop" id="sec-stop-section">
       <Panel
         title="Emergency stop"
         tools={killed ? <Status tone="block">Stopped</Status> : <Status tone="done">Running</Status>}

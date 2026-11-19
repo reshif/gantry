@@ -1,6 +1,6 @@
 
 .view-models .vendor-grid { margin-bottom: var(--s4); }
-.view-models .vendor .tb-vendor dd { overflow: hidden; text-overflow: ellipsis; }
+.view-models .vendor .tb-vendor dd { overflow-wrap: break-word; }
 .view-models .residency { display: flex; gap: 6px; align-items: flex-start; padding: 6px 16px 10px; color: var(--ink-2); }
 .view-models .residency .ic { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--accent); }
 .view-models .nowrap { white-space: nowrap; }
@@ -17,7 +17,7 @@
 .view-models .kv.tb-vendor { display: grid; grid-template-columns: 1fr; gap: 6px; margin: 0; border: 0; }
 .view-models .kv.tb-vendor > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; align-items: baseline; }
 .view-models .kv.tb-vendor dt { font-size: var(--t-sm); color: var(--muted); }
-.view-models .kv.tb-vendor dd { margin: 0; font-size: var(--t-sm); overflow: hidden; text-overflow: ellipsis; }
+.view-models .kv.tb-vendor dd { margin: 0; font-size: var(--t-sm); overflow-wrap: break-word; }
 .view-models .vendor .table-scroll { border-top: 1px solid var(--line); }
 @media (max-width: 720px) {
   .view-models .kv.tb-vendor > div { grid-template-columns: minmax(0, 1fr); gap: 0; }
@@ -26,8 +26,9 @@
   .view-models .kv.tb-vendor.md-kv dt { border-bottom: 0; padding-bottom: 0; }
   .view-models .kv.tb-vendor.md-kv dd { text-align: left; padding: 4px 0 8px; } }
 .view-models .vendor-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
-.view-models .vendor .md-kv { grid-template-columns: minmax(80px, auto) minmax(0, 1fr); }
-.view-models .vendor .md-kv dd { text-align: right; }
+.view-models .vendor .md-kv { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.view-models .vendor .md-kv dt { border-bottom: 0; padding: 6px 0 0; }
+.view-models .vendor .md-kv dd { text-align: left; padding: 0 0 6px; }
 .view-models .vendor .vendor-head { padding: 0; border: 0; }
 .view-models .vendor .residency { padding: 0; display: block; }
 .view-models .vendor .vendor-name { font-size: 15px; }

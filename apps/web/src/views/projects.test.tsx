@@ -519,7 +519,7 @@ describe("Project config", () => {
     expect(document.querySelectorAll("#pcf-st-table").length).toBe(0); // the structure table is collapsed until asked for
     expect(document.getElementById("flw-structure")).toBeNull();
     fireEvent.click(await byId("flw-adv-toggle"));
-    expect(window.location.search).toMatch(/sec=structure/);
+    expect(window.location.hash).toMatch(/sec=structure/);
     expect(await byId("flw-structure")).toBeTruthy();
     expect(document.querySelectorAll("#pcf-wip-spec").length).toBe(1); // one WIP control per station, in the line editor
   });
@@ -582,8 +582,8 @@ describe("Project config", () => {
     tab("rules"); // an old bookmark: lands on Approvers with the rule editor open
     mount(<ProjectConfigView />);
     await byId("pcf-rule");
-    expect(window.location.search).toMatch(/tab=approvers/);
-    expect(window.location.search).toMatch(/rule=G5/);
+    expect(window.location.hash).toMatch(/tab=approvers/);
+    expect(window.location.hash).toMatch(/rule=G5/);
     const req = (await byId("pcf-ap-required")) as HTMLInputElement;
     fireEvent.change(req, { target: { value: "5" } });
     fireEvent.blur(req);
@@ -661,7 +661,7 @@ describe("Project config", () => {
     expect(document.getElementById("pcf-pages")).toBeNull(); // no More menu
     expect(Array.from(document.querySelectorAll('[role="tab"]')).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Overview", "Flow", "Approvers", "MCP", "Budget", "Repos", "Members", "Line control"]);
     fireEvent.click(await byId("pcf-tab-flow"));
-    expect(window.location.search).toBe("?tab=flow");
+    expect(window.location.hash).toMatch(/\?tab=flow$/);
     expect(document.getElementById("pcf-tab-flow")!.getAttribute("aria-selected")).toBe("true");
     fireEvent.click(await byId("pcf-tab-members"));
     await byId("pcf-oncall-none");
@@ -683,7 +683,7 @@ describe("Project config", () => {
       mount(<ProjectConfigView />);
       await byId(el);
       expect(document.getElementById(`pcf-tab-${tabId}`)!.getAttribute("aria-selected"), old).toBe("true");
-      expect(window.location.search, old).toMatch(search);
+      expect(window.location.hash.slice(window.location.hash.indexOf("?")), old).toMatch(search);
       cleanup();
     }
   });
@@ -757,7 +757,7 @@ describe("Project config", () => {
     expect(document.querySelector("#flw-st-spec")!.textContent).not.toMatch(/Routes:/);
     fireEvent.click(await byId("flw-x-s-spec"));
     expect(document.querySelector("#flw-st-spec")!.textContent).toMatch(/Routes:/);
-    expect(window.location.search).toMatch(/open=s%3Aspec|open=s:spec/);
+    expect(window.location.hash).toMatch(/open=s%3Aspec|open=s:spec/);
   });
 
   it("Flow: hovering a station lights the gates on either side of it, and a gate lights its two stations", async () => {
@@ -833,8 +833,9 @@ describe("Project config", () => {
     mount(<ProjectConfigView />);
     expect(Array.from((await waitFor(() => { const t = document.querySelectorAll("#pcf-appr thead th"); if (!t.length) throw new Error("no table"); return t; }))).map((t) => t.textContent?.replace(/[↑↓↕]/, "").trim())).toEqual(["Gate", "Roles", "Needed", "Separation", "Escalate", ""]);
     expect((await byId("pcf-rule")).getAttribute("aria-label")).toMatch(/G2/); // the Traveler's Edit rule link opens that gate
-    expect(window.location.hash).toBe("#/p/payments/project-config"); // the gate lives in ?rule=, not a stale hash segment
-    expect(window.location.search).toMatch(/tab=approvers/);
+    expect(window.location.hash).toMatch(/^#\/p\/payments\/project-config\?.*rule=G2/); // the gate lives in ?rule=, not a stale hash segment
+    expect(window.location.hash).not.toContain("/G2");
+    expect(window.location.hash).toMatch(/tab=approvers/);
     fireEvent.click(await byId("pcf-ap-edit-G5"));
     await waitFor(() => expect(document.getElementById("pcf-rule")!.getAttribute("aria-label")).toMatch(/G5/));
     for (const id of ["pcf-ap-required", "pcf-ap-sod", "pcf-ap-add", "pcf-ap-esc", "pcf-ap-fallback", "pcf-sc-cls"]) expect(document.getElementById(id), id).toBeTruthy();
@@ -998,10 +999,10 @@ describe("Project config", () => {
       withPayments();
       tab("flow");
       mount(<ProjectConfigView />);
-      expect(window.location.search).not.toMatch(/sec=/);
+      expect(window.location.hash).not.toMatch(/sec=/);
       fireEvent.click(await byId("pcf-add-station"));
       await waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeTruthy());
-      expect(window.location.search).toMatch(/dlg=station/);
+      expect(window.location.hash).toMatch(/dlg=station/);
       cleanup();
       tab("approvers");
       mount(<ProjectConfigView />);
@@ -1015,7 +1016,7 @@ describe("Project config", () => {
       withPayments();
       mount(<ProjectConfigView />);
       await byId("pcf-bud-monthly");
-      expect(window.location.hash).toBe("#/p/payments/project-config");
+      expect(window.location.hash).toBe("#/p/payments/project-config?tab=budget"); // the segment moves into the hash query
       fireEvent.click(await byId("pcf-tab-overview"));
       await byId("pcf-desc");
       cleanup();
@@ -1029,7 +1030,7 @@ describe("Project config", () => {
       mount(<ProjectConfigView />);
       fireEvent.click(await byId("pcf-adv-toggle"));
       await byId("pcf-flow-sum");
-      expect(window.location.search).toMatch(/sec=glance/);
+      expect(window.location.hash).toMatch(/sec=glance/);
       cleanup();
       mount(<ProjectConfigView />);
       await byId("pcf-flow-sum");
@@ -1038,7 +1039,7 @@ describe("Project config", () => {
       mount(<ProjectConfigView />);
       fireEvent.click(await byId("pcf-add-class"));
       await waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeTruthy());
-      expect(window.location.search).toMatch(/dlg=class/);
+      expect(window.location.hash).toMatch(/dlg=class/);
       cleanup();
       mount(<ProjectConfigView />);
       await waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeTruthy());
@@ -1066,7 +1067,7 @@ describe("Project config", () => {
       mount(<ProjectConfigView />);
       fireEvent.click(await byId("pcf-ap-close"));
       expect(document.getElementById("pcf-rule")).toBeNull();
-      expect(window.location.search).not.toMatch(/rule=/);
+      expect(window.location.hash).not.toMatch(/rule=/);
     });
 
     it("a rule link typed while Project config is showing is followed", async () => {

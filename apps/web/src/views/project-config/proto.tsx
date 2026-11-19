@@ -3,6 +3,7 @@
  * Here: the gate table (Approvers), MCP, Budget, Repos and Line control. Eight tabs, no menu: each old secondary page is a section of its tab
  * and an old `?tab=` bookmark lands on it (see LEGACY_TABS in ctx.ts). Every change goes through the typed commands, which call the API.
  */
+import { gateLabelOf } from "../../lib/gate-label";
 import { useEffect, useState } from "react";
 import { fmt } from "@gantry/domain";
 import { commands as ops } from "../../api/commands";
@@ -46,12 +47,12 @@ export function ApproversProto(props: PcProps) {
         <ProtoList
           id="pcf-appr" noun="gate" search={false} rows={rows} rowKey={(x) => x.g}
           cols={[
-            { key: "g", label: "Gate", render: (x) => <div><b className="mono">{x.g}</b><span className="sub">{name(x.g)}</span>{isDirty(p, s.drafts, x.g) ? <span className="chip chip-warn">unsaved</span> : null}</div> },
+            { key: "g", label: "Gate", render: (x) => <div><b className="mono">{gateLabelOf(null, x.g)}</b><span className="sub">{name(x.g)}</span>{isDirty(p, s.drafts, x.g) ? <span className="chip chip-warn">unsaved</span> : null}</div> },
             { key: "r", label: "Roles", render: (x) => <div className="row">{x.roles.length ? x.roles.map((y) => <Chip key={y} text={roleName(cat, y)} cls="plain" />) : <Chip text="automatic" cls="info" />}</div> },
             { key: "n", label: "Needed", align: "end", render: (x) => String(x.required) },
             { key: "s", label: "Separation", render: (x) => (x.sod ? <Chip text="SoD" cls="ok" /> : "—") },
             { key: "e", label: "Escalate", align: "end", render: (x) => (x.escalateH ? `${x.escalateH} h` : "—") },
-            { key: "a", label: "", align: "end", render: (x) => <ActBtn small id={`pcf-ap-edit-${x.g}`} label={rule === x.g ? "Editing" : "Edit"} aria={`Edit the rule for ${x.g} ${name(x.g)}`} guard={d} onClick={() => setRule(x.g)} /> },
+            { key: "a", label: "", align: "end", render: (x) => <ActBtn small id={`pcf-ap-edit-${x.g}`} label={rule === x.g ? "Editing" : "Edit"} aria={`Edit the rule for ${gateLabelOf(null, x.g)} ${name(x.g)}`} guard={d} onClick={() => setRule(x.g)} /> },
           ]}
         />
       </Panel>

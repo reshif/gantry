@@ -1,48 +1,59 @@
 /**
- * Shared bits of the People, Workload and Access sheets (prototype dataView): URL-held view state (`?ppl.tab=teams`),
- * the "1-12 of 20" pager footer and the toolbar "n persons of N / Clear" count. The state lives in the address bar's
- * query string (the hash router owns only the hash), so a filtered view can be linked and survives a reload.
+ * Shared bits of the People, Workload and Access sheets (prototype dataView): URL-held view state (`#/people?ppl.tab=teams`),
+ * the "1-12 of 20" pager footer and the toolbar "n persons of N / Clear" count. The state lives in the query of the
+ * hash (`#/people?ppl.tab=teams`), so a filtered view can be linked and survives a reload.
  */
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Btn } from "../../ui/primitives";
 
-import { EVENT } from "./qs";
+const EVENT = "gantry-qs";
 const subscribe = (fn: () => void) => {
   window.addEventListener("popstate", fn);
+  window.addEventListener("hashchange", fn);
   window.addEventListener(EVENT, fn);
   return () => {
     window.removeEventListener("popstate", fn);
+    window.removeEventListener("hashchange", fn);
     window.removeEventListener(EVENT, fn);
   };
 };
-const snap = () => window.location.search;
+/** The query part of the hash (`#/people?ppl.tab=teams` gives `ppl.tab=teams`), then the older `?ppl.tab=teams` before the hash. */
+const snap = () => { const h = window.location.hash; const i = h.indexOf("?"); return `${i < 0 ? "" : h.slice(i + 1)}\n${window.location.search.slice(1)}`; };
+const valueOf = (snapshot: string, key: string): string | null => {
+  const [fromHash = "", fromSearch = ""] = snapshot.split("\n");
+  return new URLSearchParams(fromHash).get(key) ?? new URLSearchParams(fromSearch).get(key);
+};
 
-/** One string held in the URL query. `fallback` is the value when the key is absent (and is then not written). */
+function writeHash(patch: Record<string, string>, fallbacks: Record<string, string> = {}): void {
+  const h = window.location.hash;
+  const i = h.indexOf("?");
+  const base = (i < 0 ? h : h.slice(0, i)) || "#"; // a bare address still gets a hash to hold the query
+  const q = new URLSearchParams(i < 0 ? "" : h.slice(i + 1));
+  const sq = new URLSearchParams(window.location.search);
+  for (const [k, v] of Object.entries(patch)) {
+    if (!v || v === fallbacks[k]) q.delete(k);
+    else q.set(k, v);
+    sq.delete(k); // an older copy before the hash would win over this one
+  }
+  const qs = q.toString();
+  const sqs = sq.toString();
+  const next = `${window.location.pathname}${sqs ? `?${sqs}` : ""}${base}${qs ? `?${qs}` : ""}`;
+  if (next !== `${window.location.pathname}${window.location.search}${h}`) window.history.replaceState(window.history.state, "", next);
+  window.dispatchEvent(new Event(EVENT));
+}
+
+/** One string held in the hash query (rule F-15). `fallback` is the value when the key is absent (and is then not written). */
 export function useQS(key: string, fallback = ""): [string, (v: string) => void] {
-  const search = useSyncExternalStore(subscribe, snap, () => "");
-  const value = new URLSearchParams(search).get(key) ?? fallback;
-  const set = useCallback((v: string) => {
-    const u = new URL(window.location.href);
-    if (v === fallback || v === "") u.searchParams.delete(key);
-    else u.searchParams.set(key, v);
-    window.history.replaceState(window.history.state, "", u.pathname + u.search + u.hash);
-    window.dispatchEvent(new Event(EVENT));
-  }, [key, fallback]);
+  const snapshot = useSyncExternalStore(subscribe, snap, () => "");
+  const value = valueOf(snapshot, key) ?? fallback;
+  const set = useCallback((v: string) => writeHash({ [key]: v }, { [key]: fallback }), [key, fallback]);
   return [value, set];
 }
 
 /** Several keys at once (a filter change also resets the page). */
 export function setQS(patch: Record<string, string>): void {
-  const u = new URL(window.location.href);
-  for (const [k, v] of Object.entries(patch)) {
-    if (v) u.searchParams.set(k, v);
-    else u.searchParams.delete(k);
-  }
-  window.history.replaceState(window.history.state, "", u.pathname + u.search + u.hash);
-  window.dispatchEvent(new Event(EVENT));
+  writeHash(patch);
 }
-
-export { clearGovernQS } from "./qs";
 
 export const PAGE_SIZE = 12;
 

@@ -7,6 +7,7 @@ import { fmt, ROLES } from "@gantry/domain";
 import { commands as ops } from "../api/commands";
 import { useChatLinks, useMe, useSessions } from "../api/queries";
 import { navigate } from "../lib/router";
+import { useRouteTab } from "../lib/routeQuery";
 import { applyTheme, updatePrefs, usePrefs, type Theme } from "../lib/prefs";
 import { canSeeRoute } from "../lib/routes";
 import type { Me } from "../api/types";
@@ -22,7 +23,7 @@ const TABS = [{ id: "profile", label: "Profile" }, { id: "access", label: "My ac
 
 export default function AccountView() {
   const me = useMe();
-  const [tab, setTab] = useState("profile");
+  const [tab, setTab] = useRouteTab(TABS.map((t) => t.id), "profile");
   if (!me) return null;
   return (
     <div className="view view-account">

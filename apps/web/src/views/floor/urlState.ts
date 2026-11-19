@@ -1,31 +1,30 @@
-/** A view's own query-string state (rule F-15). It lives in the query before the hash (`?view=board`); a prototype deep link that carries it after the route (`#/p/payments/floor?view=board`) is read too. */
+/** A view's own query state (rule F-15). It lives in the hash after the route (`#/p/payments/floor?view=board`), so a link restores it; an older link that carries it before the hash (`?view=board#/...`) is still read. */
 import { useCallback, useEffect, useState } from "react";
 
 const read = (name: string): string | null => {
   try {
     const h = window.location.hash;
     const qi = h.indexOf("?");
-    const fromSearch = new URLSearchParams(window.location.search).get(name);
-    if (fromSearch !== null) return fromSearch;
-    // a prototype deep link carries its state inside the hash: `#/security?tab=sessions`
-    return qi < 0 ? null : new URLSearchParams(h.slice(qi + 1)).get(name);
+    const fromHash = qi < 0 ? null : new URLSearchParams(h.slice(qi + 1)).get(name);
+    if (fromHash !== null) return fromHash;
+    return new URLSearchParams(window.location.search).get(name);
   } catch {
     return null;
   }
 };
 
-/** Writes one key of the query (`?view=board`, before the hash) with replaceState (no history entry, no route change). A value the address carried in the hash query (`#/floor?view=board`) is dropped from there so the two never disagree. */
+/** Writes one key of the query into the hash (`#/floor?view=board`) with replaceState (no history entry, no route change). An older copy of the key before the hash is dropped so the two never disagree. */
 export function writeHashQuery(name: string, next: string | null): void {
   try {
     const h = window.location.hash;
     const qi = h.indexOf("?");
-    const base = qi < 0 ? h : h.slice(0, qi);
+    const base = (qi < 0 ? h : h.slice(0, qi)) || "#"; // a bare address still gets a hash to hold the query
     const hq = new URLSearchParams(qi < 0 ? "" : h.slice(qi + 1));
-    hq.delete(name);
+    if (next) hq.set(name, next);
+    else hq.delete(name);
     const hqs = hq.toString();
     const sq = new URLSearchParams(window.location.search);
-    if (next) sq.set(name, next);
-    else sq.delete(name);
+    sq.delete(name);
     const sqs = sq.toString();
     const url = `${window.location.pathname}${sqs ? `?${sqs}` : ""}${base}${hqs ? `?${hqs}` : ""}`;
     if (url !== `${window.location.pathname}${window.location.search}${h}`) window.history.replaceState(window.history.state, "", url);

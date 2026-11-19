@@ -154,13 +154,13 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     fireEvent.click(link);
     expect(window.location.hash).toBe("#person/p-priya");
     type(await byId("wl-f-approver"), "no");
-    expect(window.location.search).toContain("wl.approver=no");
+    expect(window.location.hash).toContain("wl.approver=no");
     expect(await screen.findByText("Nothing matches these filters")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(window.location.search).not.toContain("wl.approver");
+    expect(window.location.hash).not.toContain("wl.approver");
     // sorting keeps a readable key in the address bar
     fireEvent.click(document.getElementById("wl-people-sort-person")!);
-    expect(window.location.search).toContain("wl.sort=person");
+    expect(window.location.hash).toContain("wl.sort=person");
   });
 
   it("lists suggestions with the top five, and a link to show them all", async () => {

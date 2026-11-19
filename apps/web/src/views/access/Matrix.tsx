@@ -34,7 +34,7 @@ export function MatrixTable({ matrix, version, roles, actions, newRole }: { matr
               <tr>
                 <th scope="col" style={{ ...STICKY, zIndex: 3 }}>Action</th>
                 {roles.map((r) => (
-                  <th key={r.id} scope="col" id={`acc-mx-col-${r.id}`} className={newRole === r.id ? "is-new" : undefined} style={{ textAlign: "center", minWidth: 104 }} title={ALWAYS_FULL.has(r.id) ? "Factory admin always has full access (locked)" : r.name}>
+                  <th key={r.id} scope="col" id={`acc-mx-col-${r.id}`} className={newRole === r.id ? "is-new" : undefined} style={{ textAlign: "center", minWidth: 84, whiteSpace: "normal", padding: "8px 4px", letterSpacing: "0.04em" }} title={ALWAYS_FULL.has(r.id) ? "Factory admin always has full access (locked)" : r.name}>
                     {r.name}
                     {ALWAYS_FULL.has(r.id) ? <span className="sub">locked</span> : null}
                   </th>
@@ -44,7 +44,7 @@ export function MatrixTable({ matrix, version, roles, actions, newRole }: { matr
             <tbody>
               {rows.map((a) => (
                 <tr key={a.id} id={`acc-mx-row-${a.id.replace(".", "_")}`}>
-                  <td style={{ ...STICKY, minWidth: 220 }}>{a.name}<span className="sub mono">{`${a.id} · ${a.group}`}</span></td>
+                  <td style={{ ...STICKY, minWidth: 170 }}>{a.name}<span className="sub mono">{`${a.id} · ${a.group}`}</span></td>
                   {roles.map((ro) => {
                     const factoryOnly = ro.level !== "factory" && a.scope === "factory";
                     const on = !!matrix[ro.id]?.[a.id] && !factoryOnly;

@@ -138,7 +138,7 @@ export default function AuditView() {
     { key: "at", label: "When", sort: (e) => e.at, render: (e) => <span className="mono small">{dayMon(e.at)}</span> },
     { key: "actor", label: "Actor", sort: (e) => name(e.actor, e.actorName).toLowerCase(), render: (e) => name(e.actor, e.actorName) },
     { key: "action", label: "Action", sort: (e) => e.action, render: (e) => <Btn label={e.action} small kind="ghost" cls="mono" id={`aud-row-${e.seq}`} aria={`Open entry ${e.seq}`} onClick={() => open(e.seq)} /> },
-    { key: "target", label: "Target", render: (e) => <span className="trunc" style={{ display: "block", maxWidth: 340 }} title={e.target}>{e.target}</span> },
+    { key: "target", label: "Target", render: (e) => <span className="aud-target">{e.target}</span> },
     { key: "cat", label: "Category", render: (e) => <Chip text={e.category} cls="plain" /> },
     { key: "o", label: "Outcome", render: (e) => <Chip text={e.outcome} cls={e.outcome === "ok" ? "ok" : "bad"} /> },
   ];

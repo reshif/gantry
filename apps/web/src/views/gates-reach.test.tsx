@@ -40,10 +40,26 @@ describe("Gates tab", () => {
   it("shows the approvals count, the approver rule and the open assumptions and objections for the waiting gate", async () => {
     await show();
     fireEvent.click(screen.getByRole("tab", { name: /^Gates/ }));
-    expect(await screen.findByText("1 of 1 approvals")).toBeTruthy();
+    await screen.findByText("Needs 1 approval from Line Lead");
+    expect(document.getElementById(`gt-count-${gate}`)?.textContent).toBe("1 of 1 approvals");
     expect(await screen.findByText("Needs 1 approval from Line Lead")).toBeTruthy();
     expect(await screen.findByText("The ledger already stores minor units")).toBeTruthy();
     expect(screen.getByText("The spec skips refunds")).toBeTruthy();
+  });
+});
+
+describe("Gates tab labels and counts (T-26)", () => {
+  it("writes combined gates as G0+G1 and never says a passed gate has 0 of 1 approvals", async () => {
+    const passed = Object.entries(W.gates).find(([k, g]) => g.status !== "waiting" && k !== gate)?.[0] ?? "G2";
+    const t = travelerOf(W);
+    W.gates[passed]!.status = "passed";
+    t.gateProgress[passed] = { have: 0, need: 1, unmet: [], conds: [], onlyRequester: false, passes: true };
+    await show();
+    fireEvent.click(screen.getByRole("tab", { name: /^Gates/ }));
+    await waitFor(() => expect(document.getElementById(`gt-count-${passed}`)).toBeTruthy());
+    expect(document.getElementById(`gt-count-${passed}`)?.textContent).toBe("1 of 1 approvals");
+    const table = document.getElementById("dz-gates") as HTMLElement;
+    expect(table.textContent).not.toMatch(/G\d[A-Za-z]\d?G|G0G1|G3G3s/);
   });
 });
 

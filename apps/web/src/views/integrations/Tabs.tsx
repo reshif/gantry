@@ -43,7 +43,7 @@ export function ConnectedTab({ openInstance, onToggle }: { openInstance: (id: st
                   <span className={`chip ${tone}`}>{i.connected ? (st === "unknown" ? "not tested yet" : st) : "disconnected"}</span>
                 </div>
                 <div className="small muted">{t.name} · {catName(t.category)}</div>
-                <dl className="kv">
+                <dl className="kv int-card-kv">
                   <dt>Scope</dt><dd>{scope}</dd>
                   <dt>Last sync</dt><dd>{ago(i.lastSync)}</dd>
                   {cfg.map(([k, v]) => [<dt key={`${k}-t`}>{k}</dt>, <dd key={`${k}-d`}><span className="mono small">{String(v)}</span></dd>])}
