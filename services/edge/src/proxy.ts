@@ -191,8 +191,8 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
   }
 
   const reportDenied = (c: Caller, host: string, port: number, reason: string): void => {
-    // Keyed by source address too: the run id comes from an unauthenticated token, so another run forging it must not spend this run's budget.
-    const who = c.kind === "run" ? `${c.src}|${c.runId}` : c.kind;
+    // Keyed by source address only: the run id comes from an unauthenticated token, so it must neither spend another run's budget nor open a fresh one.
+    const who = c.kind === "run" ? c.src : c.kind;
     const key = `${who}|${host}:${port}`;
     const now = Date.now();
     if ((reported.get(key) ?? 0) > now - 60_000) return;
@@ -301,8 +301,8 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
     const port = Number(m[3]);
     // Reserve a tunnel slot before the (slow) admit and connect, so a burst of opens cannot overshoot the per-run cap.
     const who = callerOf(req);
-    // Keyed by (source address, run id): the token is not validated yet, so a forged run id from another run network lands in its own bucket.
-    const slot = who.kind === "run" ? `${who.src}|${who.runId}` : null;
+    // Keyed by source address only (G-S1): the run id in the credentials is not validated yet, so varying it must not open a bucket per id.
+    const slot = who.kind === "run" ? who.src : null;
     if (slot !== null) {
       if ((holding.get(slot) ?? 0) >= lim.maxTunnelsPerRun) {
         metrics.tunnelRefused++;

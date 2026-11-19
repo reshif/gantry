@@ -14,6 +14,8 @@ export interface SourceCaps {
   /** Failed edge-token compares one source may make per minute on the token routes (/service/v1, /mcp-admin/v1). Over it: 429 for every attempt until the minute is out. */
   tokenFailuresPerMinute: number;
 }
+/** How long an address must be quiet before its request count is forgotten (a new run on a reused address). */
+export const IDLE_RESET_MS = 5_000;
 export const DEFAULT_SOURCE_CAPS: SourceCaps = { maxConnections: 128, requestsPerMinute: 1200, tokenFailuresPerMinute: 20 };
 
 export interface GuardLog { warn(obj: object, msg: string): void }
@@ -25,7 +27,7 @@ const REFUSAL = (msg: string) => `HTTP/1.1 429 Too Many Requests\r\nContent-Type
 export class SourceGuard {
   readonly metrics: GuardMetrics = { connectionsRefused: 0, requestsRefused: 0, tokenAttemptsRefused: 0 };
   private readonly conns = new Map<string, number>();
-  private readonly rate = new Map<string, { since: number; n: number }>();
+  private readonly rate = new Map<string, { since: number; n: number; last: number }>();
   private readonly fails = new Map<string, { since: number; n: number }>();
   private readonly logged = new Map<string, number>();
 
@@ -83,7 +85,10 @@ export class SourceGuard {
     ip = plain(ip);
     const t = this.now();
     let r = this.rate.get(ip);
-    if (!r || r.since <= t - 60_000) this.rate.set(ip, (r = { since: t, n: 0 }));
+    // G-S2: the next run on this address (the launcher reuses the lowest free /28) must not inherit an earlier run's count. A source idle for IDLE_RESET_MS
+    // is treated as new; a run that keeps calling keeps its count.
+    if (!r || r.since <= t - 60_000 || r.last <= t - IDLE_RESET_MS) this.rate.set(ip, (r = { since: t, n: 0, last: t }));
+    r.last = t;
     if (this.rate.size > 5000) this.rate.delete(this.rate.keys().next().value as string);
     if (r.n >= this.caps.requestsPerMinute) {
       this.metrics.requestsRefused++;

@@ -76,7 +76,7 @@ describe("S-92: one run cannot starve the shared edge", () => {
   it("the proxy answers 429 over the per-source rate and keys tunnel slots by source, not by the claimed run id", async () => {
     const api = new FakeApi();
     await api.start();
-    const px = buildProxy({ cfg: baseConfig({ apiUrl: api.url, runSubnet: RUNNET, sourceCaps: caps({ requestsPerMinute: 100 }) }), logger: log, limits: { maxTunnelsPerRun: 2 } });
+    const px = buildProxy({ cfg: baseConfig({ apiUrl: api.url, runSubnet: RUNNET, sourceCaps: caps({ maxConnections: 1000, requestsPerMinute: 1000 }) }), logger: log, limits: { maxTunnelsPerRun: 2 } });
     await new Promise<void>((r) => px.server.listen(0, "127.0.0.1", r));
     closers.push(async () => { px.server.closeAllConnections(); await new Promise<void>((r) => px.server.close(() => r())); await new Promise<void>((r) => api.server.close(() => r())); });
     const port = (px.server.address() as AddressInfo).port;
@@ -95,6 +95,19 @@ describe("S-92: one run cannot starve the shared edge", () => {
     hold.forEach((s) => s.destroy());
     // with per-id buckets none would be 429; keyed by source, the cap of 2 applies across the ids
     expect(results.filter((c) => c === 429).length).toBeGreaterThan(0);
+  });
+});
+
+describe("G-S2: a new run on a reused address", () => {
+  it("is not refused for the earlier run's requests once the address has been quiet", () => {
+    let t = 1_000_000;
+    const g = new SourceGuard(caps({ requestsPerMinute: 3 }), "10.213.0.0/16", log, () => t);
+    for (let i = 0; i < 3; i++) expect(g.request("10.213.0.2")).toBe(true);
+    expect(g.request("10.213.0.2")).toBe(false);
+    t += 1000;
+    expect(g.request("10.213.0.2")).toBe(false); // a flooding run that keeps calling keeps its count
+    t += 6000; // run A is gone; run B gets the same address
+    expect(g.request("10.213.0.2")).toBe(true);
   });
 });
 
