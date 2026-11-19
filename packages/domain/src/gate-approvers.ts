@@ -42,7 +42,7 @@ export function reachOf(people: Person[], project: Pick<Project, "id">, rule: Ap
 export function ruleWarning(people: Person[], project: Pick<Project, "id" | "name">, rule: ApproverRule, label: string): string | null {
   const n = reachOf(people, project, rule).length;
   const need = Math.max(1, rule.required || 1);
-  if (n >= need && rule.sod && n === need) return `${label} needs ${need} approval${need === 1 ? "" : "s"} with separation of duties on, and exactly ${n} ${n === 1 ? "person holds" : "people hold"} the roles it names in ${project.name}: a work order authored by one of them can never pass this gate by ordinary approval (only a Factory Admin override, with a reason, would). Grant the role to one more person to avoid that.`;
+  if (n >= need && rule.sod && n === need) return `${label} needs ${need} approval${need === 1 ? "" : "s"} with separation of duties on, and exactly ${n} ${n === 1 ? "person holds" : "people hold"} the roles it names in ${project.name}: a work order authored by one of them can pass this gate only by an override with a reason (audited). Grant the role to one more person to avoid that.`;
   return n < need ? `${label} needs ${need} approval${need === 1 ? "" : "s"} but only ${n} ${n === 1 ? "person holds" : "people hold"} the roles it names in ${project.name}. It cannot pass as configured; grant the role to more people or lower the number.` : null;
 }
 
