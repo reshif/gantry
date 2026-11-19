@@ -135,6 +135,7 @@ services:
       - |
         export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(cat /run/secrets/keycloak_admin_password)"
         export GANTRY_OIDC_CLIENT_SECRET="$$(cat /run/secrets/oidc_client_secret)"
+        export GANTRY_ADMIN_CLIENT_SECRET="$$(cat /run/secrets/idp_admin_client_secret)"
         export KC_DB_PASSWORD="$$(cat /run/secrets/keycloak_db_password)"
         export GANTRY_SMTP_PASSWORD="$$(cat /run/secrets/smtp_password)"
         exec /opt/keycloak/bin/kc.sh "$$@"
@@ -155,7 +156,7 @@ services:
       GANTRY_SMTP_AUTH: ${GANTRY_SMTP_AUTH:-false}
       GANTRY_SMTP_USER: ${GANTRY_SMTP_USER:-}
       JAVA_OPTS_KC_HEAP: -XX:MaxRAMPercentage=70
-    secrets: [keycloak_admin_password, oidc_client_secret, keycloak_db_password, smtp_password]
+    secrets: [keycloak_admin_password, oidc_client_secret, idp_admin_client_secret, keycloak_db_password, smtp_password]
     volumes: !override
       - ./keycloak/realm-gantry.prod.json:/opt/keycloak/data/import/realm-gantry.json:ro
     tmpfs:

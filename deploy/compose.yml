@@ -109,12 +109,14 @@ services:
       GANTRY_EGRESS_PROXY: http://gantry-edge:8444
       # Off by default: when true, the sign-in page lists every person's name, email and roles. Local development only (refused unless the public URL is localhost).
       GANTRY_AUDIT_ANCHOR_FILE: /anchors/audit-anchors.jsonl
-      # Factory Admins must sign in with a second factor (OTP at the identity provider, checked by the API from acr/amr). The seeded demo
-      # users are password-only, so this development stack waives it by default. Local development only: the API refuses to start with
-      # it on when the public URL is not localhost. compose.prod.yml forces it off. Set it to false here to try the real flow.
-      GANTRY_DEV_ADMIN_MFA_OPTIONAL: ${GANTRY_DEV_ADMIN_MFA_OPTIONAL:-true}
+      # EVERYONE signs in with a second factor (an authenticator app, a security key or a recovery code at the identity provider; the API checks acr/amr
+      # on every request). The seeded demo users are password-only until they enrol through the one-time link an administrator issues (mail lands in
+      # mailpit). The waiver (GANTRY_DEV_ADMIN_MFA_OPTIONAL=true) only relaxes Gantry's own check: once the realm's browser flow is the two-step one, a password-only login is refused at Keycloak first. Off by default; the API refuses to start
+      # with it on when the public URL is not localhost, and compose.prod.yml forces it off.
+      GANTRY_DEV_ADMIN_MFA_OPTIONAL: ${GANTRY_DEV_ADMIN_MFA_OPTIONAL:-false}
       # Off by default: the org starts empty. The first Factory Admin is the identity-provider user GANTRY_BOOTSTRAP_ADMIN_USERNAME, created by the
-      # API with the initial password the owner wrote to the bootstrap_admin_password secret (temporary; the first sign-in changes it and sets up TOTP).
+      # API with the initial password the owner wrote to the bootstrap_admin_password secret (temporary). The identity provider refuses a sign-in without a second factor,
+      # so the first enrolment is a one-time link emailed to GANTRY_BOOTSTRAP_ADMIN_EMAIL (set both; a restart sends a new link while no Factory Admin exists).
       # GANTRY_DEV_SEED=true loads the legacy demo data (people, projects, repos, policies) once, for development and demos only.
       GANTRY_DEV_SEED: ${GANTRY_DEV_SEED:-false}
       GANTRY_BOOTSTRAP_ADMIN_USERNAME: ${GANTRY_BOOTSTRAP_ADMIN_USERNAME:-}
@@ -131,7 +133,7 @@ services:
       - backupstatus:/backups:ro
       # Signed checkpoints of the audit chain head, on a volume the database never sees (GANTRY_AUDIT_ANCHOR_FILE).
       - auditanchors:/anchors
-    secrets: [db_password, session_key, data_key, edge_token, github_token, minio_root_password, oidc_client_secret, bootstrap_admin_password, keycloak_admin_password]
+    secrets: [db_password, session_key, data_key, edge_token, github_token, minio_root_password, oidc_client_secret, bootstrap_admin_password, idp_admin_client_secret]
     depends_on:
       gantry-migrate: { condition: service_completed_successfully }
       volume-init: { condition: service_completed_successfully }
@@ -397,6 +399,7 @@ services:
       - |
         export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(cat /run/secrets/keycloak_admin_password)"
         export GANTRY_OIDC_CLIENT_SECRET="$$(cat /run/secrets/oidc_client_secret)"
+        export GANTRY_ADMIN_CLIENT_SECRET="$$(cat /run/secrets/idp_admin_client_secret)"
         # Demo users (asha, daniel, ...; password gantry-dev) exist only on a seeded stack (GANTRY_DEV_SEED=true).
         # Without the seed the realm is imported with no users; the first Factory Admin comes from GANTRY_BOOTSTRAP_ADMIN_USERNAME.
         mkdir -p /opt/keycloak/data/import
@@ -417,7 +420,7 @@ services:
       KC_HEALTH_ENABLED: "true"
       # The admin console is not served on the public site; the ingress serves it on 127.0.0.1:8081 only.
       KC_HOSTNAME_ADMIN: http://localhost:8081/idp
-    secrets: [keycloak_admin_password, oidc_client_secret]
+    secrets: [keycloak_admin_password, oidc_client_secret, idp_admin_client_secret]
     volumes:
       # The dev H2 database lives under data/. Persisting it keeps user ids (the OIDC `sub` Gantry links people to)
       # stable across container recreation. --import-realm skips a realm that already exists, so edits to
@@ -638,6 +641,9 @@ secrets:
   minio_root_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/minio_root_password" }
   keycloak_admin_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/keycloak_admin_password" }
   oidc_client_secret: { file: "${GANTRY_SECRETS_DIR:-./secrets}/oidc_client_secret" }
+  # The secret of the `gantry-admin` service-account client in the gantry realm (manage-users in that realm only). It is what the API uses at run time instead of the
+  # Keycloak master-admin password, which only the keycloak service reads (to start). Written by the owner (a long random string), never generated here.
+  idp_admin_client_secret: { file: "${GANTRY_SECRETS_DIR:-./secrets}/idp_admin_client_secret" }
   # Written by the owner, never generated: the initial password of the first Factory Admin (empty file = not used).
   bootstrap_admin_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/bootstrap_admin_password" }
   backup_remote: { file: "${GANTRY_SECRETS_DIR:-./secrets}/backup_remote" }

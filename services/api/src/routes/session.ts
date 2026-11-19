@@ -22,6 +22,7 @@ import { egressHostSources } from "../areas/internal/egress.js";
 import { validIpEntry } from "../core/security.js";
 import { pendingRecovery } from "../core/auth/ip-recovery.js";
 import { csrfFor, findSession, listSessions, revokeSessions } from "../core/auth/sessions.js";
+import { mfaPolicy } from "../core/auth/mfa.js";
 import { publishChange } from "../core/changes.js";
 import { command } from "../core/command.js";
 import { deriveKey } from "../core/config.js";
@@ -44,6 +45,8 @@ interface OidcState {
   method: "sso" | "github";
   stepUp: boolean;
   returnTo: string;
+  /** When the authorize request was made (ms), so the callback can refuse a token whose auth_time is older (a silent provider session). */
+  at?: number;
   /** Opened in a small window by the app: the callback answers by redirecting to the app's step-up result page, which tells the opener. */
   popup?: boolean;
   /** One-time invite token from the invite email's link, checked at the callback before an invited person is claimed. */
@@ -119,24 +122,17 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       }
       idpHint = g.oidc.githubIdp;
     }
-    // Ask for the provider's second-factor level when the person is setting it up (mfa=1), and on a step-up by a session that already has one.
-    let secondFactor = q.data.mfa === "1";
-    if (!secondFactor && q.data.step_up === "1") {
-      const held = req.cookies[g.config.sessionCookie];
-      const hs = held ? await findSession(g.pool, g.config.secrets.sessionKey, g.orgId, held, (await g.security.get()).value.idleMin) : null;
-      secondFactor = !!hs?.secondFactor;
-    }
     const state = randomBytes(24).toString("base64url");
     const nonce = randomBytes(24).toString("base64url");
     const verifier = randomBytes(48).toString("base64url");
     let url: URL;
     try {
-      url = await g.oidc.authorizationUrl({ redirectUri, state, nonce, codeVerifier: verifier, loginHint: q.data.login_hint ?? null, stepUp: q.data.step_up === "1", idpHint, secondFactor });
+      url = await g.oidc.authorizationUrl({ redirectUri, state, nonce, codeVerifier: verifier, loginHint: q.data.login_hint ?? null, stepUp: q.data.step_up === "1", idpHint });
     } catch (e) {
       req.log.error({ err: e }, "OIDC discovery failed");
       return toApp(reply, "/", "The identity provider is not reachable. Try again shortly.");
     }
-    const st: OidcState = { state, nonce, verifier, method, stepUp: q.data.step_up === "1", returnTo: safeReturn(q.data.return_to), ...(q.data.popup === "1" && q.data.step_up === "1" ? { popup: true } : {}), ...(q.data.invite ? { invite: q.data.invite } : {}) };
+    const st: OidcState = { state, nonce, verifier, method, at: Date.now(), stepUp: q.data.step_up === "1", returnTo: safeReturn(q.data.return_to), ...(q.data.popup === "1" && q.data.step_up === "1" ? { popup: true } : {}), ...(q.data.invite ? { invite: q.data.invite } : {}) };
     reply.setCookie(OIDC_COOKIE, seal(st, oidcKey, "oidc-state"), { ...cookieOpts, maxAge: 600 });
     return reply.redirect(url.toString(), 302);
   });
@@ -164,7 +160,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       const s = await findSession(g.pool, g.config.secrets.sessionKey, g.orgId, tok, (await g.security.get()).value.idleMin);
       if (s) existing = { id: s.id, personId: s.personId };
     }
-    const r = await signIn(g, claims, { ...meta, existingSession: existing, stepUpOnly: st.stepUp, ...(st.invite ? { inviteToken: st.invite } : {}) });
+    const r = await signIn(g, claims, { ...meta, existingSession: existing, stepUpOnly: st.stepUp, authorizedAt: st.at, ...(st.invite ? { inviteToken: st.invite } : {}) });
     if (!r.ok) return st.popup ? popupDone(reply, false, r.msg) : toApp(reply, "/", r.msg, r.reason === "mfa_required" ? "mfa_setup" : undefined);
     if (r.token && r.expiresAt) reply.setCookie(g.config.sessionCookie, r.token, { path: "/", httpOnly: true, sameSite: "lax", secure: g.config.cookieSecure, expires: r.expiresAt });
     if (claims.idToken) reply.setCookie(IDT_COOKIE, seal({ t: claims.idToken }, idtKey, "id-token"), { ...cookieOpts, ...(r.expiresAt ? { expires: r.expiresAt } : { maxAge: 12 * 3600 }) });
@@ -192,7 +188,8 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     const s = tok ? await findSession(g.pool, g.config.secrets.sessionKey, g.orgId, tok, sec.idleMin) : null;
     if (!s) {
       clear();
-      const logoutUrl = idt ? await providerLogout() : undefined;
+      // Even with no id-token cookie and no session left (an idle end, a revoke, a cleared browser) the provider session may be alive: end it too (S-130).
+      const logoutUrl = await providerLogout();
       return { ok: true, msg: "You are signed out.", ...(logoutUrl ? { logoutUrl } : {}) };
     }
     const sent = req.headers["x-csrf-token"];
@@ -284,7 +281,8 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     const d = await decide(req, "security.manage");
     if (!d.allowed && !(await decide(req, "policy.view")).allowed) throw refuse(d.rule.kind === "stop" ? "stopped" : "denied", d.reason, { rule: d.rule, needs: d.needs });
     const s = await readSecurity(g.pool, g.orgId);
-    return { ...s.value, version: s.version };
+    // The MFA policy is not a setting: it is what the server enforces (S-127), whatever an old stored value says.
+    return { ...s.value, mfa: mfaPolicy(g.config.adminMfaOptional), version: s.version };
   });
 
   /** Every host on the run and worker egress lists with where it came from (S-67), readable by whoever reads the security settings. */
@@ -305,6 +303,8 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
         ifMatch: async (tx) => (await readSecurity(tx, g.orgId)).version,
       },
       async (tx, a) => {
+        // Nothing to choose: a second factor is required of everyone (S-121). Refused plainly, not silently ignored.
+        if (body.path === "mfa" || body.path.startsWith("mfa.")) throw invalid("Two-step sign-in is required for everyone and is not a setting. It is enforced by the server for every person.");
         const cur = await readSecurity(tx, g.orgId);
         const next = setPath(cur.value, body.path, body.value);
         if (!next) throw invalid(`There is no security setting called ${body.path}.`);

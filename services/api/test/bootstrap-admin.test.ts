@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { ensureBootstrapAdmin, keycloakAdminClient, keycloakFromIssuer, startBootstrapAdmin, weakPasswordReason, type KeycloakAdminApi } from "../src/core/auth/bootstrap-admin.js";
+import { ensureBootstrapAdmin, startBootstrapAdmin, weakPasswordReason, type KeycloakAdminApi } from "../src/core/auth/bootstrap-admin.js";
+import { keycloakAdminClient, keycloakFromIssuer } from "../src/core/auth/idp-admin.js";
 import { createOidcAdapter } from "../src/core/oidc.js";
 import { TEST_URL, startApp, testConfig, type TestApp } from "./helpers.js";
 import { startIssuer } from "./issuer.js";
@@ -22,27 +23,55 @@ describe("initial password rules", () => {
   });
 });
 
-describe("Keycloak admin client request shape", () => {
-  it("creates a user with a temporary password, both required actions and no email", async () => {
+describe("Keycloak admin client request shape (S-125: the scoped service account, never the master admin)", () => {
+  const mk = () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const fetchImpl = (async (url: string, init?: RequestInit) => {
       calls.push({ url, init });
-      if (url.includes("/openid-connect/token")) return new Response(JSON.stringify({ access_token: "tok" }), { status: 200 });
-      return new Response(null, { status: 201, headers: { location: "http://kc/idp/admin/realms/gantry/users/kc-id-1" } });
+      if (url.includes("/openid-connect/token")) return new Response(JSON.stringify({ access_token: "tok", expires_in: 300 }), { status: 200 });
+      if (url.includes("/credentials")) return new Response(JSON.stringify([{ id: "c0", type: "password" }, { id: "c1", type: "otp" }, { id: "c2", type: "recovery-authn-codes" }]), { status: 200 });
+      if (init?.method === "POST" && url.endsWith("/users")) return new Response(null, { status: 201, headers: { location: "http://kc/idp/admin/realms/gantry/users/kc-id-1" } });
+      return new Response(null, { status: 204 });
     }) as unknown as typeof fetch;
-    const kc = keycloakAdminClient({ baseUrl: "http://kc/idp", realm: "gantry", adminUser: "admin", adminPassword: "adminpw", fetchImpl });
-    expect(await kc.createUser({ username: "owner", password: PW, temporary: true, requiredActions: ["UPDATE_PASSWORD", "CONFIGURE_TOTP"] })).toBe("kc-id-1");
-    const post = calls.find((c) => c.url.endsWith("/admin/realms/gantry/users"))!;
-    const body = JSON.parse(String(post.init!.body));
-    expect(body).toMatchObject({ username: "owner", enabled: true, requiredActions: ["UPDATE_PASSWORD", "CONFIGURE_TOTP"], credentials: [{ type: "password", value: PW, temporary: true }] });
-    expect(body.email).toBeUndefined();
+    return { calls, kc: keycloakAdminClient({ baseUrl: "http://kc/idp", realm: "gantry", clientId: "gantry-admin", clientSecret: "svc-secret", fetchImpl }) };
+  };
+
+  it("authenticates with client_credentials in the gantry realm: no master realm, no admin-cli, no password grant", async () => {
+    const { calls, kc } = mk();
+    await kc.secondFactors("u1");
+    const tok = calls.find((c) => c.url.includes("/openid-connect/token"))!;
+    expect(tok.url).toBe("http://kc/idp/realms/gantry/protocol/openid-connect/token");
+    const body = new URLSearchParams(String(tok.init!.body));
+    expect(body.get("grant_type")).toBe("client_credentials");
+    expect(body.get("client_id")).toBe("gantry-admin");
+    expect(body.get("password")).toBeNull();
+    expect(calls.every((c) => !c.url.includes("/realms/master"))).toBe(true);
+  });
+
+  it("creates a user with a temporary password and the enrolment actions", async () => {
+    const { calls, kc } = mk();
+    expect(await kc.createUser({ username: "owner", password: PW, email: "o@corp.example", requiredActions: ["UPDATE_PASSWORD", "CONFIGURE_TOTP"] })).toBe("kc-id-1");
+    const body = JSON.parse(String(calls.find((c) => c.url.endsWith("/admin/realms/gantry/users"))!.init!.body));
+    expect(body).toMatchObject({ username: "owner", enabled: true, email: "o@corp.example", requiredActions: ["UPDATE_PASSWORD", "CONFIGURE_TOTP"], credentials: [{ type: "password", value: PW, temporary: true }] });
+  });
+
+  it("a reset removes only second factors (never the password), ends provider sessions; a link names the actions and a short lifespan", async () => {
+    const { calls, kc } = mk();
+    expect(await kc.resetSecondFactors("u1")).toBe(2);
+    const del = calls.filter((c) => c.init?.method === "DELETE").map((c) => c.url);
+    expect(del).toEqual(["http://kc/idp/admin/realms/gantry/users/u1/credentials/c1", "http://kc/idp/admin/realms/gantry/users/u1/credentials/c2"]);
+    expect(calls.some((c) => c.url.endsWith("/users/u1/logout"))).toBe(true);
+    await kc.sendEnrolmentLink("u1");
+    const link = calls.find((c) => c.url.includes("execute-actions-email"))!;
+    expect(new URL(link.url).searchParams.get("lifespan")).toBe("3600");
+    expect(JSON.parse(String(link.init!.body))).toEqual(["UPDATE_PASSWORD", "CONFIGURE_TOTP", "CONFIGURE_RECOVERY_AUTHN_CODES"]);
   });
 });
 
 const d = TEST_URL ? describe : describe.skip;
 
 function fakeKc(existing: string | null = null) {
-  const created: Array<{ username: string; password: string; temporary: boolean; requiredActions: string[] }> = [];
+  const created: Array<{ username: string; password?: string; email?: string; requiredActions?: string[] }> = [];
   const api: KeycloakAdminApi = {
     async findUserId() { return existing; },
     async createUser(u) { created.push(u); return "kc-sub-1"; },
@@ -66,14 +95,34 @@ d("bootstrap admin from a username and an initial password", () => {
     ensureBootstrapAdmin({ pool: t.db.admin, orgId: t.orgId, username: o.username === undefined ? "owner" : o.username, readPassword: async () => (o.password === undefined ? PW : o.password), keycloak: async () => (o.kc === undefined ? fakeKc().api : o.kc), log: o.log ?? logs().log });
   const sub = async () => (await t.db.admin.query(`select settings->'bootstrapAdmin' as b from orgs where id = $1`, [t.orgId])).rows[0]?.b;
 
-  it("creates the user once when the org has no Factory Admin, temporary password and both required actions, and records its subject", async () => {
+  it("creates the user once when the org has no Factory Admin, with the enrolment actions, and records its subject", async () => {
     const { api, created } = fakeKc();
     expect(await run({ kc: api })).toBe("created");
-    expect(created).toEqual([{ username: "owner", password: PW, temporary: true, requiredActions: ["UPDATE_PASSWORD", "CONFIGURE_TOTP"] }]);
+    expect(created).toEqual([{ username: "owner", password: PW, requiredActions: ["UPDATE_PASSWORD", "CONFIGURE_TOTP", "CONFIGURE_RECOVERY_AUTHN_CODES"] }]);
     expect(await sub()).toEqual({ username: "owner", sub: "kc-sub-1" });
     // a second run, or a changed secret, never creates or resets again
     expect(await run({ kc: api, password: "A-completely-different-1" })).toBe("already_provisioned");
     expect(created).toHaveLength(1);
+  });
+
+  it("S-122: the first enrolment is a one-time link to GANTRY_BOOTSTRAP_ADMIN_EMAIL, sent at creation and again on a restart until a second factor exists", async () => {
+    const links: string[] = [];
+    let factors = 0;
+    const api = { ...fakeKc().api, async sendEnrolmentLink(id: string, o?: { lifespanSec?: number }) { links.push(`${id}:${o?.lifespanSec}`); }, async secondFactors() { return Array.from({ length: factors }, (_, i) => ({ id: `c${i}`, type: "otp" })); } };
+    const withMail = (kc: typeof api) => ensureBootstrapAdmin({ pool: t.db.admin, orgId: t.orgId, username: "owner", email: "owner@corp.example", readPassword: async () => PW, keycloak: async () => kc, log: logs().log });
+    expect(await withMail(api)).toBe("created");
+    expect(links).toEqual(["kc-sub-1:3600"]);
+    expect(await withMail(api)).toBe("already_provisioned"); // not enrolled yet: a fresh link
+    expect(links).toHaveLength(2);
+    factors = 1;
+    expect(await withMail(api)).toBe("already_provisioned"); // enrolled: nothing more is sent
+    expect(links).toHaveLength(2);
+  });
+
+  it("without an address no link is sent and the log says what to set", async () => {
+    const l = logs();
+    expect(await run({ log: l.log })).toBe("created");
+    expect(l.lines.join("\n")).toMatch(/GANTRY_BOOTSTRAP_ADMIN_EMAIL/);
   });
 
   it("never creates anything once a Factory Admin exists, and does not even read the secret", async () => {
@@ -107,7 +156,7 @@ d("bootstrap admin from a username and an initial password", () => {
     expect(await sub()).toBeNull();
   });
 
-  it("without Keycloak admin credentials it does nothing; with no username it is disabled; a provider outage is retried", async () => {
+  it("without the service-account secret it does nothing; with no username it is disabled; a provider outage is retried", async () => {
     expect(await run({ kc: null })).toBe("unavailable");
     expect(await run({ username: null })).toBe("disabled");
     let n = 0;

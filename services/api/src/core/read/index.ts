@@ -62,7 +62,7 @@ export const haltInfo = (s: ActiveStop): HaltInfo => ({ by: s.by, at: s.at, reas
 
 export async function readPeople(db: Queryable, orgId: string): Promise<Person[]> {
   const { rows } = await db.query(
-    `select p.id, p.name, p.title, p.email, p.github_login, p.status, p.mfa, p.away, p.data, p.version,
+    `select p.id, p.name, p.title, p.email, p.github_login, p.status, p.mfa, p.mfa_checked_at, p.away, p.data, p.version,
        (exists (select 1 from projects pr where pr.org_id = p.org_id and pr.config -> 'oncall' ? p.id)
          or exists (select 1 from role_assignments fa where fa.org_id = p.org_id and fa.person_id = p.id and fa.role_id = 'factory_admin' and fa.project_id is null and fa.revoked_at is null)) as oncall,
        coalesce((select jsonb_agg(jsonb_build_object('role', ra.role_id, 'scope', coalesce(ra.project_id, 'factory')) || case when ra.via_team is null then '{}'::jsonb else jsonb_build_object('via', ra.via_team) end order by (ra.via_team is not null), ra.created_at, ra.id)
@@ -74,7 +74,7 @@ export async function readPeople(db: Queryable, orgId: string): Promise<Person[]
   return rows.map((r) => ({
     ...obj(r.data),
     id: r.id, name: r.name, title: r.title, email: r.email, teams: r.teams, roles: r.roles, status: r.status, oncall: r.oncall,
-    github: r.github_login ?? "", away: (r.away as Away | null) ?? null, mfa: r.mfa, version: r.version,
+    github: r.github_login ?? "", away: (r.away as Away | null) ?? null, mfa: r.mfa === true ? true : r.mfa === false ? false : null, version: r.version,
   }) as Person);
 }
 
@@ -251,7 +251,7 @@ const pagedFor = (on: boolean): string[] => (on ? ["kill", "restore", "halts", "
 
 export const DEFAULT_SECURITY: SecuritySettings = {
   sso: { provider: "OpenID Connect", domain: "", enforced: false, entity: "" },
-  mfa: { policy: "admins", methods: [] },
+  mfa: { policy: "everyone", methods: ["totp", "webauthn", "recovery"] },
   sessionHours: 12,
   idleMin: 30,
   domains: [],

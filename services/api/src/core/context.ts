@@ -5,6 +5,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Config } from "./config.js";
 import type { Hub } from "./stream.js";
 import type { OidcAdapter } from "./oidc.js";
+import type { IdpAdmin } from "./auth/idp-admin.js";
 import type { SecurityCache } from "./security.js";
 import type { ApiSettingsCache } from "../areas/apikeys/config.js";
 import type { loadPolicyState } from "./read/state.js";
@@ -47,6 +48,8 @@ export interface Gantry {
   orgId: string;
   hub: Hub;
   oidc: OidcAdapter;
+  /** The identity provider admin API (scoped service account), or null when its secret is not provided. */
+  idpAdmin: IdpAdmin | null;
   security: SecurityCache;
   /** The public API settings (rate limit, idempotency window, triggers master switch), cached for a few seconds. */
   apiSettings: ApiSettingsCache;

@@ -62,7 +62,7 @@ d("OIDC sign-in against a local issuer", () => {
     // A named account forces the login form, so another person's SSO session at the provider cannot stand in for it.
     expect(u.searchParams.get("prompt")).toBe("login");
     const plain = new URL(String((await t.app.inject("/auth/login")).headers.location));
-    expect(plain.searchParams.get("prompt")).toBeNull(); // a plain sign-in may reuse the provider's session
+    expect(plain.searchParams.get("prompt")).toBe("login"); // S-130: a plain sign-in never reuses the provider's own session
     const c = r.cookies.find((x) => x.name === "gantry_oidc")!;
     expect(c).toMatchObject({ httpOnly: true, sameSite: "Lax", secure: true });
     expect(c.value).not.toContain(u.searchParams.get("state")!); // sealed, not readable

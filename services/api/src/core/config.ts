@@ -16,7 +16,7 @@ export interface Config {
   };
   devSeed: boolean;
   demoAccounts: boolean;
-  /** Development only (GANTRY_DEV_ADMIN_MFA_OPTIONAL): lets a Factory Admin work without a second sign-in factor. Always false off localhost. */
+  /** Development opt-in only (GANTRY_DEV_ADMIN_MFA_OPTIONAL=true, default false everywhere): waives the second sign-in factor EVERYONE otherwise needs. Always false off localhost. */
   adminMfaOptional: boolean;
   /** Deprecated alternative (GANTRY_BOOTSTRAP_ADMIN_EMAIL): the first verified sign-in with this email becomes Factory Admin while there is none. */
   bootstrapAdminEmail: string | null;
@@ -94,14 +94,15 @@ export function demoAccountsAllowed(seeded: boolean, publicUrl: string): boolean
 }
 
 /**
- * GANTRY_DEV_ADMIN_MFA_OPTIONAL=true waives the second sign-in factor Factory Admins otherwise need, so the seeded demo admin (asha,
- * password only) can work on a local stack. The service refuses to start when the public URL is not this machine.
+ * GANTRY_DEV_ADMIN_MFA_OPTIONAL=true waives the second sign-in factor everyone otherwise needs (S-121), so a throwaway local stack with password-only
+ * demo users can be tried without an authenticator. It is an explicit opt-in and is never the default. The service refuses to start when the
+ * public URL is not this machine.
  */
 export function adminMfaOptionalAllowed(on: boolean, publicUrl: string): boolean {
   if (!on) return false;
   const host = (() => { try { return new URL(publicUrl).hostname; } catch { return ""; } })();
   if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost")) return true;
-  throw new Error(`GANTRY_DEV_ADMIN_MFA_OPTIONAL=true is for local development only; GANTRY_PUBLIC_URL (${publicUrl}) is not localhost. Unset it: Factory Admins must use a second sign-in factor.`);
+  throw new Error(`GANTRY_DEV_ADMIN_MFA_OPTIONAL=true is for local development only; GANTRY_PUBLIC_URL (${publicUrl}) is not localhost. Unset it: everyone must use a second sign-in factor.`);
 }
 
 /** GANTRY_TRUST_PROXY: unset -> "loopback, uniquelocal"; "false" -> false; anything else -> that address or CIDR list. "true" (trust any peer) is refused. */

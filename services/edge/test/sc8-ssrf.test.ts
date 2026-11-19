@@ -21,7 +21,7 @@ describe("S-68: vendor endpoint SSRF", () => {
     expect(text, "a private upstream is refused by the edge").not.toContain("INTERNAL-ONLY-DATA");
   });
   it("a listed LAN range never opens loopback", async () => {
-    api.route.lan = ["192.168.0.0/16", "10.0.0.0/8"];
+    (api.route as { lan?: string[] }).lan = ["192.168.0.0/16", "10.0.0.0/8"];
     hits = [];
     const res = await fetch(`${base}/model/v1/messages`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${makeToken("run-w3-2")}` }, body: JSON.stringify({ model: "claude-test-1", max_tokens: 10, messages: [{ role: "user", content: "hi" }] }) });
     expect(await res.text()).not.toContain("INTERNAL-ONLY-DATA");
