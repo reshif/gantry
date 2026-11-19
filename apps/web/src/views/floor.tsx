@@ -182,9 +182,11 @@ function BoardPanel({ model, focus }: { model: FloorModel; focus: boolean }) {
           <BoardCol key={s.id} id={s.id} title={`${s.no} ${s.name}`} list={ctx.wos.filter((w) => w.station === stationIdx(ctx.cat, s.id) && !w.bay && isLive(w))} needs={needs} />
         ))}
         {/* S-41: orders parked in a bay and killed ones are on the Board too, as columns after the stations (declined orders stay out, as in the Parts list and the ticker) */}
-        {bays.map((b) => (
-          <BoardCol key={b.id} id={`bay-${b.id}`} title={`Bay · ${b.name}`} list={ctx.wos.filter((w) => w.bay === b.id && w.state !== "killed" && w.state !== "done")} needs={needs} />
-        ))}
+        {bays.map((b) => {
+          // Only a bay that holds something gets a column, so empty bays do not crowd the line.
+          const list = ctx.wos.filter((w) => w.bay === b.id && w.state !== "killed" && w.state !== "done");
+          return list.length ? <BoardCol key={b.id} id={`bay-${b.id}`} title={`Bay · ${b.name}`} list={list} needs={needs} /> : null;
+        })}
         {killedList.length ? <BoardCol id="killed" title="Killed" list={killedList} needs={needs} /> : null}
       </div>
     </Panel>
