@@ -176,9 +176,9 @@ button.brand-mark:hover { border-color: var(--accent); background: var(--accent-
   .side.rail .brand { padding: 14px 0; justify-content: center; }
   .side.rail .brand-name { display: none; }
   .side.rail .nav { padding: 4px 8px 16px; }
-  .side.rail .nav h3 { margin: 10px 2px 4px; padding: 6px 0 0; border-top: 1px dashed var(--line2); text-align: center; }
+  .side.rail .nav h3 { margin: 10px -4px 4px; padding: 6px 0 0; border-top: 1px dashed var(--line2); text-align: center; }
   .side.rail .nav .sec:first-child h3 { margin-top: 2px; border-top: 0; }
-  .side.rail .sec-tag { font: 600 9px var(--mono); letter-spacing: .06em; color: var(--ink3); }
+  .side.rail .sec-tag { font: 600 9px var(--mono); letter-spacing: .02em; text-transform: uppercase; color: var(--ink3); }
   .side.rail .nav a { position: relative; justify-content: center; padding: 0; min-height: 36px; margin-bottom: 2px; }
   .side.rail .nav a svg { width: 18px; height: 18px; }
   .side.rail .nav a .lbl { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

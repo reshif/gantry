@@ -40,6 +40,17 @@ const nextId = (p: string): string => `${p}${Date.now().toString(36)}${seq++}`;
 /** A model id for the header chip: no vendor prefix, no date suffix ("claude-sonnet-5-5-20260101" becomes "sonnet-5-5"). The full name stays in the chip's title and the picker. */
 export const shortModel = (id: string): string => (id.replace(/^(claude|gpt|gemini)-/i, "").replace(/-\d{8}$/, "") || id);
 
+/** T-52: the model's display name for the chip ("Sonnet 5.5"): the catalogue name without the vendor word and any "(Bedrock)" tail, else the id made readable ("claude-sonnet-5-5" becomes "Sonnet 5.5"). */
+export function modelName(id: string, models?: Array<{ id: string; name: string }>): string {
+  const named = models?.find((m) => m.id === id)?.name;
+  if (named) return named.replace(/^(claude|gpt|gemini)\s+/i, "").replace(/\s*\([^)]*\)\s*$/, "").trim() || named;
+  const parts = shortModel(id).split("-");
+  const words = parts.filter((p) => !/^\d+$/.test(p));
+  const nums = parts.filter((p) => /^\d+$/.test(p));
+  const w = words.map((x) => x.charAt(0).toUpperCase() + x.slice(1)).join(" ");
+  return (nums.length ? `${w} ${nums.join(".")}` : w).trim() || id;
+}
+
 /** The client-side answers to slash commands, per person: they are not part of the saved thread (the model's conversation is). */
 const localCache = new Map<string, Msg[]>();
 /** Forgets the slash answers kept for this session (sign-out, tests). */
@@ -410,7 +421,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const modeLine = status.isLoading ? "Checking whether a model is configured." : st?.configured ? `Answers come from ${st.model} (${st.vendor}) using tools over the live factory. ${actionsOn ? "It may propose the actions your console rights allow; each waits for your click." : offReason}` : noModels ? (st?.canManageModels ? "No model can be called yet." : "No model can be called yet. Ask a Factory Admin to connect a model vendor in Models.") : (st?.reason ?? "The console could not check its model.");
   // In Settings the model is named once (the select, or the header chip when there is no select), so this line only says what is not working.
   const settingsLine = st?.configured ? (actionsOn ? null : offReason) : modeLine;
-  const label = st?.configured ? shortModel(st.effectiveModel ?? st.model ?? "Model") : status.isLoading ? "Checking" : "No model";
+  const label = st?.configured ? modelName(st.effectiveModel ?? st.model ?? "Model", st.models) : status.isLoading ? "Checking" : "No model";
   const cls = st?.configured ? "ready" : status.isLoading ? "checking" : "absent";
 
   const modeChip = <span className={`ask-badge ask-${cls}${streaming ? " is-busy" : ""}`} id={hasModels && st ? "con-status" : "con-mode"} role="status" title={modeLine} aria-label={`Answer mode: ${label}. ${modeLine}`}>{label}</span>;

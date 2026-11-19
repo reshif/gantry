@@ -118,7 +118,7 @@ export function ProposalCard({ p, mid, serverId, onChange }: { p: Proposal; mid:
       {gate ? (
         <div className={`perm ${gate.allowed ? "pos" : "neg"}`}>
           <Icon name={gate.allowed ? "check" : "lock"} />
-          <span>{gate.allowed ? `You can do this. ${gate.reason}` : `You can't do this: ${gate.needs ? `${gate.needs}. ` : ""}${gate.reason}`}</span>
+          <span>{gate.allowed ? `You can do this. ${gate.reason}` : `You can't do this. ${gate.reason}${gate.needs ? ` Needs: ${gate.needs}.` : ""}`}</span>
         </div>
       ) : null}
       {denied ? <ExplainDenial id={`con-cf-explain-${mid}-${cur.id}`} action={cur.perm.action} project={cur.perm.project ?? null} /> : null}
@@ -150,7 +150,7 @@ export function ProposalCard({ p, mid, serverId, onChange }: { p: Proposal; mid:
       {cur.status === "dismissed" ? <div className="muted small">Dismissed. Nothing changed.</div> : null}
       {pending ? (
         <div className="ccard-actions">
-          <Btn label={goVerb} kind={cur.danger ? "danger" : "primary"} small icon={cur.danger ? "st-kill" : "check"} id={`con-cf-ok-${mid}-${cur.id}`} guard={denied ? gate : null} disabledReason={busy ? "Working on it." : null} onClick={() => void run()} />
+          <Btn label={goVerb} kind={denied ? "quiet" : cur.danger ? "danger" : "primary"} small icon={denied ? "lock" : cur.danger ? "st-kill" : "check"} cls={denied ? "con-cf-locked" : undefined} id={`con-cf-ok-${mid}-${cur.id}`} guard={denied ? gate : null} disabledReason={busy ? "Working on it." : null} onClick={() => void run()} />
           <Btn label="Dismiss" small kind="ghost" id={`con-cf-no-${mid}-${cur.id}`} onClick={() => finish("dismissed", "")} />
         </div>
       ) : null}

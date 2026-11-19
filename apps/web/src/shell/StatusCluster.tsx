@@ -44,11 +44,14 @@ export function StatusCluster() {
     { action: killed ? "restore.factory" : "kill.factory" },
     { action: "line.halt", project: cp?.id },
     { action: "line.resume", project: cp?.id },
+    { action: "restore.project", project: cp?.id },
   ]);
+  // T-39: on a killed project the menu restores it (Halt is refused by the server on it), as the Floor's Line control does
+  const cpKilled = !!cp?.killed;
   if (!s || !me) return null;
   const anyHalted = me.projects.some((p) => p.halted);
   const guardOf = (i: number) => (checks[i]?.pending ? undefined : checks[i]);
-  const [label, tone] = killed ? ["Stopped", "bad"] : anyHalted ? ["Halted", "warn"] : conn === "reconnecting" ? ["Reconnecting", "warn"] : conn === "paused" ? ["Paused", "warn"] : conn === "offline" ? ["Offline", "warn"] : s.factory === "replay" ? ["Replay", "info"] : ["Live", "ok"];
+  const [label, tone] = killed ? ["Stopped", "bad"] : cpKilled ? ["Killed", "bad"] : anyHalted ? ["Halted", "warn"] : conn === "reconnecting" ? ["Reconnecting", "warn"] : conn === "paused" ? ["Paused", "warn"] : conn === "offline" ? ["Offline", "warn"] : s.factory === "replay" ? ["Replay", "info"] : ["Live", "ok"];
   const hint = conn === "live" ? "" : conn === "paused" ? PAUSED_HINT : conn === "reconnecting" ? "Live updates dropped. Reconnecting; screens refresh on a timer meanwhile." : "No network. Showing the last information we had.";
   const stop = makeStopActions(ui, me);
   const open = () => {
@@ -57,11 +60,13 @@ export function StatusCluster() {
     ui.menu(anchor, null, [
       ...(conn === "paused" ? [{ head: "Live updates" }, { label: "Reconnect (opened in another tab)", icon: "right", onClick: () => connection.reconnect() }] : []),
       { head: "Line control" },
-      cp
+      cp && cpKilled
+        ? { label: checks[4]?.override ? "Restore project with a reason" : "Restore project", icon: "right", guard: guardOf(4), onClick: () => stop.restore("project", cp.id) }
+        : cp
         ? { label: cp.halted ? "Resume line" : "Halt line (pause the project)", icon: cp.halted ? "right" : "pause", guard: guardOf(0), onClick: () => (cp.halted ? void stop.resume(cp.id) : stop.halt(cp.id)) }
         : { label: "Halt line", icon: "pause", guard: { allowed: false, reason: "No project to halt.", needs: "" } },
-      ...(cp && repos.length ? [{ head: "Pause one repo" }] : []),
-      ...(cp ? repos.map((r) => ({ label: r.halted ? `Resume ${r.name}` : `Pause ${r.name}`, icon: r.halted ? "right" : "pause", guard: guardOf(r.halted ? 3 : 2), onClick: () => (r.halted ? void stop.resumeRepo(r.id) : stop.haltRepo(r.id, cp.id)) })) : []),
+      ...(cp && !cpKilled && repos.length ? [{ head: "Pause one repo" }] : []),
+      ...(cp && !cpKilled ? repos.map((r) => ({ label: r.halted ? `Resume ${r.name}` : `Pause ${r.name}`, icon: r.halted ? "right" : "pause", guard: guardOf(r.halted ? 3 : 2), onClick: () => (r.halted ? void stop.resumeRepo(r.id) : stop.haltRepo(r.id, cp.id)) })) : []),
       { head: "Whole factory" },
       { label: killed ? "Restore factory" : "Emergency stop", icon: "stop", guard: guardOf(1), onClick: () => (killed ? stop.restore("factory", null) : stop.kill("factory", null)) },
     ]);

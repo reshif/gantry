@@ -876,6 +876,16 @@ describe("Project config", () => {
     expect(document.getElementById("pcf-tab-line")!.textContent).toBe("Line control");
   });
 
+  it("T-38: Line control on a killed project offers Restore project and no Halt or Kill (even when only the session knows it is killed)", async () => {
+    const k = { by: "p-asha", at: Date.now(), reason: "test", mode: "hold" };
+    setup({ "GET /api/v1/me": () => ({ body: { ...ME, projects: [{ ...PAYMENTS, killed: k }, RISK] } }), "GET /api/v1/projects": () => ({ body: [PAYMENTS, RISK] }) });
+    tab("line");
+    mount(<ProjectConfigView />);
+    await waitFor(() => expect(document.getElementById("pcf-restore")?.textContent).toBe("Restore project"));
+    expect(document.getElementById("pcf-halt")).toBeNull();
+    expect(document.getElementById("pcf-kill")).toBeNull();
+  });
+
   it("Name is editable and required (3 characters); a rename goes to the server and its refusal is shown on the field", async () => {
     const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ({ status: 409, body: { ok: false, msg: "Renaming a project is not supported." } }) });
     mount(<ProjectConfigView />);

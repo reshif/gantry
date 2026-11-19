@@ -44,6 +44,18 @@ describe("status chip: Line control menu", () => {
   });
 });
 
+describe("status chip on a killed project (T-39)", () => {
+  it("offers Restore project and no Halt line or per-repo pause", async () => {
+    const killed = { id: "payments", name: "Payments Platform", key: "PAY", status: "active", halted: null, killed: { by: "p-asha", at: Date.now(), reason: "test", mode: "hold" } };
+    withApi([], { projects: [killed] });
+    expect(await screen.findByText("Killed")).toBeTruthy();
+    await open();
+    expect(await screen.findByRole("menuitem", { name: /Restore project/ })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: /Halt line/ })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /^Pause / })).toBeNull();
+  });
+});
+
 describe("Ctrl K palette", () => {
   const palette = () => mount(<PaletteDialog projectId="payments" onClose={() => undefined} />);
   const labels = (): string[] => Array.from(document.querySelectorAll("#palette-list .pal-label")).map((e) => e.textContent ?? "");

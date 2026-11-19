@@ -54,8 +54,8 @@ export const toggleNavSection = (group: string): void =>
   updatePrefs((p) => ({ navCollapsed: { ...p.navCollapsed, [group]: !p.navCollapsed[group] } }));
 
 /** The tiny mono tag a section carries in the rail. */
-export const SECTION_TAG: Record<string, string> = { Overview: "OV", Project: "LINE", Agents: "AGT", Connect: "CON", Govern: "GOV", Reference: "REF" };
-export const sectionTag = (g: string): string => SECTION_TAG[g] ?? g.slice(0, 3).toUpperCase();
+export const SECTION_TAG: Record<string, string> = { Overview: "Home", Project: "Line", Agents: "Agents", Connect: "Connect", Govern: "Govern", Reference: "Refs" };
+export const sectionTag = (g: string): string => SECTION_TAG[g] ?? g.slice(0, 7);
 
 /** Is the key press typed into something (so a bare "[" must not toggle the nav)? */
 export function isTypingTarget(t: EventTarget | null): boolean {

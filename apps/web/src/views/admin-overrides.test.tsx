@@ -2,7 +2,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useOpenTraveler } from "../shell/useTraveler";
 import { anywayLabel, overrideKindOf, overrideWhy } from "./work/override";
-import { shortModel } from "./console";
+import { modelName, shortModel } from "./console";
 import { GateActions } from "./work/gate";
 import { mockApi, mount, resetApp } from "./floor/testkit";
 import { useMe } from "../api/queries";
@@ -141,5 +141,9 @@ describe("Console header chip", () => {
     expect(shortModel("claude-sonnet-5-5-20260101")).toBe("sonnet-5-5");
     expect(shortModel("claude-opus-5")).toBe("opus-5");
     expect(shortModel("s")).toBe("s");
+    // T-52 / T-33: the chip names the model ("Sonnet 5.5"), from the catalogue name when there is one
+    expect(modelName("claude-sonnet-5-5")).toBe("Sonnet 5.5");
+    expect(modelName("claude-sonnet-5-5-20260101")).toBe("Sonnet 5.5");
+    expect(modelName("claude-opus-5-5", [{ id: "claude-opus-5-5", name: "Claude Opus 5.5 (Bedrock)" }])).toBe("Opus 5.5");
   });
 });

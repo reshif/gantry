@@ -147,7 +147,7 @@ export function Nav({ me, current, project, open, onNavigate }: { me: Me; curren
                 {rail ? (
                   <>
                     <span className="sr-only">{label}</span>
-                    <span className="sec-tag" aria-hidden="true">{sectionTag(gname)}</span>
+                    <span className="sec-tag" aria-hidden="true" title={label}>{sectionTag(gname)}</span>
                   </>
                 ) : (
                   <button type="button" className="sec-h" aria-expanded={!folded} aria-controls={sid} onClick={() => toggleNavSection(gname)}>

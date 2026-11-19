@@ -91,9 +91,11 @@ describe("collapsible nav", () => {
     expect(document.getElementById("nav-fly")).toBeNull();
   });
 
-  it("section tags are short mono codes", () => {
-    expect(sectionTag("Overview")).toBe("OV");
-    expect(sectionTag("Project")).toBe("LINE");
-    expect(sectionTag("Odd")).toBe("ODD");
+  it("section tags are short readable words", () => {
+    expect(sectionTag("Overview")).toBe("Home");
+    expect(sectionTag("Project")).toBe("Line");
+    // T-35: readable words, not OV / AGT / CON
+    expect(["Overview", "Project", "Agents", "Connect", "Govern", "Reference"].map(sectionTag).every((t) => t.length >= 4 && !/^(OV|AGT|CON|GOV|REF)$/.test(t))).toBe(true);
+    expect(sectionTag("Odd")).toBe("Odd");
   });
 });
