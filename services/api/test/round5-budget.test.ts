@@ -37,35 +37,35 @@ d("round 5 budget (S-43, S-44, S-45)", () => {
     expect((await stops("WO-S1"))[0].lifted_at, "halt still on after the raise").not.toBeNull();
   });
 
-  it("S-43: a monthly budget of 0 is accepted and means no cap at all", async () => {
+  it("S-43 (owner decision): a monthly budget of 0 means no cap, never a $0 cap", async () => {
     await w.call(ADMIN, "PUT", "/api/v1/budgets/payments", { perWorkOrder: 0 });
     const r = await run("WO-S2");
     const set = await w.call(ADMIN, "PATCH", "/api/v1/projects/payments/config", { path: "budget.monthly", value: 0 });
     expect(set.status, JSON.stringify(set.body)).toBe(200);
     await t.app.inject({ method: "POST", url: `/internal/v1/runs/${r.runId}/usage`, headers: EDGE, payload: { token: r.token, requestId: "rq-b2", model: "claude-sonnet-5-5", inputTokens: 5_000_000, outputTokens: 5_000_000 } });
-    const a = await r.authorize();
-    expect(a.allow, "cap 0 meant no spend allowed").toBe(false);
-    expect(set.body.msg).toMatch(/\$0 cap: nothing metered runs/);
-    const rb = await w.call("p-asha", "GET", "/api/v1/budgets");
-    const read = (rb.body).find((x: { project: string }) => x.project === "payments");
-    expect(read).toMatchObject({ monthly: 0, capped: true });
+    expect((await r.authorize()).allow, "0 is no cap: spend is allowed").toBe(true);
+    expect(await stops("WO-S2"), "no budget halt from an uncapped project").toEqual([]);
+    expect(set.body.msg).not.toMatch(/\$0 cap|nothing metered/);
+    expect(await w.q(`select monthly_zero_cap from budgets where project_id = 'payments'`)).toEqual([{ monthly_zero_cap: false }]);
+    const read = (await w.call("p-asha", "GET", "/api/v1/budgets")).body.find((x: { project: string }) => x.project === "payments");
+    expect(read).toMatchObject({ monthly: 0, capped: false });
   });
 
-  it("S-43: null takes the cap off (explicit no cap); a row written before the change that holds 0 without the flag is still no cap", async () => {
+  it("S-43: null also means no cap; a row that still carries the old zero-cap flag is uncapped too; a real amount is capped", async () => {
     await w.q(`delete from usage_meter where project_id = 'payments'`);
     const r = await run("WO-S2B");
     const off = await w.call(ADMIN, "PATCH", "/api/v1/projects/payments/config", { path: "budget.monthly", value: null });
     expect(off.status, JSON.stringify(off.body)).toBe(200);
     expect((await w.call("p-asha", "GET", "/api/v1/budgets")).body.find((x: { project: string }) => x.project === "payments")).toMatchObject({ monthly: 0, capped: false });
     expect((await r.authorize()).allow, "no cap").toBe(true);
-    await w.call(ADMIN, "PATCH", "/api/v1/projects/payments/config", { path: "budget.monthly", value: 0 });
-    expect((await r.authorize()).allow, "$0 cap").toBe(false);
-    // An older row: 0 and no flag (what existed before the flag) keeps meaning no cap, so the change halts nothing on its own.
-    await w.q(`update budgets set monthly_limit_micros = 0, monthly_zero_cap = false where project_id = 'payments'`);
-    const r2 = await run("WO-S2C");
-    expect((await r2.authorize()).allow, "legacy 0 row").toBe(true);
-    const lift = await w.call(ADMIN, "PATCH", "/api/v1/projects/payments/config", { path: "budget.monthly", value: 1000 });
-    expect(lift.status).toBe(200);
+    await w.q(`update budgets set monthly_limit_micros = 0, monthly_zero_cap = true where project_id = 'payments'`);
+    expect((await r.authorize()).allow, "a leftover zero-cap flag is ignored").toBe(true);
+    expect((await w.call("p-asha", "GET", "/api/v1/budgets")).body.find((x: { project: string }) => x.project === "payments")).toMatchObject({ capped: false });
+    const cap = await w.call(ADMIN, "PATCH", "/api/v1/projects/payments/config", { path: "budget.monthly", value: 0.000001 });
+    expect(cap.status).toBe(200);
+    expect(await w.q(`select monthly_zero_cap from budgets where project_id = 'payments'`)).toEqual([{ monthly_zero_cap: false }]);
+    expect((await w.call("p-asha", "GET", "/api/v1/budgets")).body.find((x: { project: string }) => x.project === "payments")).toMatchObject({ capped: true });
+    await w.call(ADMIN, "PATCH", "/api/v1/projects/payments/config", { path: "budget.monthly", value: 1000 });
   });
 
   it("S-44: a parallel work order is refused by the project cap that another work order crossed, with no halt on it", async () => {

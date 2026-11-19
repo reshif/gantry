@@ -348,6 +348,8 @@ export interface Project {
   guidelines?: ProjectGuidelines;
   /** People on call for this project, chosen by its admins. Factory Admins always count as on call too (see isOnCall). */
   oncall?: Id[];
+  /** The default page to the people on call for halts, blocked work orders, security holds and escalations (kill and restore always page). */
+  pageOnCall?: boolean;
   [extra: string]: unknown;
 }
 

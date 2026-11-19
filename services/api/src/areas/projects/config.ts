@@ -15,6 +15,7 @@ export type ConfigEdit =
   | { kind: "classes"; value: WorkClass[] }
   | { kind: "notifications"; value: z.infer<typeof RouteSchema>[] }
   | { kind: "mcp"; value: string[] }
+  | { kind: "oncall-page"; value: boolean }
   | { kind: "budget-monthly"; value: number | null }
   | { kind: "budget-alert"; value: number };
 
@@ -34,6 +35,7 @@ export function parseConfigEdit(path: string, value: unknown): ConfigEdit {
     if (a === "notifications") return { kind: "notifications", value: parse(z.array(RouteSchema).max(100), value, "Notification routes") };
     if (a === "mcp") return { kind: "mcp", value: parse(z.array(z.string().min(1).max(100)).max(100), value, "MCP servers") };
   }
+  if (a === "notifications" && p.length === 2 && b === "oncallPage") return { kind: "oncall-page", value: parse(z.boolean(), value, "On-call page") };
   if (a === "flow" && p.length === 2 && b === "slots") return { kind: "slots", value: parse(z.number().int().min(1).max(8), value, "Coding slots") };
   if (a === "flow" && p.length === 2 && b === "classes") return { kind: "classes", value: parse(z.array(ClassSchema).min(1).max(100), value, "Classes") as WorkClass[] };
   if (a === "flow" && b === "stations" && c && p.length === 4) {
@@ -48,4 +50,4 @@ export function parseConfigEdit(path: string, value: unknown): ConfigEdit {
 }
 
 /** The catalogue action a path needs (legacy: approvers.edit, notify.edit, otherwise project.config). */
-export const actionFor = (e: ConfigEdit): "notify.edit" | "project.config" => (e.kind === "notifications" ? "notify.edit" : "project.config");
+export const actionFor = (e: ConfigEdit): "notify.edit" | "project.config" => (e.kind === "notifications" || e.kind === "oncall-page" ? "notify.edit" : "project.config");

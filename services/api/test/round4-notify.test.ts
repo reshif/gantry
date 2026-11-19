@@ -79,10 +79,12 @@ d("round 4: notifications of kill, restore and resume", () => {
     await w.q(`delete from integration_instances`);
     const k = await w.call("p-asha", "POST", "/api/v1/stops", { scope: "project", id: "payments", mode: "kill", reason: "Bad release", confirmText: "Payments Platform", inFlight: "hold" });
     expect(k.status, JSON.stringify(k.body)).toBe(200);
-    const dl = await w.q(`select status, error, event_type from deliveries where event_type = 'kill'`);
+    const dl = await w.q(`select status, error, event_type from deliveries where event_type = 'kill' and request->>'page' is null`);
     expect(dl).toHaveLength(1);
     expect(dl[0].status).toBe("failed");
     expect(dl[0].error).toMatch(/Factory Admins/);
+    // The default on-call page has nobody to go through either, and is logged as failed too.
+    expect((await w.q(`select status from deliveries where event_type = 'kill' and request->>'page' = 'true'`)).map((r) => r.status)).toEqual(["failed"]);
     await w.call("p-asha", "POST", "/api/v1/stops/project%3Apayments/restore", { reason: "All clear" });
   });
 
@@ -116,6 +118,7 @@ d("round 4: notifications of kill, restore and resume", () => {
     const dest = [{ channel: "email", target: "asha@acme.dev", integration: inst }];
     const route = (id: string, event: string) => ({ id, event, dest, template: "", cond: { classes: [], priority: [], hours: "any" }, enabled: true, fields: {} });
     expect((await patch([route("NR-1", "andon"), route("NR-2", "kill"), route("NR-3", "restore")])).status).toBe(200);
+    await w.q(`update projects set config = jsonb_set(config, '{oncallPage}', 'false') where id = 'payments'`); // this test is about the routes: no default page for the halt
     const h = await w.call("p-meera", "POST", "/api/v1/stops", { scope: "project", id: "payments", mode: "halt", reason: "Flaky tests today" });
     expect(h.status, JSON.stringify(h.body)).toBe(200);
     expect(await outboxFor("halt")).toHaveLength(1);
@@ -127,6 +130,7 @@ d("round 4: notifications of kill, restore and resume", () => {
     const k = await w.call("p-asha", "POST", "/api/v1/stops", { scope: "project", id: "payments", mode: "kill", reason: "Bad release", confirmText: "Payments Platform", inFlight: "hold" });
     expect(k.status).toBe(200);
     expect((await w.call("p-asha", "POST", "/api/v1/stops/project%3Apayments/restore", { reason: "All clear" })).status).toBe(200);
-    expect(await outboxFor("restore")).toHaveLength(1);
+    expect((await w.q(`select 1 from deliveries where event_type = 'restore' and route_id is not null`))).toHaveLength(1);
+    await w.q(`update projects set config = config - 'oncallPage' where id = 'payments'`);
   });
 });

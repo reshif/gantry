@@ -77,7 +77,32 @@ export function resolveDest(insts: InstInfo[], d: Dest, project: string | null, 
   return { ok: true, inst, transport, target: d.target };
 }
 
-/** Email recipients: addresses as written, or a role keyword (submitter, approvers, project admins) resolved against people and role assignments. */
+const FACTORY_ADMINS = `select distinct p.id, p.email from people p join effective_role_assignments ra on ra.org_id = p.org_id and ra.person_id = p.id
+       where p.org_id = $1 and p.status = 'active' and p.email <> '' and ra.role_id = 'factory_admin' and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now()) order by p.email`;
+
+export interface OnCall { ids: string[]; emails: string[]; /** The project's list had nobody active and present, so these are the Factory Admins. */ fallback: boolean }
+
+/** Active Factory Admins with an email address (the fallback for an empty on-call list, and the last line for kill and restore). */
+export async function factoryAdmins(db: Queryable, orgId: string): Promise<Array<{ id: string; email: string }>> {
+  return (await db.query<{ id: string; email: string }>(FACTORY_ADMINS, [orgId])).rows;
+}
+
+/**
+ * The people to page for a project: its on-call list (projects.config.oncall) minus anyone deactivated, without an email address or away right now (their away window
+ * covers `at`). When that leaves nobody, the Factory Admins are the fallback (away or not: somebody has to be told).
+ */
+export async function resolveOnCall(db: Queryable, orgId: string, project: string | null, at: Date = new Date()): Promise<OnCall> {
+  const list = project ? (await db.query<{ oncall: unknown }>(`select config -> 'oncall' as oncall from projects where org_id = $1 and id = $2`, [orgId, project])).rows[0]?.oncall : null;
+  const ids = Array.isArray(list) ? list.filter((x): x is string => typeof x === "string") : [];
+  const ms = at.getTime();
+  const rows = ids.length ? (await db.query<{ id: string; email: string; away: { from?: number; to?: number } | null }>(`select id, email, away from people where org_id = $1 and id = any($2) and status = 'active' and email <> ''`, [orgId, ids])).rows : [];
+  const present = rows.filter((r) => !(r.away && typeof r.away.from === "number" && typeof r.away.to === "number" && r.away.from <= ms && ms <= r.away.to));
+  if (present.length) return { ids: present.map((r) => r.id), emails: [...new Set(present.map((r) => r.email.toLowerCase()))], fallback: false };
+  const admins = await factoryAdmins(db, orgId);
+  return { ids: admins.map((r) => r.id), emails: [...new Set(admins.map((r) => r.email.toLowerCase()))], fallback: true };
+}
+
+/** Email recipients: addresses as written, or a role keyword (submitter, approvers, on-call, project admins) resolved against people and role assignments. */
 export async function resolveRecipients(db: Queryable, orgId: string, target: string, ctx: { project: string | null; woId: string | null; gateId: string | null; mentioned?: string | null }, skipped: Array<{ address: string; reason: string }> = []): Promise<string[]> {
   const out = new Set<string>();
   for (const tok of target.split(/[,;]+/).map((s) => s.trim()).filter(Boolean)) {
@@ -108,6 +133,8 @@ export async function resolveRecipients(db: Queryable, orgId: string, target: st
     } else if (kw === "mentioned" && ctx.mentioned) {
       const r = (await db.query<{ email: string }>(`select email from people where org_id = $1 and id = $2 and status = 'active'`, [orgId, ctx.mentioned])).rows[0];
       if (r?.email) out.add(r.email.toLowerCase());
+    } else if (kw === "on-call" || kw === "on call" || kw === "oncall") {
+      for (const e of (await resolveOnCall(db, orgId, ctx.project)).emails) out.add(e);
     } else if (kw === "project admins" || kw === "project admin") {
       for (const r of (await db.query<{ email: string }>(
         `select distinct p.email from people p join effective_role_assignments ra on ra.org_id = p.org_id and ra.person_id = p.id where p.org_id = $1 and p.status = 'active' and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now()) and ra.role_id in ('project_admin','factory_admin') and (ra.project_id is null or ra.project_id = $2)`,
