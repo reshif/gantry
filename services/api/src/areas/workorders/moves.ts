@@ -271,6 +271,23 @@ async function retryMerge(fx: Fx, w: Wo, by: string): Promise<CmdResult> {
   const pr = (await fx.tx.query<{ state: string; head_sha: string | null }>(`select state, head_sha from pull_requests where org_id = $1 and wo_id = $2 and number = $3`, [fx.orgId, w.id, merging.prNumber])).rows[0];
   if (!pr || pr.state !== "open") throw conflict(`Pull request #${merging.prNumber} is not open, so there is nothing to merge. Reopen it on GitHub and retry, or return ${w.id} to Review.`);
   if (pr.head_sha !== merging.headSha) throw conflict(`Pull request #${merging.prNumber} changed after it was approved. Return ${w.id} to Review so the new commit is approved.`);
+  // The merge has not happened yet, so the order needs a place at its station again: a full station keeps it in its bay.
+  const station = String(w.data.bayFrom ?? "review");
+  if (await wipHoldCheck(fx, w, station, "merge", { by })) {
+    await saveWo(fx.tx, fx.orgId, w);
+    await dispatchQueued(fx, w.project);
+    const live = w.data.wipWait as { live: number; limit: number };
+    return done(fx, `${w.id}: ${stationDef(fx.catalog, station)?.name ?? station} is full (${live.live}/${live.limit}); the merge is asked again when a place frees.`, w.project, { version: w.version, waiting: true });
+  }
+  fx.wipAdmit = w.id;
+  await retryMergeCore(fx, w, by);
+  return done(fx, `${w.id}: merging #${merging.prNumber} again.`, w.project, { version: w.version });
+}
+
+/** The merge request again (the place at the station is already settled). Saves the order. */
+export async function retryMergeCore(fx: Fx, w: Wo, by: string): Promise<void> {
+  const merging = (w.data.merging ?? {}) as { prNumber?: number; headSha?: string };
+  if (!merging.prNumber || !merging.headSha) throw conflict(`${w.id} has no approved merge to retry. Return it to Review instead.`);
   await leaveBay(fx, w);
   w.position = String(w.data.bayFrom ?? "review");
   for (const k of ["bayReason", "bayFrom", "bayAt", "bayCause"]) delete w.data[k];
@@ -281,7 +298,6 @@ async function retryMerge(fx: Fx, w: Wo, by: string): Promise<CmdResult> {
   note(w, fx, by, `Retried the merge of #${merging.prNumber} at ${merging.headSha.slice(0, 7)}.`);
   ev(fx, w, "wo.retry", { station: w.position, text: `merge #${merging.prNumber}` });
   await saveWo(fx.tx, fx.orgId, w);
-  return done(fx, `${w.id}: merging #${merging.prNumber} again.`, w.project, { version: w.version });
 }
 
 /** `PUT .../record/summary`: the person-written summary on the record (legacy `setRecordSummary`; the right is wo.answer). */

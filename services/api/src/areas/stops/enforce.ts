@@ -155,7 +155,8 @@ async function restoreOne(fx: Fx, w: Wo, s: StopDb, catalog: Catalog): Promise<v
     w.position = prev.position;
     note(w, fx, fx.actor, `Restored after ${s.mode === "kill" ? "kill" : "halt"}: ${s.reason}`);
     // The kill freed its place and someone may have taken it: a restore never pushes a station over its limit, the order waits (kind restore) until a place frees.
-    const reenters = (w.state === "running" || w.state === "waiting") && !catalog.bays.some((b) => b.id === w.position);
+    // Whatever state it was killed in (a restore that was itself waiting is parked on its station), an order back on a station needs a place; only one in a bay does not.
+    const reenters = !catalog.bays.some((b) => b.id === w.position);
     const target = ((w.data.stopClosedGates as string[] | undefined) ?? []).includes("G0G1") ? "intake" : prev.station;
     if (reenters && (await wipHoldCheck(fx, w, target, "restore", { force: true, by: fx.actor, restore: { state: w.state, station: prev.station, fencing: s.fencing } }))) {
       ev(fx, w, "wo.state", { from: "killed", to: "parked", station: prev.station, text: "restored, waiting for a place" }, { category: "kill" });

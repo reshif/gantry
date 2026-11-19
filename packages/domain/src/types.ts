@@ -746,7 +746,7 @@ export type WorkOrderState = WoStateId;
 export type WoBayId = string;
 
 /** Why a work order waits before a full station (the counts are those when it began to wait; `wipStatus` has the live ones). */
-export interface WipWait { station: Id; since: Ms; live: number; limit: number; /** Why it waits: it advanced, was sent back, is retried, returns from a bay, or was restored. */ kind?: "forward" | "back" | "retry" | "unpark" | "restore" }
+export interface WipWait { station: Id; since: Ms; live: number; limit: number; /** Why it waits: it advanced, was sent back, is retried, returns from a bay, or was restored. */ kind?: "forward" | "back" | "retry" | "unpark" | "restore" | "merge" }
 
 export interface WorkOrder {
   id: Id;

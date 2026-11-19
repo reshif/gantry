@@ -241,12 +241,12 @@ async function wipFull(fx: Fx, w: Wo, project: Project, stationId: string): Prom
 const stationName = (fx: Fx, id: string): string => stationDef(fx.catalog, id)?.name ?? id;
 
 /** Why an order waits for a full station: it advanced (forward), was sent back (back), is retried (retry), or returns from a bay (unpark). */
-export type WipKind = "forward" | "back" | "retry" | "unpark" | "restore";
+export type WipKind = "forward" | "back" | "retry" | "unpark" | "restore" | "merge";
 interface WipWaitData { station: string; since: number; live: number; limit: number; kind?: WipKind; by?: string; reason?: string; restore?: { state: string; station: string; fencing: string } }
 
-/** Whether the order already holds a place at the station (a redo or a retry at the station it is at takes none, whatever state it is in). */
+/** Whether the order already holds a place at the station: live there (running or waiting). A failed or blocked order is not counted, so its retry or redo needs a place like any entry. */
 const holdsPlaceAt = (w: Wo, to: string): boolean =>
-  (w.position === to && (w.state === "running" || w.state === "waiting" || w.state === "failed" || w.state === "blocked")) || (to === "build" && w.position === "queue" && w.state === "parked" && w.data.bayFrom === "build");
+  (w.position === to && (w.state === "running" || w.state === "waiting")) || (to === "build" && w.position === "queue" && w.state === "parked" && w.data.bayFrom === "build");
 
 /**
  * THE choke point for a limit: every entry into a station (an advance, a send-back, a retry, a return from a bay, a restore after a kill, `enterStation` itself) asks here.
@@ -271,12 +271,13 @@ async function holdForWip(fx: Fx, w: Wo, next: string, full: { live: number; lim
   const text = `Waiting: ${stationName(fx, next)} is full (${full.live}/${full.limit})`;
   if (kind === "forward") closeEntry(w, fx, `waiting for ${stationName(fx, next)}`);
   // A finished or sent-back order waits on the belt; a retry or a return from a bay stays as it is (failed, or in its bay) until it can go in; a restored order is parked on its station, not counted.
-  if (kind === "forward" || kind === "back") w.state = "waiting";
+  // (a failed order redone at its own station stays failed, as a retry does: it is not counted there, and counting it would make it wait for itself)
+  if (kind === "forward" || (kind === "back" && w.position !== next)) w.state = "waiting";
   if (kind === "restore") w.state = "parked";
   w.data.wipWait = { station: next, since: fx.now.getTime(), live: full.live, limit: full.limit, kind, ...extra } satisfies WipWaitData;
   w.data.blockReason = text;
   await releaseSlot(fx, w);
-  note(w, fx, "system", `${text}. ${w.id} waits ${kind === "unpark" ? "in its bay" : kind === "restore" ? "after its restore" : `at ${stationName(fx, from)}`} until a place frees.`);
+  note(w, fx, "system", `${text}. ${w.id} waits ${kind === "unpark" || kind === "merge" ? "in its bay" : kind === "restore" ? "after its restore" : `at ${stationName(fx, from)}`} until a place frees.`);
   ev(fx, w, "wo.wip.wait", { station: from, to: next, live: full.live, limit: full.limit, kind, text });
   fx.changes.add("floor");
 }
@@ -304,6 +305,7 @@ async function runWipEntry(fx: Fx, w: Wo, how: { override?: { by: string; reason
   } else {
     const m = await import("./moves.js");
     if (kind === "retry") await m.retryCore(fx, w, wait.by ?? "system");
+    else if (kind === "merge") await m.retryMergeCore(fx, w, wait.by ?? "system");
     else await m.unparkCore(fx, w, wait.by ?? "system", wait.reason);
   }
   } finally {

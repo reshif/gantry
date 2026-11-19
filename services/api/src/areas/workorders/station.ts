@@ -10,7 +10,7 @@
 import { can, evaluateGuardrails, stationDef } from "@gantry/domain";
 import { flowFor } from "./ctx.js";
 import { schedule, type Tx } from "@gantry/db";
-import { flushFx, attemptIsCurrent, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, advance, coveringStop, enterBay, enterStation, ev, leaveBay, loadOne, note, openGate, openInstanceOf, releaseSlot, startAttempt, stationIdOf, dispatchQueued, wipHoldCheck, type Fx } from "./engine.js";
+import { flushFx, attemptIsCurrent, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, advance, coveringStop, enterBay, enterStation, ev, leaveBay, loadOne, note, openGate, openInstanceOf, releaseSlot, startAttempt, stationIdOf, dispatchQueued, wipHoldCheck, wipLive, wipLimitOf, projectOf, type Fx } from "./engine.js";
 import { readCatalog, readOrg } from "../../core/read/index.js";
 import { lockWo, saveWo, type Wo } from "./model.js";
 import { ensureStationDocument } from "./station-docs.js";
@@ -341,6 +341,7 @@ export async function recordMerged(tx: Tx, orgId: string, woId: string, o: { prN
   // S-60: only the bay a blocked merge itself uses (cause "merge") may hold an order whose approval is still pending; a decline, park or hold cancels the approval first.
   if (bayOf(fx.catalog, w) && w.data.bayCause !== "merge") return { applied: false, reason: "The work order is in a bay; a merge never takes it out of one." };
   if (bayOf(fx.catalog, w)) {
+    w.data.mergedFromBay = true;
     await leaveBay(fx, w);
     for (const k of ["bayReason", "bayAt", "bayCause"]) delete w.data[k];
     w.position = String(w.data.bayFrom ?? w.position);
@@ -351,8 +352,18 @@ export async function recordMerged(tx: Tx, orgId: string, woId: string, o: { prN
   w.data.blockReason = null;
   note(w, fx, "system", `Pull request #${o.prNumber} merged${o.mergeSha ? ` at ${o.mergeSha.slice(0, 7)}` : ""}.`);
   ev(fx, w, "wo.merged", { text: `#${o.prNumber}` }, { category: "flow" });
+  const wasBay = !!w.data.mergedFromBay;
+  delete w.data.mergedFromBay;
   await advance(fx, w, "system");
   await saveWo(tx, orgId, w);
+  // The exception: the merge already happened, so the order comes back from its bay whatever the station holds. When it then waits there for the next station it
+  // is one over the limit until it drains: an explicit audit event says so, and the Board shows the station over its limit.
+  if (wasBay && w.state === "waiting" && w.data.wipWait) {
+    const station = stationIdOf(fx.catalog, w);
+    const limit = wipLimitOf(await projectOf(fx, w.project), station);
+    const live = await wipLive(fx, w.project, station);
+    if (limit && live > limit) ev(fx, w, "wo.wip.over_limit", { station, live, limit, text: `Returned from its bay after the merge of #${o.prNumber}: ${live} at ${stationDef(fx.catalog, station)?.name ?? station}, limit ${limit}` }, { category: "approvals" });
+  }
   await flushFx(fx);
   return { applied: true };
 }

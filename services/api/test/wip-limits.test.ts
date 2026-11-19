@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 import { world } from "./flow-helpers.js";
-import { advance, enterStation, finish, flushFx, promoteWip } from "../src/areas/workorders/engine.js";
+import { advance, dispatchQueued, enterStation, finish, flushFx, promoteWip } from "../src/areas/workorders/engine.js";
 import { lockWo, saveWo } from "../src/areas/workorders/model.js";
 
 const d = TEST_URL ? describe : describe.skip;
@@ -289,11 +289,15 @@ d("station WIP limits", () => {
       const a = await pos("WO-9522");
       expect([a.position, a.state, a.data.wipWait]).toEqual(["verify", "running", undefined]);
       expect((await w.liveAttempt("WO-9522"))?.station).toBe("verify");
-      // G-W5: failed at the station it is at, so it holds its place: the retry is never held
+      // G-W8: a failed order at its own full station is not counted, so its retry waits like any other entry
+      await w.q(`update work_orders set state = 'done' where id = 'WO-9522'`);
       await w.insertWo("WO-9523", { position: "verify", state: "failed" });
       await w.insertWo("WO-9524", { position: "verify", state: "running" });
       const r2 = await w.call("p-meera", "POST", `/api/v1/work-orders/WO-9523/retry`, {});
       expect(r2.status, JSON.stringify(r2.body)).toBe(200);
+      expect([(await pos("WO-9523")).state, (await pos("WO-9523")).data.wipWait?.kind]).toEqual(["failed", "retry"]);
+      expect(await liveAt("verify")).toBe(1);
+      expect((await park("WO-9524")).status).toBe(200);
       expect([(await pos("WO-9523")).state, (await pos("WO-9523")).data.wipWait]).toEqual(["running", undefined]);
     });
 
@@ -473,7 +477,7 @@ d("station WIP limits", () => {
       for (const st of stations) await setWip(0, st);
     });
 
-    it("G-W5: a redo of a failed order at its own full station is never held", async () => {
+    it("G-W8: a redo of a failed order at its own full station waits like a retry (it is not counted); a redo of a live order is never held", async () => {
       await reset();
       await setWip(1);
       await w.insertWo("WO-9651", { position: "verify", state: "running" });
@@ -481,7 +485,92 @@ d("station WIP limits", () => {
       const r = await w.call("p-meera", "POST", `/api/v1/work-orders/WO-9652/send-back`, { toStation: "verify", note: "Redo the checks please" });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
       const b = await pos("WO-9652");
-      expect([b.state, b.data.wipWait]).toEqual(["running", undefined]);
+      expect([b.state, b.data.wipWait?.kind]).toEqual(["failed", "back"]);
+      expect(await liveAt("verify")).toBe(1);
+      expect((await park("WO-9651")).status).toBe(200);
+      expect([(await pos("WO-9652")).state, (await pos("WO-9652")).data.wipWait]).toEqual(["running", undefined]);
+    });
+
+    it("G-W7: a restore that waits, killed and restored again, goes through the check again", async () => {
+      await reset();
+      await setWip(1);
+      await w.insertWo("WO-9661", { position: "verify", state: "running" });
+      await w.insertWo("WO-9662", { position: "build", state: "running" });
+      await adv("WO-9662");
+      const { reconcileStop } = await import("../src/areas/stops/enforce.js");
+      const rec = async () => { const row = (await w.q<{ id: string }>(`select id from stops order by set_at desc limit 1`))[0]!.id; await w.tx((tx) => reconcileStop(tx, row)); };
+      const kill = async (id: string) => { expect((await w.call("p-asha", "POST", "/api/v1/stops", { scope: "wo", id, mode: "kill", reason: "Bad output seen", inFlight: "cancel", confirmText: id })).status).toBeLessThan(300); await rec(); };
+      const restore = async (id: string) => { expect((await w.call("p-asha", "POST", `/api/v1/stops/${encodeURIComponent(`workorder:${id}`)}/restore`, { reason: "The incident is over" })).status).toBe(200); await rec(); };
+      await kill("WO-9661"); // the waiter takes the freed place
+      expect((await pos("WO-9662")).position).toBe("verify");
+      await restore("WO-9661"); // waits (parked)
+      expect((await pos("WO-9661")).data.wipWait?.kind).toBe("restore");
+      await kill("WO-9661"); // killed while waiting
+      await restore("WO-9661"); // restored again: must wait again, not walk in
+      expect(await liveAt("verify")).toBe(1);
+      expect((await pos("WO-9661")).data.wipWait?.kind).toBe("restore");
+      expect((await park("WO-9662")).status).toBe(200);
+      expect([(await pos("WO-9661")).position, (await pos("WO-9661")).state]).toEqual(["verify", "running"]);
+    });
+
+    it("G-W9: an epic child created into a full Build waits; Intake creation stays unlimited", async () => {
+      await reset();
+      await setWip(1, "build");
+      await setWip(1, "intake");
+      await w.insertWo("WO-9671", { position: "build", state: "running" });
+      await w.insertWo("WO-9672", { position: "intake", state: "waiting" });
+      await w.insertWo("WO-9670", { position: "plan", state: "waiting", cls: "epic" });
+      const { createWorkOrder } = await import("../src/areas/workorders/create.js");
+      await w.tx(async (tx) => {
+        const fx = await w.fxIn(tx);
+        await createWorkOrder(fx, { id: "WO-9673", project: proj, repo: "payments-api", title: "Child one", requestedBy: "p-tomas", source: "epic", parent: "WO-9670", forceCls: "feature", childOf: { by: "p-tomas", parent: "WO-9670" } });
+        await createWorkOrder(fx, { id: "WO-9674", project: proj, repo: "payments-api", title: "A new request", requestedBy: "p-tomas", source: "web", forceCls: "feature" });
+        await flushFx(fx);
+      });
+      const c = await pos("WO-9673");
+      expect([c.position, c.state, c.data.wipWait?.station]).toEqual(["intake", "waiting", "build"]);
+      expect((await pos("WO-9674")).position).toBe("intake"); // unlimited at creation, though Intake is at its limit
+      expect((await park("WO-9671")).status).toBe(200);
+      expect([(await pos("WO-9673")).position, (await pos("WO-9673")).state]).toEqual(["build", "running"]);
+      await setWip(0, "build");
+      await setWip(0, "intake");
+    });
+
+    it("G-W9: Retry merge from the person bay waits in the bay when Review is full", async () => {
+      await reset();
+      await setWip(1, "review");
+      await w.insertWo("WO-9681", { position: "review", state: "waiting" });
+      await w.insertWo("WO-9682", { position: "person", state: "parked", data: { bayFrom: "review", bayCause: "merge", bayReason: "Merge blocked", merging: { prNumber: 9, headSha: "abc1234" }, history: [], log: [] } });
+      await w.q(`insert into pull_requests (org_id, id, repo_id, wo_id, number, title, head_sha) values ($1,'pr-t-9682','payments-api','WO-9682',9,'t','abc1234')`, [t.orgId]);
+      const r = await w.call("p-meera", "POST", `/api/v1/work-orders/WO-9682/retry`, {});
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(r.body.msg).toMatch(/Review and merge is full \(1\/1\)/);
+      expect([(await pos("WO-9682")).position, (await pos("WO-9682")).data.wipWait?.kind]).toEqual(["person", "merge"]);
+      expect(await liveAt("review")).toBe(1);
+      await w.q(`update work_orders set state = 'done' where id = 'WO-9681'`);
+      await w.tx(async (tx) => { const fx = await w.fxIn(tx); await dispatchQueued(fx, proj); await flushFx(fx); });
+      const a = await pos("WO-9682");
+      expect([a.position, a.state, a.data.wipWait]).toEqual(["review", "waiting", undefined]);
+      expect((await w.q(`select 1 from jobs where kind = 'merge.request' and payload->>'woId' = 'WO-9682'`)).length).toBeGreaterThan(0);
+      await setWip(0, "review");
+    });
+
+    it("G-W9: a recorded merge from the person bay is the exception, and leaves an explicit over-limit event", async () => {
+      await reset();
+      await setWip(1, "review");
+      await setWip(1, "close");
+      await w.insertWo("WO-9691", { position: "review", state: "waiting" });
+      await w.insertWo("WO-9692", { position: "close", state: "running" });
+      await w.insertWo("WO-9693", { position: "person", state: "parked", data: { bayFrom: "review", bayCause: "merge", bayReason: "Merge blocked", merging: { prNumber: 11, headSha: "abc1234" }, history: [], log: [] } });
+      const { recordMerged } = await import("../src/areas/workorders/station.js");
+      expect((await w.tx((tx) => recordMerged(tx, t.orgId, "WO-9693", { prNumber: 11 }))).applied).toBe(true);
+      const b = await pos("WO-9693");
+      expect([b.position, b.state, b.data.wipWait?.station]).toEqual(["review", "waiting", "close"]);
+      const e = await evs("wo.wip.over_limit", "WO-9693");
+      expect(e).toHaveLength(1);
+      expect(e[0].after).toMatchObject({ station: "review", live: 2, limit: 1 });
+      await setWip(0, "review");
+      await setWip(0, "close");
     });
   });
 });

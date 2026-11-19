@@ -89,7 +89,8 @@ export async function createWorkOrder(fx: Fx, i: CreateInput): Promise<Created> 
     // No agent ran at Intake for an inherited brief: no history entry is invented.
     w.data.history = [];
     note(w, fx, by, `Created from epic ${i.childOf.parent}.`);
-    await enterStation(fx, w, "build", { project, noWip: true });
+    // An epic child enters Build through the WIP check: when Build is full it waits (at Intake, with the usual "Waiting: Build is full") until a place frees.
+    await enterStation(fx, w, "build", { project });
     await saveWo(fx.tx, fx.orgId, w);
   } else {
     await enterStation(fx, w, "intake", { project, noWip: true });
