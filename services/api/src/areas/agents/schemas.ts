@@ -30,7 +30,7 @@ export const AgentPatch = z
   .partial()
   .strict();
 
-export const SaveBody = z.object({ patch: AgentPatch, note: z.string().trim().max(300).optional(), via: Via });
+export const SaveBody = z.object({ patch: AgentPatch, note: z.string().trim().max(300).optional(), overrideReason: z.string().trim().max(300).optional(), via: Via });
 
 export const CreateBody = z.object({
   name: z.string().trim().min(1, "Give the agent a name.").max(80),

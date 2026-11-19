@@ -110,7 +110,7 @@ export const agentRoutes: FastifyPluginAsync = async (app) => {
     const b = SaveBody.parse(req.body);
     return command(req, { ...spec(), ifMatch: rev(id), ifMatchRequired: true }, async (tx, a) => {
       await refuseIfFactoryKilled(tx, a.orgId, "agents");
-      return saveAgent(tx, a, id, b.patch, b.note);
+      return saveAgent(tx, a, id, b.patch, b.note, b.overrideReason);
     });
   });
 

@@ -73,7 +73,34 @@ async function writeSkills(tx: Tx, orgId: string, agentId: string, ids: string[]
 
 const CFG_KEYS = ["model", "fallbacks", "autonomy", "tools", "mcp", "stations", "projects", "budget", "guardrails", "suite", "instructions", "overrides"] as const;
 
-export async function saveAgent(tx: Tx, a: Actor, id: string, patch: z.infer<typeof AgentPatch>, note: string | undefined): Promise<Cmd> {
+async function actorIsFactoryAdmin(tx: Tx, a: Actor): Promise<boolean> {
+  if (!a.personId) return false;
+  return (await tx.query(`select 1 from role_assignments where org_id = $1 and person_id = $2 and role_id = 'factory_admin' and scope_type = 'factory' and revoked_at is null limit 1`, [a.orgId, a.personId])).rows.length > 0;
+}
+
+/**
+ * Turning an agent on needs its live version to have passed its suite (spec 13.2), the same rule worker dispatch applies (`agentOffKind`). An agent that keeps no
+ * promotion record at all (seeded and demo agents) is taken as it is. A Factory Admin may turn it on without a passing run with a reason of at least 5
+ * characters; that is audited on the edit event. Returns the promotion record to store and what to audit.
+ */
+async function turnOnGate(tx: Tx, a: Actor, row: AgentRow, overrideReason: string | undefined): Promise<{ promoted: unknown[] | null; audit: Record<string, unknown> }> {
+  const record = Array.isArray(row.data.promoted) ? (row.data.promoted as unknown[]) : null;
+  if (record === null || row.live_version === null || record.includes(row.live_version)) return { promoted: null, audit: {} };
+  const live = (await versionRows(tx, a.orgId, row.id)).find((v) => v.version === row.live_version);
+  const el = live ? await eligibility(tx, a.orgId, row, live) : null;
+  if (el?.ok) return { promoted: [...record, row.live_version], audit: { suiteRun: el.run, suite: el.suite, score: el.score } };
+  const admin = await actorIsFactoryAdmin(tx, a);
+  const reason = overrideReason?.trim() ?? "";
+  if (reason.length >= 5 && admin) {
+    return { promoted: [...record, row.live_version], audit: { override: true, overrideReason: reason, overrideKind: "eval_gate", suite: el?.suite ?? null } };
+  }
+  const suite = el?.suite ?? "its suite";
+  throw refuse("denied", `${row.name} version ${row.live_version} has not passed its eval suite (${el?.text ?? "no live version"}), so it cannot be turned on. Run ${suite} and promote it${admin ? ", or as Factory Admin turn it on anyway with a reason of at least 5 characters; it is recorded in the audit" : ""}.`, {
+    needs: admin ? `A passing run of ${suite}, or override_reason` : `A passing run of ${suite}`, rule: { kind: "gate", id: "EVAL-GATE", name: "Eval promotion gate" }, overrideKind: "eval_gate",
+  });
+}
+
+export async function saveAgent(tx: Tx, a: Actor, id: string, patch: z.infer<typeof AgentPatch>, note: string | undefined, overrideReason?: string): Promise<Cmd> {
   const row = await lock(tx, a.orgId, id);
   const keys = Object.keys(patch);
   if (!keys.length) throw invalid("Nothing to change.");
@@ -95,13 +122,21 @@ export async function saveAgent(tx: Tx, a: Actor, id: string, patch: z.infer<typ
   let name = row.name;
   if (patch.name !== undefined && patch.name !== row.name) { before.name = row.name; after.name = patch.name; name = patch.name; }
   let status = row.status;
-  if (patch.status !== undefined && patch.status !== row.status) { before.status = row.status; after.status = patch.status; status = patch.status; }
+  let promotedNext: unknown[] | null = null;
+  if (patch.status !== undefined && patch.status !== row.status) {
+    before.status = row.status; after.status = patch.status; status = patch.status;
+    if (patch.status === "active") {
+      const gate = await turnOnGate(tx, a, row, overrideReason);
+      promotedNext = gate.promoted;
+      if (Object.keys(gate.audit).length) after.turnOn = gate.audit;
+    }
+  }
   const newSkills = patch.skills;
   if (newSkills !== undefined && !same(newSkills, skills)) { before.skills = skills; after.skills = newSkills; }
   if (!Object.keys(after).length) return { msg: `No changes to ${row.name}.`, events: [], extra: { changed: [] }, changes: [], project: null };
   await checkRefs(tx, a.orgId, { model: patch.model, fallbacks: patch.fallbacks ?? (patch.model !== undefined ? cfg.fallbacks : undefined), skills: newSkills, mcp: patch.mcp, projects: patch.projects, overrides: patch.overrides, suite: patch.suite });
   await checkAutonomy(tx, a.orgId, row.station, next as unknown as AgentCfg);
-  const data = { ...row.data, ...Object.fromEntries(CFG_KEYS.map((k) => [k, next[k]])) };
+  const data = { ...row.data, ...Object.fromEntries(CFG_KEYS.map((k) => [k, next[k]])), ...(promotedNext ? { promoted: promotedNext } : {}) };
   await tx.query(`update agents set name = $3, status = $4, data = $5::jsonb, version = version + 1 where org_id = $1 and id = $2`, [a.orgId, id, name, status, json(data)]);
   if (after.skills !== undefined) await writeSkills(tx, a.orgId, id, newSkills!);
   const changed = Object.keys(after);
@@ -127,7 +162,7 @@ export async function createAgent(tx: Tx, a: Actor, b: z.infer<typeof CreateBody
   await checkRefs(tx, a.orgId, { model, fallbacks: cfg.fallbacks, skills, mcp: cfg.mcp, projects: cfg.projects });
   await checkAutonomy(tx, a.orgId, station, cfg);
   const name = b.name;
-  await tx.query(`insert into agents (org_id, id, name, kind, station, status, live_version, data) values ($1,$2,$3,'station',$4,'paused',1,$5::jsonb)`, [a.orgId, id, name, station, json({ ...cfg, promoted: [1] })]);
+  await tx.query(`insert into agents (org_id, id, name, kind, station, status, live_version, data) values ($1,$2,$3,'station',$4,'paused',1,$5::jsonb)`, [a.orgId, id, name, station, json({ ...cfg, promoted: [] })]);
   await tx.query(
     `insert into agent_versions (org_id, agent_id, version, body, harness_version, instruction_hash, model_id, note, published_at, published_by) values ($1,$2,1,$3::jsonb,'',$4,$5,'Created',now(),$6)`,
     [a.orgId, id, json({ label: "0.1.0", rc: false, diff: "Created", ...snapshotOf(cfg, skills, await pinSkills(tx, a.orgId, null, skills)) }), sha256(cfg.instructions), model || null, a.id],
@@ -136,7 +171,7 @@ export async function createAgent(tx: Tx, a: Actor, b: z.infer<typeof CreateBody
   await tx.query(`insert into suites (org_id, id, name, station, agent_id, data) values ($1,$2,$3,$4,$5,$6::jsonb)`, [a.orgId, cfg.suite, `${name} golden set`, station, id, json({ threshold: 0.85 })]);
   const agent = (await readAgents(tx, a.orgId, id))[0];
   return {
-    msg: `${name} created, paused until its suite passes.`, changes: ["agents", "suites", "audit"], project: null, extra: { agent },
+    msg: `${name} created, paused. Its first version is not promoted: run its suite and promote it, or a Factory Admin turns it on with a reason.`, changes: ["agents", "suites", "audit"], project: null, extra: { agent },
     events: [{ type: "agent.create", category: cat, subject: subject(id), projectId: null, after: { name, station, model, autonomy: cfg.autonomy, skills, suite: cfg.suite, version: "0.1.0" } }],
   };
 }
