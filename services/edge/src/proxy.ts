@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { DEFAULT_SOURCE_CAPS, SourceGuard } from "./source-guard.js";
 import { lookup } from "node:dns/promises";
 import http from "node:http";
 import net from "node:net";
@@ -17,6 +18,8 @@ export interface ProxyDeps {
   api?: ApiClient;
   logger: ProxyLogger;
   limits?: Partial<RunLimits>;
+  /** The per-source guard shared with the model gateway (main.ts); built from the config when absent. */
+  guard?: SourceGuard;
   /** Test hook: maps a host name to an address instead of DNS. */
   resolve?: (host: string) => Promise<string>;
 }
@@ -148,6 +151,7 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
   const { cfg, logger } = deps;
   const api = deps.api ?? new ApiClient(cfg);
   const lim: RunLimits = { ...DEFAULT_RUN_LIMITS, ...deps.limits };
+  const guard = deps.guard ?? new SourceGuard(cfg.sourceCaps ?? DEFAULT_SOURCE_CAPS, cfg.runSubnet, logger);
   const metrics: ProxyMetrics = { allowed: 0, denied: 0, deniedSuppressed: 0, tunnelRefused: 0, cut: 0 };
   /** Denial events recorded per caller in the current minute (the ledger takes one audit event per distinct host, so a run varying the name could otherwise grow it without bound). */
   const budget = new Map<string, { since: number; used: number }>();
@@ -245,6 +249,7 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
       if (!res.headersSent) res.writeHead(status, { "content-type": "text/plain", ...(status === 407 ? { "proxy-authenticate": 'Basic realm="gantry"' } : {}), connection: "close" });
       res.end(`${msg}\n`);
     };
+    if (req.url !== "/healthz" && !guard.request(req.socket.remoteAddress)) return deny(429, "This run is making too many requests; slow down.");
     let u: URL;
     try {
       u = new URL(req.url ?? "");
@@ -289,6 +294,7 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
       clientSocket.end(`HTTP/1.1 ${status} ${status === 407 ? "Proxy Authentication Required" : status === 403 ? "Forbidden" : status === 429 ? "Too Many Requests" : "Bad Gateway"}\r\n${status === 407 ? 'Proxy-Authenticate: Basic realm="gantry"\r\n' : ""}Content-Type: text/plain\r\nConnection: close\r\nContent-Length: ${Buffer.byteLength(msg) + 1}\r\n\r\n${msg}\n`);
     };
     clientSocket.on("error", () => undefined);
+    if (!guard.request(req.socket.remoteAddress)) return deny(429, "This run is making too many requests; slow down.");
     const m = /^(?:\[([^\]]+)\]|([^:]+)):(\d{1,5})$/.exec(req.url ?? "");
     if (!m) return deny(400, "Bad CONNECT target.");
     const host = (m[1] ?? m[2])!;
@@ -367,6 +373,7 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
       tunnels.delete(runId);
     }));
   };
+  guard.attach(server, "proxy");
   if (cfg.tunnelCheckMs > 0) {
     let busy = false;
     const timer = setInterval(() => {
