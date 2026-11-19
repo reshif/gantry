@@ -528,7 +528,8 @@ d("station WIP limits", () => {
         await flushFx(fx);
       });
       const c = await pos("WO-9673");
-      expect([c.position, c.state, c.data.wipWait?.station]).toEqual(["intake", "waiting", "build"]);
+      expect([c.position, c.state, c.data.wipWait?.station]).toEqual(["intake", "parked", "build"]);
+      expect(await liveAt("intake")).toBe(2); // WO-9672 and the new request; the waiting child holds no Intake seat
       expect((await pos("WO-9674")).position).toBe("intake"); // unlimited at creation, though Intake is at its limit
       expect((await park("WO-9671")).status).toBe(200);
       expect([(await pos("WO-9673")).position, (await pos("WO-9673")).state]).toEqual(["build", "running"]);
@@ -571,6 +572,45 @@ d("station WIP limits", () => {
       expect(e[0].after).toMatchObject({ station: "review", live: 2, limit: 1 });
       await setWip(0, "review");
       await setWip(0, "close");
+    });
+
+    it("G-W10: a waiting epic child does not block a real send-back into a full-looking Intake, and enters Build in promotion order", async () => {
+      await reset();
+      await setWip(1, "build");
+      await setWip(1, "intake");
+      await w.insertWo("WO-9701", { position: "build", state: "running" });
+      await w.insertWo("WO-9702", { position: "plan", state: "waiting", cls: "epic" });
+      await w.insertWo("WO-9703", { position: "spec", state: "waiting" });
+      const { createWorkOrder } = await import("../src/areas/workorders/create.js");
+      await w.tx(async (tx) => {
+        const fx = await w.fxIn(tx);
+        await createWorkOrder(fx, { id: "WO-9704", project: proj, repo: "payments-api", title: "Child", requestedBy: "p-tomas", source: "epic", parent: "WO-9702", forceCls: "feature", childOf: { by: "p-tomas", parent: "WO-9702" } });
+        await flushFx(fx);
+      });
+      expect((await pos("WO-9704")).state).toBe("parked");
+      const r = await w.call("p-meera", "POST", `/api/v1/work-orders/WO-9703/send-back`, { toStation: "intake", note: "Needs the brief again" });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      const b = await pos("WO-9703");
+      expect([b.position, b.data.wipWait]).toEqual(["intake", undefined]); // not held by the child
+      expect((await park("WO-9701")).status).toBe(200);
+      expect([(await pos("WO-9704")).position, (await pos("WO-9704")).state]).toEqual(["build", "running"]);
+      await setWip(0, "build");
+      await setWip(0, "intake");
+    });
+
+    it("G-W11: a failed order waiting to go back to a full earlier station stays failed and uncounted at its own station", async () => {
+      await reset();
+      await setWip(1, "build");
+      await w.insertWo("WO-9711", { position: "build", state: "running" });
+      await w.insertWo("WO-9712", { position: "verify", state: "failed" });
+      const r = await w.call("p-meera", "POST", `/api/v1/work-orders/WO-9712/send-back`, { toStation: "build", note: "Back to build" });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      const b = await pos("WO-9712");
+      expect([b.position, b.state, b.data.wipWait?.kind]).toEqual(["verify", "failed", "back"]);
+      expect(await liveAt("verify")).toBe(0);
+      expect((await park("WO-9711")).status).toBe(200);
+      expect([(await pos("WO-9712")).position, (await pos("WO-9712")).state]).toEqual(["build", "running"]);
+      await setWip(0, "build");
     });
   });
 });

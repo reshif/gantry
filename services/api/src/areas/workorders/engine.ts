@@ -272,7 +272,8 @@ async function holdForWip(fx: Fx, w: Wo, next: string, full: { live: number; lim
   if (kind === "forward") closeEntry(w, fx, `waiting for ${stationName(fx, next)}`);
   // A finished or sent-back order waits on the belt; a retry or a return from a bay stays as it is (failed, or in its bay) until it can go in; a restored order is parked on its station, not counted.
   // (a failed order redone at its own station stays failed, as a retry does: it is not counted there, and counting it would make it wait for itself)
-  if (kind === "forward" || (kind === "back" && w.position !== next)) w.state = "waiting";
+  // Only an order that is live (running or waiting) stays counted as waiting; a failed, blocked or parked one (an epic child not yet in Build) keeps its uncounted state, wherever it is going.
+  if (kind === "forward" || (kind === "back" && (w.state === "running" || w.state === "waiting"))) w.state = "waiting";
   if (kind === "restore") w.state = "parked";
   w.data.wipWait = { station: next, since: fx.now.getTime(), live: full.live, limit: full.limit, kind, ...extra } satisfies WipWaitData;
   w.data.blockReason = text;
