@@ -53,7 +53,7 @@ function Ticker({ model }: { model: FloorModel }) {
       </div>
       <div className={`tk${bn ? " bott" : ""}`}>
         <span className="k">BOTTLENECK</span>
-        <span className="v">{bn ? `${bn.st.s.no} ${bn.st.items.length}/${bn.st.lim}` : "none"}<small>{bn ? `+${bn.over} over` : "all within limit"}</small></span>
+        <span className="v">{bn ? `${bn.st.s.no} ${bn.st.live}/${bn.st.lim}` : "none"}<small>{bn ? `+${bn.over} over` : "all within limit"}</small></span>
       </div>
       <div className="tk" title={old ? `Oldest has waited ${fmt.dur(old.ms)}` : undefined}>
         <span className="k">{old ? `OLDEST AT ${old.gate}` : "OLDEST AT GATE"}</span>

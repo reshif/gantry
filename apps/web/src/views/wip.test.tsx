@@ -123,3 +123,20 @@ describe("WIP limits on the Record", () => {
     }
   });
 });
+
+describe("the Belt counts like the server", () => {
+  it("W-1: failed and blocked orders are not counted against the limit, so the station is full (1/1), not over", async () => {
+    updatePrefs({ floorView: "belt" });
+    const mk = (id: string, o: Partial<WorkOrder>): WorkOrder => ({ ...base, id, title: `Order ${id}`, bay: null, bayFrom: null, killed: null, doneAt: null, ...o }) as WorkOrder;
+    const wos = [mk("WO-8001", { station: at("verify"), state: "running" }), mk("WO-8002", { station: at("verify"), state: "failed" }), mk("WO-8003", { station: at("verify"), state: "blocked" })];
+    const project = { ...PAYMENTS, flow: { ...PAYMENTS.flow, stations: { ...PAYMENTS.flow.stations, verify: { enabled: true, wip: 1 } } } };
+    mockApi({ "GET /api/v1/projects/payments/floor": () => ({ body: floorRead({ project, workOrders: wos }) }) });
+    mount(<FloorView />);
+    await screen.findByRole("heading", { name: "Floor" });
+    await waitFor(() => expect(document.getElementById("floor-st-verify")).toBeTruthy());
+    const label = document.getElementById("floor-st-verify")?.getAttribute("aria-label") ?? "";
+    expect(label).toMatch(/Verify: 1 work order, limit 1(?!, over)/);
+    expect(label).not.toMatch(/over limit/);
+    expect(document.getElementById("floor-st-verify")?.textContent).toMatch(/1 \/ 1/);
+  });
+});

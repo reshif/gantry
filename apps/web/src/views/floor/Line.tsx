@@ -180,7 +180,7 @@ function Station({ p, h, bottleneck, revIds }: { p: Placed; h: LineHandlers; bot
         role="button"
         tabIndex={0}
         id={`floor-st-${st.s.id}`}
-        aria-label={`${st.s.name}: ${count} work order${count === 1 ? "" : "s"}, limit ${st.lim || "none"}${st.over ? ", over limit" : ""}, agent ${st.agent}, ${st.state.t.toLowerCase()}`}
+        aria-label={`${st.s.name}: ${st.live} work order${st.live === 1 ? "" : "s"}, limit ${st.lim || "none"}${st.over ? ", over limit" : ""}, agent ${st.agent}, ${st.state.t.toLowerCase()}`}
         onClick={open}
         onKeyDown={keyOn(open)}
       >
@@ -195,13 +195,13 @@ function Station({ p, h, bottleneck, revIds }: { p: Placed; h: LineHandlers; bot
         <text className={`fp-t b st ${tone}`} x={box.x + box.w - 10} y={box.y + 43.5} fontSize={10} textAnchor="end">{st.state.t}</text>
         <text className={tone === "idle" ? "fp-sn" : "fp-t m"} x={box.x + 10} y={box.y + 58} fontSize={10.5}>{capL.map((l, i) => <tspan key={i} x={box.x + 10} dy={i ? LH : 0}>{l}</tspan>)}</text>
         <text className="fp-t m" x={box.x + 10} y={box.y + 77 + sh} fontSize={10} letterSpacing=".1em">WIP</text>
-        <text className={`fp-t b${st.over ? " bad" : ""}`} x={box.x + 36} y={box.y + 77 + sh} fontSize={13}>{`${count} / ${st.lim || "–"}`}</text>
+        <text className={`fp-t b${st.over ? " bad" : ""}`} x={box.x + 36} y={box.y + 77 + sh} fontSize={13}>{`${st.live} / ${st.lim || "–"}`}</text>
         {st.over ? (
           <text className="fp-t bad b" x={box.x + box.w - 10} y={box.y + 77 + sh} fontSize={10} textAnchor="end">{`+${st.over} OVER`}</text>
-        ) : count && st.lim ? (
+        ) : st.live && st.lim ? (
           <text className="fp-t m" x={box.x + box.w - 10} y={box.y + 77 + sh} fontSize={10} textAnchor="end">{`${Math.round(st.ratio * 100)}% FULL`}</text>
         ) : null}
-        <Gauge x={box.x + 12} y={box.y + 84 + sh} w={box.w - 24} count={count} limit={st.lim} labels />
+        <Gauge x={box.x + 12} y={box.y + 84 + sh} w={box.w - 24} count={st.live} limit={st.lim} labels />
         <line className="fp-dim" x1={box.x + 10} y1={dimY - 4} x2={box.x + 10} y2={dimY + 4} />
         <line className="fp-dim" x1={box.x + box.w - 10} y1={dimY - 4} x2={box.x + box.w - 10} y2={dimY + 4} />
         <line className="fp-dim" x1={box.x + 10} y1={dimY} x2={box.x + box.w - 10} y2={dimY} />
@@ -553,7 +553,7 @@ export function LineStack({ model, h }: { model: FloorModel; h: LineHandlers }) 
               <div className="fp-stn-h"><b>{st.s.no}</b><span>{st.s.name}</span><em className={`st ${st.state.tone}`}>{st.state.t}</em></div>
               <div className="fp-stn-a">{st.agent}</div>
               <div className="fp-stn-c">{st.caption}</div>
-              <div className="fp-stn-g"><span className="mono">{`WIP ${st.items.length} / ${st.lim || "–"}`}</span><span className="fp-bar" aria-hidden="true"><i className={st.over ? "bad" : ""} style={{ width: `${Math.min(100, Math.round(st.ratio * 100))}%` }} /></span>{st.over ? <span className="mono bad">{`+${st.over} over`}</span> : null}</div>
+              <div className="fp-stn-g"><span className="mono">{`WIP ${st.live} / ${st.lim || "–"}`}</span><span className="fp-bar" aria-hidden="true"><i className={st.over ? "bad" : ""} style={{ width: `${Math.min(100, Math.round(st.ratio * 100))}%` }} /></span>{st.over ? <span className="mono bad">{`+${st.over} over`}</span> : null}</div>
               <div className={`fp-stn-w${st.oldestWait !== null ? " warn" : ""}`}>{st.oldestWait !== null ? `Oldest wait ${dur(st.oldestWait)}` : "No wait"}</div>
               {st.items.length ? <div className="fp-chips">{st.items.map(chip)}</div> : null}
             </div>

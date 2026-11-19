@@ -262,7 +262,7 @@ describe("Floor: prototype drawers and links", () => {
     mockApi();
     mount(<FloorView />);
     await screen.findAllByText("PAY");
-    expect(document.getElementById("floor-st-build")?.getAttribute("aria-label")).toMatch(/^Build: 2 work orders, limit \d+(, over limit)?, agent /);
+    expect(document.getElementById("floor-st-build")?.getAttribute("aria-label")).toMatch(/^Build: 3 work orders, limit \d+(, over limit)?, agent /);
   });
 
   it("opens a work order tag as the compact drawer: Approve G, Open record and Traveler", async () => {
@@ -517,11 +517,11 @@ describe("Floor: precision sheet", () => {
     await screen.findByRole("heading", { name: "Floor" });
     const build = document.querySelector('[data-station="build"]') as HTMLElement;
     expect(build.classList.contains("over")).toBe(true);
-    expect(build.querySelector(".fp-flag")?.textContent).toMatch(/BOTTLENECK 200%/);
+    expect(build.querySelector(".fp-flag")?.textContent).toMatch(/BOTTLENECK 300%/);
     expect(document.querySelector('[data-station="verify"]')?.classList.contains("over")).toBe(false);
     const cell = document.querySelectorAll("#floor-kpis .tk")[1] as HTMLElement;
     expect(cell.classList.contains("bott")).toBe(true);
-    expect(cell.textContent).toMatch(/S5 2\/1\+1 over/);
+    expect(cell.textContent).toMatch(/S5 3\/1\+2 over/);
   });
 
   it("says plainly when nothing is over a limit", async () => {
