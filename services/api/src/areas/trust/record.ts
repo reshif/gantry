@@ -82,7 +82,8 @@ export async function applyLevel(tx: Tx, orgId: string, cell: CellRow, to: numbe
   await tx.query(`insert into trust_grants (org_id, id, cell_id, level, granted_by, evidence, valid_from) values ($1,$2,$3,$4,$5,$6::jsonb,$7)`, [
     orgId, `TG-${cell.id}-${n}`, cell.id, lvlCode(to), c.by, json({ kind: c.kind === "proposal" ? "grant" : c.kind, from, reason: c.reason, ...(c.cause ? { cause: c.cause } : {}), ...(c.proposal ? { proposal: c.proposal } : {}) }), now,
   ]);
-  await tx.query(`update trust_cells set level = $3, version = version + 1, updated_at = now() where org_id = $1 and id = $2`, [orgId, cell.id, lvlCode(to)]);
+  // Any level change, a demotion or a person's regrant, is a fresh decision on the evidence: a version-change probation marker does not outlive it (S-39).
+  await tx.query(`update trust_cells set level = $3, data = data - 'probation', version = version + 1, updated_at = now() where org_id = $1 and id = $2`, [orgId, cell.id, lvlCode(to)]);
   await tx.query(`update trust_proposals set status = 'expired', evidence = evidence || $3::jsonb, updated_at = now() where org_id = $1 and cell_id = $2 and status = 'open'`, [
     orgId, cell.id, json({ reason: c.kind === "demote" && c.by === "system" ? "Withdrawn by automatic demotion" : "Superseded by a direct change" }),
   ]);
