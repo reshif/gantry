@@ -159,7 +159,7 @@ export async function setProposalStatus(tx: Tx, orgId: string, person: string, m
 }
 
 /** The stored card of a message the person may act on (their own thread, or one shared with them), or null. */
-export async function readProposal(db: Pick<Tx, "query">, orgId: string, person: string, messageId: string, proposalId: string): Promise<Record<string, any> | null> {
+export async function readProposal(db: Pick<Tx, "query">, orgId: string, person: string, messageId: string, proposalId: string): Promise<Record<string, unknown> | null> {
   const r = await db.query<{ data: { proposals?: Array<Record<string, unknown>> } }>(
     `select m.data from console_messages m join console_threads t on t.org_id = m.org_id and t.id = m.thread_id where m.org_id = $1 and m.id = $2 and m.role = 'assistant'
         and (t.person_id = $3 or exists (select 1 from thread_members tm where tm.org_id = t.org_id and tm.thread_id = t.id and tm.person_id = $3))`,
