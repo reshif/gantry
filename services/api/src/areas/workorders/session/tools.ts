@@ -50,7 +50,6 @@ export interface WoTool {
 
 const OBSERVED = "observed";
 const str = (v: unknown, max = 4000): string | undefined => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined);
-const strs = (v: unknown, max: number, n = 300): string[] => (Array.isArray(v) ? v.map((x) => str(x, n)).filter((x): x is string => !!x).slice(0, max) : []);
 
 export const stationName = (c: Catalog, id: string): string => stationDef(c, id)?.name ?? id;
 const here = (c: Catalog, w: WorkOrder): string => (w.bay ? (w.bayFrom ?? "intake") : (c.stations[w.station]?.id ?? "intake"));
