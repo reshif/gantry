@@ -183,7 +183,7 @@ describe("Projects: portfolio", () => {
     mount(<ProjectsView />);
     fireEvent.click(await byId("prj-new"));
     await screen.findByRole("dialog");
-    expect(Array.from(document.querySelectorAll("[role=dialog] .field-label")).map((l) => l.textContent?.replace(" (required)", ""))).toEqual(["Name", "Key (3 letters)", "What does it build?", "Template", "Owner"]);
+    expect(Array.from(document.querySelectorAll("[role=dialog] .field-label")).map((l) => l.textContent?.replace(" (required)", ""))).toEqual(["Name", "Key (3 letters)", "What does it build?", "Monthly budget (USD)", "Template", "Owner"]);
     expect(screen.queryByText(/Next:/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     expect(await screen.findByText("Name is required.")).toBeTruthy();
@@ -201,8 +201,22 @@ describe("Projects: portfolio", () => {
     fireEvent.change(document.getElementById("fd-key")!, { target: { value: "ORD" } });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     await waitFor(() => expect(calls.find((c) => c.path === "/api/v1/projects" && c.method === "POST")).toBeTruthy());
-    expect(calls.find((c) => c.path === "/api/v1/projects" && c.method === "POST")!.body).toMatchObject({ name: "Orders Hub", key: "ORD", templateId: "tpl-backend", owner: "p-asha", budget: 3000, teams: [] });
+    expect(calls.find((c) => c.path === "/api/v1/projects" && c.method === "POST")!.body).toMatchObject({ name: "Orders Hub", key: "ORD", templateId: "tpl-backend", owner: "p-asha", budget: null, teams: [] });
     expect(await screen.findByText("Orders Hub created")).toBeTruthy();
+  });
+
+  it("T-54: the New project dialog has a monthly budget field (empty or 0 = no cap) and sends what was typed", async () => {
+    const calls = setup();
+    mount(<ProjectsView />);
+    fireEvent.click(await screen.findByRole("button", { name: "New project" }));
+    await screen.findByRole("dialog");
+    expect(document.querySelector("[role=dialog]")!.textContent).toMatch(/Leave empty or 0 for no cap/);
+    fireEvent.change(document.getElementById("fd-name")!, { target: { value: "Orders Hub" } });
+    fireEvent.change(document.getElementById("fd-key")!, { target: { value: "ORD" } });
+    fireEvent.change(document.getElementById("fd-budget")!, { target: { value: "4500" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/v1/projects" && c.method === "POST")).toBeTruthy());
+    expect(calls.find((c) => c.path === "/api/v1/projects" && c.method === "POST")!.body).toMatchObject({ budget: 4500 });
   });
 
   it("disables New project with the reason when the right is missing", async () => {
