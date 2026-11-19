@@ -140,6 +140,23 @@ export function nextStationId(c: Catalog, project: Project | null | undefined, w
   return i >= 0 && i < r.length - 1 ? (r[i + 1] as string) : null;
 }
 
+/** A station's WIP limit in a project: 0 or unset means no limit. */
+export function wipLimit(project: Pick<Project, "flow"> | null | undefined, stationId: string): number {
+  const n = Number(project?.flow?.stations?.[stationId]?.wip);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/**
+ * The live count against a station's limit: running or waiting there (on its gate, or finished and waiting for the next station), never parked, declined, done or killed.
+ * Work waiting in the Queue bay for a coding slot was let into Build, so it counts there. The server counts the same way under a lock (`wipLive` in the API).
+ */
+export function wipStatus(c: Catalog, project: Project | null | undefined, workOrders: readonly WorkOrder[], stationId: string): { live: number; limit: number; full: boolean } {
+  const limit = wipLimit(project, stationId);
+  const idx = c.stations.findIndex((s) => s.id === stationId);
+  const live = workOrders.filter((w) => w.project === project?.id && (w.state === "running" || w.state === "waiting" ? !w.bay && w.station === idx : stationId === "build" && w.state === "parked" && w.bay === "queue" && w.bayFrom === "build")).length;
+  return { live, limit, full: limit > 0 && live >= limit };
+}
+
 /** The gate a work order waits behind at its current station, if its class passes it. */
 export function gateForWO(c: Catalog, project: Project | null | undefined, wo: Pick<WorkOrder, "cls" | "station">): Gate | null {
   const g = gateAfter(c, stationOf(c, wo).id);
@@ -679,6 +696,7 @@ export function moveCheck(state: FlowState, principalId: string | null | undefin
     return db.allowed ? { allowed: true, kind: "back", reason: "Sends back to " + stName(target) + "." } : { allowed: false, reason: why(db) };
   }
   if (ti > ci + 1) return { allowed: false, reason: "Work moves one station at a time; " + stName(r[ci + 1] as string) + " comes first." };
+  if (wo.wipWait) return { allowed: false, reason: "Waiting: " + stName(wo.wipWait.station) + " is full. It moves in when a place frees." };
   const g = gateForWO(c, project, wo);
   if (wo.state === "running") return { allowed: false, reason: "Still running at " + stName(cur) + "; it moves when the station finishes" + (g ? " and " + g.label + " passes" : "") + "." };
   if (!g) return { allowed: false, reason: "It moves automatically when the station finishes." };

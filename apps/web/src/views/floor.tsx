@@ -6,7 +6,7 @@
  * GET /projects/{id}/floor; every control is a command through the API.
  */
 import { useEffect, useState } from "react";
-import { flowOf, fmt } from "@gantry/domain";
+import { flowOf, fmt, wipStatus } from "@gantry/domain";
 import { useCan, useCanMany } from "../api/can";
 import { makeStopActions } from "../shell/stopActions";
 import { useUI } from "../ui/overlay-context";
@@ -152,11 +152,13 @@ function Header({ view, onView, model, parts, onParts, focus, onFocus, replaying
   );
 }
 
-function BoardCol({ id, title, list, needs }: { id: string; title: string; list: FWo[]; needs: Set<string> }) {
+function BoardCol({ id, title, list, needs, station }: { id: string; title: string; list: FWo[]; needs: Set<string>; station?: string }) {
   const ctx = useFloorCtx();
+  // A station with a WIP limit shows live/limit (amber when full); no limit shows the plain count.
+  const wip = station ? wipStatus(ctx.cat, ctx.project, ctx.wos, station) : null;
   return (
     <div className="col" data-station={id}>
-      <h3><span>{title}</span><span>{list.length}</span></h3>
+      <h3><span>{title}</span>{wip && wip.limit > 0 ? <span className={wip.full ? "chip warn" : ""} title={wip.live > wip.limit ? `Over the WIP limit of ${wip.limit}` : wip.full ? "Full: orders wait before this station" : `WIP limit ${wip.limit}`}>{`${wip.live}/${wip.limit}`}</span> : <span>{list.length}</span>}</h3>
       <div className="cards">
         {list.length ? list.map((w) => (
           <a key={w.id} className={`card${needs.has(w.id) ? " need" : ""}`} data-wo={w.id} id={`floor-tok-${w.id}`} href={hashFor("record", w.id, ctx.project.id)}>
@@ -180,7 +182,7 @@ function BoardPanel({ model, focus }: { model: FloorModel; focus: boolean }) {
     <Panel title="Board" flush>
       <div className={`board board-fit${focus ? " is-focus" : ""}`} id="floor-board">
         {line.map((s) => (
-          <BoardCol key={s.id} id={s.id} title={`${s.no} ${s.name}`} list={ctx.wos.filter((w) => w.station === stationIdx(ctx.cat, s.id) && !w.bay && isLive(w))} needs={needs} />
+          <BoardCol key={s.id} id={s.id} station={s.id} title={`${s.no} ${s.name}`} list={ctx.wos.filter((w) => w.station === stationIdx(ctx.cat, s.id) && !w.bay && isLive(w))} needs={needs} />
         ))}
         {/* S-41: orders parked in a bay and killed ones are on the Board too, as columns after the stations (declined orders stay out, as in the Parts list and the ticker) */}
         {bays.map((b) => {

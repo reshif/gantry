@@ -183,6 +183,8 @@ export const ops = {
   reassign: (woId: string, agentId: string, via?: Via, v?: Versioned) =>
     run(["workOrders"], post(api(`work-orders/${enc(woId)}/reassign`), { agent: agentId, via }, opts(v))),
   retry: (woId: string, via?: Via, v?: Versioned) => run(["workOrders"], post(api(`work-orders/${enc(woId)}/retry`), { via }, opts(v))),
+  /** A Factory Admin moves a work order that waits for a full station in anyway, with a reason (audited by the server). */
+  wipOverride: (woId: string, reason: string, v?: Versioned) => run(["workOrders", "floor"], post(api(`work-orders/${enc(woId)}/wip-override`), { reason }, opts(v))),
 
   /* ===== stop controls ===== */
   haltRepo: (repoId: string, reason: string, via?: Via) =>

@@ -259,7 +259,7 @@ export function FlowStructure({ p, cat, slots, setSlots }: { p: PView; cat: Cata
   const cols: Array<Col<StationRow>> = [
     { key: "no", label: "No", render: (s) => <span className="mono">{s.no}</span> },
     { key: "name", label: "Station", render: (s) => <div>{s.name}{s.custom ? <span className="tag pcf-tag-custom">custom</span> : null}<div className="muted small">{agents.find((a) => a.id === s.agent)?.name ?? s.agent}</div></div> },
-    { key: "wip", label: "WIP now", align: "end", render: (s) => { const here = m.byPosition[s.id]?.n ?? 0; const cap = p.flow.stations[s.id]?.wip ?? 0; return <span className={`mono${here > cap ? " neg" : ""}`}>{here + (here > cap ? " over" : "")}</span>; } },
+    { key: "wip", label: "WIP now", align: "end", render: (s) => { const here = m.byPosition[s.id]?.n ?? 0; const cap = p.flow.stations[s.id]?.wip ?? 0; const over = cap > 0 && here > cap; return <span className={`mono${over ? " neg" : ""}`}>{here + (over ? " over" : "")}</span>; } },
     { key: "slots", label: "Coding slots", render: (s) => (s.id === "build" ? (
       <div className="pcf-slots">
         <NumInput id="pcf-slots" value={slots} min={1} max={8} locked={!d.allowed} label="Coding slots" onCommit={setSlots} />

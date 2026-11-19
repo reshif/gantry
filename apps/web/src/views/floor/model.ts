@@ -4,7 +4,7 @@
  * Everything comes from the floor read (FloorCtx) and the agents list; nothing is invented here.
  */
 import { gateLabelOf } from "../../lib/gate-label";
-import { gateAfter, gateKind, type Agent, type Bay, type Gate, type Station } from "@gantry/domain";
+import { gateAfter, gateKind, wipLimit, type Agent, type Bay, type Gate, type Station } from "@gantry/domain";
 import { gateHaveNeed, gateOfStation, gateStateOf, isLive, since, stationIdx, waitingGateId, type FloorCtxValue, type FWo } from "./kit";
 
 /** What a balloon is: amber = needs a person at a gate, red hatched = stuck or parked for a person, violet = split epic, cyan = running, plain = anything else, green = released. */
@@ -112,7 +112,7 @@ export function buildModel(ctx: FloorCtxValue, agents: Agent[] | undefined): Flo
   };
   const stations: StationModel[] = line.map((s) => {
     const idx = stationIdx(cat, s.id);
-    const lim = p.flow.stations[s.id]?.wip ?? 5;
+    const lim = wipLimit(p, s.id);
     const items = ctx.wos.filter((w) => w.station === idx && !w.bay && w.state !== "done" && (isLive(w) || w.state === "killed")).map(bal).sort((a, b) => (b.age ?? 0) - (a.age ?? 0));
     const parked = ctx.wos.filter((w) => w.station === idx && !!w.bay && w.state !== "killed" && w.state !== "done");
     const bays = cat.bays
@@ -147,7 +147,7 @@ export function buildModel(ctx: FloorCtxValue, agents: Agent[] | undefined): Flo
       caption = s.purpose;
     }
     const ag = agents?.find((a) => a.id === s.agent);
-    return { s, idx, enabled: true, lim, items, bays, over: Math.max(0, items.length - lim), ratio: lim ? items.length / lim : 0, agent: ag?.name ?? s.agent, state, caption, oldestWait, gate };
+    return { s, idx, enabled: true, lim, items, bays, over: lim ? Math.max(0, items.length - lim) : 0, ratio: lim ? items.length / lim : 0, agent: ag?.name ?? s.agent, state, caption, oldestWait, gate };
   });
 
   // groups that need a person, oldest first, numbered

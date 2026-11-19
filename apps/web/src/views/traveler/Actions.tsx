@@ -134,6 +134,33 @@ export function useActionSpecs(wo: TWo, page = false): ActionSpec[] | null {
   // A station that failed repeatedly is parked in the Needs a person bay: retrying it is what that person is there for.
   if (wo.state === "failed" || wo.state === "blocked" || (wo.bay === "person" && (wo.bayCause === "failed" || wo.bayCause === "merge")))
     out.push({ key: "retry", label: wo.bayCause === "merge" ? "Retry merge" : `Retry ${stName(cat, stationId)}`, kind: "primary", icon: "refresh", id: "trv-retry", guard: stop ? no(stopWhy) : dec(wo, "sendback"), group: "main", onClick: () => void ops.retry(wo.id, undefined, ifm).then((r) => res(r)) });
+  // The work order finished its station and the next one is full: the server decides who may push it in (a Factory Admin, with a reason).
+  if (wo.wipWait && wo.state === "waiting" && !wo.bay) {
+    const wipName = stName(cat, wo.wipWait.station);
+    out.push({
+      key: "wipOverride",
+      label: "Move in anyway (with a reason)",
+      kind: "primary",
+      icon: "",
+      id: "trv-wip-override",
+      guard: wo.allowed.wipOverride ?? no("Only a Factory Admin can move a work order past a station's WIP limit."),
+      group: "decide",
+      onClick: () =>
+        ui.reasonDialog({
+          title: `Move ${wo.id} into ${wipName} anyway`,
+          kicker: "WIP limit",
+          ok: "Move in anyway",
+          min: 10,
+          sub: `${wipName} is at its limit. The work order goes in over it; the reason is recorded in the audit.`,
+          placeholder: "Why should it go in now?",
+          onOk: async (v) => {
+            const r = await ops.wipOverride(wo.id, v, ifm);
+            if (r.ok) ui.toast(r.msg, "ok");
+            return r;
+          },
+        }),
+    });
+  }
   if (wo.bay) {
     let dU: TDecision = stop ? no(stopWhy) : dec(wo, "park");
     if (dU.allowed && wo.bay === "sechold" && !approveGate.allowed) dU = no(`Security hold can only be released by someone who may approve gates in this project.`);

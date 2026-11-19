@@ -16,7 +16,7 @@ import { navigate, hashFor } from "../../lib/router";
 import { classOf } from "../projects/kit";
 import { useActionSpecs, type ActionSpec } from "../traveler/Actions";
 import { EditTitleDialog, PriorityDialog } from "../record/GateDialogs";
-import { bayLabel, stName, stNo, type TWo } from "../traveler/model";
+import { bayLabel, stName, stNo, wipWaitText, type TWo } from "../traveler/model";
 import type { WoSession } from "../conversations/session-api";
 
 /** The toolbar of a work order (prototype): the gate decision, Traveler, Changes and one Actions menu. Locked items say why, in their tooltip. */
@@ -30,7 +30,7 @@ function useBar(wo: TWo) {
   const why = specs.find((s) => s.why);
   const actions = (
     <div className="row dz-actions" role="toolbar" aria-label="Work order actions">
-      {specs.filter((s) => s.group === "decide" || s.key === "retry").map(btn)}
+      {specs.filter((s) => s.group === "decide" || s.key === "retry" || s.key === "wipOverride").map(btn)}
       <WoActions wo={wo.id} project={wo.project} repo={wo.repo} idPrefix="rec" omit={["primary", "record"]} small={false} />
       <Btn label="Traveler" icon="list" id="rec-traveler" onClick={() => navigate("traveler", wo.id, wo.project)} />
       <Btn label="Changes" icon="branch" id="rec-changes" onClick={() => navigate("changes", wo.id, wo.project)} />
@@ -55,6 +55,7 @@ export function statusLine(wo: TWo, cat: Catalog, s: WoSession | undefined): str
   if (wo.killed) return `Held in place by a ${wo.killed.scope} kill, ${fmt.stamp(wo.killed.at)}`;
   if (wo.state === "done") return wo.split ? "Split into child work orders" : `Shipped ${fmt.stamp(wo.doneAt ?? 0)}`;
   if (wo.bay) return `Off the belt in ${bayLabel(cat, wo.bay)}${wo.bayReason ? `: ${wo.bayReason}` : ""}`;
+  if (wo.wipWait && wo.state === "waiting") return wipWaitText(cat, wo);
   if (s?.next.text) return s.next.text;
   const st = cat.stations[wo.station];
   return `At ${stNo(cat, st?.id)} ${stName(cat, st?.id)}`.trim();
@@ -104,7 +105,13 @@ export function DossierHead({ wo, cat, project }: { wo: TWo; cat: Catalog; proje
           <div><b>Stopped</b>{` ${stop.reason}${heldByKill ? " It is held in place and resumes on restore." : ""}`}</div>
         </div>
       ) : null}
-      {wo.blockReason ? <div className="callout callout-block"><Icon name="st-block" /><div><b>Blocked</b>{` ${wo.blockReason}`}</div></div> : null}
+      {wo.wipWait && wo.state === "waiting" && !wo.bay ? (
+        <div className="callout callout-warn" id="dz-wip-wait" role="note">
+          <Icon name="st-wait" />
+          <div><b>{wipWaitText(cat, wo)}</b>{` ${stName(cat, cat.stations[wo.station]?.id)} is done; it goes in when a place frees, highest priority first, then the one that has waited longest.`}</div>
+        </div>
+      ) : null}
+      {wo.blockReason && !wo.wipWait ? <div className="callout callout-block"><Icon name="st-block" /><div><b>Blocked</b>{` ${wo.blockReason}`}</div></div> : null}
       {wo.failReason ? <div className="callout callout-fail"><Icon name="st-fail" /><div><b>Failed</b>{` ${wo.failReason}`}</div></div> : null}
       {wo.state === "parked" || wo.bay ? (
         <div className="callout callout-warn" id="dz-parked">
