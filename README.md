@@ -21,7 +21,7 @@ Open https://localhost and sign in with a demo account such as `asha` / `gantry-
 
 | Path | What it is |
 | --- | --- |
-| `apps/web` | React 19 + Vite frontend, a faithful port of `legacy/` against the real API |
+| `apps/web` | React 19 + Vite frontend (the Blueprint design, `docs/ui/design-system.md`) against the real API |
 | `packages/domain` | Pure TypeScript domain logic: permission engine, flow rules, lifecycle, trust, workload |
 | `packages/db` | Postgres schema and migrations, event ledger with hash chain, job queue, timers, outbox |
 | `services/api` | `gantry-api`: REST API, sign-in, the decision point, all commands, live updates |

@@ -52,9 +52,11 @@ jobs:
             runner/wrapper/package-lock.json
       - run: npm ci
       - run: npm run lint
+      # Build before typecheck: the worker typechecks against @gantry/api's built declarations (dist), so a fresh
+      # checkout fails typecheck until the workspaces are built.
+      - run: npm run build
       - run: npm run typecheck
       - run: npm test
-      - run: npm run build
       # Frontend gates (AGENTS.md): the architecture-lint ratchet, the per-view definition-of-done report, the entry
       # bundle budget (measured from the build above) and the check that every rule in AGENTS.md has an enforcement.
       - run: npm run lint:ratchet
