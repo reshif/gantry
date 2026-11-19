@@ -90,19 +90,22 @@ export function BudgetProto({ p, cat }: PcProps) {
   const res = useRes();
   const d = useCan("project.config", { project: p.id });
   const b = p.budget;
-  const [monthly, setMonthly] = useState(String(b.monthly));
+  // What you type is what is enforced: empty is no cap, 0 is a real $0 cap (nothing metered runs).
+  const capped = b.capped ?? b.monthly > 0;
+  const [monthly, setMonthly] = useState(capped ? String(b.monthly) : "");
   const [alert, setAlert] = useState(String(Math.round(b.alertAt * 100)));
   const [errs, setErrs] = useState<Record<string, string>>({});
-  const ratio = b.monthly ? b.mtd / b.monthly : 0;
+  const ratio = capped && b.monthly ? b.mtd / b.monthly : 0;
   const save = async () => {
     const e: Record<string, string> = {};
-    if (!monthly.trim()) e.monthly = "Monthly budget ($) is required."; else if (!Number.isFinite(Number(monthly)) || Number(monthly) < 0) e.monthly = "Must be 0 or more."; else if (Number(monthly) > 10_000_000) e.monthly = "Cannot exceed 10,000,000.";
+    if (monthly.trim() && (!Number.isFinite(Number(monthly)) || Number(monthly) < 0)) e.monthly = "Must be 0 or more."; else if (Number(monthly) > 10_000_000) e.monthly = "Cannot exceed 10,000,000.";
     if (!alert.trim()) e.alert = "Alert at (% used) is required."; else if (Number(alert) > 100) e.alert = "Cannot exceed 100."; else if (Number(alert) < 5) e.alert = "Must be at least 5.";
     setErrs(e);
     if (Object.keys(e).length) { setTimeout(() => document.querySelector<HTMLElement>("#pcf-budget [aria-invalid=true]")?.focus(), 30); return; }
     let ver = b && p.version;
     let ok = true;
-    if (Number(monthly) !== b.monthly) { const r = res(await ops.setProject(p.id, "budget.monthly", Number(monthly), { ifMatch: ver })); ok = r.ok; if (r.ok) ver = nextVersion(r, ver); }
+    const next = monthly.trim() ? Number(monthly) : null;
+    if (next !== (capped ? b.monthly : null)) { const r = res(await ops.setProject(p.id, "budget.monthly", next, { ifMatch: ver })); ok = r.ok; if (r.ok) ver = nextVersion(r, ver); }
     if (ok && Number(alert) / 100 !== b.alertAt) ok = res(await ops.setProject(p.id, "budget.alertAt", Number(alert) / 100, { ifMatch: ver })).ok;
     if (ok) ui.toast("Budget saved", "ok");
   };
@@ -111,8 +114,8 @@ export function BudgetProto({ p, cat }: PcProps) {
       <div className="cols">
         <Panel title="Spend">
           <div className="stack">
-            <div className="stat"><div className="micro">Month to date</div><div className="v">{fmt.money0(b.mtd)}</div><div className="s">{`of ${fmt.money0(b.monthly)}`}</div></div>
-            <Meter value={b.mtd} max={b.monthly} label="Budget used" warnAt={b.alertAt} />
+            <div className="stat"><div className="micro">Month to date</div><div className="v">{fmt.money0(b.mtd)}</div><div className="s">{!capped ? "No cap" : b.monthly === 0 ? "$0 cap: nothing metered runs" : `of ${fmt.money0(b.monthly)}`}</div></div>
+            {capped && b.monthly > 0 ? <Meter value={b.mtd} max={b.monthly} label="Budget used" warnAt={b.alertAt} /> : null}
             <span className="sr">{fmt.pct(ratio)}</span>
           </div>
         </Panel>
@@ -120,7 +123,7 @@ export function BudgetProto({ p, cat }: PcProps) {
           <form id="pcf-budget" noValidate onSubmit={(e) => { e.preventDefault(); void save(); }}>
             <div>
               <LockNote decision={d} what="Budget" />
-              <Field label={<>Monthly budget ($) <span className="muted">(required)</span></>} error={errs.monthly}><Input id="pcf-bud-monthly" type="number" min={0} max={10000000} step="any" value={monthly} disabled={!d.allowed} onChange={(e) => setMonthly(e.target.value)} /></Field>
+              <Field label="Monthly budget ($)" hint="Leave empty for no cap. 0 is a $0 cap: nothing metered runs." error={errs.monthly}><Input id="pcf-bud-monthly" type="number" min={0} max={10000000} step="any" value={monthly} disabled={!d.allowed} onChange={(e) => setMonthly(e.target.value)} /></Field>
               <Field label={<>Alert at (% used) <span className="muted">(required)</span></>} error={errs.alert}><Input id="pcf-bud-alert" type="number" min={5} step="any" value={alert} disabled={!d.allowed} onChange={(e) => setAlert(e.target.value)} /></Field>
               <div><ActBtn kind="primary" type="submit" id="pcf-bud-save" label="Save budget" guard={d} /></div>
             </div>
