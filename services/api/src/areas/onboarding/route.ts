@@ -1,5 +1,6 @@
 import type { Queryable } from "@gantry/db";
 import { ONBOARD_AGENT, ONBOARD_STATION } from "@gantry/domain";
+import { readSecurity } from "../../core/read/index.js";
 import { loadFacts } from "../models/facts.js";
 import { resolveModel, type Pick } from "../models/resolve.js";
 import type { ModelRoute } from "../internal/route.js";
@@ -26,9 +27,10 @@ export async function resolveOnboardingRoute(db: Queryable, orgId: string): Prom
   const res = resolveModel({ ...facts, station: ONBOARD_STATION, pinned });
   if (!res.pick) return { ok: false, reason: res.blocked ?? `No connected vendor serves ${pinned}.` };
   const v = new Map(facts.vendors.map((x) => [x.id, x])).get(res.pick.vendor)!;
+  const lan = (await readSecurity(db, orgId)).value.vendorLanRanges ?? [];
   const base = (v.endpoint || (/anthropic|claude/i.test(`${v.id} ${v.product}`) ? ANTHROPIC_BASE_URL : "")).replace(/\/+$/, "");
   if (!base) return { ok: false, reason: `Vendor ${v.name} has no endpoint.` };
   const keyless = (p: Pick): boolean => !v.hasSecret && v.endpoint !== "" && (v.custom || p.vendor === "local");
-  const route: ModelRoute = { vendor: res.pick.vendor, baseUrl: base, modelId: res.pick.model, upstreamModel: res.pick.upstream, ...(keyless(res.pick) ? { keyless: true } : {}) };
+  const route: ModelRoute = { vendor: res.pick.vendor, baseUrl: base, modelId: res.pick.model, upstreamModel: res.pick.upstream, ...(keyless(res.pick) ? { keyless: true } : {}), ...(lan.length ? { lan } : {}) };
   return { ok: true, route };
 }

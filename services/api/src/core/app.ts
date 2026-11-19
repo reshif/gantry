@@ -19,6 +19,7 @@ import { safeEqual } from "./crypto.js";
 import { installErrorHandler } from "./errors.js";
 import { enforceWriteGate } from "./write-gate.js";
 import { createOidcAdapter, type OidcAdapter } from "./oidc.js";
+import { bodyHasNul, hasNul } from "./nul.js";
 import { canonicalPath } from "./paths.js";
 import { pinVia } from "./command.js";
 import { readOrg } from "./read/index.js";
@@ -147,12 +148,17 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
   app.addHook("onRequest", async (req, reply) => {
     req.gx = { orgId, principal: null, session: null, ip: req.ip, requestId: req.id, channel: "web", reply };
     const path = canonicalPath(req.url);
-    if (path === null) return void (await reply.code(400).send({ ok: false, msg: "Malformed request path." }));
+    if (path === null || hasNul(req.url)) return void (await reply.code(400).send({ ok: false, msg: "Malformed request path." }));
     if (path.startsWith("/internal/v1/")) return authInternal(req, reply);
     if (path.startsWith("/api/v1/")) {
       await authApi(app, req, reply);
       if (!reply.sent) await enforceReadGate(req, reply);
     }
+  });
+
+  // S-69: Postgres refuses U+0000 in text, so a NUL in a JSON body would surface as a 500. Refuse it at the door, once, for every route.
+  app.addHook("preValidation", async (req, reply) => {
+    if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body) && bodyHasNul(req.body)) return void (await reply.code(400).send({ ok: false, msg: "Text cannot contain a NUL character." }));
   });
 
   // The audit channel comes from the transport: a client-sent `via` is pinned to what the caller may claim.

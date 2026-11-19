@@ -20,7 +20,7 @@ Open https://localhost. Caddy signs a certificate from its local CA; either acce
 docker compose -f deploy/compose.yml cp ingress:/data/caddy/pki/authorities/local/root.crt ./gantry-local-root.crt
 ```
 
-Sign in with a seeded demo account, for example `asha` / `gantry-dev` (all 15 people from the legacy seed exist; the username is the email prefix and the `gantry_id` claim is the legacy id such as `p-asha`). **The demo accounts and the shared password are for local development only.** Mail sent by the stack appears at https://localhost/mail/ (development profile only, see below). Keycloak's admin console is at http://localhost:8081/idp/admin/ on the host itself (`admin`, password in `deploy/secrets/keycloak_admin_password`); it is not served on the public site.
+Sign in with a seeded demo account, for example `asha` / `gantry-dev` (all 15 people from the legacy seed exist; the username is the email prefix and the `gantry_id` claim is the legacy id such as `p-asha`). **The demo accounts and the shared password are for local development only.** Mail sent by the stack appears at https://localhost/mail/ (only with `GANTRY_INGRESS_PROFILE=dev`, see below). Keycloak's admin console is at http://localhost:8081/idp/admin/ on the host itself (`admin`, password in `deploy/secrets/keycloak_admin_password`); it is not served on the public site.
 
 Stop and wipe: `docker compose -f deploy/compose.yml down -v`.
 
@@ -36,7 +36,30 @@ Stop and wipe: `docker compose -f deploy/compose.yml down -v`.
 
 Ingress routes: `/api/*`, `/auth/*`, `/hooks/*` to `gantry-api:8000` (no buffering, so server-sent events stream); `/idp/realms/gantry/*` and `/idp/resources/*` to Keycloak `:8081`; any other `/idp/*` path (the admin console, the admin REST API, the `master` realm) answers 404; everything else to `gantry-web:8080`.
 
-`GANTRY_INGRESS_PROFILE` picks the development routes from `caddy/profiles/`. `dev` (the compose default for this local stack) adds `/mail/*` to Mailpit `:8025`. `prod` (the Caddyfile default) adds nothing, so set `GANTRY_INGRESS_PROFILE=prod` for any shared or production install.
+`GANTRY_INGRESS_PROFILE` picks the development routes from `caddy/profiles/`. The default is `prod`, which adds nothing: no `/mail`, no `/v3`. `dev` is an explicit opt-in that adds `/mail/*` (Mailpit `:8025`, which holds every invite link and notification mail) and the `/v3` design preview. **To keep Mailpit at `/mail/` and the preview at `/v3/` on a local or preview stack, set `GANTRY_INGRESS_PROFILE=dev`** in the environment `docker compose` runs with (an exported variable, or the compose env file you already use) before the next `up`; recreate only the `ingress` service for it to take effect (`docker compose -p gantry up -d ingress`). Never set it on a stack that binds beyond loopback. The demo accounts are separately tied to a localhost URL (`core/config.ts`).
+
+### Back-channel logout (sessions end with the identity)
+
+The API serves `POST /auth/backchannel-logout` (OIDC Back-Channel Logout 1.0). Keycloak posts a signed logout token there when a user signs out at Keycloak, is disabled, or has sessions revoked; the API verifies it (signature, issuer, audience, age, event) and revokes the matching Gantry sessions. The realm files set the client's `backchannel.logout.url` to `http://gantry-api:8000/auth/backchannel-logout` (container to container, never through the ingress) with session required. A realm that already exists is not re-imported, so on a running stack set it by hand once: Keycloak admin console, realm `gantry`, client `gantry-web`, Settings, Logout settings, "Backchannel logout URL" `http://gantry-api:8000/auth/backchannel-logout`, "Backchannel logout session required" on.
+
+### Vendor LAN ranges (on-prem models)
+
+The model gateway (edge) refuses vendor endpoints that are loopback, link-local (metadata), on a Gantry network or private, resolving the name on every call. An on-prem vendor on a private address needs its range listed: Security setting `vendorLanRanges` (IPv4 CIDR inside 10/8, 192.168/16 or 100.64/10), set by a Factory Admin with a fresh sign-in and audited. `EDGE_ALLOW_PRIVATE_UPSTREAMS=true` turns the edge guard off for a development stack.
+
+What is never openable (`CONTROL_CIDRS` in `packages/domain/src/netguard.ts`): the pinned compose networks (control 10.89.17.0/24, front 172.18, dockerapi 172.19, egress 172.20, launch 172.22, wsapi 172.23, all /16) and Docker's whole default pool **172.16.0.0/12** (per-run networks and docker0 come from it). A range that overlaps any of them is refused when saved, so:
+- **172.16.0.0/12 is not a LAN range.** A model host on a 172.16-172.31 address stops working at the edge and cannot be listed.
+- **10.0.0.0/8 is refused** because it covers 10.89.17.0/24. List the real range instead, for example `10.0.0.0/16`.
+- Compose service names (`gantry-*`, `postgres`, `minio`, `keycloak`, `mailpit`, ...) are never a vendor host.
+
+Pinning the compose subnets matches what the existing stack already uses; on a stack created before the pin, `docker compose up` sees a changed network definition and recreates the networks (and the containers on them), so apply it in a maintenance window.
+
+**If your model host really is on 172.16-31:** move Docker's pool away from the corporate LAN, then narrow `CONTROL_CIDRS` to match.
+1. Pick a pool the LAN does not use, for example `10.200.0.0/16` split into /24 (it must not overlap the LAN or 10.89.17.0/24).
+2. On the Docker host, edit `/etc/docker/daemon.json`: `{ "default-address-pools": [ { "base": "10.200.0.0/16", "size": 24 } ] }`.
+3. Stop the stack (`docker compose -p gantry down`), restart the daemon (`systemctl restart docker`), remove the old gantry networks if `down` left any, and change the `ipam` subnets in `deploy/compose.yml` (front, dockerapi, egress, launch, wsapi) to blocks inside the new pool.
+4. In `packages/domain/src/netguard.ts` replace `172.16.0.0/12` and the old 172.x /16 entries in `CONTROL_CIDRS` with the new pool and the new subnets, rebuild and redeploy the API and edge.
+5. Then list the model host's 172.x range in Security.
+Do this only with the owner's agreement: it changes the networks of every container.
 
 ### Keycloak admin console
 

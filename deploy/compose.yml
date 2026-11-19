@@ -59,8 +59,9 @@ services:
       - ./caddy/profiles:/etc/caddy/profiles:ro
       - caddydata:/data
     environment:
-      # dev serves the Mailpit inbox at /mail; prod (the Caddyfile default) serves no development routes.
-      GANTRY_INGRESS_PROFILE: ${GANTRY_INGRESS_PROFILE:-dev}
+      # prod (the default) serves no development routes. dev is an explicit opt-in: it serves the Mailpit inbox at /mail (every invite and
+      # notification mail, with tokens) and the /v3 preview. Set GANTRY_INGRESS_PROFILE=dev on a local stack only (deploy/README.md).
+      GANTRY_INGRESS_PROFILE: ${GANTRY_INGRESS_PROFILE:-prod}
       GANTRY_HOSTNAME: ${GANTRY_HOSTNAME:-localhost}
       GANTRY_TLS: ${GANTRY_TLS:-internal}
     # Caddy writes its local CA and config under XDG_*; both are on the writable volume or tmpfs.
@@ -569,8 +570,13 @@ services:
     networks: [control]
 
 networks:
+  # Subnets are pinned (G-A6) to the ranges the stack already uses, so Gantry's address guard can name them as control networks and no LAN range can open them.
+  # Keep them in step with CONTROL_CIDRS in packages/domain/src/netguard.ts. Per-run networks come from Docker's default pool (172.16.0.0/12), also guarded.
   front:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
   control:
     driver: bridge
     internal: true
@@ -582,16 +588,28 @@ networks:
   launch:
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
   # Launcher <-> socket proxy only.
   dockerapi:
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: 172.19.0.0/16
   # Broker <-> workspace socket proxy only.
   wsapi:
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: 172.23.0.0/16
   egress:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
 
 volumes:
   # Empty; only its filesystem is read (free space), by the launcher's free-disk guard.

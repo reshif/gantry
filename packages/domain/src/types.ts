@@ -1440,6 +1440,8 @@ export interface SecuritySettings {
   githubLogin: boolean;
   /** Hosts station agents may read through governed web research (patterns like docs.example.com or *.example.org). Empty: no web research. */
   researchHosts?: string[];
+  /** LAN ranges (IPv4 CIDR, private space only) an on-prem vendor endpoint may be in. Empty: a vendor endpoint must be a public address (S-68). Set by a Factory Admin with a fresh sign-in; audited. */
+  vendorLanRanges?: string[];
   /** Most a person may spend on chats (the Console and side threads with agents) per rolling 24 hours, in dollars. Null: no cap beyond the model budgets. */
   chatCapUsdPerDay?: number | null;
 }

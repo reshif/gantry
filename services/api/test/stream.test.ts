@@ -70,6 +70,16 @@ d("SSE stream over LISTEN/NOTIFY", () => {
     return { s, stream: sse(res) };
   };
 
+  it("S-73: the hijacked stream carries the security headers by hand, with one Cache-Control", async () => {
+    const s = await t.session("p-asha");
+    const res = await fetch(`${base}/api/v1/stream`, { headers: { cookie: s.cookie } });
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("x-request-id")).toBeTruthy();
+    expect(res.headers.get("content-security-policy")).toContain("default-src 'none'");
+    expect(res.headers.get("cache-control")).toBe("no-cache, no-transform");
+    await res.body?.cancel();
+  });
+
   it("requires a session", async () => {
     const res = await fetch(`${base}/api/v1/stream`);
     expect(res.status).toBe(401);

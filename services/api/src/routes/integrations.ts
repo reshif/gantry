@@ -6,7 +6,7 @@
  */
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { visibleProjects } from "@gantry/domain";
-import { command, decide, policyState, refuse, type CommandSpec } from "../core/index.js";
+import { command, decide, mayCallOut, policyState, refuse, type CommandSpec } from "../core/index.js";
 import { addInstance, addType, recordDraftTest, recordTest, removeInstance, removeType, resolveInstance, secretsOf, updateInstance } from "../areas/integrations/commands.js";
 import { AddInstanceBody, CustomTypeBody, IdParam, PatchInstanceBody, TestBody, TypeIdParam } from "../areas/integrations/schemas.js";
 import { ensureBuiltinTypes, instanceFromRow, metaOf, readInstanceRows, readType, readTypes } from "../areas/integrations/store.js";
@@ -29,8 +29,8 @@ export const integrationRoutes: FastifyPluginAsync = async (app) => {
   });
 
   const spec = (action: "integration.add" | "integration.edit", idem = false): CommandSpec => ({ action, scope: {}, ...(idem ? { idempotent: true } : {}) });
-  /** Runs the connection test before the transaction opens, but only for a caller the decision point allows (a denial is then audited by `command`). */
-  const testFirst = async (req: FastifyRequest, action: "integration.add" | "integration.edit", run: () => Promise<TestResult>): Promise<TestResult | null> => ((await decide(req, action, {})).allowed ? run() : null);
+  /** Runs the connection test before the transaction opens, but only for a caller the decision point allows AND whose sign-in is fresh enough (a refusal is then raised and audited by `command`, before anything went out). */
+  const testFirst = async (req: FastifyRequest, action: "integration.add" | "integration.edit", run: () => Promise<TestResult>): Promise<TestResult | null> => ((await mayCallOut(req, action)) ? run() : null);
 
   app.get("/api/v1/integration-types", async (req) => {
     requirePerson(req);

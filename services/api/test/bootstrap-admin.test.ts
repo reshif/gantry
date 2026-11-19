@@ -150,7 +150,9 @@ d("the first sign-in by the bootstrap user becomes Factory Admin", () => {
     const claimsAddress = await signIn({ sub: "other-sub", preferred_username: "x", email: "owner@bootstrap.invalid", email_verified: true, name: "Impostor", auth_time: now(), acr: "2" });
     expect(claimsAddress.cookies.find((c) => c.name === "__Host-gantry_session")).toBeUndefined();
     const sameName = await signIn({ sub: "other-sub-2", preferred_username: "owner", email: "imp@x.example", email_verified: true, name: "Impostor", auth_time: now(), acr: "2" });
-    expect(sameName.cookies.find((c) => c.name === "__Host-gantry_session")).toBeTruthy(); // an ordinary person with no roles
+    // S-71: with no sign-in domain list an ordinary stranger is created pending approval, with no session and no roles.
+    expect(sameName.cookies.find((c) => c.name === "__Host-gantry_session")).toBeUndefined();
+    expect((await t.db.admin.query(`select status from people where email = 'imp@x.example'`)).rows[0].status).toBe("invited");
     expect(await admins()).toHaveLength(0);
   });
 

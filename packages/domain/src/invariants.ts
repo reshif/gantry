@@ -32,6 +32,8 @@ export const AGENT_FORBIDDEN_ACTIONS: readonly string[] = [
 export const STEP_UP_ACTIONS: readonly string[] = [
   "kill.workorder", "kill.project", "kill.factory", "restore.workorder", "restore.project", "restore.factory",
   "policy.edit", "role.edit", "security.manage", "api.keys", "people.manage",
+  // S-66: anything that can redirect data or credentials to another host: a vendor or model endpoint and key, an integration or webhook target, an MCP server, the API settings.
+  "model.edit", "integration.add", "integration.edit", "mcp.edit",
 ];
 
 export function isFactoryAdminPerson(p: Person): boolean {

@@ -11,7 +11,9 @@ import type { z } from "zod";
 import type { Actor, CommandResult } from "../../core/command.js";
 import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
 import { slug } from "../agents/config.js";
-import { checkEndpoint } from "./commands.js";
+import { checkEndpoint, lanRangesOf } from "./commands.js";
+import { egressAdded, urlHosts } from "../internal/egress.js";
+import { discoveryHosts } from "./discovery.js";
 import type { Discovered } from "./discovery.js";
 import { publishPriceVersion, type Price } from "./prices.js";
 import type { AddVendorFromTemplateBody } from "./schemas.js";
@@ -160,7 +162,7 @@ export async function addVendorFromTemplate(tx: Tx, a: Actor, dataKey: Buffer | 
   if (!id) throw invalid("Name the vendor with letters or numbers.");
   if ((await vendorRows(tx, a.orgId, id))[0]) throw conflict(`${name} exists. Open its card to refresh its models, or give this one another name.`);
   const { plain, secrets } = splitValues(t, b.fields);
-  const endpoint = checkEndpoint(templateEndpoint(t, { ...plain, ...b.fields }), { allowHttp: false });
+  const endpoint = checkEndpoint(templateEndpoint(t, { ...plain, ...b.fields }), { allowHttp: false, lan: await lanRangesOf(tx, a.orgId) });
   const stored = packSecrets(t, secrets);
   const primary = secretKeys(t).map((k) => secrets[k]).find(Boolean) ?? "";
   const region = plain.region ?? plain.location ?? "";
@@ -179,6 +181,7 @@ export async function addVendorFromTemplate(tx: Tx, a: Actor, dataKey: Buffer | 
     msg,
     events: [
       { type: "vendor.add", category: "agents", subject: subject("vendor", id), after: { name, template: t.id, endpoint, region, connected: true, retention: config.retention, ...(primary ? { keyMask: mask(primary), keyFingerprint: fingerprint(primary) } : {}) } },
+      ...egressAdded([], [...urlHosts(endpoint), ...discoveryHosts(t, { ...plain, ...(region ? { region } : {}) })], { kind: "vendor", id, name }),
       { type: "vendor.discover", category: "agents", subject: subject("vendor", id), after: { found: applied.found, added: applied.added, enabled: applied.enabled, needPrice: applied.needPrice, priceVersion: applied.priceVersion, models: applied.models.slice(0, 200).map((m) => m.id) } },
     ],
     extra: { vendor: { id, name, connected: true, template: t.id }, discovery: { ...applied, warnings } },

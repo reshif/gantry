@@ -185,6 +185,9 @@
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "post.logout.redirect.uris": "https://localhost/",
+        "backchannel.logout.url": "http://gantry-api:8000/auth/backchannel-logout",
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.revoke.offline.tokens": "false",
         "access.token.lifespan": "300",
         "client_credentials.use_refresh_token": "false"
       },
