@@ -597,15 +597,39 @@ describe("Project config", () => {
     expect(await screen.findByText(/changed since you loaded it/)).toBeTruthy();
   });
 
-  it("members tab: On call says what is paged and sends a test page to the on-call keyword through the route test", async () => {
-    const calls = withPayments({ "POST /api/v1/projects/payments/routes/test": () => ok({ msg: "Test to on-call queued on Ops mail. The delivery log shows the outcome." }) });
+  it("members tab: On call says what the server pages for and sends a test page to the on-call keyword through the route test", async () => {
+    const calls = withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, pageOnCall: true, pagedFor: ["kill", "restore", "halts", "blocked", "security hold", "escalations"] }, RISK] }), "POST /api/v1/projects/payments/routes/test": () => ok({ msg: "Test to on-call queued on Ops mail. The delivery log shows the outcome." }) });
     tab("members");
     mount(<ProjectConfigView />);
     expect((await byId("pcf-oncall-paged")).textContent).toBe("Paged for: kill, restore, halts, blocked, security hold, escalations.");
     const test = await byId("pcf-oncall-test");
     await waitFor(() => expect((test as HTMLButtonElement).disabled).toBe(false));
     await waitFor(() => { fireEvent.click(test); expect(calls.some((c) => c.path === "/api/v1/projects/payments/routes/test")).toBe(true); });
-    await waitFor(() => expect(calls.find((c) => c.path === "/api/v1/projects/payments/routes/test")?.body).toEqual({ dest: { channel: "email", target: "on-call", integration: null }, event: "andon" }));
+    expect(calls.find((c) => c.path === "/api/v1/projects/payments/routes/test")?.body).toEqual({ dest: { channel: "email", target: "on-call", integration: null }, event: "andon" });
+  });
+
+  it("members tab: the default-page switch is bound to pageOnCall and PATCHes notifications.oncallPage; off lists only kill and restore", async () => {
+    const calls = withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, pageOnCall: true, pagedFor: ["kill", "restore", "halts", "blocked", "security hold", "escalations"] }, RISK] }), "PATCH /api/v1/projects/payments/config": () => ok({ version: 8 }) });
+    tab("members");
+    mount(<ProjectConfigView />);
+    const sw = (await byId("pcf-oncall-page")) as HTMLInputElement;
+    expect(sw.checked).toBe(true);
+    await waitFor(() => expect(sw.disabled).toBe(false));
+    fireEvent.click(sw);
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ path: "notifications.oncallPage", value: false }));
+    cleanup();
+    withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, pageOnCall: false, pagedFor: ["kill", "restore"] }, RISK] }) });
+    mount(<ProjectConfigView />);
+    expect((await byId("pcf-oncall-paged")).textContent).toBe("Paged for: kill, restore.");
+    expect(((await byId("pcf-oncall-page")) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("members tab: the default-page switch is locked without the notify right", async () => {
+    withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, pageOnCall: true, pagedFor: ["kill", "restore"] }, RISK] }) }, ["notify.edit"]);
+    tab("members");
+    mount(<ProjectConfigView />);
+    const sw = (await byId("pcf-oncall-page")) as HTMLInputElement;
+    await waitFor(() => expect(sw.disabled || sw.getAttribute("aria-disabled") === "true" || sw.getAttribute("data-reason") !== null).toBe(true));
   });
 
   it("approvers tab: edits a rule, refuses N larger than the eligible people, and saves with If-Match", async () => {
