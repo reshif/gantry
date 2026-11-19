@@ -193,6 +193,36 @@ d("station documents and dialogue", () => {
     expect(await list("p-meera")).toBe("person");
   });
 
+  it("S-31: a blocking question for a requester who was deactivated goes to the project admins, line leads and Factory Admins, named as asked of them, and offboarding lists it", async () => {
+    const id = await w.atStation("research", "Asked of a leaver");
+    const att = (await w.liveAttempt(id))!;
+    await w.apply(att, { status: "needs_person", output: { dialogue: { questions: [{ question: "Which tenant goes first?", why: "Order.", blocking: true, askOf: "requester" }] } } });
+    const wo = (await w.q<{ submitter: string }>(`select submitter from work_orders where id = $1`, [id]))[0]!.submitter;
+    const waitingFor = async (who: string) => {
+      const s = await t.session(who);
+      const r = (await t.app.inject({ method: "GET", url: "/api/v1/home", headers: s.headers })).json() as Record<string, any>;
+      return JSON.stringify(r.sections.conversations ?? r.sections.waiting ?? []);
+    };
+    const { openWorkOf } = await import("../src/areas/people/offboard.js");
+    expect((await w.tx((tx) => openWorkOf(tx, t.orgId, wo, Date.now()))).find((x) => x.id === id)).toMatchObject({ roles: expect.arrayContaining(["requester", "asked"]), questions: 1 });
+    await w.q(`update people set status = 'deactivated' where id = $1`, [wo]);
+    try {
+      const name = (await w.q<{ name: string }>(`select name from people where id = $1`, [wo]))[0]!.name;
+      for (const who of ["p-meera", "p-asha"]) {
+        const text = await waitingFor(who);
+        expect(text, who).toContain(id);
+        expect(text, who).toContain(`Asked of ${name} (deactivated)`);
+      }
+      expect(await waitingFor("p-kenji")).not.toContain(id);
+      const list = async (who: string) => ((await w.call(who, "GET", "/api/v1/work-order-sessions?project=payments")).body.items as Array<{ id: string; waitingOn: string; askedOf?: string }>).find((x) => x.id === id);
+      expect(await list("p-meera")).toMatchObject({ waitingOn: "you", askedOf: `Asked of ${name} (deactivated)` });
+      const ses = (await w.call("p-meera", "GET", `/api/v1/work-orders/${id}/session`)).body;
+      expect(ses.dialogue.askedMe).toBe(true);
+    } finally {
+      await w.q(`update people set status = 'active' where id = $1`, [wo]);
+    }
+  });
+
   it("research: a proposed plan parks the station; an approver decides; unlisted hosts need security; the run reads only approved hosts", async () => {
     const id = await w.atStation("research", "Research plan");
     const att = (await w.liveAttempt(id))!;

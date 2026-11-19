@@ -22,7 +22,9 @@ export interface OpenWorkItem {
   project: string;
   state: string;
   /** Why this person matters to it: requester, assignee or sole_approver (with `gate`). */
-  roles: Array<"requester" | "assignee" | "sole_approver">;
+  roles: Array<"requester" | "assignee" | "sole_approver" | "asked">;
+  /** Open blocking questions addressed to them (as the requester) that now go to the project admins and line leads. */
+  questions?: number;
   gate?: string;
 }
 
@@ -45,6 +47,8 @@ export async function openWorkOf(tx: Tx, orgId: string, id: string, now: number)
     if (!row) continue;
     const roles: OpenWorkItem["roles"] = [];
     if (wo.requestedBy === id) roles.push("requester");
+    const asked = wo.requestedBy === id ? (await tx.query<{ n: number }>(`select count(*)::int as n from wo_questions where org_id = $1 and wo_id = $2 and status = 'open' and blocking and ask_of in ('requester','anyone')`, [orgId, wo.id])).rows[0]!.n : 0;
+    if (asked) roles.push("asked");
     if (row.assignee === id) roles.push("assignee");
     let gate: string | undefined;
     const waiting = Object.entries(wo.gates).filter(([, g]) => g.status === "waiting").map(([k]) => k);
@@ -62,7 +66,7 @@ export async function openWorkOf(tx: Tx, orgId: string, id: string, now: number)
         }
       }
     }
-    if (roles.length) items.push({ id: wo.id, title: wo.title, project: wo.project, state: String(wo.state), roles, ...(gate ? { gate } : {}) });
+    if (roles.length) items.push({ id: wo.id, title: wo.title, project: wo.project, state: String(wo.state), roles, ...(gate ? { gate } : {}), ...(asked ? { questions: asked } : {}) });
   }
   return items;
 }

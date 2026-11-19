@@ -31,7 +31,7 @@ import { addWoMessage, legacyMessages, listWoMessages, lockWoMessage, newWoMessa
 import { executeWoTool, stationName, woToolDefs, type WoSessionCtx } from "../areas/workorders/session/tools.js";
 import { openIntakeSessions, scanWoEvents } from "../areas/workorders/session/updates.js";
 import { command, decide, decideFor, policyState, refuse, type CommandResult, type EventSpec } from "../core/index.js";
-import { asksMe, askOfLabel } from "../areas/workorders/asked.js";
+import { askedOfGone, asksMe, askOfLabel, requesterActive } from "../areas/workorders/asked.js";
 import { listDialogue, listDocuments } from "../areas/workorders/documents.js";
 import { listSources, planOf } from "../areas/workorders/research.js";
 import { swarmOf } from "../areas/workorders/swarm.js";
@@ -80,6 +80,8 @@ const rails = (o: { atIntake: boolean }): string => [
 export interface WoSessionRow {
   id: string; project: string; title: string; cls: string; station: string; stationName: string; state: string; bay: string | null; gate: string | null; agent: string | null; agentName: string | null;
   waitingOn: "you" | "approver" | "agent" | "person" | "nobody"; latest: { text: string; at: number; by: string; role: string } | null; unread: boolean; closed: boolean; started: boolean; requestedBy: string | null; createdAt: number; closedAt: number | null;
+  /** "Asked of <name> (deactivated)" when an open blocking question is for a requester who is no longer active (S-31). */
+  askedOf?: string;
 }
 
 /** The work-order sessions a person sees (the Conversations list and the workspace inbox): who waits on whom, the latest message, the station. */
@@ -122,7 +124,7 @@ export async function woSessionRows(db: Queryable, orgId: string, req: FastifyRe
       const pending = !!m && m.role === "assistant" && (m.data.cards ?? []).some((c) => (c.kind === "proposal" && c.status === "pending") || c.kind === "question");
       const gate = gates.get(w.id) ?? null;
       const asks = askRows.filter((a) => a.wo_id === w.id);
-      const askedMe = asks.some((a) => asksMe(a.ask_of, meP, { project: w.project_id, requestedBy: w.submitter }, (act) => decideFor(pst, req.gx.principal!, act, { project: w.project_id }).allowed));
+      const askedMe = asks.some((a) => asksMe(a.ask_of, meP, { project: w.project_id, requestedBy: w.submitter, requesterActive: requesterActive(pst.people, w.submitter) }, (act) => decideFor(pst, req.gx.principal!, act, { project: w.project_id }).allowed));
       const waitingOn: "you" | "approver" | "agent" | "person" | "nobody" = closed ? "nobody"
         : pending ? "you"
         : asks.length ? (askedMe ? "you" : "person")
@@ -136,6 +138,7 @@ export async function woSessionRows(db: Queryable, orgId: string, req: FastifyRe
       return {
         id: w.id, project: w.project_id, title: w.title, cls: w.class, station: sid, stationName: bay ? (catalog.bays.find((b) => b.id === w.position)?.name ?? w.position) : stn?.name ?? sid, state: w.state, bay: bay ? w.position : null, gate,
         agent: stn?.agent ?? null, agentName: stn?.agent ? (names.get(stn.agent) ?? stn.name) : null, waitingOn, latest, unread, closed, started: !!m, requestedBy: w.submitter, createdAt: w.created_at.getTime(), closedAt: closed ? (w.closed_at ?? w.created_at).getTime() : null,
+        ...(asks.some((a) => a.ask_of === "requester" || a.ask_of === "anyone") && askedOfGone(pst.people, w.submitter) ? { askedOf: askedOfGone(pst.people, w.submitter)! } : {}),
       };
     });
     return items;
@@ -433,9 +436,10 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     const meP = pst.people.find((p) => p.id === who.id);
     const openAsks = dialogue.questions.filter((q) => q.status === "open");
     const blockingAsks = openAsks.filter((q) => q.blocking);
-    const askedMe = blockingAsks.some((q) => asksMe(q.askOf, meP, { project: row.project, requestedBy: wo.requestedBy }, (act) => decideFor(pst, req.gx.principal!, act, { project: row.project }).allowed));
+    const askedMe = blockingAsks.some((q) => asksMe(q.askOf, meP, { project: row.project, requestedBy: wo.requestedBy, requesterActive: requesterActive(pst.people, wo.requestedBy) }, (act) => decideFor(pst, req.gx.principal!, act, { project: row.project }).allowed));
     const roleName = (rid: string) => (f.catalog.roles ?? []).find((r) => r.id === rid)?.name ?? rid.replace(/_/g, " ");
-    const askedOf = [...new Set(blockingAsks.map((q) => askOfLabel(q.askOf, roleName)))].join(" or ");
+    const gone = askedOfGone(pst.people, wo.requestedBy);
+    const askedOf = [...new Set(blockingAsks.map((q) => (gone && q.askOf === "requester" ? `${gone.replace(/^Asked of /, "")}, so the project admins and line leads` : askOfLabel(q.askOf, roleName))))].join(" or ");
     const planWaiting = planOf(row.data)?.status === "proposed" ? planOf(row.data) : null;
     const canDecidePlan = planWaiting ? (await decide(req, "gate.approve", scopeOf(row))).allowed : false;
     // The scripted questionnaire is history: shown until the session starts, never mixed into it afterwards.
@@ -488,7 +492,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       research: { plan: planOf(row.data), allowList: (await readSecurity(g.pool, g.orgId)).value.researchHosts ?? [], canDecide: (await decide(req, "gate.approve", scopeOf(row))).allowed, canApproveUnlisted: (await decide(req, "security.manage")).allowed },
       sources: await listSources(g.pool, g.orgId, id),
       swarm: await swarmView(row.data, id),
-      dialogue: { questions: dialogue.questions.map((q) => ({ ...q, mine: q.status === "open" && asksMe(q.askOf, meP, { project: row.project, requestedBy: wo.requestedBy }, (act) => decideFor(pst, req.gx.principal!, act, { project: row.project }).allowed) })), assumptions: dialogue.assumptions, objections: dialogue.objections, askedMe }, documents: await listDocuments(g.pool, g.orgId, id),
+      dialogue: { questions: dialogue.questions.map((q) => ({ ...q, mine: q.status === "open" && asksMe(q.askOf, meP, { project: row.project, requestedBy: wo.requestedBy, requesterActive: requesterActive(pst.people, wo.requestedBy) }, (act) => decideFor(pst, req.gx.principal!, act, { project: row.project }).allowed) })), assumptions: dialogue.assumptions, objections: dialogue.objections, askedMe }, documents: await listDocuments(g.pool, g.orgId, id),
       next, waiting, pending, brief: wo.brief, briefConfirmed: (wo.briefVersions ?? []).length > 0 || wo.gates.G0G1?.status === "passed", briefOpen: atIntake,
       ruleQuestion: ag.mode === "rule-based" && atIntake && legacyQ ? { id: legacyQ.id, text: legacyQ.text, chips: legacyQ.chips } : null, ruleReady: ag.mode === "rule-based" && atIntake && wo.conv.done,
       busy: active.has(id),
