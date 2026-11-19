@@ -1,48 +1,47 @@
-/* Gantry design tokens (shadcn-style neutrals, Tremor-style data cards, indigo accent).
+/* Gantry design tokens (warm neutrals, soft radii, one muted clay accent).
    Light palette in bare :root, dark redefined twice (system preference unless forced light, and explicit data-theme="dark").
    Older token names (--ink, --muted, --line-strong, --r1 ...) keep working: they are the primary names; the short
    preview names (--fg, --ok ...) are aliases. Do not redefine --panel or --muted with a different meaning. */
 /* Self-hosted variable fonts (SIL OFL, licences in src/assets/fonts). Latin subset; other scripts fall back to the system stack.
    No third-party request, so nothing render-blocks on an external origin. */
 @font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("../assets/fonts/inter-latin-wght-normal.woff2") format("woff2-variations"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
-@font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 300 700; font-display: swap; src: url("../assets/fonts/space-grotesk-latin-wght-normal.woff2") format("woff2-variations"); }
 @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 100 800; font-display: swap; src: url("../assets/fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2-variations"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
 
-/* BLUEPRINT tokens, from the prototype (design-3-blueprint/css/app.css). Light is the paper drawing, dark is the blueprint. */
+/* Warm neutral tokens: off-white paper in light, charcoal in dark. */
 :root {
   color-scheme: light;
-  --font:"Space Grotesk",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  --bg:#e5e9f0;
-  --grid:rgba(14,40,92,.055);
-  --grid2:rgba(14,40,92,.11);
-  --surface:#f7f8fa;
-  --surface2:#eceff5;
-  --sunk:#dfe5ef;
-  --ink:#0a1a38;
-  --ink2:#3f5278;
-  --ink3:#52668c;
-  --line:#8fa0bd;
-  --line2:#13295c;
-  --accent:#0a5d86;
+  --bg:#f5f4ef;
+  --grid:transparent;
+  --grid2:transparent;
+  --surface:#ffffff;
+  --surface2:#efede6;
+  --sunk:#e8e5dc;
+  --ink:#1f1e1b;
+  --ink2:#4d4a43;
+  --ink3:#645f56;
+  --line:#dcd8ce;
+  --line2:#b9b4a8;
+  --accent:#9c4a29;
   --accent-ink:#ffffff;
-  --accent-soft:#dfe8ee;
+  --accent-soft:#f3e6de;
   --ok:#12703a;
   --ok-bg:#e0eae7;
   --warn:#9a5700;
   --warn-bg:#eee8e1;
   --bad:#c0202e;
   --bad-bg:#f3e7ea;
-  --plate:rgba(16,34,58,.16);
-  --focus:#0a5d86;
+  --plate:rgba(31,30,27,.08);
+  --focus:#9c4a29;
   --scrim:rgba(16,34,58,.45);
-  --r:3px;
+  --r:8px;
   --gut:16px;
 
   --f-body: var(--font); --f-display: var(--font); --f-ui: var(--font); --f-mono: var(--mono);
   --t-xs: 11px; --t-sm: 12.5px; --t-md: 13px; --t-base: 14px; --t-lg: 15px; --t-xl: 18px; --t-2xl: 22px; --t-3xl: 28px; --t-title: 21px; --t-label: 10.5px; --t-panel: 16px;
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
-  --r1: 3px; --r2: 3px; --r3: 3px; --r-sm: 3px;
+  --r1: 8px; --r2: 8px; --r3: 12px; --r-sm: 8px;
   --control-h: 30px;
   --z-banner: 130;
   --panel: var(--surface2); --ink-2: var(--ink2); --muted: var(--ink3); --faint: var(--ink3);
@@ -74,34 +73,34 @@
   --on-warn:#1c1200;
   --warn-solid:#f4b429;
   --hatch:rgba(192,32,46,.5);
-  --control-line:#52678f;
+  --control-line:#8a857a;
 }
 [data-scope="light"] { color-scheme: light; background: var(--bg); color: var(--ink); padding: 16px; border: 1px solid var(--line2); }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg:#050f1e;
-    --grid:rgba(120,170,255,.045);
-    --grid2:rgba(120,170,255,.10);
-    --surface:#081a33;
-    --surface2:#0b2040;
-    --sunk:#04101f;
-    --ink:#e0ebff;
-    --ink2:#a8bfe2;
-    --ink3:#86a1cc;
-    --line:#3a69ad;
-    --line2:#6aa6ec;
-    --accent:#46d6ff;
-    --accent-ink:#04203f;
-    --accent-soft:#113651;
+    --bg:#1f1e1c;
+    --grid:transparent;
+    --grid2:transparent;
+    --surface:#262522;
+    --surface2:#2e2c29;
+    --sunk:#1a1918;
+    --ink:#ecebe6;
+    --ink2:#c3c0b6;
+    --ink3:#a19d92;
+    --line:#3a3834;
+    --line2:#57544e;
+    --accent:#e08a63;
+    --accent-ink:#1f1e1c;
+    --accent-soft:#3a2a22;
     --ok:#46e08a;
     --ok-bg:#103440;
     --warn:#ffb224;
     --warn-bg:#2b2f31;
     --bad:#ff6a76;
     --bad-bg:#2b253c;
-    --plate:rgba(2,10,30,.65);
-    --focus:#46d6ff;
+    --plate:rgba(0,0,0,.4);
+    --focus:#e08a63;
     --scrim:rgba(2,10,30,.65);
   --station:#0a1e3e;
   --station-head:#123059;
@@ -110,33 +109,33 @@
   --on-warn:#1c1200;
   --warn-solid:#ffb224;
   --hatch:rgba(255,106,118,.55);
-  --control-line:#3a69ad;
+  --control-line:#77736a;
 }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg:#050f1e;
-  --grid:rgba(120,170,255,.045);
-  --grid2:rgba(120,170,255,.10);
-  --surface:#081a33;
-  --surface2:#0b2040;
-  --sunk:#04101f;
-  --ink:#e0ebff;
-  --ink2:#a8bfe2;
-  --ink3:#86a1cc;
-  --line:#3a69ad;
-  --line2:#6aa6ec;
-  --accent:#46d6ff;
-  --accent-ink:#04203f;
-  --accent-soft:#113651;
+  --bg:#1f1e1c;
+  --grid:transparent;
+  --grid2:transparent;
+  --surface:#262522;
+  --surface2:#2e2c29;
+  --sunk:#1a1918;
+  --ink:#ecebe6;
+  --ink2:#c3c0b6;
+  --ink3:#a19d92;
+  --line:#3a3834;
+  --line2:#57544e;
+  --accent:#e08a63;
+  --accent-ink:#1f1e1c;
+  --accent-soft:#3a2a22;
   --ok:#46e08a;
   --ok-bg:#103440;
   --warn:#ffb224;
   --warn-bg:#2b2f31;
   --bad:#ff6a76;
   --bad-bg:#2b253c;
-  --plate:rgba(2,10,30,.65);
-  --focus:#46d6ff;
+  --plate:rgba(0,0,0,.4);
+  --focus:#e08a63;
   --scrim:rgba(2,10,30,.65);
   --station:#0a1e3e;
   --station-head:#123059;
@@ -145,32 +144,32 @@
   --on-warn:#1c1200;
   --warn-solid:#ffb224;
   --hatch:rgba(255,106,118,.55);
-  --control-line:#3a69ad;
+  --control-line:#77736a;
 }
 [data-scope="dark"] {
   color-scheme: dark;
-  --bg:#050f1e;
-  --grid:rgba(120,170,255,.045);
-  --grid2:rgba(120,170,255,.10);
-  --surface:#081a33;
-  --surface2:#0b2040;
-  --sunk:#04101f;
-  --ink:#e0ebff;
-  --ink2:#a8bfe2;
-  --ink3:#86a1cc;
-  --line:#3a69ad;
-  --line2:#6aa6ec;
-  --accent:#46d6ff;
-  --accent-ink:#04203f;
-  --accent-soft:#113651;
+  --bg:#1f1e1c;
+  --grid:transparent;
+  --grid2:transparent;
+  --surface:#262522;
+  --surface2:#2e2c29;
+  --sunk:#1a1918;
+  --ink:#ecebe6;
+  --ink2:#c3c0b6;
+  --ink3:#a19d92;
+  --line:#3a3834;
+  --line2:#57544e;
+  --accent:#e08a63;
+  --accent-ink:#1f1e1c;
+  --accent-soft:#3a2a22;
   --ok:#46e08a;
   --ok-bg:#103440;
   --warn:#ffb224;
   --warn-bg:#2b2f31;
   --bad:#ff6a76;
   --bad-bg:#2b253c;
-  --plate:rgba(2,10,30,.65);
-  --focus:#46d6ff;
+  --plate:rgba(0,0,0,.4);
+  --focus:#e08a63;
   --scrim:rgba(2,10,30,.65);
   background: var(--bg); color: var(--ink); padding: 16px; border: 1px solid var(--line2);
   --station:#0a1e3e;
@@ -180,5 +179,5 @@
   --on-warn:#1c1200;
   --warn-solid:#ffb224;
   --hatch:rgba(255,106,118,.55);
-  --control-line:#3a69ad;
+  --control-line:#77736a;
 }

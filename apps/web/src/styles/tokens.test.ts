@@ -49,11 +49,11 @@ describe("design tokens", () => {
         expect(ratio(resolve(v, "--control-line"), resolve(v, "--surface")), `${name} control border`).toBeGreaterThanOrEqual(3);
       }
     });
-    it("uses the Precision palette: deep blueprint dark, cool paper light", () => {
+    it("uses the warm neutral palette: charcoal dark, off-white light, clay accent", () => {
       const { light, darkAttr } = parseThemes(tokens);
-      expect(darkAttr["--bg"]).toBe("#050f1e");
-      expect(darkAttr["--accent"]).toBe("#46d6ff");
-      expect(light["--bg"]).toBe("#e5e9f0");
+      expect(darkAttr["--bg"]).toBe("#1f1e1c");
+      expect(darkAttr["--accent"]).toBe("#e08a63");
+      expect(light["--bg"]).toBe("#f5f4ef");
       expect(light["--warn-solid"]).toBe("#f4b429");
     });
     it("panels carry no offset shadow and no permanent corner ticks; only data-hot keeps them", () => {
@@ -75,11 +75,11 @@ describe("design tokens", () => {
       expect(ratio("#777777", "#ffffff")).toBeCloseTo(4.48, 1);
     });
     it("flags a pair that fails, so a regression in tokens.css is caught", () => {
-      const bad = tokens.replace("--ink3:#52668c;", "--ink3:#d0d5dc;");
+      const bad = tokens.replace(/--ink3:#[0-9a-f]{6};/, "--ink3:#d0d5dc;");
       expect(contrastFailures(bad).some((f) => f.fg === "--faint" && f.theme === "light")).toBe(true);
     });
     it("flags dark blocks that drift", () => {
-      const bad = tokens.replace(/(:root\[data-theme="dark"\] \{[\s\S]*?--ink3:)#86a1cc/, "$1#999999");
+      const bad = tokens.replace(/(:root\[data-theme="dark"\] \{[\s\S]*?--ink3:)#[0-9a-f]{6}/, "$1#999999");
       expect(darkBlocksDiff(bad)).toContain("--ink3");
     });
   });
