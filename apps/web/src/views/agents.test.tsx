@@ -548,6 +548,15 @@ describe("Run limits panel", () => {
     expect((document.getElementById("ag-lim-save") as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("G-R5: 'on the floor now' shows the live version's limits, not the working copy a candidate just saved", async () => {
+    setup({ "GET /api/v1/agents": () => ({ body: [{ ...BUILD, limits: { turns: 90, wallClockSeconds: 7200, costUsd: 4.5 }, liveLimits: {} }, REVIEW] }) });
+    mountAgent();
+    await byId("ag-limits");
+    expect(input("ag-lim-turns").value).toBe("90"); // the working copy is what the fields edit
+    expect(document.getElementById("ag-limits")!.parentElement!.textContent).toContain("On the floor now: defaults.");
+    expect(input("ag-lim-turns").placeholder).toBe("40");
+  });
+
   it("refuses an out of range value before sending anything, and shows what the agent has set", async () => {
     const calls = setup();
     window.location.hash = "#agents/ag-build";

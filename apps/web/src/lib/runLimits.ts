@@ -48,8 +48,9 @@ export function limitsLine(l: RunLimits | undefined | null): string {
 }
 
 /** What a run is bound by when the agent sets nothing: shown as the placeholder of an empty field. */
-export function inheritedText(agent: { limits?: RunLimits; budget?: number } | undefined | null): LimitText {
-  const l = agent?.limits;
+export function inheritedText(agent: { liveLimits?: RunLimits; budget?: number } | undefined | null): LimitText {
+  // The version on the floor is what a run is bound by, not the working copy an edit or a candidate may have changed.
+  const l = agent?.liveLimits;
   return {
     turns: String(l?.turns ?? LIMIT_DEFAULTS.turns),
     minutes: l?.wallClockSeconds ? minutesOf(l.wallClockSeconds) : String(LIMIT_DEFAULTS.minutes),

@@ -876,6 +876,8 @@ export interface Agent {
   guardrails: { paths: string[]; maxDiff: number };
   /** Run limits a person set on the working copy (versioned with the agent). Empty: the defaults apply. */
   limits?: RunLimits;
+  /** The limits of the version on the floor: what a run is bound by. `limits` is the working copy, which only a new version and its promotion puts on the floor. */
+  liveLimits?: RunLimits;
   suite: Id;
   instructions: string;
   overrides: Record<string, { model?: string; autonomy?: Autonomy; budget?: number }>;

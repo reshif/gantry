@@ -449,7 +449,7 @@ describe("Project config", () => {
 
   it("flow tab: a station's Advanced section has Run limits (override) with the agent's values as placeholders; it joins the draft and saves one runLimits write with blanks cleared", async () => {
     const calls = withPayments({
-      "GET /api/v1/agents": () => ({ body: [{ id: "ag-spec", name: "Spec writer", station: "spec", stations: ["spec"], projects: "all", budget: 3, limits: { turns: 90, wallClockSeconds: 7200 }, versions: [], skills: [], mcp: [], tools: {}, overrides: {}, guardrails: { paths: [], maxDiff: 0 }, rev: 1 }] }),
+      "GET /api/v1/agents": () => ({ body: [{ id: "ag-spec", name: "Spec writer", station: "spec", stations: ["spec"], projects: "all", budget: 3, limits: { turns: 10, wallClockSeconds: 600, costUsd: 99 }, liveLimits: { turns: 90, wallClockSeconds: 7200 }, versions: [], skills: [], mcp: [], tools: {}, overrides: {}, guardrails: { paths: [], maxDiff: 0 }, rev: 1 }] }),
       "PATCH /api/v1/projects/payments/config": () => ok(),
     });
     tab("flow");
@@ -462,7 +462,7 @@ describe("Project config", () => {
     const turns = (await byId("pcf-rl-turns-spec")) as HTMLInputElement;
     await waitFor(() => expect(turns.placeholder).toBe("90"));
     expect((document.getElementById("pcf-rl-min-spec") as HTMLInputElement).placeholder).toBe("120");
-    expect((document.getElementById("pcf-rl-cost-spec") as HTMLInputElement).placeholder).toBe("3");
+    expect((document.getElementById("pcf-rl-cost-spec") as HTMLInputElement).placeholder).toBe("3"); // the floor version's limits, not the working copy (10 / 10 min / $99)
     // a bad value is said at the field and blocks Save
     fireEvent.change(turns, { target: { value: "900" } });
     expect(await screen.findByText(/Whole number from 1 to 500/)).toBeTruthy();

@@ -39,7 +39,7 @@ export function RunLimitsPanel({ a, ro, perm, saveLimits }: Pick<TabProps, "a" |
       <div className="row" style={{ marginTop: 10 }}>
         <Btn label="Save as new version" kind="primary" id="ag-lim-save" guard={ro ? perm : null} disabled={!dirty || bad || busy} onClick={() => void save()} />
         <Btn label="Revert" id="ag-lim-revert" disabled={!dirty} onClick={() => setT(saved)} />
-        <span className="small muted">{`Now: ${limitsLine(a.limits)}. A change ships as a new version and runs the eval suite before going live. A project can override these per station.`}</span>
+        <span className="small muted">{`On the floor now: ${limitsLine(a.liveLimits)}. A change ships as a new version and runs the eval suite before going live. A project can override these per station.`}</span>
       </div>
     </Panel>
   );
