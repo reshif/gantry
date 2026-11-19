@@ -10,6 +10,8 @@ export interface TDecision {
   reason: string;
   needs?: string;
   rule?: unknown;
+  override?: boolean;
+  overrideKind?: string;
 }
 export interface GateProg {
   have: number;

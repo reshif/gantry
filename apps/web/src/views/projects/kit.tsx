@@ -10,6 +10,7 @@ import { useState, type ReactNode } from "react";
 import { flowOf, gateExplain, gateStateText, gateTitle, route as routeOf, routeGates as routeGatesOf, type Bay, type Catalog, type Gate, type Project, type Role, type Station, type WorkClass } from "@gantry/domain";
 import { api } from "../../api/client";
 import { get } from "../../api/client";
+import type { FlowOverrideView } from "../../api/types";
 import { Icon } from "../../ui/Icon";
 import { Empty } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
@@ -35,7 +36,7 @@ export interface Metrics {
   onboarding: number;
   health: { id: "killed" | "halted" | "attention" | "new" | "onboarding" | "ok" | "archived"; label: string; icon: string; detail?: string };
 }
-export type PView = Project & { version: number; metrics?: Metrics };
+export type PView = Project & { version: number; metrics?: Metrics; flowOverride?: FlowOverrideView };
 
 export const EMPTY_METRICS: Metrics = {
   wip: 0, bays: 0, gates: 0, oldest: 0, late: 0, eff: null, effN: 0, cov: { total: 0, auto: 0, share: 0 }, bad: 0, haltedRepos: 0,

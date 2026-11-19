@@ -4,7 +4,7 @@
  */
 import type { SecuritySettings } from "@gantry/domain";
 import { useCan } from "../../api/can";
-import { useFactoryStops, useMe, usePeople } from "../../api/queries";
+import { useFactoryStops, useMe } from "../../api/queries";
 import { fmt } from "@gantry/domain";
 import { makeStopActions } from "../../shell/stopActions";
 import { Btn, Panel, Status, Who, type Decision } from "../../ui/primitives";
@@ -13,7 +13,6 @@ import { DataTable } from "../../ui/DataTable";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
-import { isAdminLike, lockd } from "../govern/data";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 const SCOPE: Record<string, string> = { factory: "Whole factory", project: "Project", repo: "Repo", workorder: "Work order" };
@@ -21,17 +20,14 @@ const SCOPE: Record<string, string> = { factory: "Whole factory", project: "Proj
 export function StopTab({ sec }: { sec: SecuritySettings }) {
   const me = useMe();
   const ui = useUI();
-  const peopleQ = usePeople();
-  const people = peopleQ.data ? peopleQ.data : [];
   const kill = dec(useCan("kill.factory"));
-  const restore = dec(useCan("restore.factory"));
+  const restoreD = useCan("restore.factory");
+  const restore = dec(restoreD);
+  const sole = restoreD.allowed && restoreD.override === true; // the server says this admin is the only one: restore with a reason, no second person
   const stops = useFactoryStops();
   if (!me) return null;
   const killed = me.factory.killed;
   const act = makeStopActions(ui, me);
-  const admins = people.filter((p) => p.status === "active" && isAdminLike(p.roles.filter((g) => g.scope === "factory"))).length;
-  const noSecond = sec.restoreFactoryNeedsTwo && admins < 2;
-  const restoreGuard: Decision = restore.allowed && killed && noSecond ? lockd(`Only ${admins} Factory Admin: a restore needs two different Factory Admins.`, "Add a second Factory Admin") : restore;
   return (
     <div className="sec-stop">
       <Panel
@@ -39,19 +35,19 @@ export function StopTab({ sec }: { sec: SecuritySettings }) {
         tools={killed ? <Status tone="block">Stopped</Status> : <Status tone="done">Running</Status>}
       >
         <p className="muted small sec-stop-sub">Stops every project at once. Running agents are held or cancelled as you choose.</p>
-        {noSecond ? (
-          <div className="callout callout-warn" role="alert" id="sec-stop-warn">
+        {sole && killed ? (
+          <div className="callout callout-warn" role="note" id="sec-stop-warn">
             <Icon name="alert" />
-            <div><strong>{`Only ${admins} Factory Admin: a restore could not be approved.`}</strong><span>{" If the factory is stopped now, nobody could lift it. Add a second Factory Admin in "}<a href="#people" className="linkish">People &amp; teams</a>.</span></div>
+            <div><strong>You are the only Factory Admin.</strong><span>{" You can restore the factory yourself with a reason; it is recorded in the audit as an override."}</span></div>
           </div>
         ) : null}
         <div className="sec-stop-act">
           {killed
-            ? <Btn label="Restore the factory" kind="primary" icon="play" id="sec-stop-restore" guard={restoreGuard} onClick={() => act.restore("factory", null)} />
+            ? <Btn label={sole ? "Restore with a reason" : "Restore the factory"} kind="primary" icon="play" id="sec-stop-restore" guard={restore} onClick={() => act.restore("factory", null)} />
             : <Btn label="Emergency stop the factory" kind="danger" icon="halt" id="sec-stop-kill" guard={kill} onClick={() => act.kill("factory", null)} />}
         </div>
         <dl className="sec-kv">
-          <div><dt>Restore</dt><dd>{sec.restoreFactoryNeedsTwo ? "Needs two different Factory Admins and a fresh sign-in." : "One Factory Admin with a fresh sign-in."}</dd></div>
+          <div><dt>Restore</dt><dd>{sec.restoreFactoryNeedsTwo && !sole ? "Needs two different Factory Admins and a fresh sign-in." : sole ? "You are the only Factory Admin: restore with a reason (audited) and a fresh sign-in." : "One Factory Admin with a fresh sign-in."}</dd></div>
           <div><dt>Kill</dt><dd>{sec.killNeedsStepUp !== false ? "Needs a fresh sign-in." : "No fresh sign-in needed."}</dd></div>
           <div><dt>Change this</dt><dd><Btn label="Sign-in policy above" small kind="ghost" id="sec-stop-policy" onClick={() => document.getElementById("sec-policy")?.scrollIntoView({ block: "start" })} /></dd></div>
         </dl>

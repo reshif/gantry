@@ -133,7 +133,7 @@ function OtherItem({ it }: { it: Extract<Item, { kind: "other" }> }) {
         <>
           {r && me && !d.pending && d.allowed ? (
             <Btn
-              label={r.scope === "factory" ? (done ? `Approve restore (${done + 1} of ${r.needs ?? 2})` : "Restore factory") : "Restore project"}
+              label={r.scope === "factory" && d.override ? "Restore with a reason" : r.scope === "factory" ? (done ? `Approve restore (${done + 1} of ${r.needs ?? 2})` : "Restore factory") : "Restore project"}
               kind="primary"
               id={`inb-restore-${r.scope}${r.id ? `-${r.id}` : ""}`}
               disabledReason={already ? "You approved this restore already. A second Factory Admin must approve." : null}

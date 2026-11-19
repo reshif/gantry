@@ -341,7 +341,10 @@ describe("Project config", () => {
     await byId("pcf-gmode-G0G1");
     expect(document.getElementById("flw-g-G0G1")!.textContent).toMatch(/Brief confirmed/);
     for (const id of ["G0G1", "G3G3s", "G4", "G5"]) {
-      expect((await byId(`pcf-gate-${id}`)).hasAttribute("disabled"), id).toBe(true);
+      // no live-looking switch for a gate that is always on: a lock and "Always on", with the reason
+      expect(document.getElementById(`pcf-gate-${id}`), id).toBeNull();
+      expect((await byId(`flw-always-${id}`)).textContent, id).toContain("Always on");
+      expect(document.getElementById(`flw-lock-${id}`)?.textContent, id).toBeTruthy();
       expect(document.querySelector(`#flw-g-${id} .flw-on`)?.getAttribute("title"), id).toBeTruthy();
     }
     expect(document.querySelector("#flw-g-G5 .flw-on")?.getAttribute("title")).toMatch(/No agent merges on its own authority/);
@@ -353,11 +356,55 @@ describe("Project config", () => {
     expect(calls.find((c) => c.method === "PATCH")?.headers["if-match"]).toBe("7");
   });
 
+  const lock = (o: object = {}) => ({ locked: true, reason: "Code review is always on.", overridable: true, viewerMayOverride: true, overridden: null, modeOverridden: null, ...o });
+  const flowOverride = (viewerMayOverride: boolean, locks: Record<string, object>) => ({ viewerMayOverride, minReasonLength: 10, locks });
+
+  it("flow tab, admin: a locked gate has a live switch; switching it off asks for a reason (10+ characters, audited), and Save sends it", async () => {
+    const withLocks = { ...PAYMENTS, flowOverride: flowOverride(true, { G4: lock(), G5: lock({ reason: "No agent merges on its own authority.", overridable: false, viewerMayOverride: false }) }) };
+    const calls = withPayments({ "GET /api/v1/projects": () => ({ body: [withLocks, RISK] }), "PATCH /api/v1/projects/payments/config": () => ok() });
+    tab("flow");
+    mount(<ProjectConfigView />);
+    const sw = (await byId("pcf-gate-G4")) as HTMLInputElement;
+    expect(sw.hasAttribute("disabled")).toBe(false);
+    expect(document.getElementById("flw-always-G4")).toBeNull();
+    // G5 stays locked and human for everyone, an admin included
+    expect(document.getElementById("pcf-gate-G5")).toBeNull();
+    expect((await byId("flw-always-G5")).textContent).toContain("Always on");
+    expect(document.getElementById("flw-lock-G5")!.textContent).toContain("No agent merges on its own authority.");
+    fireEvent.click(sw);
+    const box = (await byId("flw-reason-G4")) as HTMLTextAreaElement;
+    expect(document.getElementById("flw-ovr-G4")!.textContent).toMatch(/at least 10 characters/);
+    expect(document.getElementById("flw-ovr-G4")!.textContent).toMatch(/audited/);
+    expect(document.querySelector("#flw-g-G4 .flw-on")!.textContent).toContain("Off"); // the label follows the switch
+    fireEvent.change(box, { target: { value: "too short" } });
+    fireEvent.click(await byId("flw-save"));
+    expect(await screen.findByText("Give a reason of at least 10 characters.")).toBeTruthy();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    fireEvent.change(box, { target: { value: "Reviewed by the platform council" } });
+    fireEvent.click(await byId("flw-save"));
+    fireEvent.click(await screen.findByRole("button", { name: "Turn off" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ path: "flow.gates.G4.enabled", value: false, reason: "Reviewed by the platform council" }));
+  });
+
+  it("flow tab, everyone else: a locked gate is a lock and 'Always on' with the server's reason, never a switch; a gate off by override shows who, when and why", async () => {
+    const off = { by: "p-asha", byName: "Asha Raman", at: Date.UTC(2026, 10, 19, 9, 0), reason: "Pilot without the council" };
+    const gates = { ...PAYMENTS.flow.gates, G3d: { ...PAYMENTS.flow.gates.G3d!, enabled: false } };
+    const locks = { G4: lock({ viewerMayOverride: false }), G3d: lock({ locked: false, reason: "", overridden: off }) };
+    withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, flow: { ...PAYMENTS.flow, gates }, flowOverride: flowOverride(false, locks) }, RISK] }) });
+    tab("flow");
+    mount(<ProjectConfigView />);
+    expect((await byId("flw-always-G4")).textContent).toContain("Always on");
+    expect(document.getElementById("pcf-gate-G4")).toBeNull();
+    expect(document.getElementById("flw-lock-G4")!.textContent).toContain("Code review is always on.");
+    expect((await byId("flw-off-by-G3d")).textContent).toBe("Off by Asha Raman on Thu 19 Nov: Pilot without the council");
+    expect(document.querySelector("#flw-g-G3d .flw-on")!.textContent).toContain("Off");
+  });
+
   it("flow tab: a regulated project keeps every gate on, with the reason", async () => {
     withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, regulated: true }, RISK] }) });
     tab("flow");
     mount(<ProjectConfigView />);
-    expect((await byId("pcf-gate-G3d")).hasAttribute("disabled")).toBe(true);
+    expect((await byId("flw-always-G3d")).textContent).toContain("Always on");
     expect(document.querySelector("#flw-g-G3d .flw-on")?.getAttribute("title")).toMatch(/Regulated projects keep every gate on/);
   });
 

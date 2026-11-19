@@ -13,6 +13,8 @@ import { Async } from "../../ui/async";
 import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
 import { useTravelerWo } from "./model";
+import { OVERRIDE_MIN, OverrideReason } from "../work/override";
+import { useState } from "react";
 
 export interface ApproversRead extends GateApprovers {
   viewerCanOverride: boolean;
@@ -25,7 +27,11 @@ export function ApproversPanel({ woId, gate, project, onNavigate }: { woId: stri
   const q = useGateApprovers(woId, gate);
   const ui = useUI();
   const wo = useTravelerWo(woId).data;
+  const [reason, setReason] = useState("");
+  const [open, setOpen] = useState(false);
+  const [err, setErr] = useState("");
   const a = q.data;
+  const unreachable = !!a && a.eligible.length < a.progress.need;
   if (!a) return <Async query={q} what="who may approve this gate" id="apr" rows={2}>{() => null}</Async>;
   const go = (route: string, param?: string) => { onNavigate?.(); navigate(route, param ?? null, route === "project-config" ? project : undefined); };
   return (
@@ -42,8 +48,22 @@ export function ApproversPanel({ woId, gate, project, onNavigate }: { woId: stri
       <div className="osx-actions">
         <Btn small id="apr-edit-rule" label="Edit rule" disabled={!a.can.editRule} disabledReason={!a.can.editRule ? a.can.editWhy || "You may not edit approver rules." : undefined} onClick={() => go("project-config", `approvers/${gate}`)} />
         <Btn small id="apr-grant" label="Grant a role" disabled={!a.can.grantRole} disabledReason={!a.can.grantRole ? a.can.grantWhy || "You may not grant roles." : undefined} onClick={() => go("people")} />
-        {a.viewerCanOverride ? <Btn small kind="primary" id="apr-override" label="Approve as override" onClick={async () => { const r = await ops.approveGate(woId, gate, wo?.allowed.approve?.gate === gate ? wo.allowed.approve.instance : undefined); ui.toast(r.msg, r.ok ? "ok" : "error"); }} /> : null}
+        {a.viewerCanOverride && !open ? <Btn small kind="primary" id="apr-override" label={unreachable ? "Pass with override" : "Approve as override"} onClick={() => setOpen(true)} /> : null}
       </div>
+      {a.viewerCanOverride && open ? (
+        <div className="apr-override-box">
+          <OverrideReason id="apr-override-reason" value={reason} onChange={(v) => { setReason(v); setErr(""); }} error={err} why={unreachable ? `Only ${a.eligible.length} of the ${a.progress.need} approvals this gate enforces can be given.` : "This gate would not pass as configured."} />
+          <div className="osx-actions">
+            <Btn small id="apr-override-cancel" label="Cancel" onClick={() => { setOpen(false); setReason(""); setErr(""); }} />
+            <Btn small kind="danger" id="apr-override-go" label={unreachable ? "Pass with override" : "Approve as override"} onClick={async () => {
+              if (reason.trim().length < OVERRIDE_MIN) return setErr(`Give a reason of at least ${OVERRIDE_MIN} characters.`);
+              const r = await ops.approveGate(woId, gate, wo?.allowed.approve?.gate === gate ? wo.allowed.approve.instance : undefined, undefined, undefined, reason.trim());
+              ui.toast(r.msg, r.ok ? "ok" : "error");
+              if (r.ok) { setOpen(false); setReason(""); }
+            }} />
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

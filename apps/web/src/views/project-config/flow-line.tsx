@@ -6,7 +6,7 @@
  * Nothing is written until Save. Below the line: "Advanced: structure" (add, move, remove), Class routes and Work classes.
  */
 import { useMemo, useState } from "react";
-import { approvalText, flowOf, gateLock, gateModeLock, ruleText, ruleWarning, type ApproverRule, type Catalog, type Gate, type GateKind, type Station, type WorkClass } from "@gantry/domain";
+import { approvalText, flowOf, fmt, gateLock, gateModeLock, ruleText, ruleWarning, type ApproverRule, type Catalog, type Gate, type GateKind, type GateLockView, type Station, type WorkClass } from "@gantry/domain";
 import { commands as ops } from "../../api/commands";
 import { useCan } from "../../api/can";
 import { useAgents, useTemplates } from "../../api/queries";
@@ -14,6 +14,8 @@ import { useLeaveGuard } from "../../lib/useLeaveGuard";
 import { DraftConflictBanner } from "../../ui/DraftConflict";
 import { useUI } from "../../ui/overlay-context";
 import { Btn, Input, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
+import { Icon } from "../../ui/Icon";
+import { OverrideReason } from "../work/override";
 import { nextVersion } from "../govern/data";
 import { metricsOf, useRes, type PView } from "../projects/kit";
 import { flowFrom, type Tpl } from "../projects/templates-kit";
@@ -34,7 +36,7 @@ type Mode = GateKind | "off";
 const MODES: GateKind[] = ["human", "auto", "mixed"];
 
 interface StOv { enabled?: boolean; wip?: number }
-interface GOv { kind?: GateKind; on?: boolean }
+interface GOv { kind?: GateKind; on?: boolean; reason?: string }
 interface ClsOv { skips?: string[]; enabled?: boolean }
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 
@@ -63,6 +65,7 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
   const [reviewing, setReviewing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
+  const [reasonErr, setReasonErr] = useState<Record<string, string>>({});
   const roleName = (id: string): string => cat.roles.find((r) => r.id === id)?.name ?? id;
   const personName = (id: string): string => people.find((x) => x.id === id)?.name ?? id;
 
@@ -80,6 +83,14 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
   const clsChanged = (c: WorkClass): { skips: boolean; enabled: boolean } => { const e = classesEff.find((x) => x.id === c.id)!; return { skips: !same([...c.skips].sort(), [...e.skips].sort()), enabled: (c.enabled !== false) !== (e.enabled !== false) }; };
 
   const gates = cat.gates.filter((g) => p.flow.gates[g.id]);
+  /** The server's view of each lock (project.flowOverride): why, and whether this viewer may override it. Older servers send none: the domain lock alone, nobody overrides. */
+  const fo = p.flowOverride;
+  const minReason = fo?.minReasonLength ?? 10;
+  const lockOf = (g: Gate): GateLockView => fo?.locks[g.id] ?? { ...gateLock(g, p), overridable: false, viewerMayOverride: false, overridden: null, modeOverridden: null };
+  /** Always on for this viewer: locked, currently on, and they may not override it (G5 included, for everyone). */
+  const pinnedOn = (g: Gate): boolean => lockOf(g).locked && gCur(g) !== "off" && !lockOf(g).viewerMayOverride;
+  /** The draft switches a locked gate off, or picks a locked mode, as someone who may override: it needs a reason (audited). */
+  const needsReason = (g: Gate): boolean => { const l = lockOf(g); return l.viewerMayOverride && ((l.locked && gCur(g) !== "off" && gEff(g) === "off") || (gEff(g) !== "off" && gKind(g) !== gateMode(g) && gateModeLock(g, gKind(g), p) !== null)); };
   const gatesAfter = (sid: string): Gate[] => gates.filter((g) => g.after === sid);
   const orphans = gates.filter((g) => !order.includes(g.after));
 
@@ -112,6 +123,13 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
 
   const save = async () => {
     if (!dirty || saving) return;
+    const missing = gates.filter((g) => needsReason(g) && (gOv[g.id]?.reason ?? "").trim().length < minReason);
+    if (missing.length) {
+      setReasonErr(Object.fromEntries(missing.map((g) => [g.id, `Give a reason of at least ${minReason} characters.`])));
+      ui.toast(`${missing.map((g) => g.name).join(", ")}: give a reason of at least ${minReason} characters to override the lock.`, "error");
+      return;
+    }
+    setReasonErr({});
     const offs = gates.filter((g) => gEff(g) === "off" && gCur(g) !== "off" && g.id !== "G1f");
     if (offs.length) {
       const ok = await ui.confirm({ title: `Turn off ${offs.map((g) => g.name).join(", ")}?`, kicker: `Flow · ${p.name}`, ok: "Turn off", body: `${offs.map((g) => `${g.name} (${g.label})`).join(", ")} will be skipped for new work orders. Work orders already in flight keep the flow they started with. This needs a recent sign-in and is audited.` });
@@ -142,9 +160,10 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
       for (const g of gates) {
         const to = gEff(g);
         if (to === gCur(g)) continue;
-        if (to === "off") { if (!(await run(ops.setProject(p.id, `flow.gates.${g.id}.enabled`, false, { ifMatch: ver }), `${g.name} turned off.`))) break; continue; }
+        const why = needsReason(g) ? (gOv[g.id]?.reason ?? "").trim() : undefined;
+        if (to === "off") { if (!(await run(ops.setProject(p.id, `flow.gates.${g.id}.enabled`, false, { ifMatch: ver }, why), `${g.name} turned off.`))) break; continue; }
         if (gCur(g) === "off" && !(await run(ops.setProject(p.id, `flow.gates.${g.id}.enabled`, true, { ifMatch: ver }), `${g.name} turned on.`))) break;
-        if (to !== gateMode(g) && !(await run(ops.setGateMode(p.id, g.id, to, { ifMatch: ver }), `${g.label} set to ${MODE_TEXT[to].label}.`))) break;
+        if (to !== gateMode(g) && !(await run(ops.setGateMode(p.id, g.id, to, { ifMatch: ver }, why), `${g.label} set to ${MODE_TEXT[to].label}.`))) break;
       }
     }
     if (!failed && slots !== p.flow.slots) await run(ops.setProject(p.id, "flow.slots", slots, { ifMatch: ver }), `Coding slots set to ${slots}.`);
@@ -154,12 +173,14 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
   };
 
   const modeChoices = (g: Gate): { options: Array<{ value: string; label: string }>; why: string[] } => {
-    const lock = gateLock(g, p);
+    const lock = lockOf(g);
     const why: string[] = [];
     if (lock.locked) why.push(lock.reason);
     const options = MODES.filter((m) => {
       if (m === gateMode(g) || m === gKind(g)) return true;
       const w = gateModeLock(g, m, p);
+      // a viewer who may override sees the locked modes too (they ask for a reason); G5's mode stays locked for everyone
+      if (w && lock.viewerMayOverride && gateModeLock(g, m, p, { override: true }) === null) return true;
       if (w) { why.push(w); return false; }
       return true;
     }).map((m) => ({ value: m, label: MODE_TEXT[m].label }));
@@ -211,7 +232,7 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
           </span>
           <span className="flw-ctl flw-on">
             {s.id === "intake" ? <span className="small muted">Always on</span> : (
-              <><span className="small muted" aria-hidden="true">On</span><Toggle id={`pcf-st-${s.id}`} checked={eff.enabled} decision={d} label={`${s.name} station on`} onChange={(v) => setStOv((o) => ({ ...o, [s.id]: { ...o[s.id], enabled: v } }))} /></>
+              <><span className="small muted" aria-hidden="true">{eff.enabled ? "On" : "Off"}</span><Toggle id={`pcf-st-${s.id}`} checked={eff.enabled} decision={d} label={`${s.name} station on`} onChange={(v) => setStOv((o) => ({ ...o, [s.id]: { ...o[s.id], enabled: v } }))} /></>
             )}
           </span>
           {chevron(key, s.name)}
@@ -236,7 +257,9 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
     const next = s ? nextStation(s) : undefined;
     const rule = p.flow.gates[g.id] && (p.approvers[g.id] as ApproverRule | undefined);
     const { options, why } = modeChoices(g);
-    const lock = gateLock(g, p);
+    const lock = lockOf(g);
+    const pinned = pinnedOn(g);
+    const ovr = needsReason(g);
     const warn = on && kind !== "auto" && rule && g.id !== "G0G1" ? ruleWarning(people.filter((x) => x.status === "active"), p, rule, g.label) : null;
     const who = !on ? MODE_TEXT.off.help
       : kind === "auto" ? "No approvers: passes when its checks pass."
@@ -250,15 +273,24 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
           <span className="mono small flw-code" title={g.id === "G0G1" || g.id === "G3G3s" ? "Two checkpoints drawn as one" : undefined}>{g.label}</span>
           <span className="flw-name" title={g.name}>{g.name}</span>
           <span className="small muted mono flw-hint" title={s && next ? `Between ${s.name} and ${next.name}` : s ? `After ${s.name}` : "Not placed on this line"}>{s && next ? `${s.no} → ${next.no}` : s ? `after ${s.no}` : "unplaced"}</span>
-          <Select id={`pcf-gmode-${g.id}`} aria-label={`${g.name} mode`} aria-describedby={`flw-mh-${g.id}`} disabled={!d.allowed || !on} options={options} value={kind}
+          <Select id={`pcf-gmode-${g.id}`} aria-label={`${g.name} mode`} aria-describedby={`flw-mh-${g.id}`} disabled={!d.allowed || !on || (lock.locked && options.length < 2)} options={options} value={kind}
             onChange={(v) => setGOv((o) => ({ ...o, [g.id]: { ...o[g.id], kind: v as GateKind } }))} />
           <span className="small muted flw-sub" id={`flw-mh-${g.id}`} title={short}>{short}</span>
           <span className="flw-ctl flw-on" title={lock.locked ? lock.reason : undefined}>
-            <span className="small muted" aria-hidden="true">On</span>
-            <Toggle id={`pcf-gate-${g.id}`} checked={on} decision={d} disabled={lock.locked} label={`${g.name} on`} onChange={(v) => setGOv((o) => ({ ...o, [g.id]: { ...o[g.id], on: v } }))} />
+            {pinned
+              ? <span className="small muted flw-always" id={`flw-always-${g.id}`}><Icon name="lock" /><span>Always on</span></span>
+              : <><span className="small muted" aria-hidden="true">{on ? "On" : "Off"}</span><Toggle id={`pcf-gate-${g.id}`} checked={on} decision={d} label={`${g.name} on`} onChange={(v) => setGOv((o) => ({ ...o, [g.id]: { ...o[g.id], on: v } }))} /></>}
           </span>
           {chevron(key, g.name)}
         </div>
+        {pinned ? <div className="small muted flw-note" id={`flw-lock-${g.id}`}><span className="sr">Locked: </span>{lock.reason}</div> : null}
+        {lock.overridden ? <div className="small flw-note flw-marker" id={`flw-off-by-${g.id}`}>{`Off by ${lock.overridden.byName || lock.overridden.by} on ${fmt.istDate(lock.overridden.at)}: ${lock.overridden.reason}`}</div> : null}
+        {lock.modeOverridden ? <div className="small flw-note flw-marker" id={`flw-mode-by-${g.id}`}>{`Mode set by ${lock.modeOverridden.byName || lock.modeOverridden.by} on ${fmt.istDate(lock.modeOverridden.at)}${lock.modeOverridden.from ? ` (was ${MODE_TEXT[lock.modeOverridden.from].label})` : ""}: ${lock.modeOverridden.reason}`}</div> : null}
+        {ovr ? (
+          <div className="flw-ovr" id={`flw-ovr-${g.id}`}>
+            <OverrideReason id={`flw-reason-${g.id}`} min={minReason} label={`Reason for overriding the lock on ${g.name} (at least ${minReason} characters)`} hint="This overrides a lock. It is audited with your name and shown on the flow until it is turned back on." value={gOv[g.id]?.reason ?? ""} error={reasonErr[g.id]} onChange={(v) => { setGOv((o) => ({ ...o, [g.id]: { ...o[g.id], reason: v } })); setReasonErr((e) => ({ ...e, [g.id]: "" })); }} />
+          </div>
+        ) : null}
         {warn ? <div className="callout callout-warn small flw-warn" role="alert" id={`flw-warn-${g.id}`}>{warn}</div> : null}
         {opened.has(key) ? (
           <div className="flw-more small" id={`flw-d-g-${g.id}`}>

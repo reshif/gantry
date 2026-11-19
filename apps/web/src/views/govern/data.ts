@@ -65,7 +65,6 @@ export function useOutcome(): <T extends object>(r: ApiResult<T>, okMsg?: string
   );
 }
 
-export const isAdminLike = (roles: ReadonlyArray<{ role: string; scope: string }>): boolean => roles.some((g) => g.role === "factory_admin");
 export const versionOf = (x: unknown): number | undefined => {
   const v = (x as { version?: unknown } | null)?.version;
   return typeof v === "number" ? v : undefined;

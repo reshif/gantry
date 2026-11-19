@@ -7,7 +7,7 @@ import { commands as ops } from "../api/commands";
 import { useAccessMatrix, useMe, usePeople, useProjects, useWorkOrdersOfProjects } from "../api/queries";
 import { useCan } from "../api/can";
 import { hashFor, useHash } from "../lib/router";
-import { FACTORY_ADMIN, PROJECT_ADMIN } from "../lib/roles";
+import { PROJECT_ADMIN } from "../lib/roles";
 import { Btn, Empty, LockNote, Panel, Stat, StatRow, Toggle, ViewHead, type Decision } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
@@ -42,11 +42,10 @@ export default function PersonView() {
       </div>
     );
   }
-  const admins = (people ?? []).filter((x) => x.status === "active" && x.roles.some((g) => g.role === FACTORY_ADMIN));
   return (
     <div className="view view-person">
       <LockNote decision={perm} what="Roles, teams and access" />
-      <MemberDetail key={p.id} p={p} teams={teamsQ.data ? teamsQ.data : []} projects={projects} roles={roles} perm={perm} admins={admins} viewerId={me.person.id} roleName={roleName} />
+      <MemberDetail key={p.id} p={p} teams={teamsQ.data ? teamsQ.data : []} projects={projects} roles={roles} perm={perm} viewerId={me.person.id} roleName={roleName} />
     </div>
   );
 }
@@ -77,20 +76,18 @@ function ProjectRoleRow(props: Omit<Parameters<typeof RoleRow>[0], "guard"> & { 
   return <RoleRow {...rest} guard={guard} />;
 }
 
-function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleName }: {
-  p: Person; teams: Array<{ id: string; name: string }>; projects: Project[]; roles: Role[]; perm: Decision; admins: Person[]; viewerId: string; roleName: (id: string) => string;
+function MemberDetail({ p, teams, projects, roles, perm, viewerId, roleName }: {
+  p: Person; teams: Array<{ id: string; name: string }>; projects: Project[]; roles: Role[]; perm: Decision; viewerId: string; roleName: (id: string) => string;
 }) {
   const ui = useUI();
   const outcome = useOutcome();
   const away = p.away && p.away.to > Date.now() ? p.away : null;
-  const frRole = p.roles.find((g) => g.scope === "factory" && !g.via)?.role ?? "";
   const teamName = (id: string) => teams.find((t) => t.id === id)?.name ?? id;
   const scopeName = (s: string) => (s === "factory" ? "Factory" : projects.find((x) => x.id === s)?.name ?? s);
   const visible = projects.filter((x) => x.status !== "archived");
 
   let factGuard: Decision = perm;
   if (perm.allowed && p.id === viewerId) factGuard = lockd("You cannot change your own factory role. Ask another Factory Admin.");
-  else if (perm.allowed && frRole === FACTORY_ADMIN && admins.length < 2) factGuard = lockd(`${p.name} is the only Factory Admin. Make someone else a Factory Admin first.`);
 
   const grant = useGrantRole({ roles, projects: visible, guard: perm });
   const editTeams = useEditTeams({ teams, guard: perm });
@@ -113,7 +110,6 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   const off = p.status === "deactivated";
   let offGuard: Decision = perm;
   if (perm.allowed && p.id === viewerId) offGuard = lockd("You cannot deactivate yourself. Ask another Factory Admin.");
-  else if (perm.allowed && p.status === "active" && p.roles.some((g) => g.role === FACTORY_ADMIN && !g.via) && admins.length < 2) offGuard = lockd(`${p.name} is the only Factory Admin. Make someone else a Factory Admin first.`);
 
   // open work orders this person requested, across every project the viewer can read
   const wos = useWorkOrdersOfProjects(visible.map((x) => x.id));

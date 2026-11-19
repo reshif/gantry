@@ -11,6 +11,7 @@ import { useProjectRepos } from "../floor/kit";
 import { ReclassifyDialog } from "../work-orders/intake";
 import { ApproveGateDialog, RejectGateDialog } from "../record/GateDialogs";
 import { ParkDialog, ReassignDialog, RedoDialog, SendBackDialog } from "./Dialogs";
+import { anywayLabel, overrideKindOf } from "../work/override";
 import { bayLabel, dec, isClosed, no, ok, stName, type TDecision, type TWo } from "./model";
 
 /** One action the viewer may take on a work order. `group` says where the dossier toolbar puts it; the drawer lists them in two rows. */
@@ -59,21 +60,22 @@ export function useActionSpecs(wo: TWo, page = false): ActionSpec[] | null {
   const out: ActionSpec[] = [];
   if (waiting && ap && g) {
     let dA: TDecision = ap;
+    const anyway = overrideKindOf(ap); // a halt or freeze only a Factory Admin override passes: "Approve anyway" with a reason
     if (dA.allowed && halted) dA = no(`${halted.reason} Resume first.`);
     out.push({
       key: "approve",
-      label: page ? "Approve" : g.id === "G0G1" ? "Confirm brief" : g.id === "G6" ? "Confirm release" : `Approve ${g.label}`,
+      label: anyway ? anywayLabel(g.id) : page ? "Approve" : g.id === "G0G1" ? "Confirm brief" : g.id === "G6" ? "Confirm release" : `Approve ${g.label}`,
       kind: "primary",
       icon: page ? "" : g.id === "G6" ? "rocket" : "check",
       id: "trv-approve",
-      guard: dA,
+      guard: anyway ? null : dA,
       group: "decide",
-      ...(!dA.allowed ? { why: `${dA.reason}${dA.needs ? ` Needs: ${dA.needs}.` : ""}` } : {}),
+      ...(!dA.allowed && !anyway ? { why: `${dA.reason}${dA.needs ? ` Needs: ${dA.needs}.` : ""}` } : {}),
       onClick: () => {
         const run = () => void (g.id === "G0G1" ? ops.confirmBrief(wo.id, undefined, ifm) : ops.approveGate(wo.id, g.id, ap.instance, undefined, ifm)).then((r) => res(r));
         // the work order page asks first (prototype Approve dialog: the gate's purpose and an optional note); the drawer decides in one press
-        if (!page) return run();
-        void ui.open((close) => <ApproveGateDialog wo={wo} gate={g} guard={dA} run={(note) => (g.id === "G0G1" ? ops.confirmBrief(wo.id, undefined, ifm) : ops.approveGate(wo.id, g.id, ap.instance, undefined, ifm, note || undefined))} onClose={close} />);
+        if (!page && !anyway) return run();
+        void ui.open((close) => <ApproveGateDialog wo={wo} gate={g} guard={dA} run={(note) => (g.id === "G0G1" ? ops.confirmBrief(wo.id, undefined, ifm, note || undefined) : ops.approveGate(wo.id, g.id, ap.instance, undefined, ifm, note || undefined))} onClose={close} />);
       },
     });
     const dR: TDecision = g.id === "G0G1" ? (stop ? no(stopWhy) : dec(wo, "decline")) : ap;

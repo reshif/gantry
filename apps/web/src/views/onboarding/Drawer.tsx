@@ -1,4 +1,5 @@
 /** The repo drawer (legacy onboarding.js drawer): status, stepper, callouts, actions and the Findings, Pull request, Timeline, Settings and History tabs. */
+import { WithdrawException } from "./WithdrawException";
 import { useState } from "react";
 import { assessorLabel, fmt, type OnboardAssessor } from "@gantry/domain";
 import { ops } from "../../api/ops";
@@ -281,7 +282,7 @@ export function RepoDrawer({ repoId, projectId, close }: { repoId: string; proje
         {busy ? <div className="callout" id="onb-busy"><Icon name="clock" /><div>{busy}</div></div> : null}
         {o.blocker && o.stage === "person" ? <div className="callout callout-block"><Icon name="human" /><div><strong>Needs a person. </strong>{o.blocker}{` Fix it in ${sourceName}, then re-run the assessment or verify again, or mark an exception.`}</div></div> : null}
         {o.stage === "failed" ? <div className="callout callout-fail"><Icon name="st-fail" /><div><strong>Onboarding failed. </strong>{o.blocker || "Re-run the assessment after fixing the cause."}</div></div> : null}
-        {o.exception ? <div className="callout callout-warn"><Icon name="shield" /><div><strong>Ready by exception. </strong>{o.exception.reason}<span className="muted">{` · ${fmt.stamp(o.exception.at)}`}</span></div></div> : null}
+        {o.exception ? <div className="callout callout-warn"><Icon name="shield" /><div><strong>Ready by exception. </strong>{o.exception.reason}<span className="muted">{` · ${fmt.stamp(o.exception.at)}`}</span> <WithdrawException repoId={r.id} repoName={r.name} project={projectId} id="onb-withdraw-exception" /></div></div> : null}
         {r.halted && /readiness/i.test(r.halted.reason ?? "") ? <div className="callout callout-warn" id="onb-halt"><Icon name="alert" /><div><strong>Halted: readiness was lost. </strong>{`Agents on this repo are stopped until it is verified again. ${r.halted.reason}`}</div></div> : null}
         {auto && o.stage !== "ready" && !busy ? <div className="callout"><Icon name="clock" /><div>Gantry moves this repo to the next stage on its own. It checks GitHub every minute.</div></div> : null}
         {needsMerge(r) ? <div className="callout callout-warn"><Icon name="st-wait" /><div>{`Checks are green. A person with merge rights on this project must approve and merge PR #${o.pr!.number}.`}</div></div> : null}

@@ -101,7 +101,7 @@ function LineControl() {
           ...(ctx.repos.length ? [{ head: "Pause one repo" }] : []),
           ...ctx.repos.map((r) => ({ label: r.halted ? `Resume ${r.name}` : `Pause ${r.name}`, icon: r.halted ? "right" : "pause", guard: guardOf(r.halted ? 3 : 2), onClick: () => (r.halted ? void stop.resumeRepo(r.id) : stop.haltRepo(r.id, p.id)) })),
           { head: "Whole factory" },
-          { label: killed ? "Restore factory" : "Emergency stop", icon: "stop", guard: guardOf(1), onClick: () => (killed ? stop.restore("factory", null) : stop.kill("factory", null)) },
+          { label: killed ? (checks[1]?.override ? "Restore with a reason" : "Restore factory") : "Emergency stop", icon: "stop", guard: guardOf(1), onClick: () => (killed ? stop.restore("factory", null) : stop.kill("factory", null)) },
         ])
       }
     />

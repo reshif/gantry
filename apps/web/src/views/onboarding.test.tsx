@@ -305,6 +305,30 @@ describe("Onboarding: repo drawer", () => {
     expect(locked("onb-act-exception")).toBe("Already ready");
   });
 
+  it("an accepted exception shows Withdraw exception: it needs 10 characters and sends the reason to the withdraw route", async () => {
+    const accepted = repo("web-storefront", (x) => { x.onboarding.stage = "ready"; x.onboarding.exception = { reason: "Owner accepts the missing ruleset", by: "p-asha", at: Date.now() }; });
+    const calls = api([accepted], { "POST /api/v1/repos/web-storefront/onboarding/exception/withdraw": () => ok("acme/web-storefront: the exception is withdrawn.") });
+    mount(<OnboardingView />);
+    await open("web-storefront");
+    fireEvent.click(await byId("onb-withdraw-exception"));
+    const dlg = await screen.findByRole("dialog", { name: /Withdraw the exception on/ });
+    fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "too short" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Withdraw exception" }));
+    expect(posts(calls, "POST", "/api/v1/repos/web-storefront/onboarding/exception/withdraw")).toHaveLength(0);
+    fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "The ruleset gap is now a real risk" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Withdraw exception" }));
+    await waitFor(() => expect(posts(calls, "POST", "/api/v1/repos/web-storefront/onboarding/exception/withdraw")).toHaveLength(1));
+    expect(posts(calls, "POST", "/api/v1/repos/web-storefront/onboarding/exception/withdraw")[0]!.body).toEqual({ reason: "The ruleset gap is now a real risk" });
+  });
+
+  it("a repo without an accepted exception has no Withdraw exception", async () => {
+    api([find("search-indexer")]);
+    mount(<OnboardingView />);
+    await open("search-indexer");
+    await byId("onb-act-exception");
+    expect(document.getElementById("onb-withdraw-exception")).toBeNull();
+  });
+
   it("the pull request tab shows the real files with their added lines, the link and the checks", async () => {
     api([GREEN], {
       "GET /api/v1/repos/mobile-app/onboarding/pr": () => ({ body: { number: 338, files: [{ path: "AGENTS.md", plus: 3, minus: 0, finding: "agents", mode: "create", added: ["# AGENTS.md", "## Test command", "Run `npm test`."] }] } }),
