@@ -2,6 +2,7 @@
  * Shared pieces of the agent sessions (the onboarding session per repository, the work-order session per work order): the question card with clickable suggested answers,
  * a progress line, and the streaming state of one live agent turn. The sessions differ in their rows, cards and commands; how a turn streams and how a question looks do not.
  */
+import { fmt } from "@gantry/domain";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Btn } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
@@ -14,11 +15,33 @@ export function useThreadEnd<T extends HTMLElement>(...deps: unknown[]) {
   return thread;
 }
 
-export function QuestionCard({ question, options, answered, answer, last }: { question: string; options: string[]; answered?: string | undefined; answer: (t: string) => void; last: boolean }) {
+export interface QuestionState { answered?: string | undefined; answeredBy?: string | undefined; via?: string | undefined; answeredAt?: string | undefined; answerQuote?: string | undefined; superseded?: boolean | undefined; supersededBy?: string | undefined }
+
+/** What closed a question, in words: "Answered by your message at 14:05: '...'", "You answered: ...", or "Replaced by a newer question". */
+function closedLine(q: QuestionState): string {
+  if (q.superseded && q.answered === undefined) return q.supersededBy ? `Replaced by a newer question (${q.supersededBy}).` : "Replaced by a newer question.";
+  if (q.via === "message") {
+    const t = q.answeredAt ? Date.parse(q.answeredAt) : NaN;
+    return `Answered by your message${Number.isNaN(t) ? "" : ` at ${fmt.ist(t)}`}: “${q.answerQuote ?? q.answered ?? ""}”`;
+  }
+  return `You answered: ${q.answered ?? ""}`;
+}
+
+/** An open question is a live card with its suggested answers (shown in full, wrapped). One that was answered or replaced is collapsed to its wording, and opens to the answer. */
+export function QuestionCard({ question, options, answered, answeredBy, via, answeredAt, answerQuote, superseded, supersededBy, answer, last }: { question: string; options: string[]; answer: (t: string) => void; last: boolean } & QuestionState) {
+  const closed = answered !== undefined || superseded === true;
+  if (closed) {
+    return (
+      <details className={`osx-card osx-question is-closed${superseded && answered === undefined ? " is-superseded" : " is-answered"}`} aria-label="Question from the agent, closed">
+        <summary className="osx-q-sum"><strong className="osx-q-text">{question}</strong></summary>
+        <p className="small muted osx-answered">{closedLine({ answered, answeredBy, via, answeredAt, answerQuote, superseded, supersededBy })}</p>
+      </details>
+    );
+  }
   return (
-    <article className={`osx-card osx-question${answered ? " is-answered" : ""}`} aria-label="Question from the agent">
+    <article className="osx-card osx-question" aria-label="Question from the agent">
       <strong>{question}</strong>
-      {answered ? <p className="small muted osx-answered">{`You answered: ${answered}`}</p> : options.length && last ? <div className="osx-options">{options.map((o) => <Btn key={o} small label={o} onClick={() => answer(o)} />)}</div> : null}
+      {options.length && last ? <div className="osx-options">{options.map((o) => <Btn key={o} small cls="osx-opt" label={o} onClick={() => answer(o)} />)}</div> : null}
     </article>
   );
 }

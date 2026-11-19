@@ -58,6 +58,32 @@ async function showSession(s: WoSession, extra: Parameters<typeof mockApi>[0] = 
   return calls;
 }
 
+const longOption = "A new user can find the settings page, change their display name and finish the whole sign-up flow without help";
+const withClosedCards = (): WoSession => session({
+  messages: [
+    { id: "wm-a", role: "assistant", author: "ag-intake", text: "Which first?", at: Date.now() - 5000, data: { mode: "agent", agent: "Intake Clerk", cards: [
+      { kind: "question", id: "Q-1", question: "Which screen or flow first?", options: ["Sign-up"], blocking: true, answered: "all three together", answeredBy: "person", via: "message", answeredAt: "2026-11-19T08:35:00.000Z", answerMessageId: "wm-u", answerQuote: "all three together" },
+      { kind: "question", id: "Q-2", question: "Which flow, again?", options: ["Checkout"], blocking: true, superseded: true, supersededBy: "Q-3" },
+    ] } },
+    { id: "wm-b", role: "assistant", author: "ag-intake", text: "One more.", at: Date.now(), data: { mode: "agent", agent: "Intake Clerk", cards: [{ kind: "question", id: "Q-3", question: "What does done look like?", options: [longOption], blocking: false }] } },
+  ],
+});
+
+describe("Question cards", () => {
+  it("collapses an answered or replaced question with its answer, keeps the open one live, and shows a long option whole", async () => {
+    await showSession(withClosedCards());
+    const closed = document.querySelectorAll("details.osx-question.is-closed");
+    expect(closed).toHaveLength(2);
+    closed.forEach((d) => expect((d as HTMLDetailsElement).open).toBe(false));
+    expect(screen.getByText(/Answered by your message at 14:05: “all three together”/)).toBeTruthy();
+    expect(screen.getByText(/Replaced by a newer question/)).toBeTruthy();
+    // the open question stays a live card, and its long suggestion is complete (no ellipsis)
+    const btn = screen.getByRole("button", { name: longOption });
+    expect(btn.textContent).toBe(longOption);
+    expect(document.querySelectorAll("article.osx-question")).toHaveLength(1);
+  });
+});
+
 describe("Conversations list", () => {
   it("says the conversations are not visible on a 403", async () => {
     mockApi({ ...readsFor(W), "GET /api/v1/work-order-sessions": () => ({ status: 403, body: { ok: false, msg: "Needs a role on this project." } }) });

@@ -2,6 +2,7 @@
  * Notification commands (spec 8.8, 12.2): routes, test sends, delivery retry, card templates. Each runs inside `command()` (decision point, event and state in one
  * transaction, a denial audited). A test send and a retry only queue an outbox row: the worker delivers, and the delivery log shows the outcome.
  */
+import { endSentence } from "../../core/text.js";
 import type { z } from "zod";
 import type { Tx } from "@gantry/db";
 import { CARD_ACTIONS, CARD_TEMPLATES } from "@gantry/domain";
@@ -102,7 +103,7 @@ export async function sendTest(tx: Tx, a: Actor, publicUrl: string, project: str
   const label = `${p.ok ? p.inst.name : p.resolvedInst?.name ?? d0.channel} → ${d0.target || "default"}`;
   const queued = p.ok;
   return {
-    msg: p.ok ? `Test to ${d0.target || "the default target"} queued on ${p.inst.name}. The delivery log shows the outcome.` : `Test to ${d0.target} failed: ${p.error}.`, changes: ["deliveries"], project,
+    msg: p.ok ? `Test to ${d0.target || "the default target"} queued on ${p.inst.name}. The delivery log shows the outcome.` : `Test to ${d0.target} failed: ${endSentence(p.error)}`, changes: ["deliveries"], project,
     events: [{ type: "notify.test", category: cat, outcome: queued ? "ok" : "failed", subject: { type: "project", id: project }, after: { label, event, delivery: deliveryId, ...(p.ok ? {} : { error: p.error }) } }],
     extra: { delivery: { id: deliveryId, event, channel: p.ok ? p.inst.typeId : d0.channel, target: d0.target, integration: p.ok ? p.inst.id : p.resolvedInst?.id ?? d0.integration ?? null, queued, status: queued ? "pending" : "failed", ...(p.ok ? {} : { error: p.error }) } },
     ...(p.ok ? { outbox: [{ destination: p.destination, payload: p.payload }] } : {}),
@@ -134,7 +135,7 @@ export async function retryDelivery(tx: Tx, a: Actor, publicUrl: string, deliver
   const sample = await loadSample(tx, { orgId: a.orgId, publicUrl, event, projectId: d.project_id, woId: d.wo_id, ...(ev ? { source: { type: ev.type, category: ev.category, outcome: ev.outcome, projectId: ev.project_id, woId: ev.wo_id, subject: ev.subject, after: ev.after, before: ev.before }, at: ev.recorded_at } : {}) });
   const insts = await loadInstances(tx, a.orgId);
   const e = await emitOne(tx, { orgId: a.orgId, eventId: d.event_id, event, mandatory: req.mandatory === true || isMandatoryEvent(event), project: d.project_id, route: req.route ?? null, dest: req.dest, repo: d.repo_id, wo: d.wo_id, isTest: req.isTest ?? false, sample, insts, reuseDeliveryId: deliveryId });
-  if (e.status === "failed") throw conflict(`Retry failed again: ${e.error}.`);
+  if (e.status === "failed") throw conflict(`Retry failed again: ${endSentence(e.error)}`);
   return mk("Queued again. The delivery log shows the outcome.");
 }
 

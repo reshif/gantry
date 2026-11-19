@@ -8,6 +8,7 @@
  * areas/onboarding/session/tools.ts and the Onboarding Agent's pinned model. Tool calls run here with the person's permissions; heavy repository reading is the broker's inspect.
  * An approval is the only way anything is written to GitHub: it calls the ordinary onboarding commands (open-pr, request-changes, merge) under the approving person's own authority.
  */
+import { endSentence } from "../core/text.js";
 import { appendEvent, withTx } from "@gantry/db";
 import { ONBOARD_AGENT, SESSION_BUDGET_DEFAULT_USD, lifecycle, nextStep, visibleProjects, type SessionCard } from "@gantry/domain";
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
@@ -300,7 +301,7 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
     } catch (e) {
       const unavailable = e instanceof ModelUnavailable;
       if (!unavailable) req.log.error({ err: e }, "onboarding session turn failed");
-      const text = unavailable ? `The Onboarding Agent did not answer: ${e.message}. Nothing was changed; Gantry's rule-based path still works.` : "Something went wrong while answering. Nothing was changed.";
+      const text = unavailable ? `The Onboarding Agent did not answer: ${endSentence(e.message)} Nothing was changed; Gantry's rule-based path still works.` : "Something went wrong while answering. Nothing was changed.";
       try {
         const mid = await persist(fresh, doc.runId ?? null, "system", "system", text, { kind: unavailable ? e.code : "error", cards: [] }, who.id, { mode: "none", code: unavailable ? e.code : "error" });
         send("error", { code: unavailable ? e.code : "error", msg: text, messageId: mid });

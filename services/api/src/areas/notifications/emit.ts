@@ -3,6 +3,7 @@
  * committed event, delivered at least once, keyed by event id and destination). A destination that cannot be resolved is logged as a failed delivery with
  * its reason, so it shows up in the log and can be retried once fixed. Nothing here sends: the worker's outbox dispatcher does.
  */
+import { endSentence } from "../../core/text.js";
 import { enqueueOutbox, type Queryable } from "@gantry/db";
 import { publishChange } from "../../core/changes.js";
 import { actionsFor, emailParts, factRows, renderTemplate, slackBlocks, webhookData, type CardFields, type CardSample } from "./cards.js";
@@ -90,7 +91,7 @@ export async function recordDelivery(db: Queryable, c: EmitCtx, p: Prepared, out
      on conflict (org_id, id) do update set status = excluded.status, error = excluded.error, outbox_id = excluded.outbox_id, destination = excluded.destination, integration_id = excluded.integration_id, attempts = 0, updated_at = now()`,
     [
       c.orgId, c.deliveryId, p.ok ? p.inst.id : p.resolvedInst?.id ?? c.dest.integration ?? null, c.eventId ?? null, JSON.stringify(requestOf(c, p.skipped)), c.project, c.event, channel, c.dest.target, c.route?.id ?? null, c.dest.override ?? null, c.repo, c.wo, c.isTest ?? false,
-      p.ok ? p.destination : `${c.dest.channel}:${c.dest.target}`, p.ok ? "pending" : "failed", p.ok ? "" : `Not delivered: ${p.error}.`, outboxId, p.ok ? p.cardKey : null,
+      p.ok ? p.destination : `${c.dest.channel}:${c.dest.target}`, p.ok ? "pending" : "failed", p.ok ? "" : endSentence(`Not delivered: ${p.error}`), outboxId, p.ok ? p.cardKey : null,
     ],
   );
 }

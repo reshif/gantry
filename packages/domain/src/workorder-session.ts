@@ -23,7 +23,13 @@ export interface BriefChange { field: keyof BriefDraft; label: string; before: s
 
 export type WoCard =
   | { kind: "progress"; text: string; detail?: string }
-  | { kind: "question"; id: string; question: string; options: string[]; answered?: string; blocking?: boolean }
+  | {
+      kind: "question"; id: string; question: string; options: string[]; answered?: string; blocking?: boolean;
+      /** Who closed it and how: the person clicking or replying (`card`), or the agent recording that the person's own message already answered it (`message`, verified on the server). */
+      answeredBy?: "person"; via?: "card" | "message"; answeredAt?: string; answerMessageId?: string; answerQuote?: string;
+      /** The agent asked again: this card is closed and points to the new one (`supersededBy`); the new one names the old (`replaces`). */
+      superseded?: boolean; supersededBy?: string; replaces?: string;
+    }
   /** A station's document version (artefact id) and a question a station asked (wo_questions id): the thread reads their live state by id. */
   | { kind: "document"; id: string; name: string; version: number }
   | { kind: "station_question"; id: string }

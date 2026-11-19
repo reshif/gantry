@@ -2,6 +2,7 @@
  * Connector operations: test and health (spec 12.1). Each makes the real call: Slack `auth.test`, an SMTP handshake, a signed ping to a webhook, the GitHub
  * broker's installation listing. Outbound chat and webhook traffic goes through the egress proxy (`httpFromEnv`). Nothing here is simulated.
  */
+import { endSentence } from "../../core/text.js";
 import { createHmac } from "node:crypto";
 import nodemailer from "nodemailer";
 import type { IntegrationType } from "@gantry/domain";
@@ -69,7 +70,7 @@ export async function testConnector(env: OpsEnv, c: Candidate): Promise<TestResu
         const token = c.secrets.botToken;
         if (!token) return fail("The bot token is missing.");
         const r = await slackAuthTest(env.http, token, env.slackBase);
-        if (!r.ok) return fail(`Slack refused the bot token: ${r.error ?? "unknown error"}.`);
+        if (!r.ok) return fail(`Slack refused the bot token: ${endSentence(r.error ?? "unknown error")}`);
         lines.push(["ok", `Reached ${hostOf(env.slackBase)}.`]);
         lines.push(["ok", `Authenticated as ${String(r.data.user ?? "the bot")} in ${String(r.data.team ?? "the workspace")}.`]);
         if (!c.secrets.signingSecret) lines.push(["fail", "No signing secret: button clicks and slash commands will be refused."]);
@@ -88,7 +89,7 @@ export async function testConnector(env: OpsEnv, c: Candidate): Promise<TestResu
         try {
           await transport.verify();
         } catch (e) {
-          return fail(`SMTP ${host}:${port} did not accept the connection: ${(e as Error).message}.`);
+          return fail(`SMTP ${host}:${port} did not accept the connection: ${endSentence((e as Error).message)}`);
         } finally {
           transport.close();
         }

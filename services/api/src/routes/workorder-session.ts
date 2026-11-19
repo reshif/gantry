@@ -36,6 +36,7 @@ import { listDialogue, listDocuments } from "../areas/workorders/documents.js";
 import { listSources, planOf } from "../areas/workorders/research.js";
 import { swarmOf } from "../areas/workorders/swarm.js";
 import { openAccessRequests, recordMentions, searchMentionable, MAX_MENTIONS, type Mentioned } from "../areas/workorders/session/mentions.js";
+import { endSentence } from "../core/text.js";
 import { readSecurity } from "../core/read/index.js";
 
 /** Output room for one turn: enough for a full brief (several lists) in a single tool call. */
@@ -71,7 +72,7 @@ const facts = (o: { agent: string; station: string; purpose: string; wo: string;
 const rails = (o: { atIntake: boolean }): string => [
   "Facts about the work order, the project and the repository come only from your tools; say \"Gantry observed\" for tool results and \"I suggest\" for your own judgement; never present a guess as an observation. What a person tells you is their claim: use it and say it is theirs. You never change anything yourself: you propose, as cards, and a person approves; say plainly when something waits for their approval and never claim a change happened. Answer every message the person writes in plain sentences, then say the next concrete step.",
   o.atIntake
-    ? "Tools at Intake: get_work_order, get_station_progress, inspect_repository, list_related_work read facts; read_file reads any text file of the repository at the assessed commit (read-only, secret and binary files refused, capped per turn). ask_user puts a question with suggested answers to the person. propose_brief (goal, scope in and out, acceptance criteria, risks, open questions, estimate) puts a brief up for confirmation; propose_reclassify and propose_decline put those proposals up. A blocking question (ask_user with blocking set) must be answered before a brief can be proposed; open questions that do not block may stay open in a brief. Anything you proceed on without confirmation belongs in the brief as an assumption, said as such. How and how much you ask is for you to decide."
+    ? "Tools at Intake: get_work_order, get_station_progress, inspect_repository, list_related_work read facts; read_file reads any text file of the repository at the assessed commit (read-only, secret and binary files refused, capped per turn). ask_user puts a question with suggested answers to the person. propose_brief (goal, scope in and out, acceptance criteria, risks, open questions, estimate) puts a brief up for confirmation; propose_reclassify and propose_decline put those proposals up. A blocking question (ask_user with blocking set) must be answered before a brief can be proposed. A question is closed only by a click on its own card or by you calling resolve_question with the person's exact words (Gantry checks them against what they wrote); when you must ask again, pass replaces with the old question's ref instead of posting a second card, and never ask a question that is already open. Never describe tool or system mechanics to the person (cards, ids, what Gantry holds or records): ask the question plainly, in your own words; open questions that do not block may stay open in a brief. Anything you proceed on without confirmation belongs in the brief as an assumption, said as such. How and how much you ask is for you to decide."
     : "Past Intake you cannot change anything: gates are decided by people on the work order's traveler. Your tools (get_work_order, get_station_progress) read facts: where it is, what each station did, what waits on whom.",
   UNTRUSTED_NOTE,
   "Keep each answer under 140 words. Plain sentences, no headings, no emoji.",
@@ -121,7 +122,7 @@ export async function woSessionRows(db: Queryable, orgId: string, req: FastifyRe
       const bay = catalog.bays.some((b) => b.id === w.position);
       const sid = bay ? "intake" : w.position;
       const stn = stationDef(catalog, sid);
-      const pending = !!m && m.role === "assistant" && (m.data.cards ?? []).some((c) => (c.kind === "proposal" && c.status === "pending") || c.kind === "question");
+      const pending = !!m && m.role === "assistant" && (m.data.cards ?? []).some((c) => (c.kind === "proposal" && c.status === "pending") || (c.kind === "question" && c.answered === undefined && !c.superseded));
       const gate = gates.get(w.id) ?? null;
       const asks = askRows.filter((a) => a.wo_id === w.id);
       const askedMe = asks.some((a) => asksMe(a.ask_of, meP, { project: w.project_id, requestedBy: w.submitter, requesterActive: requesterActive(pst.people, w.submitter) }, (act) => decideFor(pst, req.gx.principal!, act, { project: w.project_id }).allowed));
@@ -229,7 +230,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       db: g.pool, orgId: g.orgId, wo: f.wo, st: f.st, project: f.project, catalog: f.catalog, repoFull, inspect, readFile, person: who,
       // The model the route resolves for the call (what the meter will record), not the agent's pinned wish.
       agent: ag.mode === "agent" ? { id: ag.agentId, name: ag.agentName, version: ag.pin.version, model: ag.model } : null,
-      briefOpen: briefOpenOf(f.wo, f.catalog), cards: [], drafts: {}, used: [], next: 1,
+      withTx: (fn) => withTx(g.pool, fn), briefOpen: briefOpenOf(f.wo, f.catalog), cards: [], drafts: {}, used: [], next: 1,
     };
   }
   const repoFullOf = async (repoId: string | null): Promise<string | null> => {
@@ -303,8 +304,8 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
 
   /** Follow-ups: an update that asked for one (data.followUp = pending) gets an agent turn that says what it means and puts up the next proposal. Never writes anything about the work. */
   async function runFollowUps(): Promise<number> {
-    const { rows } = await g.pool.query<{ id: string; wo_id: string; body: string }>(
-      `update workorder_messages set data = jsonb_set(data, '{followUp}', '"running"') where org_id = $1 and id in (select id from workorder_messages where org_id = $1 and data->>'followUp' = 'pending' order by created_at limit 3 for update skip locked) returning id, wo_id, body`,
+    const { rows } = await g.pool.query<{ id: string; wo_id: string; body: string; ev: string | null }>(
+      `update workorder_messages set data = jsonb_set(data, '{followUp}', '"running"') where org_id = $1 and id in (select id from workorder_messages where org_id = $1 and data->>'followUp' = 'pending' order by created_at limit 3 for update skip locked) returning id, wo_id, body, data->>'event' as ev`,
       [g.orgId],
     );
     const done = (id: string, status: string) => g.pool.query(`update workorder_messages set data = jsonb_set(data, '{followUp}', to_jsonb($3::text)) where org_id = $1 and id = $2`, [g.orgId, id, status]);
@@ -313,6 +314,8 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       const row = await readWoRow(g.pool, g.orgId, m.wo_id);
       if (!row) { await done(m.id, "skipped"); continue; }
       if (active.has(row.id)) { await done(m.id, "pending"); continue; }
+      // The "conversation is open" nudge starts the dialogue once: if the agent already spoke (the person's own opening turn ran first), a second opening turn would ask everything again.
+      if (m.ev === "session.opened" && (await g.pool.query(`select 1 from workorder_messages where org_id = $1 and wo_id = $2 and role = 'assistant' and data->>'mode' = 'agent' limit 1`, [g.orgId, row.id])).rows.length) { await done(m.id, "skipped"); continue; }
       active.add(row.id);
       try {
         const f = await flowOf(row);
@@ -553,7 +556,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
         const last = (await tx.query<{ id: string; data: WoMessage["data"] }>(`select id, data from workorder_messages where org_id = $1 and wo_id = $2 and id <> $3 and role = 'assistant' order by created_at desc, id desc limit 1 for update`, [a.orgId, id, mid])).rows[0];
         if (last) {
           let changed = false;
-          for (const cd of last.data.cards ?? []) if (cd.kind === "question" && cd.answered === undefined) { cd.answered = b.text.slice(0, 300); changed = true; }
+          for (const cd of last.data.cards ?? []) if (cd.kind === "question" && cd.answered === undefined && !cd.superseded) { cd.answered = b.text.slice(0, 300); cd.answeredBy = "person"; cd.via = "card"; cd.answeredAt = a.now.toISOString(); cd.answerMessageId = mid; changed = true; }
           if (changed) await saveWoMessageData(tx, a.orgId, last.id, last.data);
         }
       }
@@ -575,7 +578,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     } catch (e) {
       const unavailable = e instanceof ModelUnavailable;
       if (!unavailable) req.log.error({ err: e }, "work-order session turn failed");
-      const text = unavailable ? `${ag.agentName} did not answer: ${e.message}. Nothing was changed; the scripted intake questions still work.` : "Something went wrong while answering. Nothing was changed.";
+      const text = unavailable ? `${ag.agentName} did not answer: ${endSentence(e.message)} Nothing was changed; the scripted intake questions still work.` : "Something went wrong while answering. Nothing was changed.";
       try {
         const mid = await persist(fresh, "system", "system", text, { kind: unavailable ? e.code : "error", cards: [] }, who.id, { mode: "none", code: unavailable ? e.code : "error" });
         send("error", { code: unavailable ? e.code : "error", msg: text, messageId: mid });
