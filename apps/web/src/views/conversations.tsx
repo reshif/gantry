@@ -65,7 +65,7 @@ export default function ConversationsView() {
         <h1 className="cv-h1" title="The dialogue between people and the agents at each station.">Conversations</h1>
         {project?.key ? <span className="mono muted small">{project.key}</span> : null}
         <span className="grow" />
-        <Btn small icon="chat" label="All side threads" id="conv-all" onClick={() => navigate("workspace", "inbox")} />
+        <Btn small icon="chat" label="All agent chats" id="conv-all" onClick={() => navigate("workspace", "inbox")} />
       </header>
       <div className="cv-grid">
         <section className="panel cv-listpane" id="conv-threads" aria-label="Threads">

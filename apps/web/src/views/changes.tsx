@@ -80,7 +80,7 @@ export default function ChangesView() {
             <ul className="list" id="chg-files">
               {files.map((f) => (
                 <li key={f.path} style={f.path === sel?.path ? { background: "var(--accent-soft)" } : undefined}>
-                  <a className="pri trunc grow mono small" href={`${hashFor("changes", wo.id, wo.project)}?file=${encodeURIComponent(f.path)}`} aria-current={f.path === sel?.path ? "true" : undefined} title={f.path} onClick={(e) => { e.preventDefault(); setFile(f.path); }}>{f.path}</a>
+                  <a className="pri wrap-text grow mono small" href={`${hashFor("changes", wo.id, wo.project)}?file=${encodeURIComponent(f.path)}`} aria-current={f.path === sel?.path ? "true" : undefined} title={f.path} onClick={(e) => { e.preventDefault(); setFile(f.path); }}>{f.path.split("/").flatMap((seg, i, all) => (i < all.length - 1 ? [seg, "/", <wbr key={i} />] : [seg]))}</a>
                   <Chip text={f.status} cls={f.status === "added" ? "ok" : "plain"} />
                   {f.df?.approximate ? <Chip text="approx." cls="warn" /> : null}
                   <span className="num small">{`${f.df?.approximate ? "≈ " : ""}+${f.plus}/−${f.minus}`}</span>

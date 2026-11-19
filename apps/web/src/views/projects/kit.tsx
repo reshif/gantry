@@ -47,6 +47,9 @@ export const metricsOf = (p: PView): Metrics => p.metrics ?? EMPTY_METRICS;
 export function useCatalogQuery() {
   return useQuery({ queryKey: qk.catalog(), queryFn: () => get<Catalog>(api("catalog")), staleTime: 30_000 });
 }
+/** One plain sentence per recorded event (Home Recent activity and the bell); re-exported so both screens share one chunk. */
+export { eventSentence } from "../../lib/eventText";
+
 export function useCatalog(): Catalog | null {
   return useCatalogQuery().data ?? null;
 }
