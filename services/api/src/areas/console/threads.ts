@@ -169,7 +169,10 @@ export async function readProposal(db: Pick<Tx, "query">, orgId: string, person:
 }
 
 /** Writes what the server learned from running a card: its outcome, the result text, and what a refusal still needs. Never taken from the browser. */
-export async function recordProposalOutcome(tx: Tx, orgId: string, person: string, messageId: string, proposalId: string, o: { status: "done" | "failed"; result: string; needs?: string; refusal?: { code: number; rule?: unknown; overrideKind?: string } }): Promise<boolean> {
+export async function recordProposalOutcome(tx: Tx, orgId: string, person: string, messageId: string, proposalId: string, o: { status: "done" | "failed"; result: string; needs?: string; refusal?: { code: number; rule?: unknown; overrideKind?: string } }): Promise<boolean | "already_done"> {
+  // A card that ended done is never overwritten (S-50): the action ran, and a later refusal of a repeat must not turn it into a failure.
+  const cur = (await tx.query<{ data: { proposals?: Array<Record<string, unknown>> } }>(`select data from console_messages where org_id = $1 and id = $2 for update`, [orgId, messageId])).rows[0];
+  if ((cur?.data.proposals ?? []).find((x) => x.id === proposalId)?.status === "done") return "already_done";
   const ok = await setProposalStatus(tx, orgId, person, messageId, proposalId, o.status, o.result);
   if (!ok) return false;
   const row = (await tx.query<{ data: { proposals?: Array<Record<string, unknown>> } }>(`select data from console_messages where org_id = $1 and id = $2 for update`, [orgId, messageId])).rows[0]!;

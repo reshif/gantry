@@ -281,7 +281,10 @@ export interface NotificationRoute {
 }
 
 export interface ProjectBudget {
+  /** The monthly cap in USD. Read it with `capped`: 0 with capped true is a real $0 cap (nothing metered runs); 0 with capped false is no cap. */
   monthly: number;
+  /** True when a monthly cap is in force (an amount above 0, or a $0 cap a person set). */
+  capped: boolean;
   mtd: number;
   alertAt: number;
 }

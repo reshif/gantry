@@ -154,6 +154,8 @@ export async function setFactoryRole(tx: Tx, orgId: string, actorId: string, id:
   const before = factoryRolesOf(p);
   if (has === add) return { msg: `${p.name} ${add ? "already is" : "is not"} ${role.name}.`, events: [], extra: { version: versionOf(p) }, changes: ["people"], project: null };
   // Escalation guards: people.manage can be handed to a custom role, so it must not be a path to Factory Admin or to more rights for oneself.
+  // No grant reaches someone who cannot use it (S-48): a project role is refused for a deactivated person, and so is a factory role (it would take effect silently at reactivation).
+  if (add && p.status === "deactivated") throw invalid(`${p.name} is deactivated. Reactivate them first, then grant ${role.name}.`);
   if (add && actorId === id) throw refuse("denied", `You cannot grant yourself ${role.name}. Ask another administrator.`);
   const actor = st.people.find((x) => x.id === actorId);
   if (roleId === "factory_admin" && !actor?.roles.some((g) => g.role === "factory_admin" && g.scope === "factory"))

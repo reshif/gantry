@@ -102,13 +102,13 @@ export const modelRoutes: FastifyPluginAsync = async (app) => {
     const who = requirePerson(req);
     const st = await policyState(req);
     const ids = visibleProjects(st, who).map((p) => p.id);
-    const { rows } = await g.pool.query<{ project_id: string; monthly: string; alert_at: string; wo: string; version: number; spent: string }>(
-      `select b.project_id, b.monthly_limit_micros::text as monthly, b.alert_at::text, b.wo_limit_micros::text as wo, b.version,
+    const { rows } = await g.pool.query<{ project_id: string; monthly: string; alert_at: string; wo: string; zero: boolean; version: number; spent: string }>(
+      `select b.project_id, b.monthly_limit_micros::text as monthly, b.alert_at::text, b.wo_limit_micros::text as wo, b.monthly_zero_cap as zero, b.version,
               (select coalesce(sum(u.cost_micros),0) from usage_meter u where u.org_id = b.org_id and u.project_id = b.project_id and u.at >= date_trunc('month', now() at time zone 'UTC') at time zone 'UTC')::text as spent
          from budgets b where b.org_id = $1 and b.project_id = any($2) order by b.project_id`,
       [g.orgId, ids],
     );
-    return rows.map((r) => ({ project: r.project_id, monthly: Number(r.monthly) / 1e6, alertAt: Number(r.alert_at), perWorkOrder: Number(r.wo) / 1e6, spent: Number(r.spent) / 1e6, version: r.version }));
+    return rows.map((r) => ({ project: r.project_id, monthly: Number(r.monthly) / 1e6, capped: Number(r.monthly) > 0 || r.zero, alertAt: Number(r.alert_at), perWorkOrder: Number(r.wo) / 1e6, spent: Number(r.spent) / 1e6, version: r.version }));
   });
 
   // ------------------------------------------------------------------ commands

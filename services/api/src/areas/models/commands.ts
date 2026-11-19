@@ -8,6 +8,8 @@ import type { z } from "zod";
 import type { Actor, CommandResult } from "../../core/command.js";
 import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
 import { readCatalog } from "../../core/read/index.js";
+import { liftBudgetHalt } from "../workorders/budget.js";
+import { capOfReason, overBudget, overText } from "../workorders/budget-state.js";
 import { slug } from "../agents/config.js";
 import { ensureDefaultModel } from "./default.js";
 import { publishPriceVersion, type Price } from "./prices.js";
@@ -353,10 +355,31 @@ export async function setWoBudget(tx: Tx, a: Actor, projectId: string, b: z.infe
     `insert into budgets (org_id, project_id, wo_limit_micros) values ($1,$2,$3) on conflict (org_id, project_id) do update set wo_limit_micros = excluded.wo_limit_micros, version = budgets.version + 1, updated_at = now()`,
     [a.orgId, projectId, usdToMicros(b.perWorkOrder)],
   );
+  // Raising the default (or taking it off) lifts the budget halts it was holding, like the monthly raise does (S-45); a work order still over a cap stays halted and is named.
+  const lifted: string[] = [];
+  const kept: string[] = [];
+  const events: NonNullable<Cmd["events"]> = [];
+  const jobs: NonNullable<Cmd["jobs"]> = [];
+  const was = before ? Number(before.w) / 1e6 : 0;
+  if (b.perWorkOrder === 0 || b.perWorkOrder > was) {
+    const halts = (await tx.query<{ wo_id: string; reason: string }>(
+      `select s.wo_id, s.reason from stops s join work_orders w on w.org_id = s.org_id and w.id = s.wo_id where s.org_id = $1 and w.project_id = $2 and s.scope_type = 'wo' and s.mode = 'halt' and s.cause = 'budget' and s.lifted_at is null order by s.wo_id`, [a.orgId, projectId],
+    )).rows;
+    for (const h of halts) {
+      if (capOfReason(h.reason) !== "wo") continue;
+      const still = await overBudget(tx, a.orgId, h.wo_id);
+      if (still.length) { kept.push(`${h.wo_id} (${still.map(overText).join(" and ")})`); continue; }
+      const l = await liftBudgetHalt(tx, a, h.wo_id, b.perWorkOrder > 0 ? `Per-work-order default raised to $${b.perWorkOrder}` : "Per-work-order default taken off");
+      events.push(...l.events);
+      jobs.push(...l.jobs);
+      lifted.push(h.wo_id);
+    }
+  }
   return {
-    msg: b.perWorkOrder > 0 ? `Each work order in ${p.name} may spend up to $${b.perWorkOrder}.` : `${p.name} has no per-work-order cap.`,
-    events: [{ type: "budget.wo", category: "config", subject: subject("project", projectId), projectId, before: before ? Number(before.w) / 1e6 : 0, after: b.perWorkOrder }],
-    changes: ["projects", "vendors"],
+    msg: `${b.perWorkOrder > 0 ? `Each work order in ${p.name} may spend up to $${b.perWorkOrder}.` : `${p.name} has no per-work-order cap.`}${lifted.length ? ` Lifted the budget halt on ${lifted.join(", ")}.` : ""}${kept.length ? ` Still halted: ${kept.join("; ")}.` : ""}`,
+    events: [{ type: "budget.wo", category: "config", subject: subject("project", projectId), projectId, before: was, after: b.perWorkOrder, ...(lifted.length ? { lifted } : {}) }, ...events],
+    ...(jobs.length ? { jobs } : {}),
+    changes: lifted.length ? ["projects", "vendors", "workOrders", "stops", "floor", "home"] : ["projects", "vendors"],
     project: projectId,
   };
 }
