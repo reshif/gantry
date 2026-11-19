@@ -345,7 +345,8 @@ export async function executeWoTool(ctx: WoSessionCtx, name: string, input: unkn
     let out = await t.run(ctx, input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {});
     // Whatever the tool, the agent is told which blocking questions are still open: a person's reply to one card does not close another.
     if (out && typeof out === "object" && !Array.isArray(out) && !("openBlockingQuestions" in out) && name !== "get_station_progress" && name !== "list_related_work") {
-      const stillOpen = await openBlockingQuestions(ctx);
+      // A hint only: if the lookup fails the tool's own result stands (propose_brief checks the same questions itself and fails closed).
+      const stillOpen = await openBlockingQuestions(ctx).catch(() => []);
       if (stillOpen.length) out = { ...out, openBlockingQuestions: stillOpen, openBlockingNote: "These blocking questions are still open (a typed reply or a click on another card does not close them by itself). If the person's own words answered one (answeredDuplicate names an answered copy of it), call resolve_question with its ref and their exact quote; if you need to ask again, use ask_user with replaces." };
     }
     const text = JSON.stringify(out);

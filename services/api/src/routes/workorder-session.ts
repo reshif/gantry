@@ -314,10 +314,11 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       const row = await readWoRow(g.pool, g.orgId, m.wo_id);
       if (!row) { await done(m.id, "skipped"); continue; }
       if (active.has(row.id)) { await done(m.id, "pending"); continue; }
-      // The "conversation is open" nudge starts the dialogue once: if the agent already spoke (the person's own opening turn ran first), a second opening turn would ask everything again.
-      if (m.ev === "session.opened" && (await g.pool.query(`select 1 from workorder_messages where org_id = $1 and wo_id = $2 and role = 'assistant' and data->>'mode' = 'agent' limit 1`, [g.orgId, row.id])).rows.length) { await done(m.id, "skipped"); continue; }
+      // Claim the work order in the same tick as the check (no await between): a check, a wait and then an add let two turns pass the check (statechart intake-questions, race).
       active.add(row.id);
       try {
+        // The "conversation is open" nudge starts the dialogue once: if the agent already spoke (the person's own opening turn ran first), a second opening turn would ask everything again.
+        if (m.ev === "session.opened" && (await g.pool.query(`select 1 from workorder_messages where org_id = $1 and wo_id = $2 and role = 'assistant' and data->>'mode' = 'agent' limit 1`, [g.orgId, row.id])).rows.length) { await done(m.id, "skipped"); continue; }
         const f = await flowOf(row);
         const ag = await agentState(row, f.wo, f.catalog);
         if (ag.mode === "agent") {
@@ -513,6 +514,9 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     if (!t.allowed) throw refuse("denied", t.reason || "You may not act on this work order.");
     if (b.kind === "open" && (await listWoMessages(g.pool, g.orgId, id, 400)).some((m) => m.data.kind !== "update")) return { ok: true, msg: "The conversation already started.", already: true };
     if (active.has(id)) throw refuse("conflict", "The agent is already answering. Wait for it to finish.");
+    // Claimed in the same tick as the check, and released by whichever path leaves this handler (statechart intake-questions: check, many awaits, add let a second turn start, and the first to finish cleared the shared flag).
+    active.add(id);
+    try {
     const f0 = await flowOf(row);
     if (f0.wo.state === "done" || f0.wo.state === "killed" || f0.wo.bay === "declined") throw refuse("conflict", `${id} is closed.`);
     const ag = await agentState(row, f0.wo, f0.catalog);
@@ -570,7 +574,6 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     const fresh = (await readWoRow(g.pool, g.orgId, id))!;
     const confirm = await decide(req, "brief.confirm", scopeOf(fresh));
     const { send, ac, end } = openSse(reply);
-    active.add(id);
     try {
       const question = b.kind === "open" ? "(The person opened the conversation about this work order. Begin.)" : b.kind === "continue" ? "(The person asked for changes to your proposal; see their last message. Revise and propose again.)" : (b.text ?? "");
       const mid = await agentTurn({ row: fresh, who, canConfirm: confirm.allowed, ag, question, kind: b.kind, send, signal: ac.signal });
@@ -587,10 +590,12 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
         send("error", { code: "error", msg: text });
       }
     } finally {
-      active.delete(id);
       end();
     }
     return reply;
+    } finally {
+      active.delete(id);
+    }
   });
 
   app.post("/api/v1/work-orders/:id/session/seen", async (req) => {
