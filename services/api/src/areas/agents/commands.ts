@@ -72,7 +72,7 @@ async function writeSkills(tx: Tx, orgId: string, agentId: string, ids: string[]
   }
 }
 
-const CFG_KEYS = ["model", "fallbacks", "autonomy", "tools", "mcp", "stations", "projects", "budget", "guardrails", "suite", "instructions", "overrides"] as const;
+const CFG_KEYS = ["model", "fallbacks", "autonomy", "tools", "mcp", "stations", "projects", "budget", "guardrails", "suite", "instructions", "overrides", "limits"] as const;
 
 async function actorIsFactoryAdmin(tx: Tx, a: Actor): Promise<boolean> {
   if (!a.personId) return false;
@@ -157,7 +157,7 @@ export async function createAgent(tx: Tx, a: Actor, b: z.infer<typeof CreateBody
   const station = b.station ?? null;
   const cfg = cfgOf({
     model, fallbacks: b.fallbacks ?? [], autonomy: b.autonomy ?? "suggest", tools: { ...(b.tools ?? {}) }, mcp: b.mcp ?? [], stations: b.stations?.length ? b.stations : station ? [station] : [],
-    projects: b.projects ?? "all", budget: b.budget ?? 1, guardrails: { paths: [], maxDiff: 0 }, suite: `SUITE-${id.slice(3).toUpperCase()}`, instructions: b.instructions ?? "", overrides: {},
+    projects: b.projects ?? "all", budget: b.budget ?? 1, guardrails: { paths: [], maxDiff: 0 }, suite: `SUITE-${id.slice(3).toUpperCase()}`, instructions: b.instructions ?? "", overrides: {}, limits: {},
   });
   const skills = b.skills ?? [];
   await checkRefs(tx, a.orgId, { model, fallbacks: cfg.fallbacks, skills, mcp: cfg.mcp, projects: cfg.projects });
@@ -264,6 +264,8 @@ export async function rollbackAgent(tx: Tx, a: Actor, id: string, ref: string | 
     data.promoted = [...record, v.version];
   }
   for (const k of VERSIONED_KEYS) if (k !== "skills" && k !== "skillVersions" && k in v.body) data[k] = v.body[k];
+  // A version cut before limits existed ran with the defaults, so rolling back to it clears the working copy's limits.
+  if (!("limits" in v.body)) data.limits = {};
   await tx.query(`update agents set live_version = $3, data = $4::jsonb, version = version + 1 where org_id = $1 and id = $2`, [a.orgId, id, v.version, json(data)]);
   if (Array.isArray(v.body.skills)) {
     const have = new Set((await tx.query<{ id: string }>(`select id from skills where org_id = $1 and id = any($2)`, [a.orgId, v.body.skills])).rows.map((r) => r.id));

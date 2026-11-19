@@ -7,6 +7,7 @@
  *   handleFlowTimer     escalation timers (paused while a halt covers the work order)
  * Each flushes its events and jobs with `flushFx` (actor "system"), so the caller only commits.
  */
+import { limitStopOf } from "./limit-stop.js";
 import { can, evaluateGuardrails, stationDef } from "@gantry/domain";
 import { flowFor } from "./ctx.js";
 import { schedule, type Tx } from "@gantry/db";
@@ -240,11 +241,17 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
     ev(fx, w, "wo.question", { station: sid, text: waiting.map((q) => q.question).join(" · ").slice(0, 300) }, { category: "flow" });
     next = "person";
   } else {
-    closeEntry(w, fx, result.status === "failed" ? "failed" : "interrupted", result.error?.msg ?? result.summary ?? "");
+    // A run that stopped on a limit says which one and the numbers (used 40 of 40 turns); the person who may raise it is offered a one-off raise on the Record.
+    const stop = result.status === "failed" ? await limitStopOf(tx, orgId, attemptId, sid, result.error ?? undefined) : null;
+    if (stop) {
+      w.data.limitStop = stop;
+      await tx.query(`update attempts set data = data || $3::jsonb where org_id = $1 and id = $2`, [orgId, attemptId, JSON.stringify({ limitStop: stop })]);
+    } else delete w.data.limitStop;
+    closeEntry(w, fx, result.status === "failed" ? "failed" : "interrupted", stop?.text ?? result.error?.msg ?? result.summary ?? "");
     const n = await failCount(tx, orgId, w.id, sid);
     if (result.status === "failed" && n < MAX_STATION_FAILURES) {
       w.state = "failed";
-      w.data.failReason = result.error?.msg ?? `${stationDef(fx.catalog, sid)?.name ?? sid} failed.`;
+      w.data.failReason = stop?.text ?? result.error?.msg ?? `${stationDef(fx.catalog, sid)?.name ?? sid} failed.`;
       if (result.error?.phase === "start") w.data.failPhase = "start";
       else delete w.data.failPhase;
       ev(fx, w, "wo.state", { from: "running", to: "failed", station: sid, text: String(w.data.failReason) });
@@ -253,7 +260,7 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
       await enterStation(fx, w, sid);
       next = sid;
     } else {
-      await needsPerson(fx, w, `${stationDef(fx.catalog, sid)?.name ?? sid} ${result.status === "failed" ? "failed" : "was interrupted"} ${MAX_STATION_FAILURES} times; a person needs to look.`, "failed");
+      await needsPerson(fx, w, stop ? `${stationDef(fx.catalog, sid)?.name ?? sid} stopped on its ${stop.limit} limit ${MAX_STATION_FAILURES} times. ${stop.text} Retry with a higher limit, or change the limit.` : `${stationDef(fx.catalog, sid)?.name ?? sid} ${result.status === "failed" ? "failed" : "was interrupted"} ${MAX_STATION_FAILURES} times; a person needs to look.`, "failed");
       next = "person";
     }
   }

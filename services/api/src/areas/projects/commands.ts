@@ -13,7 +13,7 @@ import { loadPolicyState } from "../../core/read/state.js";
 import { readCatalog, readPeople, readRoles, readTemplates } from "../../core/read/index.js";
 import { pruneOncall } from "./oncall.js";
 import { parseConfigEdit, type ConfigEdit } from "./config.js";
-import { addBay, addClass, type OverrideRecord, addGate, addStation, draftOf, moveStation, removeStation, replaceClasses, setEnabled, setGateMode, setWip, updateClass, type FlowDraft } from "./flowedit.js";
+import { addBay, addClass, type OverrideRecord, addGate, addStation, draftOf, moveStation, removeStation, replaceClasses, setEnabled, setGateMode, setRunLimits, setWip, updateClass, type FlowDraft } from "./flowedit.js";
 import { approversPreset, flowFrom, routesPreset } from "./presets.js";
 import { checkRule, checkRuleRefs, ruleContext } from "./rules.js";
 import type { ArchiveBody, BayBody, ClassBody, ClassPatch, GateBody, MoveBody, NewProject, StationBody, TemplateCreate, TemplatePatch, ViewCreate, ViewPatch } from "./schemas.js";
@@ -288,6 +288,12 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
       before = setWip(draft, edit.id, edit.value).before;
       after = edit.value;
       break;
+    case "station-run-limits": {
+      const r = setRunLimits(draft, edit.id, edit.value);
+      before = r.before;
+      after = r.after;
+      break;
+    }
     case "classes": {
       const r = replaceClasses(draft, edit.value, await openByClass(tx, org, projectId), { regulated: !!row.regulated });
       before = r.before.map((c) => c.id);

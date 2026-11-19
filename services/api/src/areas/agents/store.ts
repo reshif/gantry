@@ -1,4 +1,6 @@
 /** Agent reads: rows to the legacy `G.store.agents` shape, plus the eval promotion gate (spec 13.2). */
+import type { RunLimits } from "@gantry/domain";
+import { readRunLimits } from "./run-limits.js";
 import { fmt, type Agent, type AgentVersion } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { cfgOf, diffKeys, initialsOf, VERSIONED_KEYS, type AgentCfg } from "./config.js";
@@ -130,6 +132,10 @@ export interface AgentOut extends Agent {
   running: number;
   /** The skills the version on the floor runs with, in order, each at the version it is pinned to (`skills` is the draft attachments). Empty `version`: no pin recorded. */
   liveSkills: Array<{ id: string; version: string }>;
+  /** The run limits of the version on the floor: what a run is bound by (`limits` is the working copy, which only a new version and its promotion puts on the floor). */
+  liveLimits: RunLimits;
+  /** The per-run budget a run is bound by when no cost limit is set: the floor version's, else the agent's. */
+  liveBudget: number;
   versions: Array<AgentVersion & { eligibility: Omit<Eligibility, "needs"> & { needs: string } }>;
 }
 
@@ -176,9 +182,11 @@ export async function readAgents(db: Queryable, orgId: string, id?: string, now 
     const liveIds = live && Array.isArray(live.body.skills) ? (live.body.skills as unknown[]).filter((x): x is string => typeof x === "string") : [];
     const liveVers = live && live.body.skillVersions && typeof live.body.skillVersions === "object" ? (live.body.skillVersions as Record<string, unknown>) : {};
     out.push({
+      liveLimits: readRunLimits(live?.body.limits),
+      liveBudget: typeof live?.body.budget === "number" ? live.body.budget : cfg.budget,
       liveSkills: liveIds.map((sid) => ({ id: sid, version: typeof liveVers[sid] === "number" ? skillLabels.get(`${sid}:${liveVers[sid]}`) ?? "" : "" })),
       id: a.id, name: a.name, station: a.station, model: cfg.model, fallbacks: cfg.fallbacks, version: liveV?.v ?? "", status: a.status, autonomy: cfg.autonomy, tools: cfg.tools,
-      skills: skills.filter((s) => s.agent_id === a.id).map((s) => s.skill_id), mcp: cfg.mcp, stations: cfg.stations, projects: cfg.projects, budget: cfg.budget, guardrails: cfg.guardrails,
+      skills: skills.filter((s) => s.agent_id === a.id).map((s) => s.skill_id), mcp: cfg.mcp, stations: cfg.stations, projects: cfg.projects, budget: cfg.budget, guardrails: cfg.guardrails, limits: cfg.limits,
       suite: cfg.suite, instructions: cfg.instructions, overrides: cfg.overrides, versions, spark: ex.spark.get(a.id) ?? [], spend7d: ex.spend.get(a.id) ?? 0, initials: initialsOf(a.name),
       evalScore: liveV?.suiteScore ?? 0, ...(a.data.builtin === true ? { builtin: true } : {}), running: ex.running.get(a.id) ?? 0, rev: a.version, suiteName: suite?.name ?? null, threshold: suite ? (suite.threshold !== null && !Number.isNaN(Number(suite.threshold)) ? Number(suite.threshold) : 0.85) : null,
     });
