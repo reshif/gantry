@@ -7,12 +7,15 @@
  *
  * A route is a prototype hash route without "#/": `home`, `floor`, `record/WO-2399`, `agents/ag-build`. The real route comes
  * from fidelity/routes.json (default: project routes get /p/payments/). Output, prototype left, real right:
- *   /home/reshif/Downloads/gantry-designs/design-3-blueprint/fidelity/<route>-<w>-<theme>.png
+ *   $FID_PROTO_DIR/fidelity/<route>-<w>-<theme>.png (or $FID_OUT)
  *
  * Prototype: python3 -m http.server 9403 from the design folder. Real app: `vite build` + `vite preview` on 9530 with every
  * /api call answered by e2e/fixtures.ts (mockApi), fed with the prototype's own demo seed (e2e/seed-fixtures.ts), so both
  * sides show the same factory. Fonts are served locally to both sides (no network). One browser, one preview server, one
  * http server, all stopped by PID on exit.
+ *
+ * Environment: FID_PROTO_DIR = the prototype folder (default: ../gantry-designs/design-3-blueprint next to this repository);
+ * FID_OUT = output folder; FID_PLAYWRIGHT = playwright module to import (default: the repo's `playwright`).
  */
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, readdirSync } from "node:fs";
@@ -22,9 +25,9 @@ import vm from "node:vm";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB = resolve(HERE, "..");
-const PROTO_DIR = "/home/reshif/Downloads/gantry-designs/design-3-blueprint";
+const PROTO_DIR = process.env.FID_PROTO_DIR || resolve(WEB, "../../../gantry-designs/design-3-blueprint");
 const OUT_DIR = process.env.FID_OUT || join(PROTO_DIR, "fidelity"); // FID_OUT: per-engineer output folder
-const PW = "/home/reshif/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs";
+const PW = process.env.FID_PLAYWRIGHT || "playwright";
 const PROTO_PORT = Number(process.env.FID_PROTO_PORT || 9423); // unique per parallel run
 const REAL_PORT = Number(process.env.FID_REAL_PORT || 9532);
 const FONTS = join(WEB, "src/assets/fonts");

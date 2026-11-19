@@ -75,14 +75,14 @@ function Fallback({ level, error, id, onRetry }: { level: BoundaryLevel; error: 
         <section className="panel">
           <div className="state" role="alert">
             <svg className="art" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><path d="M12 3l10 18H2zM12 10v5M12 18h.01" /></svg>
-            <h3 className="empty-title">{chunk ? "A newer version of Gantry is available" : "This sheet failed to draw"}</h3>
-            <p>{chunk ? "Reload to get the latest version." : "Nothing you entered elsewhere was lost."}</p>
+            <h3 className="empty-title">{chunk ? "This screen could not load" : "This sheet failed to draw"}</h3>
+            <p>{chunk ? "This screen could not load (a new version may have been deployed). Reload to get the latest version." : "Nothing you entered elsewhere was lost."}</p>
             {import.meta.env.DEV ? <pre className="error-detail">{error.message}</pre> : null}
             {id ? <p className="error-id">Error id <code>{id}</code></p> : null}
             <div className="row">
               {/* React.lazy caches the rejected import, so re-rendering would throw the same error: a missing chunk offers Reload only */}
               {chunk ? <button type="button" className="btn primary" onClick={() => window.location.reload()}>Reload</button> : <button type="button" className="btn primary" onClick={onRetry}>Retry</button>}
-              <a className="btn" href="#home">Home</a>
+              <a className="btn" href="#home">{chunk ? "Go home" : "Home"}</a>
             </div>
           </div>
         </section>
