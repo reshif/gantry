@@ -6,7 +6,7 @@ import { appendEvent, enqueueOutbox, type Tx } from "@gantry/db";
  */
 export async function recordMfaChangedOutside(
   tx: Tx, orgId: string, personId: string | null,
-  d: { why: "credentials_changed" | "first_seen_without_enrolment" | "provider_admin_event"; detail: Record<string, unknown>; requestId?: string; sourceIp?: string | null },
+  d: { why: "credentials_changed" | "first_seen_without_enrolment" | "provider_admin_event" | "events_incomplete"; detail: Record<string, unknown>; requestId?: string; sourceIp?: string | null },
 ): Promise<void> {
   const label = personId ? `person ${personId}` : "an account at the identity provider";
   const ev = await appendEvent(tx, {

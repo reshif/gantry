@@ -74,7 +74,7 @@ export async function readPeople(db: Queryable, orgId: string): Promise<Person[]
   return rows.map((r) => ({
     ...obj(r.data),
     id: r.id, name: r.name, title: r.title, email: r.email, teams: r.teams, roles: r.roles, status: r.status, oncall: r.oncall,
-    github: r.github_login ?? "", away: (r.away as Away | null) ?? null, mfa: r.mfa ? true : r.mfa_checked_at ? false : null, version: r.version,
+    github: r.github_login ?? "", away: (r.away as Away | null) ?? null, mfa: r.mfa === true ? true : r.mfa === false ? false : null, version: r.version,
   }) as Person);
 }
 

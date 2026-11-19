@@ -11,7 +11,7 @@ create table idp_admin_log (
   at timestamptz not null default clock_timestamp()
 );
 create index idp_admin_log_at_idx on idp_admin_log (org_id, at);
-grant select, insert on idp_admin_log to gantry_app;
+grant select, insert, delete on idp_admin_log to gantry_app;
 grant usage on sequence idp_admin_log_id_seq to gantry_app;
 
 alter table people add column mfa_link_at timestamptz;

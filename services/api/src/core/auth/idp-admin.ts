@@ -18,7 +18,7 @@ import { readSecretOptional } from "@gantry/db";
  */
 export interface IdpCredential { id: string; type: string; /** When the provider created it (ms); a re-planted factor with a reused id differs here. */ createdDate?: number }
 /** One admin-API change at the provider (admin events), as far as Gantry reads it. */
-export interface IdpAdminEvent { time: number; operation: string; resourceType: string; resourcePath: string; /** The client that made the change (`gantry-admin`), or null for a person in a console. */ clientId: string | null; userId: string | null; realmId: string | null }
+export interface IdpAdminEvent { time: number; operation: string; resourceType: string; resourcePath: string; /** The client that made the change (`gantry-admin`), or null for a person in a console. */ clientId: string | null; userId: string | null; realmId: string | null; /** The submitted user representation when the provider recorded one (it omits credentials). */ representation?: string | null }
 export interface IdpUser { id: string; username: string; email: string | null }
 
 export interface KeycloakAdminApi {
@@ -47,8 +47,13 @@ export interface IdpAdmin extends KeycloakAdminApi {
   secondFactors(userId: string): Promise<IdpCredential[]>;
   /** Removes second factors (only `only` when given, else every one) and ends the person's provider sessions; returns how many were removed. */
   resetSecondFactors(userId: string, only?: string[]): Promise<number>;
-  /** Credential and password changes the provider recorded since `sinceMs` (admin events). Needs the view-events role. */
-  credentialEvents(sinceMs: number): Promise<IdpAdminEvent[]>;
+  /**
+   * Every user-affecting admin event since `sinceMs`, read in pages until the window is exhausted (never a fixed first-200 view a flood could push a plant out of).
+   * `complete` is false only if the page cap was hit. Needs the view-events role.
+   */
+  credentialEvents(sinceMs: number): Promise<{ events: IdpAdminEvent[]; complete: boolean }>;
+  /** The id of this client's own service-account user: the `authDetails.userId` of every event Gantry itself causes (the client id in events is an internal UUID, not "gantry-admin"). */
+  serviceAccountUserId(): Promise<string | null>;
   /** Emails the person a one-time link that sets a password and enrols a second factor. It expires after `lifespanSec`. */
   sendEnrolmentLink(userId: string, o?: { lifespanSec?: number; redirectUri?: string }): Promise<void>;
   /** Ends the person's sessions at the provider. */
@@ -153,15 +158,26 @@ export function keycloakAdminClient(o: KeycloakAdminOptions): IdpAdmin {
       const res = await call("PUT", `/users/${encodeURIComponent(id)}/execute-actions-email?${q}`, ENROLMENT_ACTIONS);
       if (!res.ok) throw new Error(`identity provider could not send the enrolment link (HTTP ${res.status})`);
     },
+    async serviceAccountUserId() { return (await findUser({ username: `service-account-${o.clientId}` }))?.id ?? null; },
     async credentialEvents(sinceMs) {
-      const q = new URLSearchParams({ max: "200", dateFrom: new Date(sinceMs - 86_400_000).toISOString().slice(0, 10) });
-      q.append("resourceTypes", "USER"); // credential deletes and password resets are recorded as USER events (there is no CREDENTIAL resource type)
-      const res = await call("GET", `/admin-events?${q}`);
-      if (!res.ok) throw new Error(`identity provider admin events could not be read (HTTP ${res.status})`);
-      const rows = (await res.json()) as Array<{ time: number; operationType: string; resourceType: string; resourcePath?: string; authDetails?: { clientId?: string; userId?: string; realmId?: string } }>;
-      return rows.filter((e) => e.time > sinceMs && (/(^|\/)(reset-password|credentials)(\/|$)/.test(e.resourcePath ?? "") || (e.operationType === "CREATE" && /^users\/[^/]+$/.test(e.resourcePath ?? "")))).map((e) => ({
-        time: e.time, operation: e.operationType, resourceType: e.resourceType, resourcePath: e.resourcePath ?? "", clientId: e.authDetails?.clientId ?? null, userId: e.authDetails?.userId ?? null, realmId: e.authDetails?.realmId ?? null,
-      }));
+      const PAGE = 200;
+      const MAX_PAGES = 100;
+      const out: IdpAdminEvent[] = [];
+      const dateFrom = new Date(sinceMs - 3_600_000).toISOString().slice(0, 10);
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const q = new URLSearchParams({ first: String(page * PAGE), max: String(PAGE), dateFrom });
+        q.append("resourceTypes", "USER"); // credential deletes and password resets are USER events too (there is no CREDENTIAL resource type)
+        const res = await call("GET", `/admin-events?${q}`);
+        if (!res.ok) throw new Error(`identity provider admin events could not be read (HTTP ${res.status})`);
+        const rows = (await res.json()) as Array<{ time: number; operationType: string; resourceType: string; resourcePath?: string; representation?: string; authDetails?: { clientId?: string; userId?: string; realmId?: string } }>;
+        for (const e of rows) {
+          if (e.time <= sinceMs) continue;
+          out.push({ time: e.time, operation: e.operationType, resourceType: e.resourceType, resourcePath: e.resourcePath ?? "", clientId: e.authDetails?.clientId ?? null, userId: e.authDetails?.userId ?? null, realmId: e.authDetails?.realmId ?? null, representation: e.representation ?? null });
+        }
+        // newest first: once a page reaches back to the high-water mark (or is short) everything newer has been read
+        if (rows.length < PAGE || rows.some((e) => e.time <= sinceMs)) return { events: out, complete: true };
+      }
+      return { events: out, complete: false };
     },
     endSessions,
   };

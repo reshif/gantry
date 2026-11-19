@@ -122,11 +122,21 @@ admin it lets in still signs in with both factors.
   **It can still set any user's password and create or update a user with a second factor whose secret it chose, so whoever controls the
   API process or that secret file can plant a factor on any account, a Factory Admin included, and sign in as them. MFA does not survive a
   compromise of the API or of `idp_admin_client_secret`.** That is a smaller hole than the master password, not a closed one. What
-  reduces and detects it: every change the API's own client makes is logged (`idp_admin_log`); each minute the API reads the realm's admin
-  events and records `auth.mfa_changed_outside` in the ledger, and emails the Factory Admins, for any credential or password change that
-  is not one of those logged calls (the provider's console, the master admin, or someone using the secret directly); each sign-in compares
-  the person's authenticators (type, id and creation time) with the last sighting, and a factor first seen with no Gantry enrolment link
-  is audited the same way. These are alarms, not walls: nothing is refused or undone automatically. Keycloak's fine-grained admin permissions
+  reduces and detects it: every change the API's own client makes is logged (`idp_admin_log`); each minute the API reads ALL of the realm's
+  user admin events since its last check (in pages, never a fixed window) and records `auth.mfa_changed_outside` in the ledger, and emails
+  the Factory Admins, for every event that is not explained. An event is explained only if it was made by Gantry's own service-account
+  user (events carry its user id; the client id in an event is an internal UUID) AND matches a not-yet-used log row by operation and path
+  within eight seconds, each row explaining one event. So a console change, a master-admin change, an `UPDATE` of a user (how a factor is
+  planted through PUT) or a second reset nobody logged are all alarms; if the events cannot be read to the end that is an alarm too. Each
+  sign-in also compares the person's authenticators (type, id and creation time) with the last sighting, and the API start does the same
+  from the provider (it fills only a missing baseline; a difference is raised, never overwritten). A factor first seen with no Gantry
+  enrolment link is audited the same way. **What remains, honestly:** these are alarms, not walls, and they are best-effort against a
+  compromise of the API itself: code running in the API process can write `idp_admin_log` (the app role may insert into it) or simply use the
+  logged client, so it can make its own plant look like Gantry's. The watcher reliably catches changes made by anyone ELSE and is evidence for
+  an investigation, not a guarantee. A delete-and-replant through PUT with an identical credential id and creation time leaves the authenticator
+  fingerprint unchanged, so only the admin-event watcher can catch it. After the apply script runs, the master admin's test-mail user is
+  ignored by the watcher, but expect to see nothing else from it; any other alarm in the minutes around an apply is worth reading.
+  Keycloak's fine-grained admin permissions
   (26.4.7: `admin-fine-grained-authz` is a preview feature that needs `--features=admin-fine-grained-authz:v2` at build/start) can scope a
   service account to a group of users but have no "everyone except" rule, so excluding Factory Admins would mean Gantry maintaining a
   "managed users" group at every grant; that is not done. Keep `idp_admin_client_secret` readable by the two services only and rotate it
@@ -161,9 +171,10 @@ everyone without an authenticator is refused at the provider and can only be let
    from your environment and never printed), **sends a test mail and stops, changing nothing else, if it fails**, then sets the OTP / WebAuthn
    policy and the required actions, builds the new browser flow beside the old, switches, removes the old, turns on admin events, turns off
    password-only direct grants on `admin-cli`, and creates `gantry-admin` with only `manage-users` and `view-events`. It does not touch users,
-   credentials or sessions and is safe to run again. Then confirm the realm's browser flow is `gantry-browser` and that the first admin can sign in
+   credentials or sessions and is safe to run again. Its test-mail user (`gantry-smtp-test-*`, created and deleted by the master admin) is an admin event
+   from outside Gantry; the watcher ignores exactly that, so the apply raises no alarm. Then confirm the realm's browser flow is `gantry-browser` and that the first admin can sign in
    at the provider with password and code (the account console works for this test).
-4. **Deploy the API and the web together, right after step 3** (migrations 0053 and 0054; `gantry-api` mounts `idp_admin_client_secret` instead of
+4. **Deploy the API and the web together, right after step 3** (migrations 0053, 0055 and 0056 (0054 is the back-channel logout table of fix/api-security); `gantry-api` mounts `idp_admin_client_secret` instead of
    `keycloak_admin_password`; `GANTRY_DEV_ADMIN_MFA_OPTIONAL` is false). At start the API reads each person's authenticators once so the People
    status is right (until then it shows "Unknown", never "Not enrolled"). Sign the first admin out and in once: their old session had no recorded factor.
 5. **Send enrolment links.** People > Reset authenticator (or invite again) for each other person; confirm one arrives and works before telling

@@ -11,19 +11,25 @@ const now = () => Math.floor(Date.now() / 1000);
 type Issuer = Awaited<ReturnType<typeof startIssuer>>;
 const d = TEST_URL ? describe : describe.skip;
 
+/** The id Keycloak gives the gantry-admin service-account user: what `authDetails.userId` of Gantry's own events carries. */
+const SVC_USER = "6e206e9b-0fcb-491b-8071-1a2d0d54d827";
+/** The client's INTERNAL id: what `authDetails.clientId` really carries in a Keycloak 26.4.7 admin event (probed), never the string "gantry-admin". */
+const SVC_CLIENT_UUID = "acb40f19-f82f-4c53-9210-8f34af3d3329";
+
 /** An identity provider the API can administer: records what Gantry asks of it. */
-function fakeIdp(): IdpAdmin & { calls: string[]; creds: Map<string, IdpCredential[]>; failLink: boolean; failReset: boolean; events: IdpAdminEvent[] } {
+function fakeIdp(): IdpAdmin & { calls: string[]; creds: Map<string, IdpCredential[]>; failLink: boolean; failReset: boolean; events: IdpAdminEvent[]; incomplete: boolean } {
   const calls: string[] = [];
   const creds = new Map<string, IdpCredential[]>();
   const users = new Map<string, { id: string; username: string; email: string | null }>();
   const fake = {
-    calls, creds, failLink: false, failReset: false, events: [] as IdpAdminEvent[],
+    calls, creds, failLink: false, failReset: false, incomplete: false, events: [] as IdpAdminEvent[],
     async findUser(q: { username?: string; email?: string }) { return [...users.values()].find((u) => (q.username && u.username === q.username) || (q.email && u.email === q.email)) ?? null; },
     async findUserId(username: string) { return (await fake.findUser({ username }))?.id ?? null; },
     async createUser(u: { username: string; email?: string }) { const id = `kc-${u.username}`; users.set(id, { id, username: u.username, email: u.email ?? null }); calls.push(`create:${u.username}`); return id; },
     async secondFactors(id: string) { return creds.get(id) ?? []; },
     async resetSecondFactors(id: string, only?: string[]) { if (fake.failReset) throw new Error("provider refused"); const held = (creds.get(id) ?? []).filter((c) => !only || only.includes(c.id)); creds.set(id, (creds.get(id) ?? []).filter((c) => !held.includes(c))); calls.push(`reset:${id}`, `logout:${id}`); return held.length; }, // the real client also ends the provider sessions
-    async credentialEvents(since: number) { return fake.events.filter((e) => e.time > since); },
+    async credentialEvents(since: number) { return { events: fake.events.filter((e) => e.time > since), complete: !fake.incomplete }; },
+    async serviceAccountUserId() { return SVC_USER; },
     async sendEnrolmentLink(id: string, o?: { lifespanSec?: number }) { if (fake.failLink) throw new Error("smtp down"); calls.push(`link:${id}:${o?.lifespanSec}`); },
     async endSessions(id: string) { calls.push(`logout:${id}`); },
   };
@@ -284,34 +290,118 @@ d("MFA for everyone (S-120..S-130)", () => {
     expect(ev[0].after).toMatchObject({ why: "first_seen_without_enrolment" });
   });
 
-  it("G-M1: a credential or password change at the provider that Gantry did not make is recorded and emailed; Gantry's own calls are not", async () => {
+  const real = (o: Partial<IdpAdminEvent>): IdpAdminEvent => ({ time: Date.now(), operation: "ACTION", resourceType: "USER", resourcePath: "users/u1/reset-password", clientId: SVC_CLIENT_UUID, userId: SVC_USER, realmId: "74d1ab8c", ...o });
+  const outsideCount = async () => (await t.db.admin.query(`select count(*)::int n from events where type = 'auth.mfa_changed_outside'`)).rows[0].n as number;
+  const logCall = (method: string, path: string, at = new Date()) => t.db.admin.query(`insert into idp_admin_log (org_id, method, path, at) values ($1,$2,$3,$4)`, [t.orgId, method, path, at]);
+
+  it("G-N1: Gantry's own calls are recognised by the service-account USER id with a real-shaped event (client id is a UUID): no alarm for an invite or a reset", async () => {
     const { checkIdpAdminEvents } = await import("../src/core/auth/idp-watch.js");
-    await t.db.admin.query(`update people set idp_subject = 'kc-lena' where id = 'p-lena'`);
+    const n0 = await outsideCount();
+    await logCall("PUT", "/users/u1/reset-password");
+    await logCall("DELETE", "/users/u1/credentials/c9");
+    await logCall("POST", "/users");
     const t0 = Date.now();
-    await t.db.admin.query(`insert into idp_admin_log (org_id, method, path, at) values ($1, 'DELETE', 'users/kc-priya/credentials/x', now())`, [t.orgId]);
-    idp.events.push(
-      { time: t0 + 1, operation: "DELETE", resourceType: "CREDENTIAL", resourcePath: "users/kc-priya/credentials/x", clientId: "gantry-admin", userId: "svc", realmId: "gantry" }, // Gantry's own (logged)
-      { time: t0 + 2, operation: "UPDATE", resourceType: "USER", resourcePath: "users/kc-lena/reset-password", clientId: null, userId: "admin", realmId: "master" }, // a console user
-    );
-    const r = await checkIdpAdminEvents(t.app.gantry, t0 + 10);
-    expect(r).toEqual({ checked: 2, flagged: 1 });
-    const ev = (await t.db.admin.query(`select subject, after from events where type = 'auth.mfa_changed_outside' and after->>'why' = 'provider_admin_event'`)).rows;
-    expect(ev).toHaveLength(1);
-    expect(ev[0].subject).toMatchObject({ id: "p-lena" });
-    expect(ev[0].after).toMatchObject({ operation: "UPDATE", resource: "users/kc-lena/reset-password" });
-    expect((await checkIdpAdminEvents(t.app.gantry, t0 + 20)).flagged).toBe(0); // the cursor moved on: not reported twice
+    idp.events = [
+      real({ time: t0 + 1, resourcePath: "users/u1/credentials/c9" }),
+      real({ time: t0 + 2 }),
+      real({ time: t0 + 3, operation: "CREATE", resourcePath: "users/newbie" }),
+      real({ time: t0 + 4, resourcePath: "users/u1/execute-actions-email" }), // never an alarm
+    ];
+    expect(await checkIdpAdminEvents(t.app.gantry, t0 + 10)).toMatchObject({ flagged: 0 });
+    expect(await outsideCount()).toBe(n0);
   });
 
-  it("G-M9: the backfill records who holds a factor from the provider, and the People status is unknown (null) until something has been read", async () => {
+  it("G-N2: a logged call of one kind does not hide a different event; each log row explains at most one event; a few seconds, not two minutes", async () => {
+    const { checkIdpAdminEvents } = await import("../src/core/auth/idp-watch.js");
+    const t0 = Date.now() + 100_000;
+    await t.db.admin.query(`delete from idp_admin_log`);
+    await logCall("POST", "/users/someone-else/execute-actions-email", new Date(t0));
+    await logCall("PUT", "/users/ok/reset-password", new Date(t0 + 500));
+    idp.events = [
+      real({ time: t0 + 1000, resourcePath: "users/victim/reset-password" }), // matches the ok row's path? no: another user's path
+      real({ time: t0 + 1100, resourcePath: "users/ok/reset-password" }),
+      real({ time: t0 + 1200, resourcePath: "users/ok/reset-password" }), // the one row already explained the first: this is a second reset nobody logged
+      real({ time: t0 + 60_000, resourcePath: "users/ok/reset-password" }), // a minute later: outside the few-second window
+    ];
+    const r = await checkIdpAdminEvents(t.app.gantry, t0 + 70_000);
+    expect(r.flagged).toBe(3);
+  });
+
+  it("G-N2: an UPDATE of a user (how a factor is planted through PUT) is an alarm unless a logged PUT explains it, and so is a console change", async () => {
+    const { checkIdpAdminEvents } = await import("../src/core/auth/idp-watch.js");
+    const n0 = await outsideCount();
+    const t0 = Date.now() + 200_000;
+    idp.events = [
+      real({ time: t0, operation: "UPDATE", resourcePath: "users/victim", representation: "{\"id\":\"victim\",\"totp\":false}" }),
+      real({ time: t0 + 1, operation: "UPDATE", resourcePath: "users/victim", userId: "admin-console-user", clientId: "security-admin-console-uuid", realmId: "master" }),
+    ];
+    expect((await checkIdpAdminEvents(t.app.gantry, t0 + 10)).flagged).toBe(2);
+    expect(await outsideCount()).toBe(n0 + 2);
+  });
+
+  it("G-N2: if the events cannot be read to the end (a flood), that is itself an alarm and the check says so", async () => {
+    const { checkIdpAdminEvents } = await import("../src/core/auth/idp-watch.js");
+    const n0 = await outsideCount();
+    idp.incomplete = true; idp.events = [];
+    const r = await checkIdpAdminEvents(t.app.gantry, Date.now() + 300_000);
+    idp.incomplete = false;
+    expect(r.flagged).toBe(1);
+    expect((await t.db.admin.query(`select after from events where type = 'auth.mfa_changed_outside' order by seq desc limit 1`)).rows[0].after).toMatchObject({ why: "events_incomplete" });
+    expect(await outsideCount()).toBe(n0 + 1);
+  });
+
+  it("G-N4: the apply script's test-mail probe user (made by the master admin) raises no alarm; the same event made by the service account does", async () => {
+    const { checkIdpAdminEvents } = await import("../src/core/auth/idp-watch.js");
+    const t0 = Date.now() + 400_000;
+    const probe = { operation: "CREATE", resourcePath: "users/probe1", representation: "{\"username\":\"gantry-smtp-test-123\",\"email\":\"ops@x.dev\"}" };
+    idp.events = [real({ time: t0, ...probe, userId: "master-admin", clientId: "admin-cli-uuid", realmId: "master" }), real({ time: t0 + 1, operation: "DELETE", resourcePath: "users/probe1", userId: "master-admin", clientId: "admin-cli-uuid" })];
+    expect((await checkIdpAdminEvents(t.app.gantry, t0 + 10)).flagged).toBe(0);
+    idp.events = [real({ time: t0 + 20, ...probe })]; // our own account creating that name with no logged call
+    expect((await checkIdpAdminEvents(t.app.gantry, t0 + 30)).flagged).toBe(1);
+  });
+
+  it("G-M9/G-N3: the backfill fills only a missing baseline; a baseline that differs from the provider is raised, not overwritten; an unreachable provider changes nothing", async () => {
     const { backfillMfa } = await import("../src/core/auth/idp-watch.js");
-    await t.db.admin.query(`update people set idp_subject = 'kc-sam', mfa = false, mfa_checked_at = null where id = 'p-sam'`);
+    await t.db.admin.query(`update people set idp_subject = 'kc-sam', mfa = null, mfa_checked_at = null, mfa_fingerprint = null where id = 'p-sam'`);
     const unknown = (await t.app.inject({ url: "/api/v1/people", headers: { cookie: (await t.session("p-asha", { secondFactor: true })).cookie } })).json().find((p: { id: string }) => p.id === "p-sam");
     expect(unknown.mfa).toBeNull();
+    // provider unreachable at start: nothing changes, nothing thrown, still unknown
+    const orig = idp.secondFactors; idp.secondFactors = async () => { throw new Error("down"); };
+    expect(await backfillMfa(t.app.gantry)).toBe(0); idp.secondFactors = orig;
+    expect((await t.db.admin.query(`select mfa from people where id = 'p-sam'`)).rows[0].mfa).toBeNull();
+    // missing baseline: filled
     idp.creds.set("kc-sam", [{ id: "s1", type: "otp", createdDate: 1 }]);
     await backfillMfa(t.app.gantry);
     const row = (await t.db.admin.query(`select mfa, mfa_types, mfa_fingerprint from people where id = 'p-sam'`)).rows[0];
     expect(row).toMatchObject({ mfa: true, mfa_types: ["otp"] });
-    expect(row.mfa_fingerprint).toBeTruthy();
+    // a factor planted while the API was down: raised, baseline kept
+    const samEvents = async () => (await t.db.admin.query(`select count(*)::int n from events where type = 'auth.mfa_changed_outside' and subject->>'id' = 'p-sam'`)).rows[0].n as number;
+    const n0 = await samEvents();
+    idp.creds.set("kc-sam", [{ id: "plant", type: "otp", createdDate: 2 }]);
+    await backfillMfa(t.app.gantry);
+    expect(await samEvents()).toBe(n0 + 1);
+    expect((await t.db.admin.query(`select mfa_fingerprint from people where id = 'p-sam'`)).rows[0].mfa_fingerprint).toBe(row.mfa_fingerprint);
+  });
+
+  it("G-N2: the real client pages through every admin event (not a fixed 200) and keeps UPDATE events", async () => {
+    const { keycloakAdminClient } = await import("../src/core/auth/idp-admin.js");
+    const since = Date.now() - 60_000;
+    const mk = (i: number, op = "ACTION", path = `users/u${i}/reset-password`) => ({ time: since + 1000 + i, operationType: op, resourceType: "USER", resourcePath: path, authDetails: { clientId: SVC_CLIENT_UUID, userId: SVC_USER, realmId: "r" } });
+    const all = [...Array.from({ length: 450 }, (_, i) => mk(450 - i)), mk(1, "UPDATE", "users/victim")]; // newest first, 451 rows: three pages of 200
+    const asked: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      asked.push(String(url));
+      if (String(url).includes("/token")) return new Response(JSON.stringify({ access_token: "t", expires_in: 60 }));
+      const u = new URL(String(url));
+      const first = Number(u.searchParams.get("first")); const max = Number(u.searchParams.get("max"));
+      return new Response(JSON.stringify(all.slice(first, first + max)));
+    }) as unknown as typeof fetch;
+    const c = keycloakAdminClient({ baseUrl: "http://kc/idp", realm: "gantry", clientId: "gantry-admin", clientSecret: "s", fetchImpl });
+    const r = await c.credentialEvents(since);
+    expect(r.complete).toBe(true);
+    expect(r.events).toHaveLength(451);
+    expect(r.events.some((e) => e.operation === "UPDATE" && e.resourcePath === "users/victim")).toBe(true);
+    expect(asked.filter((u) => u.includes("admin-events"))).toHaveLength(3);
   });
 });
 
