@@ -134,6 +134,8 @@ export interface AgentOut extends Agent {
   liveSkills: Array<{ id: string; version: string }>;
   /** The run limits of the version on the floor: what a run is bound by (`limits` is the working copy, which only a new version and its promotion puts on the floor). */
   liveLimits: RunLimits;
+  /** The per-run budget a run is bound by when no cost limit is set: the floor version's, else the agent's. */
+  liveBudget: number;
   versions: Array<AgentVersion & { eligibility: Omit<Eligibility, "needs"> & { needs: string } }>;
 }
 
@@ -181,6 +183,7 @@ export async function readAgents(db: Queryable, orgId: string, id?: string, now 
     const liveVers = live && live.body.skillVersions && typeof live.body.skillVersions === "object" ? (live.body.skillVersions as Record<string, unknown>) : {};
     out.push({
       liveLimits: readRunLimits(live?.body.limits),
+      liveBudget: typeof live?.body.budget === "number" ? live.body.budget : cfg.budget,
       liveSkills: liveIds.map((sid) => ({ id: sid, version: typeof liveVers[sid] === "number" ? skillLabels.get(`${sid}:${liveVers[sid]}`) ?? "" : "" })),
       id: a.id, name: a.name, station: a.station, model: cfg.model, fallbacks: cfg.fallbacks, version: liveV?.v ?? "", status: a.status, autonomy: cfg.autonomy, tools: cfg.tools,
       skills: skills.filter((s) => s.agent_id === a.id).map((s) => s.skill_id), mcp: cfg.mcp, stations: cfg.stations, projects: cfg.projects, budget: cfg.budget, guardrails: cfg.guardrails, limits: cfg.limits,

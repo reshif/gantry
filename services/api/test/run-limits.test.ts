@@ -278,5 +278,12 @@ d("run limits: agent version, station override, one-off retry raise", () => {
     const ag = (await w.call(ADMIN, "GET", "/api/v1/agents")).body.find((a: any) => a.id === "ag-research");
     expect(ag.limits).toEqual({ turns: 77 });
     expect(ag.liveLimits).toEqual({});
+    // the floor version's own per-run budget, not the working copy's
+    await save("ag-research", { budget: 31 });
+    const ag2 = (await w.call(ADMIN, "GET", "/api/v1/agents")).body.find((a: any) => a.id === "ag-research");
+    expect(ag2.budget).toBe(31);
+    const floor = (await q(`select v.body->>'budget' as b from agents a join agent_versions v on v.agent_id = a.id and v.version = a.live_version where a.id = 'ag-research'`))[0].b;
+    expect(ag2.liveBudget).toBe(floor === null ? 31 : Number(floor));
+    if (floor !== null) expect(ag2.liveBudget).not.toBe(31);
   });
 });
