@@ -13,6 +13,7 @@ import { ClassChip, classOf, useCatalog } from "../projects/kit";
 import { Lifecycle } from "../record/Lifecycle";
 import { useOpenRecordRoute } from "../record/nav";
 import { Actions } from "./Actions";
+import { WaitBanner, WaitChip } from "./WaitBanner";
 import { Journey } from "./Journey";
 import { ArtefactsTab, BriefTab, HistoryTab } from "./Tabs";
 import { bayLabel, stName, stNo, useTravelerWo } from "./model";
@@ -103,7 +104,7 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
           <div className="kicker">{`Traveler · routing sheet · ${project.name}`}</div>
           <div className="drawer-id">
             <span className="mono big-id">{wo.id}</span>
-            <StateChip state={wo.state} />
+            {wo.wait ? <WaitChip wait={wo.wait} /> : <StateChip state={wo.state} />}
             <ClassChip cls={classOf(cat, project, wo.cls)} />
             <span className={`chip prio-${wo.priority}`}>{wo.priority}</span>
             {heldByKill ? <span className="chip chip-block">{`held by ${typeof heldByKill === "string" ? heldByKill : wo.stop?.scope ?? ""} kill`}</span> : null}
@@ -142,12 +143,7 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
             <span>{halt.reason}</span>
           </div>
         ) : null}
-        {wo.wait ? (
-          <div className={wo.wait.kind === "slot" ? "halt-banner" : "trv-killed"} role={wo.wait.kind === "disk_critical" ? "alert" : "status"} id="trv-wait">
-            <Icon name={wo.wait.kind === "slot" ? "halt" : "alert"} />
-            <span>{wo.wait.label}{wo.wait.reason ? ` · ${wo.wait.reason}` : ""}</span>
-          </div>
-        ) : null}
+        {wo.wait ? <WaitBanner wait={wo.wait} /> : null}
         {wo.blockReason ? <div className="callout callout-block"><Icon name="st-block" /><span>{wo.blockReason}</span></div> : null}
         {wo.failReason ? <div className="callout callout-fail"><Icon name="st-fail" /><span>{wo.failReason}</span></div> : null}
         <dl className="kv tb-drawer">
@@ -168,7 +164,8 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
         <div className={`wos-open-conv${row?.waitingOn === "you" ? " is-you" : ""}`} id="trv-conversation">
           <Btn label="Open conversation" kind="primary" icon="chat" id="trv-open-conversation" onClick={() => { close(); setProject(wo.project); navigate("conversations", wo.id, wo.project); }} />
           <span className="small" role="status">
-            {!row ? "Talk to the agent at this station about this work order."
+            {wo.wait ? <strong>{`${wo.wait.label}${wo.wait.reason ? `: ${wo.wait.reason}` : ""}`}</strong>
+              : !row ? "Talk to the agent at this station about this work order."
               : row.closed ? "Closed."
               : wo.state === "failed" || wo.state === "blocked" ? <strong>{`${wo.state === "blocked" ? "Blocked" : "Stopped"}: a person has to retry it or assign another agent`}</strong>
               : row.waitingOn === "you" ? <strong>{`${row.agentName ?? "The agent"} is waiting for you`}</strong>

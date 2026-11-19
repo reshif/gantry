@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RecordView from "./record";
 import ChangesView from "./changes";
 import { mockApi, mount, resetApp } from "./floor/testkit";
-import { readsFor, travelerOf, waitingWo } from "./traveler/testkit";
+import { readsFor, recordOf, travelerOf, waitingWo } from "./traveler/testkit";
 
 beforeEach(() => resetApp());
 afterEach(() => {
@@ -19,6 +19,15 @@ async function show(extra: Parameters<typeof mockApi>[0] = {}, hash = `#record/$
   await screen.findByRole("toolbar", { name: "Work order actions" }, { timeout: 4000 });
   return calls;
 }
+
+describe("Record shows why the run is not running (T-64)", () => {
+  it("renders the sandbox wait label from the record read on the page itself, not only in a section no tab shows", async () => {
+    const wait = { label: "Waiting: host disk low", reason: null, since: null, kind: "disk" as const };
+    await show({ [`GET /api/v1/work-orders/${W.id}/record`]: () => ({ body: recordOf(W, { wait }) }) });
+    await waitFor(() => expect(document.getElementById("trv-wait")?.textContent).toMatch(/Waiting: host disk low/));
+    expect(document.getElementById("wait-chip")?.textContent).toBe("Waiting: host disk low");
+  });
+});
 
 describe("Work order page", () => {
   it("puts the title, route and actions in the header and the document and activity in tabs", async () => {
