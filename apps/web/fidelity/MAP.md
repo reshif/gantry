@@ -1,6 +1,6 @@
 # Fidelity map: Blueprint prototype to real app
 
-The prototype (`/home/reshif/Downloads/gantry-designs/design-3-blueprint`, hash routes, `js/*.js` render functions) is the
+The prototype (folder `$FID_PROTO_DIR`, default `../gantry-designs/design-3-blueprint` next to the repository; hash routes, `js/*.js` render functions) is the
 specification. Compare with `node apps/web/fidelity/compare.mjs <route>...` (prototype route name; real route from `routes.json`).
 Fixtures: the prototype's own seed (`js/data.js`, already in server shapes) served through `e2e/seed-fixtures.ts` + `e2e/fixtures.ts`.
 Project routes open as `#/p/payments/<id>`. "Cannot supply" = shown as closest real data or omitted.

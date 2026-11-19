@@ -116,6 +116,8 @@ describe("AppErrorBoundary", () => {
     );
     expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.getByText(/This screen could not load \(a new version may have been deployed\)/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Go home" }).getAttribute("href")).toBe("#home");
   });
   it("nested levels report their own level in situ, and only the route fallback takes focus", () => {
     const got: ErrorReport[] = [];

@@ -427,6 +427,8 @@ textarea.input{height:auto;min-height:84px}
 .inbox-btn{position:relative}
 .inbox-count{position:absolute;top:6px;right:6px;width:8px;height:8px;background:var(--bad);border-radius:50%;font-size:0}
 .status-cluster .chip{pointer-events:none}
+/* very narrow phones (320): the factory word shortens so the top bar fits (the button's aria-label carries the full state) */
+@media (max-width:400px){.top .status-cluster{min-width:0}.top .status-cluster .chip{display:block;max-width:56px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 .nav>div[role=group]{display:block}
 .nav a .cnt.warn{background:var(--warn);color:var(--bg)}
 .scrim.nav{z-index:90}

@@ -98,7 +98,7 @@ test("offline: going offline mid-session keeps the shell", async ({ page, contex
   await expect(page.locator("#root > *")).not.toHaveCount(0);
 });
 
-// Stale chunk after a deploy: a lazy view's script 404s. lazyRetry reloads once, then the route error boundary offers Retry.
+// Stale chunk after a deploy: a lazy view's script 404s. lazyRetry reloads once, then the route error boundary offers Reload and Go home.
 test("a missing lazy chunk shows a recoverable error, not a blank route", async ({ page }) => {
   await mockApi(page);
   await open(page, "/#home");
@@ -106,5 +106,7 @@ test("a missing lazy chunk shows a recoverable error, not a blank route", async 
   await page.evaluate(() => {
     window.location.hash = "#agents";
   });
-  await expect(page.getByRole("alert").filter({ hasText: /reload|try again|something went wrong|could not load/i })).toBeVisible({ timeout: 8000 });
+  await expect(page.getByRole("alert").filter({ hasText: /This screen could not load/ })).toBeVisible({ timeout: 8000 });
+  await expect(page.getByRole("button", { name: "Reload" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Go home" })).toBeVisible();
 });

@@ -30,8 +30,10 @@ export function makeQueryClient(): QueryClient {
         refetchOnWindowFocus: true,
         // the stream is how screens stay current; while it is down every live read polls (never while it is up). A query may set its own interval.
         refetchInterval: pollWhenStreamDown(STREAM_DOWN_POLL_MS),
-        // a 4xx is an answer (permission, missing), not a blip: do not retry it
-        retry: (count, err) => !(err instanceof ApiError && err.status >= 400 && err.status < 500) && count < 2,
+        // a 4xx is an answer (permission, missing), not a blip: do not retry it. A 5xx or a network blip is retried once, quickly, so a
+        // real failure reaches the failed state within about a second (the default backoff of 1 s then 2 s kept screens on "Loading").
+        retry: (count, err) => !(err instanceof ApiError && err.status >= 400 && err.status < 500) && count < 1,
+        retryDelay: 400,
       },
     },
   });

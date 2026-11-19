@@ -1,4 +1,4 @@
-/* Precision theme (docs: gantry-designs/belt-options/PRECISION-THEME.md). Loaded LAST: one source for the primitives.
+/* Precision theme (see PRECISION-THEME.md in the design folder). Loaded LAST: one source for the primitives.
    Flat outlined frames, mono uppercase labels with a hairline rule, three line tiers (hairline --line, outline --line2,
    emphasis 2px for the one hot object). Amber = needs you, red = stuck/failed, green = done, violet = split, cyan = selection/flow.
    Floating things (menu, dialog, toast, popover) keep a hard offset shadow so they separate from the grid. */
