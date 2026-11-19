@@ -140,7 +140,7 @@ export const WRITE_GATES: Readonly<Record<string, WriteGate>> = {
   [`POST ${P}/gate-instances/:id/approve`]: { any: GATE_ACTIONS, pick: (r, st) => actionForGate(st.catalog, parseGateId(param(r, "id")).gateId) },
   [`POST ${P}/gate-instances/:id/reject`]: { any: GATE_ACTIONS, pick: (r, st) => (parseGateId(param(r, "id")).gateId === "G0G1" ? "wo.decline" : actionForGate(st.catalog, parseGateId(param(r, "id")).gateId)) },
   [`POST ${P}/work-orders/:id/move`]: { any: ["wo.move"], unless: (r) => body(r).dry_run === true }, [`POST ${P}/work-orders/:id/send-back`]: A("wo.sendback"), [`POST ${P}/work-orders/:id/park`]: PICK((r) => (body(r).bay === "declined" ? "wo.decline" : "wo.park"), "wo.park", "wo.decline"),
-  [`POST ${P}/work-orders/:id/unpark`]: A("wo.park"), [`POST ${P}/work-orders/:id/reassign`]: A("wo.reassign"), [`POST ${P}/work-orders/:id/retry`]: A("wo.sendback"), [`POST ${P}/work-orders/:id/retry-with-limits`]: A("project.config"),
+  [`POST ${P}/work-orders/:id/unpark`]: A("wo.park"), [`POST ${P}/work-orders/:id/reassign`]: A("wo.reassign"), [`POST ${P}/work-orders/:id/retry`]: A("wo.sendback"), [`POST ${P}/work-orders/:id/retry-with-limits`]: A("project.config"), [`POST ${P}/work-orders/:id/wip-override`]: A("wo.move"),
   [`PUT ${P}/work-orders/:id/budget`]: A("project.config"), [`PUT ${P}/work-orders/:id/record/summary`]: A("wo.answer"),
   [`POST ${P}/work-orders/:id/session/messages`]: OWN("wo.answer"), [`POST ${P}/work-orders/:id/session/seen`]: SELF("marks the caller's own read position"),
   [`POST ${P}/work-orders/:id/session/proposals/:mid/:pid`]: OWN("wo.answer", "brief.confirm", "wo.classify", "wo.decline"),

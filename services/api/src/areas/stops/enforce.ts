@@ -9,7 +9,7 @@
  */
 import { gateAfter, type Catalog } from "@gantry/domain";
 import type { Queryable, Tx } from "@gantry/db";
-import { cancelAttempts, closeEntry, completeParentIfDone, closeInstance, dispatchQueued, enterStation, ev, flushFx, note, openGate, releaseSlot, stationIdOf, type Fx } from "../workorders/engine.js";
+import { cancelAttempts, closeEntry, completeParentIfDone, closeInstance, dispatchQueued, enterStation, wipHoldCheck, wipLimitOf, wipLive, projectOf, ev, flushFx, note, openGate, releaseSlot, stationIdOf, type Fx } from "../workorders/engine.js";
 import { lockWo, saveWo, toWo, WO_COLS, type Wo } from "../workorders/model.js";
 import { readCatalog, readOrg } from "../../core/read/index.js";
 import { job } from "../../core/jobs-contract.js";
@@ -154,6 +154,30 @@ async function restoreOne(fx: Fx, w: Wo, s: StopDb, catalog: Catalog): Promise<v
     w.state = (prev.state === "running" || prev.state === "waiting" || prev.state === "parked" ? prev.state : "running") as Wo["state"];
     w.position = prev.position;
     note(w, fx, fx.actor, `Restored after ${s.mode === "kill" ? "kill" : "halt"}: ${s.reason}`);
+    // An order that was waiting for a full station (any kind of wait, an epic child waiting for Build included) comes back INTO that wait: same target and kind, same
+    // state, no station re-entered and no gate opened. The promotion lets it in when a place frees.
+    if (w.data.wipWait) {
+      w.state = (prev.state as Wo["state"]) ?? w.state;
+      w.position = prev.position;
+      // A forward or back waiter that was waiting held a counted seat at its own station. The kill freed it and another order may have taken it, so it comes back
+      // waiting only if that station has room; otherwise parked and uncounted, with its original wait, and the promotion moves it on when its target has a place.
+      const wk = (w.data.wipWait as { kind?: string }).kind;
+      if (w.state === "waiting" && (wk === "forward" || wk === "back") && !catalog.bays.some((b) => b.id === w.position)) {
+        const lim = wipLimitOf(await projectOf(fx, w.project), prev.station);
+        if (lim && (await wipLive(fx, w.project, prev.station, w.id)) >= lim) w.state = "parked";
+      }
+      delete w.data.stopClosedGates;
+      ev(fx, w, "wo.state", { from: "killed", to: w.state, station: prev.station, text: "restored, still waiting for a place" }, { category: "kill" });
+      return;
+    }
+    // The kill freed its place and someone may have taken it: a restore never pushes a station over its limit, the order waits (kind restore) until a place frees.
+    // Whatever state it was killed in (a restore that was itself waiting is parked on its station), an order back on a station needs a place; only one in a bay does not.
+    const reenters = !catalog.bays.some((b) => b.id === w.position);
+    const target = ((w.data.stopClosedGates as string[] | undefined) ?? []).includes("G0G1") ? "intake" : prev.station;
+    if (reenters && (await wipHoldCheck(fx, w, target, "restore", { force: true, by: fx.actor, restore: { state: w.state, station: prev.station, fencing: s.fencing } }))) {
+      ev(fx, w, "wo.state", { from: "killed", to: "parked", station: prev.station, text: "restored, waiting for a place" }, { category: "kill" });
+      return;
+    }
     await resume(fx, w, prev.station, catalog, true, s);
     ev(fx, w, "wo.state", { from: "killed", to: w.state, station: prev.station, text: "restored" }, { category: "kill" });
     return;
@@ -166,6 +190,11 @@ async function restoreOne(fx: Fx, w: Wo, s: StopDb, catalog: Catalog): Promise<v
     return;
   }
   if (s.mode === "halt") await resume(fx, w, stationIdOf(catalog, w), catalog, false, s);
+}
+
+/** A restored order whose station was full goes in now that a place freed (called by the WIP promotion, which has settled the place). */
+export async function resumeRestored(fx: Fx, w: Wo, station: string, fencing: string): Promise<void> {
+  await resume(fx, w, station, fx.catalog, true, { fencing });
 }
 
 /** Back to work: running work gets a fresh attempt at its station, a work order that was waiting at a gate gets its instance reopened, parked work stays in its bay. */
