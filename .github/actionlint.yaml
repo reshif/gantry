@@ -1,0 +1,4 @@
+# Custom runner labels, for actionlint (the production host's own runner: deploy.yml, job `deploy`).
+self-hosted-runner:
+  labels:
+    - gantry-prod

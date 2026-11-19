@@ -1,0 +1,11 @@
+{
+  "note": "Steps a person must do on the host before a release that crosses a migration is deployed (the pipeline cannot do them: they need a secret or an address only a person has). gantry-release.sh refuses to deploy a release whose migrations.latest is at or above fromMigration, while the host has not yet applied that migration, until the step is acknowledged on the host with: gantry-release.sh ack <id>. Add a line here in the same pull request as the change that needs it.",
+  "requires": [
+    {
+      "id": "mfa-realm",
+      "fromMigration": 53,
+      "secrets": ["idp_admin_client_secret"],
+      "text": "Apply the MFA realm once, from the host (deploy/PRODUCTION.md, MFA rollout step 3): node deploy/keycloak/apply-mfa-realm.mjs --dry-run first, then for real with --smtp-test-to an address you read. The secret deploy/secrets/idp_admin_client_secret must exist. Then run: gantry-release.sh ack mfa-realm"
+    }
+  ]
+}
