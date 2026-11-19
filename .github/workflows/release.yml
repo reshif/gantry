@@ -1,0 +1,76 @@
+# A version tag (vX.Y.Z) on a commit that is already on main and already built, scanned and signed by CI. Nothing is rebuilt: the
+# images that passed staging get their version tag by DIGEST, and a DRAFT GitHub Release is written for a person to read and
+# publish. Production is promoted by deploy.yml (approval on the `production` Environment), not by publishing this release.
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Tag the signed images and draft the release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write   # the draft release
+      packages: write   # the version tags on the already-pushed digests
+      actions: read     # the release manifest CI uploaded
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: The tag is a version on a commit CI built and signed on main
+        id: find
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::$TAG is not a version tag"; exit 1; }
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$TAG is not on main"; exit 1; }
+          run_id="$(gh run list --workflow ci.yml --branch main --commit "$GITHUB_SHA" --status success --event push --json databaseId --jq '.[0].databaseId')"
+          [ -n "$run_id" ] || { echo "::error::CI has not passed on main for $GITHUB_SHA: wait for it, then re-push the tag"; exit 1; }
+          gh run download "$run_id" --name "release-$GITHUB_SHA" --dir manifest
+          cosign verify-blob --bundle manifest/release.json.bundle \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com manifest/release.json >/dev/null
+          node deploy/release/release-manifest.mjs validate manifest/release.json --sha "$GITHUB_SHA"
+          prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${GITHUB_SHA}^" 2>/dev/null || true)"
+          echo "previous=$prev" >>"$GITHUB_OUTPUT"
+      - name: Give each image its version tag (same digest, nothing rebuilt)
+        run: |
+          v="${TAG#v}"; tags=("$v")
+          # 1.3.0 also moves 1.3; a prerelease (1.3.0-rc.1) moves nothing but its own tag.
+          [[ "$v" == *-* ]] || tags+=("${v%.*}")
+          for n in $(jq -r '.images | keys[]' manifest/release.json); do
+            ref="$(jq -r ".images.${n}.ref" manifest/release.json)"; dg="$(jq -r ".images.${n}.digest" manifest/release.json)"
+            args=(); for t in "${tags[@]}"; do args+=(-t "${ref}:${t}"); done
+            docker buildx imagetools create "${args[@]}" "${ref}@${dg}"
+            cosign verify --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com "${ref}:${v}" >/dev/null
+          done
+      - name: Draft the release
+        env:
+          PREVIOUS: ${{ steps.find.outputs.previous }}
+        run: |
+          node deploy/release/release-notes.mjs --manifest manifest/release.json --previous-ref "$PREVIOUS" --tag "$TAG" >notes.md
+          prerelease=(); [[ "$TAG" == *-* ]] && prerelease=(--prerelease)
+          gh release create "$TAG" --draft --verify-tag --generate-notes --notes-file notes.md "${prerelease[@]}" \
+            ${PREVIOUS:+--notes-start-tag "$PREVIOUS"} manifest/release.json manifest/release.json.bundle

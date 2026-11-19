@@ -1,0 +1,52 @@
+# New advisories appear after an image shipped. Every day, the images of the newest signed release (what production runs, or will)
+# are scanned again; a fixable high or critical fails the run, so the owner is told by the usual failed-run notification.
+name: Rescan
+
+on:
+  schedule:
+    - cron: "15 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rescan
+  cancel-in-progress: true
+
+jobs:
+  rescan:
+    name: Rescan ${{ matrix.name }}
+    if: ${{ !github.event.repository.fork }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [api, worker, migrate, launcher, edge, github, web, runner, keycloak, backup]
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: The newest signed release manifest
+        id: m
+        run: |
+          run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success --event push --limit 1 --json databaseId,headSha --jq '.[0].databaseId')"
+          sha="$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)"
+          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name "release-$sha" --dir manifest
+          echo "image=$(jq -r '.images["${{ matrix.name }}"] | .ref + "@" + .digest' manifest/release.json)" >>"$GITHUB_OUTPUT"
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: ${{ steps.m.outputs.image }}
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table

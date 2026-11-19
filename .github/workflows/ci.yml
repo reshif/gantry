@@ -1,15 +1,17 @@
-# Gantry CI. Every pull request and every push to main must pass `checks`, `audit`, `deploy-config`, `migrations` and
-# `images` (branch protection: deploy/ci/branch-protection.sh). Pushes to main and v* tags also publish the images to
-# GHCR, signed with cosign (keyless, this workflow's identity) and with an SBOM attestation. The nightly run brings
-# the whole stack up and runs the smoke and isolation checks and a backup with a restore drill.
+# Gantry CI. Every pull request, every merge-queue run and every push to main must pass `checks`, `audit`, `deploy-config`,
+# `migrations` and `images` (branch protection: deploy/ci/branch-protection.sh). A push to main builds each image ONCE, pushes it
+# by commit, scans that pushed digest, signs it with cosign (keyless, this workflow's identity), attaches the SBOM, and then
+# `release-manifest` signs one manifest of all the digests: the only thing deploy.yml will deploy. Tags are not built here:
+# release.yml gives an already-built, already-signed digest its version tag. The nightly run brings the whole stack up and runs
+# the smoke and isolation checks and a backup with a restore drill. The design is docs: gantry-designs/v3-readiness/CICD.md.
 # Actions are pinned by commit; Dependabot (.github/dependabot.yml) proposes updates.
 name: CI
 
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main]
-    tags: ["v*"]
   schedule:
     - cron: "30 1 * * *"
   workflow_dispatch:
@@ -122,6 +124,19 @@ jobs:
         run: node deploy/ci/compose-socket.mjs
       - name: Image provenance matcher (deploy/verify-images.sh)
         run: node --test deploy/ci/provenance-names-repo.test.mjs
+      # The pipeline's own rules (supply chain, forks, deploy order): actions pinned by commit, persist-credentials: false, least
+      # privilege, no pull_request_target, self-hosted only behind an Environment, no untrusted text in a shell. Then the release
+      # tooling's tests (manifest, host deploy script decisions in a dry run).
+      - name: Workflow syntax (actionlint, pinned release, checksum verified)
+        run: |
+          curl -fsSL -o actionlint.tgz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tgz" | sha256sum -c -
+          tar xzf actionlint.tgz actionlint
+          ./actionlint
+      - name: Workflow policy and release tooling
+        run: |
+          node deploy/ci/workflow-policy.mjs
+          node --test deploy/ci/workflow-policy.test.mjs deploy/release/release-manifest.test.mjs deploy/release/release-notes.test.mjs deploy/release/gantry-release.test.mjs
       - name: Caddyfile (development and production)
         run: |
           img=caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
@@ -156,13 +171,20 @@ jobs:
       - name: Apply the base's migrations, then this tree's
         env:
           GANTRY_TEST_DATABASE_URL: postgres://postgres:pw@127.0.0.1:5432/postgres
-          # A pull request: its base. A push: the commit before it. A tag: the previous release tag.
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          # A pull request: its base. A merge queue run: the branch it merges into. A push: the commit before it.
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: |
           base="$BASE"
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then base="$(git describe --tags --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"; fi
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then base=origin/main; fi
+          echo "BASE_REV=$base" >>"$GITHUB_ENV"
           deploy/ci/migration-upgrade.sh "$base"
+      # Expand/contract (deploy/ci/migration-safety.mjs): a new migration that drops, renames or tightens something must say so
+      # (`-- gantry:contract`) and stand alone, and an applied migration is never edited. A contract migration is a warning on the
+      # pull request: its release cannot be rolled back automatically past it.
+      - name: Migration safety (expand / contract)
+        run: |
+          node --test deploy/ci/migration-safety.test.mjs
+          node deploy/ci/migration-safety.mjs "$BASE_REV"
 
   images:
     name: Image ${{ matrix.name }}
@@ -209,7 +231,9 @@ jobs:
           labels: |
             org.opencontainers.image.title=gantry-${{ matrix.name }}
             org.opencontainers.image.licenses=UNLICENSED
+      # Pull requests (and merge-queue runs): build, scan and SBOM a local image; nothing is pushed.
       - name: Build (for the scan)
+        if: env.PUBLISH != 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -222,6 +246,7 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
       - name: Vulnerability scan (fails on a fixable high or critical)
+        if: env.PUBLISH != 'true'
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           image: gantry-${{ matrix.name }}:scan
@@ -230,12 +255,16 @@ jobs:
           only-fixed: true
           output-format: table
       - name: SBOM
+        if: env.PUBLISH != 'true'
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           image: gantry-${{ matrix.name }}:scan
           format: spdx-json
           output-file: sbom-${{ matrix.name }}.spdx.json
           upload-artifact: true
+      # A push to main: build ONCE, push by commit only, then scan, SBOM and sign THAT pushed digest. (Scanning a loaded image and
+      # then pushing a second build would sign bytes that were never scanned.) The branch and version tags are added after the
+      # signature, so a tag never points at an unscanned or unsigned image.
       - if: env.PUBLISH == 'true'
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
@@ -249,21 +278,92 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ env.IMAGE }}:sha-${{ github.sha }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: HARNESS_LOCK=require
           cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
           provenance: mode=max
+      - name: Vulnerability scan of the pushed digest (fails on a fixable high or critical)
+        if: env.PUBLISH == 'true'
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table
+      - name: SBOM of the pushed digest
+        if: env.PUBLISH == 'true'
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.name }}.spdx.json
+          upload-artifact: true
       - if: env.PUBLISH == 'true'
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
-      - name: Sign and attest the SBOM
+      - name: Sign, attest the SBOM, then add the branch tag
         if: env.PUBLISH == 'true'
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           cosign sign --yes "${IMAGE}@${DIGEST}"
           cosign attest --yes --type spdxjson --predicate "sbom-${{ matrix.name }}.spdx.json" "${IMAGE}@${DIGEST}"
+          # Version tags are release.yml's job; here only the moving branch tag.
+          for t in $TAGS; do case "$t" in *:sha-*|*:[0-9]*) ;; *) docker buildx imagetools create -t "$t" "${IMAGE}@${DIGEST}" ;; esac; done
           echo "### gantry-${{ matrix.name }}: \`${IMAGE}@${DIGEST}\`" >>"$GITHUB_STEP_SUMMARY"
+
+  # One signed manifest of every digest this commit produced: what staging rehearses, what a person approves, what production runs
+  # and what a rollback goes back to (deploy/release/release-manifest.mjs). Built only after every gate above has passed.
+  release-manifest:
+    name: Signed release manifest
+    needs: [checks, audit, deploy-config, migrations, images]
+    if: github.event_name == 'push' && !github.event.repository.fork
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - name: Resolve and verify every digest, write the manifest, sign it
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          args=()
+          for n in api worker migrate launcher edge github web runner keycloak backup; do
+            ref="ghcr.io/${owner}/gantry-${n}"
+            digest="$(docker buildx imagetools inspect "${ref}:sha-${GITHUB_SHA}" --format '{{json .Manifest}}' | jq -r .digest)"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no digest for gantry-${n}"; exit 1; }
+            # The signature, made by this workflow on main, must be on exactly that digest.
+            cosign verify --certificate-identity "https://github.com/${GITHUB_WORKFLOW_REF}" --certificate-oidc-issuer https://token.actions.githubusercontent.com "${ref}@${digest}" >/dev/null
+            args+=(--image "${n}=${digest}")
+          done
+          node deploy/release/release-manifest.mjs build --sha "$GITHUB_SHA" --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" "${args[@]}" >release.json
+          cosign sign-blob --yes --bundle release.json.bundle release.json >/dev/null
+          node deploy/release/release-manifest.mjs validate release.json --sha "$GITHUB_SHA"
+          { echo "### Release ${GITHUB_SHA:0:12}"; echo '```json'; cat release.json; echo '```'; } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ github.sha }}
+          path: |
+            release.json
+            release.json.bundle
+          if-no-files-found: error
+          retention-days: 90
 
   e2e:
     name: Whole stack (nightly)

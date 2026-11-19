@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Classic branch protection (no merge queue). The release pipeline's settings, including the merge queue ruleset and the
+# Environments, are deploy/ci/github-settings.sh (CICD.md); use that one, or this one, not both.
 # Protects main: changes land only through pull requests that pass every CI gate and have one approving review; no force
 # pushes, no deletion, and the rule applies to admins too. Run once by a repository admin (needs gh, authenticated):
 #   deploy/ci/branch-protection.sh your-org/gantry

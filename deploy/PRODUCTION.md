@@ -287,13 +287,19 @@ Migrations only go forward, and an applied migration is never edited (CI checks 
 - the migration upgrade test (the base's migrations, then this tree's, on one database)
 - every image built and scanned with Grype (a fixable high or critical fails), with an SBOM
 
-On `main` and on `v*` tags it also pushes the images to GHCR, signs them with cosign (keyless, the workflow's identity),
-and attaches the SBOM as an attestation. Every night, and on demand, it brings the whole stack up, runs
-`deploy/smoke.sh`, and takes a backup with a restore drill. Dependabot proposes updates to npm packages, GitHub Actions
-and base images every week.
+On a push to `main` it also builds every image once, pushes it by commit, scans that pushed digest, signs it with cosign
+(keyless, the workflow's identity), attaches the SBOM as an attestation, and signs one release manifest of all the digests.
+`.github/workflows/deploy.yml` then rehearses that exact manifest on a staging stack (`deploy/smoke.sh`), waits for a person
+to approve it on the `production` Environment, and runs `deploy/release/gantry-release.sh` on the production host: it verifies the
+signatures, takes a backup set, runs the migrations, starts the release, gates on health and rolls back (or pages a person, when a
+contract migration is applied) if it is unhealthy. A `vX.Y.Z` tag (`release.yml`) gives the already-built images their version tag
+and drafts the release notes, including what the upgrade does to the database. Every night, and on demand, CI brings the whole
+stack up, runs `deploy/smoke.sh` and takes a backup with a restore drill, and every day the newest release is scanned again.
+Dependabot proposes updates to npm packages, GitHub Actions and base images every week. The design, the one-time GitHub settings
+and the host setup are in `gantry-designs/v3-readiness/CICD.md`; `deploy/ci/github-settings.sh` prints the settings as commands.
 
-A repository admin turns on branch protection for `main` once: pull requests only, every check above required, one
-approving review, no force pushes. Run `deploy/ci/branch-protection.sh your-org/gantry` (needs `gh` signed in as an admin).
+A repository admin turns on the `main` ruleset once: pull requests only, every check above required, one approving review, the
+merge queue, no force pushes (`deploy/ci/github-settings.sh`, or the older `deploy/ci/branch-protection.sh` without the queue).
 
 ## Known limits
 
