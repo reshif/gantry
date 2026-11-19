@@ -575,14 +575,14 @@ describe("Project config", () => {
     expect(document.getElementById("pcf-back")).toBeNull();
     cleanup();
     const landing: Array<[string, string, string, RegExp]> = [
-      ["classes", "flw-classes", "flow", /^\?tab=flow$/],
+      ["classes", "flw-classes", "flow", /^\?tab=flow&sec=classes$|^\?sec=classes&tab=flow$/],
       ["flow-advanced", "flw-structure", "flow", /tab=flow.*sec=structure|sec=structure.*tab=flow/],
       ["rules", "pcf-rule", "approvers", /rule=G5/],
       ["spend", "pcf-bud-monthly", "budget", /^\?tab=budget$/],
       ["archive", "pcf-archive-panel", "line", /^\?tab=line$/],
-      ["history", "pcf-recent", "overview", /^$/],
-      ["notifications", "pcf-notify", "overview", /^$/],
-      ["more", "pcf-overlay", "overview", /^$/],
+      ["history", "pcf-recent", "overview", /^\?sec=history$/],
+      ["notifications", "pcf-notify", "overview", /^\?sec=notifications$/],
+      ["more", "pcf-overlay", "overview", /^\?sec=overlay$/],
     ];
     for (const [old, el, tabId, search] of landing) {
       window.history.replaceState(null, "", `/?tab=${old}`);
@@ -897,5 +897,99 @@ describe("Project config", () => {
     expect(((await byId("pcf-gate-GC")) as HTMLInputElement).checked).toBe(false);
     expect((document.getElementById("pcf-gmode-GC") as HTMLSelectElement).disabled).toBe(true);
     expect(screen.getByText("Compliance sign-off")).toBeTruthy();
+  });
+
+  describe("navigation", () => {
+    it("Add station, gate and bay, and Set away, are one click from their tab (no hidden section, no rule editor)", async () => {
+      withPayments();
+      tab("flow");
+      mount(<ProjectConfigView />);
+      expect(window.location.search).not.toMatch(/sec=/);
+      fireEvent.click(await byId("pcf-add-station"));
+      await waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeTruthy());
+      expect(window.location.search).toMatch(/dlg=station/);
+      cleanup();
+      tab("approvers");
+      mount(<ProjectConfigView />);
+      fireEvent.click(await byId("pcf-away-p-meera"));
+      await byId("pcf-away-ok");
+      expect(document.getElementById("pcf-rule")).toBeNull();
+    });
+
+    it("a path-segment bookmark does not stick: clicking Overview leaves an address that reloads to Overview", async () => {
+      window.location.hash = "#/p/payments/project-config/budget";
+      withPayments();
+      mount(<ProjectConfigView />);
+      await byId("pcf-bud-monthly");
+      expect(window.location.hash).toBe("#/p/payments/project-config");
+      fireEvent.click(await byId("pcf-tab-overview"));
+      await byId("pcf-desc");
+      cleanup();
+      mount(<ProjectConfigView />);
+      await byId("pcf-desc");
+      expect(document.getElementById("pcf-tab-overview")!.getAttribute("aria-selected")).toBe("true");
+    });
+
+    it("open panels survive a reload: the Overview Advanced disclosure and a dialog are in the address", async () => {
+      withPayments();
+      mount(<ProjectConfigView />);
+      fireEvent.click(await byId("pcf-adv-toggle"));
+      await byId("pcf-flow-sum");
+      expect(window.location.search).toMatch(/sec=glance/);
+      cleanup();
+      mount(<ProjectConfigView />);
+      await byId("pcf-flow-sum");
+      cleanup();
+      tab("flow");
+      mount(<ProjectConfigView />);
+      fireEvent.click(await byId("pcf-add-class"));
+      await waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeTruthy());
+      expect(window.location.search).toMatch(/dlg=class/);
+      cleanup();
+      mount(<ProjectConfigView />);
+      await waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeTruthy());
+    });
+
+    it("switching tab with an unsaved Flow draft asks first; declining keeps the Flow tab and the draft", async () => {
+      withPayments();
+      tab("flow");
+      mount(<ProjectConfigView />);
+      fireEvent.change(await byId("pcf-gmode-G1f"), { target: { value: "human" } });
+      await waitFor(() => expect(document.getElementById("flw-count")!.textContent).toMatch(/1 unsaved/));
+      const ask = vi.spyOn(window, "confirm").mockReturnValue(false);
+      fireEvent.click(await byId("pcf-tab-approvers"));
+      expect(ask).toHaveBeenCalledTimes(1);
+      expect(document.getElementById("pcf-tab-flow")!.getAttribute("aria-selected")).toBe("true");
+      ask.mockReturnValue(true);
+      fireEvent.click(await byId("pcf-tab-approvers"));
+      await byId("pcf-appr");
+      ask.mockRestore();
+    });
+
+    it("a rule link naming a gate the flow lacks shows a panel with Close", async () => {
+      withPayments();
+      window.history.replaceState(null, "", "/?tab=approvers&rule=G99");
+      mount(<ProjectConfigView />);
+      fireEvent.click(await byId("pcf-ap-close"));
+      expect(document.getElementById("pcf-rule")).toBeNull();
+      expect(window.location.search).not.toMatch(/rule=/);
+    });
+
+    it("a rule link typed while Project config is showing is followed", async () => {
+      withPayments();
+      tab("flow");
+      mount(<ProjectConfigView />);
+      await byId("flw");
+      window.location.hash = "#/p/payments/project-config/approvers/G2";
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+      expect((await byId("pcf-rule")).getAttribute("aria-label")).toMatch(/G2/);
+    });
+
+    it("a failed catalogue read says so and can be retried (not an empty page)", async () => {
+      withPayments({ "GET /api/v1/catalog": () => ({ status: 500, body: { ok: false, msg: "boom" } }) });
+      mount(<ProjectConfigView />);
+      await byId("pcf-catalog-error");
+      expect(document.getElementById("pcf-catalog-error")!.textContent).toMatch(/boom|catalogue/);
+    });
   });
 });

@@ -12,6 +12,7 @@ import { Dialog } from "../../ui/Overlay";
 import { Btn, Empty, Field, Input, LockNote, Select, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
+import { useUrlDialog } from "./url-dialog";
 import { NumInput, focusLater, metricsOf, projectRoles, useRes, type PView } from "../projects/kit";
 
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
@@ -230,6 +231,21 @@ function BayDialog({ p, close }: { p: PView; close: () => void }) {
 
 type StationRow = ReturnType<typeof flowOf>["stations"][number];
 
+/** Add station, gate and bay: always in view on Flow (one click from the tab), not behind the structure section. */
+export function StructureAdd({ p, cat }: { p: PView; cat: Catalog }) {
+  const fd = useCan("flow.edit", { project: p.id });
+  const addStation = useUrlDialog("station", (_a, close) => <StationDialog p={p} cat={cat} close={close} />);
+  const addGate = useUrlDialog("gate", (_a, close) => <GateDialog p={p} cat={cat} close={close} />);
+  const addBay = useUrlDialog("bay", (_a, close) => <BayDialog p={p} close={close} />);
+  return (
+    <span className="row">
+      <Btn small icon="plus" id="pcf-add-station" guard={fd} label="Add station" onClick={() => addStation()} />
+      <Btn small icon="plus" id="pcf-add-gate" guard={fd} label="Add gate" onClick={() => addGate()} />
+      <Btn small icon="plus" id="pcf-add-bay" guard={fd} label="Add bay" onClick={() => addBay()} />
+    </span>
+  );
+}
+
 export function FlowStructure({ p, cat, slots, setSlots }: { p: PView; cat: Catalog; slots: number; setSlots: (v: number) => void }) {
   const ui = useUI();
   const res = useRes();
@@ -272,11 +288,6 @@ export function FlowStructure({ p, cat, slots, setSlots }: { p: PView; cat: Cata
   return (
     <div className="stack" id="flw-structure">
       <LockNote decision={fd} what="Adding and moving stations, gates and bays" />
-      <div className="row">
-        <Btn small icon="plus" id="pcf-add-station" guard={fd} label="Add station" onClick={() => ui.open((close) => <StationDialog p={p} cat={cat} close={close} />)} />
-        <Btn small icon="plus" id="pcf-add-gate" guard={fd} label="Add gate" onClick={() => ui.open((close) => <GateDialog p={p} cat={cat} close={close} />)} />
-        <Btn small icon="plus" id="pcf-add-bay" guard={fd} label="Add bay" onClick={() => ui.open((close) => <BayDialog p={p} close={close} />)} />
-      </div>
       <DataTable id="pcf-st-table" caption="Stations: order, coding slots and removal" columns={cols} rows={f.stations} rowKey={(s) => s.id} />
       <div>
         <div className="small strong">Bays off the main belt</div>

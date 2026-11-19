@@ -12,6 +12,7 @@ import { useUI } from "../../ui/overlay-context";
 import { MiniBelt, metricsOf, projectRoles, roleName, useRes, useTeams } from "../projects/kit";
 import { useSaveFromProject } from "../projects/templates";
 import { Kv, ActBtn } from "../projects/proto";
+import { useQueryParam } from "../projects/urlState";
 import { nextVersion } from "../govern/data";
 import { membersOf, rolesIn, type PcProps } from "./ctx";
 import { HistoryList } from "./history";
@@ -38,7 +39,9 @@ export function OverviewProto({ p, cat, people }: PcProps) {
   const [overlay, setOverlay] = useState(p.overlay ?? "");
   const [errs, setErrs] = useState<Record<string, string>>({});
   const owners = people.filter((x) => x.status === "active");
-  const [adv, setAdv] = useState(false);
+  const [advQ, setAdvQ] = useQueryParam("sec");
+  const adv = advQ === "glance";
+  const setAdv = (f: (v: boolean) => boolean) => setAdvQ(f(adv) ? "glance" : null);
   const save = async () => {
     const nm = name.trim();
     if (!nm) { setErrs({ name: "Name is required." }); return; }
