@@ -15,7 +15,7 @@ import { FakeGithub } from "./fake-github.js";
 
 export const REPO = "acme/payments-api";
 export const gitSync = (cwd: string, ...args: string[]): string =>
-  execFileSync("git", ["-c", "user.name=Runner", "-c", "user.email=runner@example.com", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } }).trim();
+  execFileSync("git", ["-c", "user.name=Runner", "-c", "user.email=runner@example.com", "-c", "commit.gpgsign=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false", ...args], { cwd, encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } }).trim();
 
 /** A workspace store backed by plain directories, going through the broker's own tar writer and reader exactly as the Docker one does. */
 export class DirStore implements WorkspaceStore {
