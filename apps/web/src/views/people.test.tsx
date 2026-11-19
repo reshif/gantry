@@ -300,6 +300,13 @@ describe("People & teams: deactivate", () => {
     expect(btn.getAttribute("aria-description") ?? btn.title).toMatch(/another administrator/i);
   });
 
+  it("G-M9: until the provider has been read the person card says Unknown, not Not enrolled", async () => {
+    setup({ "GET /api/v1/people": () => ({ body: [{ ...PEOPLE[0], mfa: true }, { ...PEOPLE[1], mfa: null }] }) });
+    mount("p-tomas");
+    await waitFor(() => expect(document.getElementById("ppl-stats")!.textContent).toContain("Unknownuntil their next sign-in"));
+    expect(document.getElementById("ppl-stats")!.textContent).not.toContain("Not enrolled");
+  });
+
   it("S-127: the MFA stat shows the real enrolment, not a flag nothing wrote", async () => {
     setup({ "GET /api/v1/people": () => ({ body: [{ ...PEOPLE[0], mfa: true }, { ...PEOPLE[1], mfa: false }] }) });
     mount("p-tomas");

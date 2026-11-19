@@ -147,7 +147,7 @@ function MemberDetail({ p, teams, projects, roles, perm, viewerId, roleName }: {
       />
       <StatRow id="ppl-stats">
         <Stat label="Status" value={p.status} tone={p.status === "active" ? "done" : "wait"} />
-        <Stat label="MFA" value={p.mfa ? "Enrolled" : "Not enrolled"} sub={p.mfa ? "signed in with a second factor" : "needs an enrolment link"} tone={p.mfa ? "done" : "wait"} />
+        <Stat label="MFA" value={p.mfa === true ? "Two-step on" : p.mfa === false ? "Not enrolled" : "Unknown"} sub={p.mfa === true ? "holds a second factor" : p.mfa === false ? "needs an enrolment link" : "until their next sign-in"} tone={p.mfa === true ? "done" : "wait"} />
         <Stat label="Open work orders" value={wos.pending ? "\u2026" : wos.failed && !held.length ? "n/a" : String(held.length)} sub="requested" />
         <Stat label="On call" value={p.oncall ? "Yes" : "No"} />
       </StatRow>

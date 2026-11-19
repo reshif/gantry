@@ -137,14 +137,11 @@ export function SignInExtras({ perm, sec }: { perm: Decision; sec: SecuritySetti
   const set = useSet(sec);
   const peopleQ = usePeople();
   const people = peopleQ.data ? peopleQ.data : [];
-  const enrolled = people.filter((p) => p.mfa).length;
+  const enrolled = people.filter((p) => p.mfa === true).length;
   return (
     <Panel title="More sign-in controls">
       <div className="form-grid" id="sec-extras">
-        <div className="toggle-row">
-          <label htmlFor="sec-gh"><span className="strong">Allow GitHub sign-in</span><span className="muted small">People can sign in with their linked GitHub account. A GitHub sign-in is accepted only if it carries a second factor.</span></label>
-          <Toggle id="sec-gh" checked={sec.githubLogin} decision={perm} onChange={(v) => void set("githubLogin", v, v ? "GitHub sign-in allowed." : "GitHub sign-in turned off.")} />
-        </div>
+        <p className="small muted" id="sec-gh-note">GitHub sign-in is not offered: a login through GitHub carries no second factor in this setup, so Gantry would refuse it. Everyone signs in with single sign-on and a second factor.</p>
         <div className="field" id="sec-mfa-methods">
           <div className="field-label">Second factors accepted</div>
           <ul className="small" style={{ margin: "4px 0" }}>
@@ -152,7 +149,7 @@ export function SignInExtras({ perm, sec }: { perm: Decision; sec: SecuritySetti
             <li>Security key or passkey (WebAuthn)</li>
             <li>Recovery codes (single use)</li>
           </ul>
-          <div className="field-hint" id="sec-mfa-status">{`${sec.mfa.waived ? "Waived on this development stack. " : "Required at every sign-in and every fresh sign-in. "}${peopleQ.data ? `${enrolled} of ${people.length} people have signed in with a second factor.` : ""} A first authenticator is set up only from a one-time link an administrator issues (People, Reset authenticator).`}</div>
+          <div className="field-hint" id="sec-mfa-status">{`${sec.mfa.waived ? "Waived on this development stack. " : "Required at every sign-in and every fresh sign-in. "}${peopleQ.data ? `${enrolled} of ${people.length} people are known to hold a second factor (the rest are unknown until their next sign-in, or not enrolled).` : ""} A first authenticator is set up only from a one-time link an administrator issues (People, Reset authenticator).`}</div>
         </div>
         <Field label="Fresh sign-in window" htmlFor="sec-stepup-window" hint="Kill, restore, policy, role, security and key changes need a sign-in within this time. Changing it needs a fresh sign-in and is audited.">
           <Select id="sec-stepup-window" value={String(sec.stepUpWindowMinutes ?? 15)} disabled={!perm.allowed} options={[5, 10, 15, 30, 60].map((x) => ({ value: String(x), label: `${x} minutes` }))} onChange={(v) => void set("stepUpWindowMinutes", Number(v), `A sign-in now counts as fresh for ${v} minutes.`)} />
