@@ -3,7 +3,7 @@
  *   GET /api/v1/people, GET /api/v1/people/{id}/effective-permissions
  *   GET/POST /api/v1/teams, PATCH/DELETE /api/v1/teams/{id}
  *   GET/POST /api/v1/teams/{id}/roles, DELETE /api/v1/teams/{id}/roles/{grant}      (team role grants; members inherit them)
- *   POST /api/v1/invites, POST /api/v1/invites/{id}/accept       (the invite id is the invited person's id)
+ *   POST /api/v1/invites, POST /api/v1/invites/{id}/resend, POST /api/v1/invites/{id}/accept       (the invite id is the invited person's id)
  *   PUT/DELETE /api/v1/people/{id}/factory-roles/{role}
  *   POST /api/v1/people/{id}/deactivate, POST /api/v1/people/{id}/reactivate   (offboarding)
  *   PUT /api/v1/people/{id}/teams, PUT /api/v1/people/{id}/oncall, PUT /api/v1/people/{id}/away
@@ -17,7 +17,7 @@ import { command, decide, policyState, refuse, readPeople, readTeams } from "../
 import { effectivePermissions } from "../areas/access/simulate.js";
 import { deactivatePerson, reactivatePerson } from "../areas/people/offboard.js";
 import { AwayBody, CreateTeamBody, DeactivateBody, ReactivateBody, FactoryRoleBody, InviteBody, RevokeBody, TeamGrantBody, TeamsBody, UpdateTeamBody } from "../areas/people/schemas.js";
-import { acceptInvite, invitePerson, personVersion, setAway, setFactoryRole, setTeams } from "../areas/people/people.js";
+import { acceptInvite, invitePerson, resendInvite, personVersion, setAway, setFactoryRole, setTeams } from "../areas/people/people.js";
 import { createTeam, deleteTeam, grantTeamRole, revokeTeamRole, updateTeam } from "../areas/people/teams.js";
 import { directoryPeople, directoryScope, directoryTeams } from "../core/directory.js";
 
@@ -106,6 +106,11 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
     return command(req, { action: "people.manage", idempotent: true }, (tx, a) => invitePerson(tx, a.orgId, g.config.publicUrl, a.id, body));
   });
 
+  app.post("/api/v1/invites/:id/resend", async (req) => {
+    const { id } = Id.parse(req.params);
+    return command(req, { action: "people.manage", idempotent: true }, (tx, a) => resendInvite(tx, a.orgId, g.config.publicUrl, a.id, id));
+  });
+
   app.post("/api/v1/invites/:id/accept", async (req) => {
     const { id } = Id.parse(req.params);
     return command(req, { action: "people.manage", ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => acceptInvite(tx, a.orgId, id));
@@ -134,7 +139,7 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/v1/people/:id/reactivate", async (req) => {
     const { id } = Id.parse(req.params);
     const body = ReactivateBody.parse(req.body ?? {});
-    return command(req, { action: "people.manage", stepUp: true, ifMatchRequired: true, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => reactivatePerson(tx, a, id, body));
+    return command(req, { action: "people.manage", stepUp: true, ifMatchRequired: true, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => reactivatePerson(tx, a, id, body, g.config.publicUrl));
   });
 
   app.put("/api/v1/people/:id/teams", async (req) => {
