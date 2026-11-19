@@ -20,6 +20,7 @@ import { useUI } from "../../ui/overlay-context";
 import { decide, markSeen, sendTurn, useSession, type Session, type SessionMessage } from "./session-api";
 import { busyText, useAvailableRepos, type RepoV } from "./kit";
 import { PSTAGES, protoStage } from "./proto";
+import { WithdrawException } from "./WithdrawException";
 import { QuestionCard, useThreadEnd } from "../session/kit";
 
 type Proposal = Extract<SessionCard, { kind: "proposal" }>;
@@ -333,6 +334,7 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
     <div className="osx" id="osx">
       <ViewHead crumbs={[{ label: "Onboarding", href: hashFor("onboarding", null, projectId) }, { label: r.name }]} title={r.name} sub="Onboarding session" />
       {STEPS(st)}
+      {o.exception ? <div className="callout callout-warn" id="osx-exception"><Icon name="shield" /><div><strong>Ready by exception. </strong>{o.exception.reason}<span className="muted">{` · ${fmt.stamp(o.exception.at)}`}</span> <WithdrawException repoId={r.id} repoName={r.name} project={projectId} id="osx-withdraw-exception" /></div></div> : null}
       <Tabs revealActive idPrefix="osx-tab" items={tabs} active={tab} onChange={setTab} />
       <div className="stack">
         {tab === "findings" ? (

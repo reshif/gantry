@@ -200,6 +200,8 @@ export function RestoreDialog({ scope, id, onClose }: { scope: Scope; id: string
   if (!me) return null;
   const k = scope === "factory" ? me.factory.killed : scope === "project" ? project?.killed : wo?.killed;
   const label = scope === "factory" ? "the factory" : scope === "project" ? (project?.name ?? id ?? "") : (id ?? "");
+  // the sole Factory Admin restores the factory on their own, with a reason that is audited as an override (the server decides; no second admin to wait for)
+  const sole = scope === "factory" && !d.pending && d.allowed && d.override === true;
   const submit = async () => {
     if (busy) return;
     if (reason.trim().length < 5) {
@@ -221,24 +223,24 @@ export function RestoreDialog({ scope, id, onClose }: { scope: Scope; id: string
   };
   return (
     <Dialog
-      title={scope === "factory" ? "Restore the factory" : `Restore ${label}`}
+      title={sole ? "Restore the factory with a reason" : scope === "factory" ? "Restore the factory" : `Restore ${label}`}
       onClose={close}
       body={
         <div className="form-grid">
-          <p style={{ marginBottom: 12 }}>{`${k ? `Killed by ${actor(k.by).name} at ${fmt.stamp(k.at)}: ${k.reason}. ` : ""}Agents start picking up work again in station order.${scope === "factory" ? " Restoring the factory needs two Factory Admins." : ""}`}</p>
+          <p style={{ marginBottom: 12 }}>{`${k ? `Killed by ${actor(k.by).name} at ${fmt.stamp(k.at)}: ${k.reason}. ` : ""}Agents start picking up work again in station order.${sole ? " You are the only Factory Admin, so you restore without a second person." : scope === "factory" ? " Restoring the factory needs two Factory Admins." : ""}`}</p>
           <LockNote decision={d.pending ? null : d} what="Restoring" />
-          <Field label="Reason" htmlFor="rsn-text">
+          <Field label={sole ? "Reason (recorded in the audit as an override)" : "Reason"} htmlFor="rsn-text">
             <textarea id="rsn-text" className="input" rows={3} placeholder="Why is it safe to restore?" value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
           <NotifyList items={routes} />
-          <p className="muted small">Restoring always needs a fresh sign-in, and restoring the whole factory needs two Factory Admins when that is set in Security.</p>
+          <p className="muted small">{sole ? "Restoring always needs a fresh sign-in. The restore is audited as an override by the only Factory Admin." : "Restoring always needs a fresh sign-in, and restoring the whole factory needs two Factory Admins when that is set in Security."}</p>
           {step ? <StepUpNotice result={step} what="a restore" draft={{ kind: "restore", scope, id, values: { reason } }} /> : null}
           <div className="form-err" role="alert">
             {err}
           </div>
         </div>
       }
-      actions={[{ label: "Cancel" }, { label: "Restore", kind: "primary", submit: true, id: "rsn-ok", guard: d.pending ? null : d, onClick: () => void submit() }]}
+      actions={[{ label: "Cancel" }, { label: sole ? "Restore with a reason" : "Restore", kind: "primary", submit: true, id: "rsn-ok", guard: d.pending ? null : d, onClick: () => void submit() }]}
     />
   );
 }

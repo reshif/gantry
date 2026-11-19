@@ -16,7 +16,7 @@
  *  - stop id          = `${scope}:${targetId}`        (DELETE /stops/{id}, POST /stops/{id}/restore), scope in factory|project|repo|workorder
  */
 import { clearDrafts as clearStoredDrafts } from "./drafts";
-import { api, del, patch, post, put, command, type ApiResult, type RequestOptions } from "./client";
+import { api, del, patch, post, put, type ApiResult, type RequestOptions } from "./client";
 import { invalidateSlices } from "./keys";
 import { noteSignedOut } from "../lib/session/session";
 import { clearDrafts } from "../lib/useDraft";
@@ -114,7 +114,7 @@ export const ops = {
   /** A person edits the brief before confirming it (PATCH .../brief). `v.ifMatch` is the work order's version from the last read; a different version is a 409. */
   editBrief: (woId: string, b: { scopeIn?: string[]; scopeOut?: string[]; children?: string[]; reason?: string }, v?: Versioned) =>
     run(["workOrders"], patch(api(`work-orders/${enc(woId)}/brief`), b, opts(v))),
-  confirmBrief: (woId: string, via?: Via, v?: Versioned) => run(["workOrders"], post(api(`work-orders/${enc(woId)}/confirm-brief`), { via }, opts(v))),
+  confirmBrief: (woId: string, via?: Via, v?: Versioned, note?: string) => run(["workOrders"], post(api(`work-orders/${enc(woId)}/confirm-brief`), { via, reason: note }, opts(v))),
   decline: (woId: string, reason: string, via?: Via, v?: Versioned) =>
     run(["workOrders"], post(api(`work-orders/${enc(woId)}/decline`), { reason, via }, opts(v))),
   setRecordSummary: (woId: string, text: string, v?: Versioned) =>
@@ -165,13 +165,13 @@ export const ops = {
   saveTemplate: (o: Obj) => run(["templates"], post(api("templates"), o, create)),
   updateTemplate: (tplId: string, patchBody: Obj, v?: Versioned) => run(["templates"], patch(api(`templates/${enc(tplId)}`), patchBody, opts(v))),
   /** `approvers.<gate>` paths go to the approvers endpoint; everything else to the config endpoint. */
-  setProject: (projectId: string, path: string, value: unknown, v?: Versioned) => {
+  setProject: (projectId: string, path: string, value: unknown, v?: Versioned, reason?: string) => {
     const m = /^approvers\.(.+)$/.exec(path);
     const p = enc(projectId);
-    return run(["projects"], m?.[1] ? put(api(`projects/${p}/approvers/${enc(m[1])}`), { value }, opts(v)) : patch(api(`projects/${p}/config`), { path, value }, opts(v)));
+    return run(["projects"], m?.[1] ? put(api(`projects/${p}/approvers/${enc(m[1])}`), { value }, opts(v)) : patch(api(`projects/${p}/config`), { path, value, reason }, opts(v)));
   },
-  setGateMode: (projectId: string, gateId: string, mode: string, v?: Versioned) =>
-    run(["projects"], patch(api(`projects/${enc(projectId)}/config`), { gate: gateId, mode }, opts(v))),
+  setGateMode: (projectId: string, gateId: string, mode: string, v?: Versioned, reason?: string) =>
+    run(["projects"], patch(api(`projects/${enc(projectId)}/config`), { gate: gateId, mode, reason }, opts(v))),
   addStation: (projectId: string, def: Obj, afterId?: string, v?: Versioned) =>
     run(["projects", "floor"], post(api(`projects/${enc(projectId)}/flow/stations`), { def, after: afterId ?? null }, opts(v, create))),
   removeStation: (projectId: string, stationId: string, v?: Versioned) =>
@@ -200,6 +200,8 @@ export const ops = {
   mergeOnboardingPR: (repoId: string) => run(["repos"], post(api(`repos/${enc(repoId)}/onboarding/merge`))),
   requestChanges: (repoId: string, text: string) => run(["repos"], post(api(`repos/${enc(repoId)}/onboarding/request-changes`), { text })),
   markException: (repoId: string, reason: string) => run(["repos"], post(api(`repos/${enc(repoId)}/onboarding/exception`), { reason })),
+  /** Takes an accepted onboarding exception back (reason of at least 10 characters, audited): the repo returns to its real onboarding state. */
+  withdrawException: (repoId: string, reason: string) => run(["repos"], post(api(`repos/${enc(repoId)}/onboarding/exception/withdraw`), { reason })),
   verifyNow: (repoId: string) => run(["repos"], post(api(`repos/${enc(repoId)}/onboarding/verify`))),
   saveGuidelines: (patchBody: Obj, note: string, projectId?: string | null, v?: Versioned) =>
     run(["guidelines", "projects"], put(api(projectId ? `projects/${enc(projectId)}/guidelines` : "guidelines"), { patch: patchBody, note }, opts(v))),
@@ -214,10 +216,6 @@ export const ops = {
   rollbackAgent: (agentId: string, version: number | string, v?: Versioned) => run(["agents"], post(api(`agents/${enc(agentId)}/rollback`), { version }, opts(v))),
   attachSkill: (agentId: string, skillId: string, attach: boolean) =>
     run(["agents", "skills"], (attach ? put : del)(api(`agents/${enc(agentId)}/skills/${enc(skillId)}`))),
-  /** `v.ifMatch` is the base version from GET /instructions/base. */
-  saveInstructions: (text: string, v?: Versioned) => run(["instructions", "agents"], put(api("instructions/base"), { text }, opts(v))),
-  /** Binds the console to an agent (its live instructions and skills answer), or null to unbind. */
-  setConsoleAgent: (agent: string | null) => run(["agents"], put(api("agents/bindings/console"), { agent })),
   /** skillId null creates a skill. */
   saveSkill: (skillId: string | null, patchBody: Obj, note?: string, v?: Versioned) =>
     run(["skills"], skillId ? patch(api(`skills/${enc(skillId)}`), { patch: patchBody, note }, opts(v)) : post(api("skills"), { ...patchBody, note }, create)),
@@ -232,13 +230,9 @@ export const ops = {
   removeModel: (modelId: string) => run(["vendors", "routing"], del(api(`models/${enc(modelId)}`))),
   setModelEnabled: (modelId: string, on: boolean) => run(["vendors", "routing"], patch(api(`models/${enc(modelId)}`), { enabled: on })),
   setRouting: (next: Obj, label?: string, v?: Versioned) => run(["routing"], put(api("routing"), { routing: next, label }, opts(v))),
-  /** Records that a custom vendor passed a station's suite (the server checks the eval run). */
-  qualifyVendor: (vendorId: string, station: string, v?: Versioned) => run(["vendors", "routing"], post(api(`vendors/${enc(vendorId)}/qualify`), { station }, opts(v))),
   /** prices: model id -> USD per million tokens. effectiveFrom is an ISO timestamp, now or later. */
   publishPrices: (prices: Record<string, { in: number; out: number; cacheRead?: number; cacheWrite?: number }>, effectiveFrom?: string, note?: string) =>
     run(["vendors"], post(api("prices"), { prices, ...(effectiveFrom ? { effectiveFrom } : {}), ...(note ? { note } : {}) }, create)),
-  /** The default cost cap for each work order of a project, in USD (0 = none). The monthly budget is set in project config. */
-  setWoBudget: (project: string, perWorkOrder: number) => run(["vendors", "projects"], put(api(`budgets/${enc(project)}`), { perWorkOrder })),
   /** Starts a real run of the suite through the production runtime (sandboxes, no write access to real repos). `repeats` runs each task that many times. */
   runSuite: (agentId: string, suiteId: string, version: number | string, model?: string, repeats?: number) =>
     run(["evalRuns", "suites", "scorecards", "evalExtra", "agents"], post(api(`suites/${enc(suiteId)}/runs`), { agent: agentId, version, ...(model ? { model } : {}), ...(repeats && repeats > 1 ? { repeats } : {}) }, create)),
@@ -250,7 +244,6 @@ export const ops = {
   grantTrust: (target: string | Obj, level: number, reason: string, v?: Versioned) => run(["trust"], post(api("trust/grants"), { target, level, reason }, opts(v))),
   decideTrustProposal: (proposalId: string, accept: boolean, reason?: string) =>
     run(["trust"], post(api(`trust/proposals/${enc(proposalId)}/decide`), { accept, reason })),
-  demoteTrust: (cellId: string, to: number, reason: string, v?: Versioned) => run(["trust"], post(api(`trust/cells/${enc(cellId)}/demote`), { to, reason }, opts(v))),
   /** `v` is the criteria version (Trust.criteriaVersion): a change publishes the next version. */
   setTrustCriteria: (level: number | string, patchBody: Obj, v?: Versioned) => run(["trust"], put(api("trust/criteria"), { level, patch: patchBody }, opts(v))),
   saveCeiling: (c: Obj, v?: Versioned) => run(["trust"], post(api("trust/ceilings"), c, c.id ? opts(v) : { ...create, ...opts(v) })),
@@ -276,8 +269,6 @@ export const ops = {
   updateIntegration: (id: string, patchBody: Obj, v?: Versioned) => run(["integrationInstances"], patch(api(`integrations/${enc(id)}`), patchBody, opts(v))),
   removeIntegration: (id: string) => run(["integrationInstances"], del(api(`integrations/${enc(id)}`))),
   testIntegrationInstance: (id: string) => run(["integrationInstances"], post(api(`integrations/${enc(id)}/test`))),
-  /** The Add dialog's connection test: settings that are not saved yet. Nothing is stored; the result's `test` has the lines. */
-  testIntegrationDraft: (type: string, body: Obj) => post(api(`integration-types/${enc(type)}/test`), body),
   /** The recorded link step (spec 12.3): a one-time code the person sends from the chat app. */
   requestChatLink: (channel = "slack", integration?: string) => run<{ command: string }>(["chatLinks"], post(api("chat-links"), { channel, ...(integration ? { integration } : {}) }, create)),
   removeChatLink: (id: string) => run(["chatLinks"], del(api(`chat-links/${enc(id)}`))),
@@ -311,9 +302,6 @@ export const ops = {
   createKey: (o: Obj) => run(["apiKeys"], post(api("api-keys"), o, create)),
   revokeKey: (keyId: string) => run(["apiKeys"], del(api(`api-keys/${enc(keyId)}`))),
   setApiConfig: (patchBody: Obj, v?: Versioned) => run(["apiConfig"], patch(api("api-config"), patchBody, opts(v))),
-  /** Public API try-it: submits with the key the person pastes, as an external client would. */
-  apiSubmit: (apiKeySecret: string, projectId: string, body: Obj) =>
-    run(["workOrders", "requestLog"], command(api(`projects/${enc(projectId)}/work-orders`), { method: "POST", body, idempotent: true, headers: { Authorization: `Bearer ${apiKeySecret}` } })),
   /** triggerId null creates a trigger. */
   saveTrigger: (triggerId: string | null, patchBody: Obj, v?: Versioned) =>
     run(["triggers"], triggerId ? patch(api(`triggers/${enc(triggerId)}`), patchBody, opts(v)) : post(api("triggers"), patchBody, create)),
@@ -356,8 +344,6 @@ export const ops = {
   deletePolicy: (policyId: string, v?: Versioned) => run(["policies"], del(api(`policies/${enc(policyId)}`), undefined, opts(v))),
   saveFreeze: (f: Obj) => run(["freezes"], post(api("freezes"), f, create)),
   endFreeze: (freezeId: string, v?: Versioned) => run(["freezes"], post(api(`freezes/${enc(freezeId)}/end`), undefined, opts(v))),
-  /** The access simulator: the same decision function as enforcement. Changes nothing. */
-  simulateAccess: (q: { person: string; action: string; project?: string; repo?: string; time?: number }) => post(api("access/simulate"), q),
   saveSavedView: (view: Obj) => run(["savedViews"], post(api("saved-views"), view, create)),
   updateSavedView: (id: string, patchBody: Obj, v?: Versioned) => run(["savedViews"], patch(api(`saved-views/${enc(id)}`), patchBody, opts(v))),
   deleteSavedView: (id: string, v?: Versioned) => run(["savedViews"], del(api(`saved-views/${enc(id)}`), undefined, opts(v))),

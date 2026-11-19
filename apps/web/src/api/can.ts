@@ -24,7 +24,7 @@ export const STEP_UP_HINT = "You'll be asked to sign in again to confirm.";
  * refused command to ui/stepup, which prompts and retries. So the control stays enabled (the server still decides every command).
  */
 export function softenStepUp(r: CanResult): CanResult {
-  return !r.allowed && r.needs === "step_up" ? { allowed: true, reason: STEP_UP_HINT, needs: "step_up" } : r;
+  return !r.allowed && r.needs === "step_up" ? { ...r, allowed: true, reason: STEP_UP_HINT, needs: "step_up" } : r;
 }
 
 /** Before the server answers a control stays usable-looking but unresolved. */

@@ -15,6 +15,8 @@ import { useUI } from "../../ui/overlay-context";
 import { hashFor } from "../../lib/router";
 import { classOf } from "../projects/kit";
 import { stName } from "../traveler/model";
+import { DecisionDialog } from "../work/gate";
+import { OVERRIDE_MIN, anywayLabel, overrideKindOf, overrideWhy } from "../work/override";
 import { raisedOpen } from "../conversations/model";
 import { FloorCtx, WoChip, isLive, stationIdx, useFloorCtx, useFloorValue, waitingGateId, type FWo } from "./kit";
 
@@ -73,18 +75,26 @@ function ApproveBtn({ w, gid, label, primary, id, after }: { w: WorkOrder; gid: 
   const ctx = useFloorCtx();
   const t = useWorkOrder(w.id).data as Traveler | undefined;
   const lock: Decision | null = ctx.replay ? { allowed: false, reason: "Replay is showing the past. Go back to live to act.", needs: "" } : null;
-  const dec: Decision | null = lock ?? (!t ? { allowed: false, reason: "Checking what you may decide here.", needs: "" } : t.allowed?.approve && t.allowed.approve.gate === gid ? { allowed: t.allowed.approve.allowed, reason: t.allowed.approve.reason, needs: t.allowed.approve.needs } : null);
+  const dec: Decision | null = lock ?? (!t ? { allowed: false, reason: "Checking what you may decide here.", needs: "" } : t.allowed?.approve && t.allowed.approve.gate === gid ? { allowed: t.allowed.approve.allowed, reason: t.allowed.approve.reason, needs: t.allowed.approve.needs, override: t.allowed.approve.override, overrideKind: t.allowed.approve.overrideKind } : null);
+  const anyway = overrideKindOf(dec);
+  const decide = async (note?: string) => {
+    const r = await ops.approveGate(w.id, gid, t?.allowed?.approve?.instance, undefined, undefined, note);
+    ui.toast(r.ok ? `${w.id} moved on` : r.msg, r.ok ? "ok" : "error", r.ok ? { label: "Undo", id: "floor-approve-undo", onClick: () => ui.toast("Undo is not available: an approved gate cannot be taken back from here.", "warn") } : undefined);
+    if (r.ok) after?.();
+    return r;
+  };
   return (
     <Btn
-      label={label}
+      label={anyway ? anywayLabel(gid) : label}
       small={!primary}
       kind="primary"
       id={id}
-      guard={dec}
-      onClick={async () => {
-        const r = await ops.approveGate(w.id, gid, t?.allowed?.approve?.instance);
-        ui.toast(r.ok ? `${w.id} moved on` : r.msg, r.ok ? "ok" : "error", r.ok ? { label: "Undo", id: "floor-approve-undo", onClick: () => ui.toast("Undo is not available: an approved gate cannot be taken back from here.", "warn") } : undefined);
-        if (r.ok) after?.();
+      guard={anyway ? null : dec}
+      onClick={() => {
+        if (!anyway) return void decide();
+        ui.open((close) => (
+          <DecisionDialog title={`${anywayLabel(gid)}: ${gid} for ${w.id}`} danger intro={`${w.id} is held at ${gid}. ${dec?.reason ?? ""}`} submit={anywayLabel(gid)} ovrWhy={overrideWhy(anyway)} field={{ label: "Reason", min: OVERRIDE_MIN, area: true }} onClose={close} onSubmit={(text) => decide(text)} />
+        ));
       }}
     />
   );

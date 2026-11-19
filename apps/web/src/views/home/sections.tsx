@@ -58,7 +58,7 @@ function RestoreAction({ item }: { item: AttentionItem }) {
   if (!me || d.pending || !d.allowed) return null;
   const done = r.approvals?.length ?? 0;
   const already = !!r.approvals?.some((a) => a.by === me.person.id);
-  const label = r.scope === "factory" ? (done ? `Approve restore (${done + 1} of ${r.needs ?? 2})` : "Restore factory") : "Restore project";
+  const label = r.scope === "factory" && d.override ? "Restore with a reason" : r.scope === "factory" ? (done ? `Approve restore (${done + 1} of ${r.needs ?? 2})` : "Restore factory") : "Restore project";
   return (
     <Btn
       label={label} small kind="primary" id={`hm-restore-${r.scope}${r.id ? `-${r.id}` : ""}`} aria={`${label}: ${item.title}`}

@@ -54,8 +54,15 @@ describe("Gate approver transparency", () => {
     expect(screen.getByRole("button", { name: "Grant a role" })).toBeTruthy();
     expect(screen.getByText(/Factory Admins are eligible approvers like anyone else\. Asha Raman wrote this work order/)).toBeTruthy();
     expect(screen.queryByText(/may approve as an override/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Approve as override" }));
+    // 1 person can approve but the gate enforces 2: "Pass with override" asks for a reason first, then sends it with the ordinary approve call
+    fireEvent.click(screen.getByRole("button", { name: "Pass with override" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pass with override" }));
+    expect(posts(calls, path)).toHaveLength(0);
+    expect(await screen.findByText("Give a reason of at least 5 characters.")).toBeTruthy();
+    fireEvent.change(document.getElementById("apr-override-reason")!, { target: { value: "Only one approver on leave-free rota" } });
+    fireEvent.click(document.getElementById("apr-override-go")!);
     await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
+    expect(posts(calls, path)[0]!.body).toMatchObject({ reason: "Only one approver on leave-free rota" });
   });
 
   it("lists an eligible Factory Admin as a normal approver and shows no override line when none is needed", async () => {
@@ -64,6 +71,7 @@ describe("Gate approver transparency", () => {
     expect(document.getElementById("apr-warning")).toBeNull();
     expect(screen.queryByText(/override with a reason/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Approve as override" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pass with override" })).toBeNull();
   });
 
   it("says when the work order's class has its own count instead of the gate's base", async () => {

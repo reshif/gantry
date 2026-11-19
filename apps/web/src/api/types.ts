@@ -6,6 +6,7 @@
  * `stream`) that the domain package does not define. Integration note: if @gantry/domain later
  * exports `Me` / `CanCheck` / `CanResult`, replace these with re-exports.
  */
+import type { GateLockView } from "@gantry/domain";
 import type {
   Decision,
   FactoryState,
@@ -77,6 +78,10 @@ export interface CanResult {
   reason: string;
   rule?: RuleRef | null;
   needs?: string;
+  /** Only a Factory Admin override would allow it (`overrideReason: "required"`), or the sole admin restoring the factory. */
+  override?: boolean;
+  overrideReason?: string;
+  overrideKind?: string;
 }
 
 export interface CanResponse {
@@ -355,4 +360,11 @@ export interface AgentSuite {
   station: string | null;
   agent: string | null;
   threshold: number;
+}
+
+/** What GET /projects adds to every project about the flow's locks (the server decides who may override; never a role name here). */
+export interface FlowOverrideView {
+  viewerMayOverride: boolean;
+  minReasonLength: number;
+  locks: Record<string, GateLockView>;
 }

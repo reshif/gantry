@@ -34,7 +34,7 @@ const BASE: Record<string, Handler> = {
   "GET /api/v1/signins": () => ({ body: SIGNINS }),
 };
 
-function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
+function setup(extra: Record<string, Handler> = {}, denied: string[] = [], override: string[] = []) {
   const calls: Call[] = [];
   const base: Record<string, Handler> = { ...BASE, ...extra };
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -44,7 +44,7 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
     calls.push({ method, path: u.pathname, body, ifMatch: (init?.headers as Record<string, string> | undefined)?.["If-Match"] });
     if (u.pathname === "/api/v1/can") {
       const checks = (body as { checks: Array<{ action: string }> }).checks;
-      return new Response(JSON.stringify({ results: checks.map((c) => (denied.includes(c.action) ? { allowed: false, reason: `No role holds ${c.action}.`, needs: "Needs Factory Admin", rule: { id: "MATRIX" } } : { allowed: true, reason: "", needs: "" })) }));
+      return new Response(JSON.stringify({ results: checks.map((c) => (override.includes(c.action) ? { allowed: true, reason: "", needs: "", override: true, overrideReason: "required" } : denied.includes(c.action) ? { allowed: false, reason: `No role holds ${c.action}.`, needs: "Needs Factory Admin", rule: { id: "MATRIX" } } : { allowed: true, reason: "", needs: "" })) }));
     }
     const h = base[`${method} ${u.pathname}`];
     const r = h ? h(url, init) : { status: 404, body: { ok: false, msg: `no mock ${method} ${u.pathname}` } };
@@ -281,13 +281,24 @@ describe("Security screen", () => {
 });
 
 describe("Security screen: emergency stop section", () => {
-  it("offers the factory kill with who may do it, lists the stops in force, and warns when a restore could not be approved", async () => {
+  it("offers the factory kill with who may do it, lists the stops in force, and does not warn of a restore nobody could approve", async () => {
     setup({ "GET /api/v1/people": () => ({ body: [PEOPLE[0]] }), "GET /api/v1/stops": () => ({ body: { items: [{ id: "project:payments", row: "r1", scope: "project", mode: "halt", reason: "Flaky tests", inFlight: null, by: "p-asha", at: NOW - 60000, version: 1, fencing: 1 }] } }) });
     mount();
     expect(locked(await byId("sec-stop-kill"))).toBe(false);
-    expect((await byId("sec-stop-warn")).textContent).toContain("a restore could not be approved");
+    // the browser no longer counts Factory Admins: with one, the SERVER says the restore needs no second person (see the next test)
+    expect(document.getElementById("sec-stop-warn")).toBeNull();
     await waitFor(() => expect(document.getElementById("sec-stops-table")?.textContent).toContain("Flaky tests"));
     expect(text()).toContain("Needs two different Factory Admins and a fresh sign-in.");
+  });
+
+  it("lets the sole Factory Admin restore with a reason: the server's override decision, not a head count in the browser", async () => {
+    setup({ "GET /api/v1/me": () => ({ body: { ...ME, factory: { killed: { by: "p-asha", at: NOW - 60000, reason: "Incident" } } } }), "GET /api/v1/stops": () => ({ body: { items: [] } }) }, [], ["restore.factory"]);
+    mount();
+    const btn = await byId("sec-stop-restore");
+    expect(btn.textContent).toContain("Restore with a reason");
+    expect(locked(btn)).toBe(false);
+    expect((await byId("sec-stop-warn")).textContent).toContain("only Factory Admin");
+    expect(text()).toContain("You are the only Factory Admin: restore with a reason");
   });
 
   it("locks the kill with the server's reason when kill.factory is denied", async () => {

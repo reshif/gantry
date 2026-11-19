@@ -297,11 +297,11 @@ describe("People & teams: deactivate", () => {
     expect(sent.ifMatch).toBe("5");
   });
 
-  it("locks Deactivate for the last Factory Admin with the reason", async () => {
+  it("leaves the last-Factory-Admin invariant to the server: Deactivate is not pre-locked by counting roles in the browser", async () => {
     setup({ "GET /api/v1/me": () => ({ body: { ...ME, person: PEOPLE[1] } }) });
     mount("p-asha");
     const btn = await byId("ppl-deactivate");
-    expect(btn.getAttribute("aria-description")).toContain("only Factory Admin");
+    expect(btn.getAttribute("aria-description")).toBeNull();
   });
 
   it("locks Deactivate on yourself with the reason", async () => {

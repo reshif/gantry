@@ -34,7 +34,7 @@
 /* One tidy action bar: decisions and links in one wrapping row (Home), or two fixed rows right-aligned in a table cell (Inbox). */
 .act-stack { display: grid; justify-items: end; gap: var(--s2); }
 .act-stack .wo-acts { display: flex; flex-wrap: nowrap; gap: var(--s2); justify-content: flex-end; }
-.act-decide { display: grid; grid-template-columns: 5rem 10rem 5rem; justify-content: end; gap: var(--s2); }
+.act-decide { display: grid; grid-template-columns: minmax(5rem, max-content) 10rem 5rem; justify-content: end; gap: var(--s2); }
 .act-decide > .btn { width: 100%; justify-content: center; }
 .act-decide > :first-child { grid-column: 1; }
 .act-decide > :last-child { grid-column: 3; }

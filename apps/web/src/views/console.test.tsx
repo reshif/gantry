@@ -140,7 +140,10 @@ describe("Console (legacy console.js on the real API)", () => {
           { id: "cm-2", threadId: "ct-1", role: "assistant", text: "WO-1042 is waiting at G2.", at: Date.now(), data: { mode: "model", cited: [{ type: "wo", id: "WO-1042", project: "payments" }], proposals: [], tools: ["get_work_order"] } }] } }),
       });
       mount("/settings");
-      await waitFor(() => expect(document.getElementById("con-mode")!.textContent).toBe("claude-test-1"));
+      await waitFor(() => expect(document.getElementById("con-mode")!.textContent).toBe("test-1")); // short chip; the full name is in the answer-mode line
+      expect(document.getElementById("con-mode")!.getAttribute("aria-label")).toContain("claude-test-1");
+      await waitFor(() => expect(document.querySelector(".footnote")?.textContent).toContain("audited as made via the console."));
+      expect(document.body.textContent).not.toContain("audited with via console");
       // T-3: the reason is the factory switch and who can flip it, never a made-up "read-only for you"
       expect(document.getElementById("con-mode-reason")!.textContent).toContain("switched off for this factory");
       expect(document.getElementById("con-mode-reason")!.textContent).toContain("A Factory Admin can switch them on");

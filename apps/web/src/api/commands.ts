@@ -11,6 +11,7 @@ export const commands = {
   rerunAssessment: ops.rerunAssessment,
   openOnboardingPR: ops.openOnboardingPR,
   mergeOnboardingPR: ops.mergeOnboardingPR,
+  withdrawException: ops.withdrawException,
   saveGuidelines: ops.saveGuidelines,
   setProject: ops.setProject,
   setGateMode: ops.setGateMode,

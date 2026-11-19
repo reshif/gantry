@@ -37,6 +37,9 @@ let seq = 1;
 const byPerson = (m: Msg): boolean => m.role === "user";
 const localIds = (l: Msg[]): Set<string> => new Set(l.map((m) => m.id));
 const nextId = (p: string): string => `${p}${Date.now().toString(36)}${seq++}`;
+/** A model id for the header chip: no vendor prefix, no date suffix ("claude-sonnet-5-5-20260101" becomes "sonnet-5-5"). The full name stays in the chip's title and the picker. */
+export const shortModel = (id: string): string => (id.replace(/^(claude|gpt|gemini)-/i, "").replace(/-\d{8}$/, "") || id);
+
 /** The client-side answers to slash commands, per person: they are not part of the saved thread (the model's conversation is). */
 const localCache = new Map<string, Msg[]>();
 /** Forgets the slash answers kept for this session (sign-out, tests). */
@@ -407,7 +410,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const modeLine = status.isLoading ? "Checking whether a model is configured." : st?.configured ? `Answers come from ${st.model} (${st.vendor}) using tools over the live factory. ${actionsOn ? "It may propose the actions your console rights allow; each waits for your click." : offReason}` : noModels ? (st?.canManageModels ? "No model can be called yet." : "No model can be called yet. Ask a Factory Admin to connect a model vendor in Models.") : (st?.reason ?? "The console could not check its model.");
   // In Settings the model is named once (the select, or the header chip when there is no select), so this line only says what is not working.
   const settingsLine = st?.configured ? (actionsOn ? null : offReason) : modeLine;
-  const label = st?.configured ? (st.effectiveModel ?? st.model ?? "Model") : status.isLoading ? "Checking" : "No model";
+  const label = st?.configured ? shortModel(st.effectiveModel ?? st.model ?? "Model") : status.isLoading ? "Checking" : "No model";
   const cls = st?.configured ? "ready" : status.isLoading ? "checking" : "absent";
 
   const modeChip = <span className={`ask-badge ask-${cls}${streaming ? " is-busy" : ""}`} id={hasModels && st ? "con-status" : "con-mode"} role="status" title={modeLine} aria-label={`Answer mode: ${label}. ${modeLine}`}>{label}</span>;
@@ -478,7 +481,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
                 {modePicker}
                 {settingsLine ? <p className="con-mode-line small muted" id="con-mode-reason"><span>{settingsLine}</span>{noModels && st?.canManageModels ? <> <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a></> : null}</p> : null}
                 <p className="small muted" id="con-access-line">The console proposes only actions your role allows; each waits for your click. Permissions are managed in <a href="#access" id="con-access-link" onClick={(e) => { e.preventDefault(); navigate("access"); }}>Access</a>.</p>
-                <p className="footnote small muted">{`Questions go to the model through the Gantry edge, with tools that read only what you may see. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited with via console.`}</p>
+                <p className="footnote small muted">{`Questions go to the model through the Gantry edge, with tools that read only what you may see. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited as made via the console.`}</p>
               </div>
             ) : null}
             <div className="chat con2-log" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
@@ -568,7 +571,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
         {embed?.aside ?? (
         <aside className="ctx" aria-label="Console context">
           {embed?.page ? <details className="con-more"><summary>What you and the console can do here</summary>{ctxPanels}</details> : ctxPanels}
-          <p className="footnote">{`Questions go to ${st?.configured ? st.model : "the configured model"} through the Gantry edge, with tools that read only what you may see. Work order, issue and repository text is passed as untrusted data. Slash commands read the same tools directly and never need a model. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited with via console.`}</p>
+          <p className="footnote">{`Questions go to ${st?.configured ? st.model : "the configured model"} through the Gantry edge, with tools that read only what you may see. Work order, issue and repository text is passed as untrusted data. Slash commands read the same tools directly and never need a model. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited as made via the console.`}</p>
         </aside>
         )}
       </div>

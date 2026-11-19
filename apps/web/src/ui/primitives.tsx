@@ -19,6 +19,9 @@ export interface Decision {
   allowed: boolean;
   reason: string;
   needs?: string | undefined;
+  /** Only a Factory Admin override would allow it (a halt or freeze on a gate or release): the control offers "<verb> anyway" with a reason. */
+  override?: boolean | undefined;
+  overrideKind?: string | undefined;
 }
 
 /** Text shown for a locked control: "<needs>. <reason>". */

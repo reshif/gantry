@@ -5,6 +5,7 @@ import { Field, LockNote, Select } from "../../ui/primitives";
 import { TextArea, TextInput } from "../../ui/TextControls";
 import { useUI } from "../../ui/overlay-context";
 import type { TDecision, TWo } from "../traveler/model";
+import { OVERRIDE_MIN, OverrideReason, anywayLabel, overrideKindOf, overrideWhy } from "../work/override";
 
 const Err = ({ text }: { text: string }) => <div className="form-err" role="alert">{text}</div>;
 
@@ -17,8 +18,10 @@ export function ApproveGateDialog({ wo, gate, guard, run, onClose }: { wo: TWo; 
   const [note, setNote] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const kind = overrideKindOf(guard);
   const submit = async () => {
     if (busy) return;
+    if (kind && note.trim().length < OVERRIDE_MIN) { setErr(`Give a reason of at least ${OVERRIDE_MIN} characters.`); return; }
     setBusy(true);
     const r = await run(note.trim());
     setBusy(false);
@@ -28,17 +31,17 @@ export function ApproveGateDialog({ wo, gate, guard, run, onClose }: { wo: TWo; 
   };
   return (
     <Dialog
-      title={`Approve ${gate.id} for ${wo.id}`}
+      title={kind ? `${anywayLabel(gate.id)}: ${gate.id} for ${wo.id}` : `Approve ${gate.id} for ${wo.id}`}
       sub={gate.purpose}
       onClose={onClose}
       body={
         <div className="form-grid">
-          <LockNote decision={guard} what="Approving" />
-          <Field label="Note (optional)" htmlFor="ap-note"><TextInput id="ap-note" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
-          <Err text={err} />
+          {kind ? null : <LockNote decision={guard} what="Approving" />}
+          {kind ? <OverrideReason id="ap-note" value={note} onChange={(v) => { setNote(v); setErr(""); }} why={overrideWhy(kind)} error={err} /> : <Field label="Note (optional)" htmlFor="ap-note"><TextInput id="ap-note" value={note} onChange={(e) => setNote(e.target.value)} /></Field>}
+          {kind ? null : <Err text={err} />}
         </div>
       }
-      actions={[{ label: "Cancel" }, { label: "Approve", kind: "primary", submit: true, id: "ap-submit", guard, onClick: () => void submit() }]}
+      actions={[{ label: "Cancel" }, { label: kind ? anywayLabel(gate.id) : "Approve", kind: kind ? "danger" : "primary", submit: true, id: "ap-submit", guard: kind ? null : guard, onClick: () => void submit() }]}
     />
   );
 }
