@@ -122,10 +122,29 @@ async function failDispatch(deps: Deps, a: AttemptInfo, runId: string, code: str
   return { failed: code, applied: out.applied };
 }
 
+/** Why this attempt must not (or no longer) start a runner: superseded, or covered by a stop. Undefined when it may. */
+async function startBlock(deps: Deps, orgId: string, a: AttemptInfo): Promise<string | undefined> {
+  const cur = await attemptIsCurrent(deps.pool, orgId, a.attemptId, a.fencing);
+  if (!cur.current) return cur.reason;
+  const stops = await coveringStops(deps.pool, orgId, a);
+  return stops.length ? `${stops[0]!.mode} at ${stops[0]!.scopeType} scope` : undefined;
+}
+
+async function abandonStart(deps: Deps, runId: string, why: string): Promise<unknown> {
+  await deps.launcher.stop(runId, { keepWorkspace: false }).catch((e) => deps.log.warn({ run: runId, err: errMsg(e) }, "removing a run that was stopped while it started; the reaper retries"));
+  return { skipped: why, abandonedStart: true };
+}
+
+/** S-96: a token issued for a start that did not happen is revoked now, not at the retry's prepareRun or teardown (a new one is issued on the retry). */
+async function revokeUnused(deps: Deps, orgId: string, runId: string, reason: string): Promise<void> {
+  await withTx(deps.pool, (tx) => revokeRunTokens(tx, { orgId, runIds: [runId], reason })).catch((e) => deps.log.warn({ run: runId, err: errMsg(e) }, "revoking the token of a run that did not start"));
+}
+
 /** Launcher at capacity: wait for room without spending the queue's retry budget. A new job carries the count of deferrals. */
 async function defer(deps: Deps, job: Job, a: AttemptInfo, runId: string, reason: string): Promise<unknown> {
   const n = Number((job.payload as { deferrals?: unknown }).deferrals ?? 0) + 1;
   await deps.launcher.stop(runId, { keepWorkspace: false }).catch(() => undefined);
+  await revokeUnused(deps, a.orgId, runId, "dispatch deferred");
   if (n > deps.cfg.maxDispatchDeferrals) return failDispatch(deps, a, runId, "capacity", `No room to start the run after ${n - 1} waits: ${reason}`);
   await enqueue(deps.pool, {
     orgId: a.orgId, queue: "flow", kind: "attempt.dispatch", payload: { ...(job.payload as object), deferrals: n }, runAt: new Date(deps.now().getTime() + 15_000), dedupeKey: `attempt:${a.attemptId}:defer:${n}`,
@@ -185,13 +204,23 @@ export async function attemptDispatch(job: Job, ctx: HandlerCtx): Promise<unknow
       // and the record (paths, sizes, hashes, what was inlined or withheld) shows later exactly what the agent was offered.
       await recordRepoContext(deps, a, runId, seeded.repoContext);
     }
+    // S-95: a kill that landed while the workspace was being seeded must not get a runner. Checked again right before the start.
+    const before = await startBlock(deps, job.orgId, a);
+    if (before) return await abandonStart(deps, runId, before);
     const go = await deps.launcher.start({ ...base, seedComplete: true });
     if (go.state === "capacity") return await defer(deps, job, a, runId, go.msg);
+    // ...and once more after it: a kill that landed between that check and the start has already been enforced (tokens revoked, the run removed),
+    // so the start has just recreated a runner nobody owns. Remove it now instead of leaving it to the next reaper pass.
+    const after = await startBlock(deps, job.orgId, a);
+    if (after) return await abandonStart(deps, runId, after);
     await markStarted(deps, a, runId, deps.cfg.startupLeaseMs);
     return { started: true, runId, seeded: a.repo?.full ?? null };
   } catch (e) {
     const transient = e instanceof TransientError;
-    if (transient && !ctx.last) throw e;
+    if (transient && !ctx.last) {
+      await revokeUnused(deps, a.orgId, runId, "dispatch retry");
+      throw e;
+    }
     const code = e instanceof PermanentError || e instanceof TransientError ? e.code : "dispatch_error";
     deps.log.warn({ attempt: a.attemptId, err: errMsg(e), code }, "dispatch gave up");
     return failDispatch(deps, a, runId, code, `The run could not be started: ${errMsg(e)}`);

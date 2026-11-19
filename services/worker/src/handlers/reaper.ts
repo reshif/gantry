@@ -81,9 +81,11 @@ export async function wallClockWatchdog(deps: Deps, orgId: string): Promise<stri
   const out: string[] = [];
   for (const r of rows) {
     try {
+      // S-94: the token is revoked first (the edge refuses the next call within seconds), then the launcher is asked to stop the run. With the launcher
+      // down, the run keeps no usable credential past its wall clock; the next pass finds it again (it is still starting/running) and retries the stop.
+      await withTx(deps.pool, (tx) => revokeRunTokens(tx, { orgId, runIds: [r.id], reason: "wall-clock limit" }));
       await deps.launcher.stop(r.id, { keepWorkspace: false });
       await withTx(deps.pool, async (tx) => {
-        await revokeRunTokens(tx, { orgId, runIds: [r.id], reason: "wall-clock limit" });
         await tx.query(`update runs set state = 'stopped', ended_at = now(), updated_at = now(), data = data || '{"endedBy":"wall-clock watchdog"}'::jsonb where org_id = $1 and id = $2`, [orgId, r.id]);
         const msg = `The run exceeded its wall-clock limit of ${r.limit_s} seconds and was stopped.`;
         // An eval case ends with an error on its item; real work goes through the flow engine.
