@@ -158,7 +158,7 @@ function BoardCol({ id, title, list, needs, station }: { id: string; title: stri
   const wip = station ? wipStatus(ctx.cat, ctx.project, ctx.wos, station) : null;
   return (
     <div className="col" data-station={id}>
-      <h3><span>{title}</span>{wip && wip.limit > 0 ? <span className={wip.full ? "chip warn" : ""} title={wip.live > wip.limit ? `Over the WIP limit of ${wip.limit}` : wip.full ? "Full: orders wait before this station" : `WIP limit ${wip.limit}`}>{`${wip.live}/${wip.limit}`}</span> : <span>{list.length}</span>}</h3>
+      <h3><span>{title}</span>{wip && wip.limit > 0 ? <span className={wip.live > wip.limit ? "chip bad" : wip.full ? "chip warn" : ""} title={wip.live > wip.limit ? `Over the WIP limit of ${wip.limit}` : wip.full ? "Full: orders wait before this station" : `WIP limit ${wip.limit}`}>{`${wip.live}/${wip.limit}`}</span> : <span>{list.length}</span>}</h3>
       <div className="cards">
         {list.length ? list.map((w) => (
           <a key={w.id} className={`card${needs.has(w.id) ? " need" : ""}`} data-wo={w.id} id={`floor-tok-${w.id}`} href={hashFor("record", w.id, ctx.project.id)}>

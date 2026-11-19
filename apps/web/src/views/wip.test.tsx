@@ -139,4 +139,18 @@ describe("the Belt counts like the server", () => {
     expect(label).not.toMatch(/over limit/);
     expect(document.getElementById("floor-st-verify")?.textContent).toMatch(/1 \/ 1/);
   });
+
+  it("an over-limit station (a merge returned from a bay) is red on the Board until it drains", async () => {
+    updatePrefs({ floorView: "board" });
+    const mk = (id: string, o: Partial<WorkOrder>): WorkOrder => ({ ...base, id, title: `Order ${id}`, bay: null, bayFrom: null, killed: null, doneAt: null, ...o }) as WorkOrder;
+    const wos = [mk("WO-8001", { station: at("verify"), state: "running" }), mk("WO-8002", { station: at("verify"), state: "waiting" })];
+    const project = { ...PAYMENTS, flow: { ...PAYMENTS.flow, stations: { ...PAYMENTS.flow.stations, verify: { enabled: true, wip: 1 } } } };
+    mockApi({ "GET /api/v1/projects/payments/floor": () => ({ body: floorRead({ project, workOrders: wos }) }) });
+    window.location.hash = "#/p/payments/floor?view=board";
+    mount(<FloorView />);
+    const head = await waitFor(() => { const el = document.querySelector('#floor-board [data-station="verify"] h3 .chip'); if (!el) throw new Error("no chip"); return el; });
+    expect(head.className).toBe("chip bad");
+    expect(head.textContent).toBe("2/1");
+    expect(head.getAttribute("title")).toMatch(/Over the WIP limit of 1/);
+  });
 });
