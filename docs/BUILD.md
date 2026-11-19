@@ -42,7 +42,7 @@ legacy/                 The original vanilla-JS prototype: reference for API sha
 | GitHub (broker only) | `@octokit/app`, `@octokit/rest` |
 | Logging | `pino` (Fastify's logger). Never log secrets |
 | Tests | `vitest`. DB tests run against a real Postgres (`GANTRY_TEST_DATABASE_URL`) |
-| Frontend | `react` 19, `react-dom`, `react-router` 7 (hash routes, matching legacy `#name`), `@tanstack/react-query` 5, `vite` 7 |
+| Frontend | `react` 19, `react-dom`, a custom hash router (no `react-router`, AGENTS.md F-20), `@tanstack/react-query` 5, `vite` 7 |
 
 ## TypeScript
 
