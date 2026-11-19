@@ -293,6 +293,26 @@ describe("Notifications", () => {
     expect(await screen.findByText(/delivery log shows the outcome/)).toBeTruthy();
   });
 
+  it("the route editor offers On-call as an email recipient, and saves it as the on-call keyword", async () => {
+    const MAIL_TYPE = { id: "email", name: "Email", category: "email", icon: "mail", auth: "smtp", payload: "html", builtIn: true, destination: true, available: true, targetLabel: "Address or role", fields: [], events: [], actions: [] };
+    const MAIL = { ...INST, id: "int-mail", type: "email", name: "Ops mail", config: {}, secretMask: "" };
+    const MAIL_ROUTE = { ...ROUTE, id: "NR-3", event: "blocked", dest: [{ channel: "email", target: "approvers", integration: "int-mail" }], template: "incident" };
+    const calls = setup({
+      "GET /api/v1/integration-types": () => ({ body: [...TYPES, MAIL_TYPE] }),
+      "GET /api/v1/integrations": () => ({ body: [INST, OFF, MAIL] }),
+      "GET /api/v1/projects": () => ({ body: [{ ...PROJECTS[0], notifications: [{ ...MAIL_ROUTE, version: 2 }] }] }),
+      "GET /api/v1/projects/payments/routes": () => ({ body: [{ ...MAIL_ROUTE, version: 2 }] }),
+      "PATCH /api/v1/projects/payments/routes/NR-3": () => ({ body: { ok: true, msg: "Route NR-3 saved.", id: "NR-3", version: 3 } }),
+    });
+    mount(<NotificationsView />);
+    fireEvent.click(await byId("nt-row-NR-3"));
+    fireEvent.click(await byId("nt-dest-oncall-0"));
+    expect((await byId("nt-dest-t-0") as HTMLInputElement).value).toBe("on-call");
+    fireEvent.click(await byId("nt-save"));
+    await waitFor(() => expect(calls.some((x) => x.method === "PATCH")).toBe(true));
+    expect(calls.find((x) => x.method === "PATCH")!.body).toMatchObject({ dest: [{ channel: "email", target: "on-call", integration: "int-mail" }] });
+  });
+
   it("the delivery log shows failures with their reason and retries one", async () => {
     const calls = setup({ "POST /api/v1/deliveries/DLV-9/retry": () => ({ body: { ok: true, msg: "Queued again. The delivery log shows the outcome." } }) });
     mount(<NotificationsView />);

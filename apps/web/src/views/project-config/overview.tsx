@@ -6,7 +6,7 @@ import { useCan } from "../../api/can";
 import { useMe, useRepos, useTemplates } from "../../api/queries";
 import { canSeeRoute } from "../../lib/routes";
 import { DataTable, type Col } from "../../ui/DataTable";
-import { Btn, Chip, Field, Input, LockNote, Panel, Select, TextArea, Who } from "../../ui/primitives";
+import { Btn, Chip, Field, Input, LockNote, Panel, Select, TextArea, Toggle, Who } from "../../ui/primitives";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
 import { MiniBelt, metricsOf, projectRoles, roleName, useRes, useTeams } from "../projects/kit";
@@ -197,6 +197,8 @@ function OnCallPanel({ p, people, canSet }: { p: PcProps["p"]; people: PcProps["
   const mine = !!me && list.includes(me.person.id);
   const handTo = pool.filter((x) => x.id !== me?.person.id);
   const admins = people.filter((x) => x.status === "active" && isFA(x));
+  const v0 = v;
+  const notify = useCan("notify.edit", { project: p.id });
   const save = (next: string[]) => ops.setProjectOncall(p.id, next, { ifMatch: v }).then((r) => res(r));
   return (
     <Panel title="On call">
@@ -214,6 +216,14 @@ function OnCallPanel({ p, people, canSet }: { p: PcProps["p"]; people: PcProps["
         ) : (
           <p className="small muted" id="pcf-oncall-none">Nobody besides the Factory Admins is on call for {p.name}.</p>
         )}
+        {Array.isArray(p.pagedFor) && p.pagedFor.length ? <p className="small muted" id="pcf-oncall-paged">{`Paged for: ${p.pagedFor.join(", ")}.`}</p> : null}
+        <div className="row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
+          <span>Page the people on call by default (halts, blocked, security hold, escalations)</span>
+          <Toggle id="pcf-oncall-page" checked={p.pageOnCall !== false} decision={notify} label="Page the people on call by default" onChange={(v) => void ops.setProject(p.id, "notifications.oncallPage", v, { ifMatch: v0 }).then((r) => res(r))} />
+        </div>
+        <div className="filters">
+          <Btn small icon="send" id="pcf-oncall-test" guard={notify} label="Send test page" onClick={async () => res(await ops.sendTest(p.id, { channel: "email", target: "on-call", integration: null }, "", "andon"))} />
+        </div>
         <p className="small muted">{`Always on call: ${admins.map((x) => x.name).join(", ") || "no Factory Admin"} (Factory Admin).`}</p>
         <div className="filters">
           <Field label="Put on call" htmlFor="pcf-oncall-pick">

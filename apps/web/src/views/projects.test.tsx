@@ -120,13 +120,14 @@ describe("Projects: portfolio", () => {
     expect(screen.queryByText("No projects yet")).toBeNull();
   });
 
-  it("S-43: a project card says no cap when uncapped, and a $0 cap as a cap, not as a plain $0", async () => {
+  it("S-43: a project card says no cap for a budget of 0, whatever `capped` says, and an amount as a cap", async () => {
     window.location.hash = "#/projects";
     setup({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, budget: { monthly: 0, capped: false, mtd: 40, alertAt: 0.8 } }, { ...RISK, budget: { monthly: 0, capped: true, mtd: 0, alertAt: 0.8 } }] }) });
     mount(<ProjectsView />);
     expect(await screen.findByText("Payments Platform")).toBeTruthy();
     expect(document.getElementById("prj-card-payments")!.textContent).toMatch(/\$40 · no cap/);
-    expect(document.getElementById(`prj-card-${RISK.id}`)!.textContent).toMatch(/\$0 of \$0 cap/);
+    expect(document.getElementById(`prj-card-${RISK.id}`)!.textContent).toMatch(/\$0 · no cap/);
+    expect(document.getElementById(`prj-card-${RISK.id}`)!.textContent).not.toMatch(/\$0 cap/);
   });
 
   it("is the Blueprint's page: key in the eyebrow, Cards / Table switch, four tiles over all projects, cards with only Open Floor and Config", async () => {
@@ -294,6 +295,17 @@ describe("Projects: templates and wizard", () => {
     expect((post.body as { notifications: unknown[] }).notifications.length).toBe(1);
     expect(post.headers["idempotency-key"]).toBeTruthy();
     await waitFor(() => expect(calls.find((c) => c.path === "/api/v1/projects/orders-hub/repos")?.body).toMatchObject({ name: "acme/orders-api", team: "growth" }));
+  });
+
+  it("S-43: the wizard's budget field says 0 means no cap (and no longer a $0 cap)", async () => {
+    window.history.replaceState(null, "", "/?view=templates");
+    setup();
+    mount(<ProjectsView />);
+    fireEvent.click(await byId("prj-tpl-use-tpl-backend"));
+    fireEvent.click(await byId("prj-wz-next"));
+    fireEvent.change(await byId("prj-wz-budget"), { target: { value: "0" } });
+    expect(document.querySelector(".dlg-form, form, body")!.textContent).toMatch(/0 means no cap/);
+    expect(document.body.textContent).not.toMatch(/nothing metered runs/);
   });
 
   it("refuses a name that already exists before calling the server", async () => {
@@ -585,6 +597,41 @@ describe("Project config", () => {
     expect(await screen.findByText(/changed since you loaded it/)).toBeTruthy();
   });
 
+  it("members tab: On call says what the server pages for and sends a test page to the on-call keyword through the route test", async () => {
+    const calls = withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, pageOnCall: true, pagedFor: ["kill", "restore", "halts", "blocked", "security hold", "escalations"] }, RISK] }), "POST /api/v1/projects/payments/routes/test": () => ok({ msg: "Test to on-call queued on Ops mail. The delivery log shows the outcome." }) });
+    tab("members");
+    mount(<ProjectConfigView />);
+    expect((await byId("pcf-oncall-paged")).textContent).toBe("Paged for: kill, restore, halts, blocked, security hold, escalations.");
+    const test = await byId("pcf-oncall-test");
+    await waitFor(() => expect((test as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => { fireEvent.click(test); expect(calls.some((c) => c.path === "/api/v1/projects/payments/routes/test")).toBe(true); });
+    expect(calls.find((c) => c.path === "/api/v1/projects/payments/routes/test")?.body).toEqual({ dest: { channel: "email", target: "on-call", integration: null }, event: "andon" });
+  });
+
+  it("members tab: the default-page switch is bound to pageOnCall and PATCHes notifications.oncallPage; off lists only kill and restore", async () => {
+    const calls = withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, pageOnCall: true, pagedFor: ["kill", "restore", "halts", "blocked", "security hold", "escalations"] }, RISK] }), "PATCH /api/v1/projects/payments/config": () => ok({ version: 8 }) });
+    tab("members");
+    mount(<ProjectConfigView />);
+    const sw = (await byId("pcf-oncall-page")) as HTMLInputElement;
+    expect(sw.checked).toBe(true);
+    await waitFor(() => expect(sw.disabled).toBe(false));
+    fireEvent.click(sw);
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ path: "notifications.oncallPage", value: false }));
+    cleanup();
+    withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, pageOnCall: false, pagedFor: ["kill", "restore"] }, RISK] }) });
+    mount(<ProjectConfigView />);
+    expect((await byId("pcf-oncall-paged")).textContent).toBe("Paged for: kill, restore.");
+    expect(((await byId("pcf-oncall-page")) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("members tab: the default-page switch is locked without the notify right", async () => {
+    withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, pageOnCall: true, pagedFor: ["kill", "restore"] }, RISK] }) }, ["notify.edit"]);
+    tab("members");
+    mount(<ProjectConfigView />);
+    const sw = (await byId("pcf-oncall-page")) as HTMLInputElement;
+    await waitFor(() => expect(sw.disabled || sw.getAttribute("aria-disabled") === "true" || sw.getAttribute("data-reason") !== null).toBe(true));
+  });
+
   it("approvers tab: edits a rule, refuses N larger than the eligible people, and saves with If-Match", async () => {
     const people = [PEOPLE[0]!, person("p-meera", "Meera Iyer", [{ role: "line_lead", scope: "payments" }]), person("p-priya", "Priya Nair", [{ role: "reviewer", scope: "payments" }])];
     const calls = withPayments({ "GET /api/v1/people": () => ({ body: people }), "PUT /api/v1/projects/payments/approvers/G5": () => ok() });
@@ -641,16 +688,16 @@ describe("Project config", () => {
     expect(await screen.findByText("Budget saved")).toBeTruthy();
   });
 
-  it("budget tab: any amount from 0 to 10,000,000 is accepted, decimals too (the server's range)", async () => {
+  it("budget tab: any amount from 0 (no cap) to 10,000,000 is accepted, decimals too (the server's range)", async () => {
     const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok({ version: 8 }) });
     tab("budget");
     mount(<ProjectConfigView />);
     const el = (await byId("pcf-bud-monthly")) as HTMLInputElement;
-    for (const v of ["10", "0", "12.5"]) {
+    for (const v of ["10", "0", "12.5"]) { // 0 means no cap: it saves null, never 0
       calls.length = 0;
       fireEvent.change(el, { target: { value: v } });
       fireEvent.click(await byId("pcf-bud-save"));
-      await waitFor(() => expect(calls.filter((c) => c.method === "PATCH").map((c) => c.body)).toEqual([{ path: "budget.monthly", value: Number(v) }]));
+      await waitFor(() => expect(calls.filter((c) => c.method === "PATCH").map((c) => c.body)).toEqual([{ path: "budget.monthly", value: Number(v) || null }]));
       expect(screen.queryByText(/Must be at least/)).toBeNull();
     }
     calls.length = 0;

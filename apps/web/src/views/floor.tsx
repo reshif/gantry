@@ -72,7 +72,7 @@ function useFacts(): string {
   const { project: p, wos } = ctx;
   const slots = ctx.replay ? wos.filter((w) => !w.bay && w.state === "running" && ctx.cat.stations[w.station]?.id === "build").slice(0, p.flow.slots).length : ctx.floor.slots.used;
   const spendPct = p.budget.monthly ? p.budget.mtd / p.budget.monthly : 0;
-  return `Coding slots ${slots}/${p.flow.slots} · Spend, month to date ${fmt.money0(p.budget.mtd)} (${p.budget.capped === false ? "no cap" : `${fmt.pct(spendPct)} of ${fmt.money0(p.budget.monthly)}`})${ctx.replay ? ", live figure" : ""}`;
+  return `Coding slots ${slots}/${p.flow.slots} · Spend, month to date ${fmt.money0(p.budget.mtd)} (${p.budget.monthly <= 0 ? "no cap" : `${fmt.pct(spendPct)} of ${fmt.money0(p.budget.monthly)}`})${ctx.replay ? ", live figure" : ""}`;
 }
 
 /** Line control in the Floor header: halt or resume this project's line, and the factory emergency stop (each asks for step-up in its dialog). */

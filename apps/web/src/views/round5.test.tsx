@@ -109,11 +109,11 @@ describe("round 5 web (S-43, S-49)", () => {
   }
   const stat = () => Array.from(document.querySelectorAll(".stat")).map((e) => e.textContent).join(" | ");
 
-  it("S-43: a $0 monthly cap reads as a $0 cap, nothing metered runs, and the field holds 0", async () => {
+  it("S-43: a monthly budget of 0 reads as No cap, with the field empty (owner decision: 0 means no cap)", async () => {
     const input = await budgetTab({ monthly: 0, capped: true });
-    expect(stat()).toMatch(/\$0 cap: nothing metered runs/);
-    expect(stat()).not.toMatch(/No cap/);
-    expect(input.value).toBe("0");
+    expect(stat()).toMatch(/No cap/);
+    expect(stat()).not.toMatch(/\$0 cap|nothing metered/);
+    expect(input.value).toBe("");
   });
 
   it("S-43: no cap reads as No cap, with the field empty (not 0)", async () => {
@@ -123,7 +123,7 @@ describe("round 5 web (S-43, S-49)", () => {
     expect(input.value).toBe("");
   });
 
-  it("S-43: emptying the field saves no cap (null), typing 0 saves a $0 cap", async () => {
+  it("S-43: emptying the field saves no cap (null); typing 0 also saves no cap (null), never 0", async () => {
     const calls = setup({ "GET /api/v1/projects": () => ({ body: [PAYMENTS, RISK] }), "PATCH /api/v1/projects/payments/config": () => ok({ version: 8 }) });
     window.history.replaceState(null, "", "/?tab=budget");
     mount(<ProjectConfigView />);
@@ -133,7 +133,8 @@ describe("round 5 web (S-43, S-49)", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({ path: "budget.monthly", value: null }));
     fireEvent.change(input, { target: { value: "0" } });
     fireEvent.click(await byId("pcf-bud-save"));
-    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH").some((c) => (c.body as { value: unknown }).value === 0)).toBe(true));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
+    expect(calls.filter((c) => c.method === "PATCH").every((c) => (c.body as { value: unknown }).value === null)).toBe(true);
   });
 
   it("S-49: a card refused for an expired sign-in comes back pending; the sign-in prompt is offered once, the same confirm repeats and the card ends done", async () => {
