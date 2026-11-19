@@ -1,7 +1,7 @@
 # gantry-launcher: start-run / stop-run / list-runs over the Docker socket. Build context: repository root.
 #   docker build -f services/launcher/Dockerfile -t gantry-launcher:dev .
 # Behind a TLS-intercepting proxy, add: --secret id=cacert,src=/path/to/ca-bundle.crt (optional; used only for npm ci).
-FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS build
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY services/launcher/package.json services/launcher/
@@ -15,7 +15,7 @@ COPY services/launcher/tsconfig.json services/launcher/
 COPY services/launcher/src services/launcher/src
 RUN npm run build -w @gantry/domain && npm run build -w @gantry/launcher
 
-FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS deps
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY services/launcher/package.json services/launcher/
@@ -24,7 +24,7 @@ RUN --mount=type=secret,id=cacert,required=false \
     if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
     npm ci -w @gantry/launcher -w @gantry/domain --omit=dev --ignore-scripts && npm cache clean --force
 
-FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5
 ENV NODE_ENV=production
 WORKDIR /app/services/launcher
 COPY --from=deps /app/node_modules /app/node_modules
