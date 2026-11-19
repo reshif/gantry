@@ -239,4 +239,123 @@ d("station WIP limits", () => {
     expect((await w.liveAttempt("WO-9492"))?.station).toBe("build");
     await setWip(0, "build");
   });
+
+  /** Orders sent back, retried or returned from a bay are held by a full station too, and the cycle of going back against going forward resolves. */
+  describe("the other ways in: send-back, redo, retry and return from a bay", () => {
+    const sendBack = (id: string, to: string, who = "p-meera") => w.call(who, "POST", `/api/v1/work-orders/${id}/send-back`, { toStation: to, note: "Needs another look at the build" });
+    const park = (id: string) => w.call("p-meera", "POST", `/api/v1/work-orders/${id}/park`, { bay: "hold", reason: "Parked to free a place" });
+
+    it("a send-back into a full station waits where the order is, with the same chip, and goes in when a place frees", async () => {
+      await reset();
+      await setWip(1, "build");
+      await w.insertWo("WO-9501", { position: "build", state: "running" });
+      await w.insertWo("WO-9502", { position: "verify", state: "waiting" });
+      const r = await sendBack("WO-9502", "build");
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      const b = await pos("WO-9502");
+      expect([b.position, b.state, b.data.wipWait?.station, b.data.wipWait?.kind]).toEqual(["verify", "waiting", "build", "back"]);
+      expect(b.data.blockReason).toBe("Waiting: Build is full (1/1)");
+      expect(await evs("wo.wip.wait", "WO-9502")).toHaveLength(1);
+      expect((await w.get("WO-9502")).wipWait).toMatchObject({ station: "build", kind: "back" });
+      expect((await park("WO-9501")).status).toBe(200);
+      const a = await pos("WO-9502");
+      expect([a.position, a.state]).toEqual(["build", "running"]);
+      expect((await evs("wo.wip.enter", "WO-9502"))[0].after).toMatchObject({ kind: "back", station: "build" });
+      await setWip(0, "build");
+    });
+
+    it("a redo of the station the order is live at takes no new place, so a full or over-limit station never holds it", async () => {
+      await reset();
+      await w.insertWo("WO-9511", { position: "verify", state: "waiting" });
+      await w.insertWo("WO-9512", { position: "verify", state: "waiting" });
+      await setWip(1, "verify");
+      const r = await sendBack("WO-9512", "verify");
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      const b = await pos("WO-9512");
+      expect([b.position, b.state, b.data.wipWait]).toEqual(["verify", "running", undefined]);
+    });
+
+    it("a retry into a full station waits (the order stays failed) and runs when a place frees", async () => {
+      await reset();
+      await setWip(1);
+      await w.insertWo("WO-9521", { position: "verify", state: "running" });
+      await w.insertWo("WO-9522", { position: "verify", state: "failed" });
+      const r = await w.call("p-meera", "POST", `/api/v1/work-orders/WO-9522/retry`, {});
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(r.body.msg).toMatch(/Verify is full \(1\/1\)/);
+      const b = await pos("WO-9522");
+      expect([b.state, b.data.wipWait?.kind]).toEqual(["failed", "retry"]);
+      expect((await park("WO-9521")).status).toBe(200);
+      const a = await pos("WO-9522");
+      expect([a.position, a.state, a.data.wipWait]).toEqual(["verify", "running", undefined]);
+      expect((await w.liveAttempt("WO-9522"))?.station).toBe("verify");
+    });
+
+    it("a return from a bay into a full station waits in the bay and goes in when a place frees", async () => {
+      await reset();
+      await setWip(1);
+      await w.insertWo("WO-9531", { position: "verify", state: "running" });
+      await w.insertWo("WO-9532", { position: "hold", state: "parked", data: { bayFrom: "verify", bayReason: "Waiting for a part", history: [], log: [] } });
+      const r = await w.call("p-meera", "POST", `/api/v1/work-orders/WO-9532/unpark`, { reason: "The part arrived" });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(r.body.msg).toMatch(/Verify is full \(1\/1\)/);
+      const b = await pos("WO-9532");
+      expect([b.position, b.state, b.data.wipWait?.kind]).toEqual(["hold", "parked", "unpark"]);
+      expect((await park("WO-9531")).status).toBe(200);
+      const a = await pos("WO-9532");
+      expect([a.position, a.state]).toEqual(["verify", "running"]);
+    });
+
+    it("the Factory Admin override works for a send-back that waits", async () => {
+      await reset();
+      await setWip(1, "build");
+      await w.insertWo("WO-9541", { position: "build", state: "running" });
+      await w.insertWo("WO-9542", { position: "verify", state: "waiting" });
+      expect((await sendBack("WO-9542", "build")).status).toBe(200);
+      expect((await w.get("WO-9542", "p-asha")).allowed.wipOverride.allowed).toBe(true);
+      const ok = await w.call("p-asha", "POST", "/api/v1/work-orders/WO-9542/wip-override", { reason: "Rework is blocking the release" });
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect((await pos("WO-9542")).position).toBe("build");
+      expect(await evs("wo.wip.override", "WO-9542")).toHaveLength(1);
+      await setWip(0, "build");
+    });
+
+    it("a send-back takes the next free place before work going forward, whatever its priority", async () => {
+      await reset();
+      await setWip(1, "verify");
+      await w.insertWo("WO-9551", { position: "verify", state: "waiting" });
+      await building("WO-9552", "P0");
+      await finishBuild("WO-9552"); // forward, P0, waits for Verify
+      await w.insertWo("WO-9553", { position: "review", state: "waiting", priority: "P3" });
+      expect((await sendBack("WO-9553", "verify")).status).toBe(200); // back, P3, also waits for Verify
+      expect((await pos("WO-9552")).data.wipWait?.kind).toBe("forward");
+      expect((await pos("WO-9553")).data.wipWait?.kind).toBe("back");
+      expect((await park("WO-9551")).status).toBe(200);
+      expect((await pos("WO-9553")).position).toBe("verify");
+      expect((await pos("WO-9552")).state).toBe("waiting");
+      await setWip(0, "verify");
+    });
+
+    it("the cycle: one order waits to go back to a station that is full of orders waiting to go forward; they swap at once and no count changes", async () => {
+      await reset();
+      await setWip(1, "build");
+      await setWip(1, "verify");
+      await w.insertWo("WO-9561", { position: "verify", state: "waiting" }); // holds Verify
+      await building("WO-9562"); // holds Build and holds a coding slot
+      await finishBuild("WO-9562"); // forward: Verify is full, so it waits at Build (and gives up its coding slot)
+      expect((await pos("WO-9562")).data.wipWait?.station).toBe("verify");
+      const r = await sendBack("WO-9561", "build"); // back: Build is full of the order waiting to go forward
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      const [a, b] = [await pos("WO-9562"), await pos("WO-9561")];
+      expect([a.position, a.state, a.data.wipWait]).toEqual(["verify", "running", undefined]);
+      expect([b.position, b.state, b.data.wipWait]).toEqual(["build", "running", undefined]);
+      expect(await liveAt("verify")).toBe(1);
+      expect(await liveAt("build")).toBe(1);
+      expect(await held()).toBe(1);
+      expect(await evs("wo.wip.enter", "WO-9561")).toHaveLength(1);
+      expect(await evs("wo.wip.enter", "WO-9562")).toHaveLength(1);
+      await setWip(0, "build");
+      await setWip(0, "verify");
+    });
+  });
 });

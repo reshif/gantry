@@ -4,7 +4,7 @@ import type { Tx } from "@gantry/db";
 import type { Actor } from "../../core/command.js";
 import { conflict, invalid, refuse } from "../../core/errors.js";
 import {
-  acquireSlot, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, closeOpenQuestions, dispatchQueued, enterStation, overrideWip, ev, leaveBay, note, openGate, pinned, advance, projectOf, resetGatesFrom, stationIdOf, type Fx,
+  acquireSlot, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, closeOpenQuestions, dispatchQueued, enterStation, overrideWip, wipHoldCheck, ev, leaveBay, note, openGate, pinned, advance, projectOf, resetGatesFrom, stationIdOf, type Fx,
 } from "./engine.js";
 import { begin, done, flowFor, person, type CmdResult } from "./ctx.js";
 import { approveInner } from "./gates.js";
@@ -74,7 +74,8 @@ export async function sendBackCore(fx: Fx, w: Wo, project: Project, cur: string,
   await closeOpenQuestions(fx, w.id, redo ? "The station was redone; it asks again if it still needs to." : `The work order was sent back to ${to}; the station asks again if it still needs to.`);
   await closeOpenInstances(fx, w.id, "send_back");
   await resetGatesFrom(fx, w, project, to);
-  await enterStation(fx, w, to, { project });
+  // The station it goes back to may be full: the order then waits where it is until a place frees (a send-back is let in before work going forward).
+  if (!(await wipHoldCheck(fx, w, to, "back", { by }))) await enterStation(fx, w, to, { project });
   note(w, fx, by, redo ? `Redo ${stationDef(fx.catalog, to)?.name ?? to}${noteText ? `: ${noteText}` : "."}` : `Sent back from ${stationDef(fx.catalog, cur)?.name ?? cur} to ${stationDef(fx.catalog, to)?.name ?? to}${noteText ? `: ${noteText}` : "."}`);
   ev(fx, w, "wo.sendback", { text: noteText, from: cur, to, station: to, ...(redo ? { redo: true } : {}), ...(by === "system" ? { by: "system" } : {}) });
   await saveWo(fx.tx, fx.orgId, w);
@@ -127,6 +128,21 @@ async function unparkInner(fx: Fx, actor: Actor, w: Wo, reason?: string): Promis
   if (!from) throw invalid(`${w.id} is not in a bay.`);
   const { st } = await flowFor(fx, w);
   if (from === "sechold" && !can(st, by, "gate.approve", { project: w.project, time: fx.now.getTime() }).allowed) throw refuse("denied", "Security hold can only be released by someone who may approve gates in this project.", { rule: { kind: "matrix", id: "gate.approve", name: "Approve gates" } });
+  const back = from === "queue" ? "build" : String(w.data.bayFrom ?? "intake");
+  // The station it returns to may be full: the order then stays in its bay until a place frees (the Queue already counts at Build, so it is never held here).
+  if (await wipHoldCheck(fx, w, back, "unpark", { by, ...(reason ? { reason } : {}) })) {
+    await saveWo(fx.tx, fx.orgId, w);
+    const live = w.data.wipWait as { live: number; limit: number };
+    return done(fx, `${w.id} waits in ${bayDef(fx.catalog, from)?.name ?? from}: ${stationDef(fx.catalog, back)?.name ?? back} is full (${live.live}/${live.limit}).`, w.project, { version: w.version, waiting: true });
+  }
+  await unparkCore(fx, w, by, reason);
+  return done(fx, `${w.id} is back at ${stationDef(fx.catalog, stationIdOf(fx.catalog, w))?.name ?? back}.`, w.project, { version: w.version });
+}
+
+/** The return from a bay itself (the place at the station is already settled): the station runs again or the gate reopens. Saves the order. */
+export async function unparkCore(fx: Fx, w: Wo, by: string, reason?: string): Promise<void> {
+  const from = bayOf(fx.catalog, w);
+  if (!from) throw invalid(`${w.id} is not in a bay.`);
   const project = await projectOf(fx, w.project);
   const back = from === "queue" ? "build" : String(w.data.bayFrom ?? "intake");
   // Returning a blocked merge to the belt gives up that approval: the station runs again and the gate opens afresh on whatever head it ends with.
@@ -162,8 +178,8 @@ async function unparkInner(fx: Fx, actor: Actor, w: Wo, reason?: string): Promis
   note(w, fx, by, `Returned from ${bayDef(fx.catalog, from)?.name ?? from}${reason ? `: ${reason}` : ""}.`);
   ev(fx, w, "wo.unpark", { text: reason ?? "", bay: null, from, station: back });
   await saveWo(fx.tx, fx.orgId, w);
-  return done(fx, `${w.id} is back at ${stationDef(fx.catalog, stationIdOf(fx.catalog, w))?.name ?? back}.`, w.project, { version: w.version });
 }
+
 
 export async function reassign(tx: Tx, actor: Actor, woId: string, agentId: string): Promise<CmdResult> {
   const { fx, w } = await begin(tx, actor, woId, "wo.reassign");
@@ -212,6 +228,20 @@ export async function retry(tx: Tx, actor: Actor, woId: string): Promise<CmdResu
   if (w.state === "parked" && bayOf(fx.catalog, w) === "person" && w.data.bayCause === "merge") return retryMerge(fx, w, by);
   if (w.state !== "failed" && w.state !== "blocked" && !failedBay) throw invalid(`${w.id} is not failed or blocked.`);
   const sid = stationIdOf(fx.catalog, w);
+  // The station may be full: the retry then waits (the order stays failed, or in its bay) until a place frees.
+  if (await wipHoldCheck(fx, w, sid, "retry", { by })) {
+    await saveWo(fx.tx, fx.orgId, w);
+    const live = w.data.wipWait as { live: number; limit: number };
+    return done(fx, `${w.id}: ${stationDef(fx.catalog, sid)?.name ?? sid} is full (${live.live}/${live.limit}); the retry waits for a place.`, w.project, { version: w.version, waiting: true });
+  }
+  await retryCore(fx, w, by);
+  return done(fx, `${w.id} is running again.`, w.project, { version: w.version });
+}
+
+/** The retry itself (the place at the station is already settled): the station runs again as a fresh attempt. Saves the order. */
+export async function retryCore(fx: Fx, w: Wo, by: string): Promise<void> {
+  const failedBay = w.state === "parked" && bayOf(fx.catalog, w) === "person" && w.data.bayCause === "failed";
+  const sid = stationIdOf(fx.catalog, w);
   if (failedBay) {
     await leaveBay(fx, w);
     // The person's retry starts the station's failure and interruption counts afresh.
@@ -225,7 +255,6 @@ export async function retry(tx: Tx, actor: Actor, woId: string): Promise<CmdResu
   await enterStation(fx, w, sid);
   ev(fx, w, "wo.retry", { station: sid });
   await saveWo(fx.tx, fx.orgId, w);
-  return done(fx, `${w.id} is running again.`, w.project, { version: w.version });
 }
 
 /**

@@ -97,7 +97,7 @@ export async function readTraveler(db: Queryable, orgId: string, viewer: string 
   }
   // Pushing a waiting order past a full station is the Factory Admin's override (the server decides, the browser only shows the button).
   // The counts shown are today's, not those from when it began to wait.
-  if (wo.wipWait && wo.state === "waiting") wo.wipWait = { ...wo.wipWait, live: await countWip(db, orgId, wo.project, wo.wipWait.station), limit: wipLimit(await readProject(db, orgId, wo.project), wo.wipWait.station) };
+  if (wo.wipWait) wo.wipWait = { ...wo.wipWait, live: await countWip(db, orgId, wo.project, wo.wipWait.station), limit: wipLimit(await readProject(db, orgId, wo.project), wo.wipWait.station) };
   const wipOverride = !wo.wipWait ? { allowed: false, reason: "This work order is not waiting for a full station." } : stop ? { allowed: false, reason: `${stop.reason || "Stopped"} (${stop.scope} ${stop.mode === "halt" ? "halted" : "killed"})` }
     : !viewer || !isFactoryAdmin(st, viewer) ? { allowed: false, reason: "Only a Factory Admin can move a work order past a station's WIP limit." } : { allowed: true, reason: "As Factory Admin you can move it in anyway, with a reason." };
   return { wo: { ...wo, version: row.version }, progress, allowed: { approve, moves, can: cans, wipOverride }, stop, route: route(st.catalog, project, wo.cls) };
