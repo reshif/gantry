@@ -27,7 +27,7 @@ RUN npm run build --workspace @gantry/domain
 COPY apps/web apps/web
 RUN npm run build --workspace @gantry/web
 
-FROM nginxinc/nginx-unprivileged:1.27.5-alpine@sha256:65e3e85dbaed8ba248841d9d58a899b6197106c23cb0ff1a132b7bfe0547e4c0 AS runtime
+FROM nginxinc/nginx-unprivileged:1.31.7-alpine@sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e AS runtime
 COPY apps/web/nginx.conf /etc/nginx/nginx.conf
 COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
 # nginx-unprivileged already runs as uid 101; pin the uid the compose file expects (10001:10001 is set by compose `user:`).
