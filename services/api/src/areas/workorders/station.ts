@@ -7,7 +7,8 @@
  *   handleFlowTimer     escalation timers (paused while a halt covers the work order)
  * Each flushes its events and jobs with `flushFx` (actor "system"), so the caller only commits.
  */
-import { evaluateGuardrails, stationDef } from "@gantry/domain";
+import { can, evaluateGuardrails, stationDef } from "@gantry/domain";
+import { flowFor } from "./ctx.js";
 import { schedule, type Tx } from "@gantry/db";
 import { flushFx, attemptIsCurrent, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, advance, coveringStop, enterBay, enterStation, ev, leaveBay, loadOne, note, openGate, openInstanceOf, releaseSlot, startAttempt, stationIdOf, dispatchQueued, type Fx } from "./engine.js";
 import { readCatalog, readOrg } from "../../core/read/index.js";
@@ -446,7 +447,18 @@ export async function handleFlowTimer(tx: Tx, p: { kind: "escalation" | "soak" |
   if (inst.basis.escalated) return { handled: true, note: "already escalated" };
   await tx.query(`update gate_instances set basis = basis || '{"escalated": true}'::jsonb, updated_at = now() where org_id = $1 and id = $2`, [row.org_id, inst.id]);
   note(w, fx, "system", `Escalated: ${inst.gate_id} has waited past its limit.`);
-  ev(fx, w, "gate.escalated", { gate: inst.gate_id, instance: inst.id, text: "Waited past the escalation limit" }, { category: "approvals" });
+  // S-56: say who it reaches. The rule's fallback (the project owner when none is named) must be an active person who can approve this gate; otherwise nobody new is reached, and the announcement says so with a way forward.
+  const { st, wo } = await flowFor(fx, w);
+  const project = st.projects.find((x) => x.id === w.project);
+  const rule = project?.approvers[inst.gate_id];
+  const fallbackId = rule?.fallback ?? project?.owner ?? null;
+  const fb = st.people.find((x) => x.id === fallbackId);
+  const gate = st.catalog.gates.find((g) => g.id === inst.gate_id);
+  const reached = !!fb && fb.status === "active" && can(st, fb.id, gate?.action || "gate.approve", { project: w.project, repo: wo.repo, time: now.getTime() }).allowed;
+  const text = reached
+    ? `Waited past the escalation limit. It now also reaches ${fb!.name}, the fallback approver.`
+    : `Waited past the escalation limit, but the fallback approver${fb ? ` (${fb.name})` : ""} cannot approve it, so it reached nobody new. Name a fallback who can approve ${inst.gate_id} in the gate rule, or ask a Factory Admin.`;
+  ev(fx, w, "gate.escalated", { gate: inst.gate_id, instance: inst.id, text, reached: reached ? fb!.id : null, fallback: fallbackId }, { category: "approvals" });
   await saveWo(tx, row.org_id, w);
   await flushFx(fx);
   return { handled: true, note: "escalated" };

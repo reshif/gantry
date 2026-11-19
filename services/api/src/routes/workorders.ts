@@ -178,7 +178,7 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     return { items: await listDocComments(g.pool, req.gx.orgId, id) };
   });
   /* People's side of a document (`:doc` is the version's id): comment on a section, edit it into a new version, accept it as the station's output. */
-  app.post("/api/v1/work-orders/:id/documents/:doc/comments", { config: { apiKey: "wo.answer" } }, async (req) => {
+  app.post("/api/v1/work-orders/:id/documents/:doc/comments", async (req) => {
     const { id } = Id.parse(req.params);
     const { doc } = DocId.parse(req.params);
     const b = DocCommentBody.parse(req.body);
@@ -186,7 +186,7 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     const own = req.gx.principal?.kind === "person" && s.requestedBy === req.gx.principal.id;
     return command(req, spec(id, own ? null : "wo.answer", s), (tx, a) => commentOnDocument(tx, a, id, doc, { text: b.text, ...(b.section !== undefined ? { section: b.section } : {}) }));
   });
-  app.post("/api/v1/work-orders/:id/document-comments/:cid/resolve", { config: { apiKey: "wo.answer" } }, async (req) => {
+  app.post("/api/v1/work-orders/:id/document-comments/:cid/resolve", async (req) => {
     const { id } = Id.parse(req.params);
     const { cid } = CId.parse(req.params);
     const s = await scopeOf(req, id);
@@ -211,7 +211,7 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     await scopeOf(req, id);
     return listDialogue(g.pool, req.gx.orgId, id);
   });
-  app.post("/api/v1/work-orders/:id/questions/:qid/answer", { config: { apiKey: "wo.answer" } }, async (req) => {
+  app.post("/api/v1/work-orders/:id/questions/:qid/answer", async (req) => {
     const { id } = Id.parse(req.params);
     const { qid } = QId.parse(req.params);
     const b = AnswerBody.parse(req.body);
@@ -220,7 +220,7 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     const own = req.gx.principal?.kind === "person" && s.requestedBy === req.gx.principal.id;
     return command(req, spec(id, own ? null : "wo.answer", s), (tx, a) => answerStationQuestion(tx, a, id, qid, { kind: b.kind, ...(b.answer !== undefined ? { answer: b.answer } : {}) }));
   });
-  app.post("/api/v1/work-orders/:id/assumptions/:aid", { config: { apiKey: "wo.answer" } }, async (req) => {
+  app.post("/api/v1/work-orders/:id/assumptions/:aid", async (req) => {
     const { id } = Id.parse(req.params);
     const { aid } = AId.parse(req.params);
     const b = AssumptionBody.parse(req.body);
