@@ -217,6 +217,37 @@ describe("Onboarding session", () => {
     await waitFor(() => expect(document.activeElement?.id).toBe("osx-input"));
   });
 
+  it("T-44: ?focus=chat focuses the composer without scrolling the page under the header", async () => {
+    const scroll = vi.fn();
+    (HTMLElement.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scroll;
+    try {
+      window.location.hash = "#/p/storefront/onboarding/mobile-app?focus=chat";
+      api(session());
+      mount(<OnboardingView />);
+      await waitFor(() => expect(document.activeElement?.id).toBe("osx-input"));
+      expect(scroll.mock.calls.filter((c) => (scroll.mock.contexts[scroll.mock.calls.indexOf(c)] as HTMLElement).id === "osx-conv")).toHaveLength(0);
+    } finally {
+      delete (HTMLElement.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
+
+  it("T-36/T-44: a timeline entry that repeats a message is not printed a second time", async () => {
+    const text = "I read acme/mobile-app: 12 checks, 4 need work. Open the findings to see which.";
+    const repo = clone(REPO);
+    repo.onboarding.timeline = [{ at: NOW - 3000, who: "ag-onboard", text }, { at: NOW - 2000, who: "system", text: "Checks started." }];
+    mockApi({
+      "GET /api/v1/projects": () => ({ body: [STOREFRONT] }),
+      "GET /api/v1/projects/storefront/repos": () => ({ body: [repo] }),
+      "GET /api/v1/repos/mobile-app/onboarding/session": () => ({ body: session({ messages: [{ id: "a1", role: "assistant", author: "ag-onboard", text, at: NOW - 3000, data: { mode: "agent", cards: [] } }] }) }),
+      "GET /api/v1/guidelines": () => ({ body: { version: 1, by: "p-daniel", at: NOW, items: [], may: "", mayNot: "", history: [] } }),
+      "GET /api/v1/teams": () => ({ body: [] }), "GET /api/v1/integrations": () => ({ body: [] }), "GET /api/v1/integration-types": () => ({ body: [] }), "GET /api/v1/audit": () => ({ body: [] }),
+    }, { me: { person: daniel, projects: [STOREFRONT] } });
+    mount(<OnboardingView />);
+    await screen.findByText(text);
+    expect((document.querySelector(".osx-conv")!.textContent ?? "").split(text).length - 1).toBe(1);
+    expect(document.querySelector(".osx-conv")!.textContent).toContain("Checks started.");
+  });
+
   it("pipeline updates fold into one quiet row, the person's change request reads as their message, and a progress-only message is not a bubble", async () => {
     const msgs = [
       { id: "u1", role: "system", author: "system", text: "Assessment started.", at: NOW - 9000, data: { kind: "update" } },

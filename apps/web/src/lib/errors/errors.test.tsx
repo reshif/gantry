@@ -118,6 +118,8 @@ describe("AppErrorBoundary", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     expect(screen.getByText(/This screen could not load \(a new version may have been deployed\)/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Go home" }).getAttribute("href")).toBe("#home");
+    // T-50: the heading says what happened, it does not read "Something went wrong" over a message about a missing screen
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("This screen could not load");
   });
   it("nested levels report their own level in situ, and only the route fallback takes focus", () => {
     const got: ErrorReport[] = [];

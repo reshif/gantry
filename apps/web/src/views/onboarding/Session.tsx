@@ -262,16 +262,18 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
   const items = useMemo<Item[]>(() => {
     if (!s || !r) return [];
     const msgs = s.messages.map((m) => ({ at: m.at, kind: "m" as const, m }));
-    const tl = r.onboarding.timeline.map((t) => ({ at: t.at, kind: "t" as const, t }));
+    // a timeline entry that says what a message already says is the same event: one copy, the message
+    const said = s.messages.map((m) => m.text.trim()).filter(Boolean);
+    const tl = r.onboarding.timeline.filter((t) => { const x = t.text.trim(); return !said.some((m) => m === x || (x.length > 20 && m.startsWith(x))); }).map((t) => ({ at: t.at, kind: "t" as const, t }));
     return [...msgs, ...tl].sort((a, b) => a.at - b.at);
   }, [s, r]);
   const blocks = useMemo(() => foldQuiet(items), [items]);
-  // `?focus=chat` (the list's Conversation action): bring the conversation into view and put the cursor in the composer
+  // `?focus=chat` (the list's Conversation action): mark the conversation and put the cursor in the composer
   const ready = !!s;
   useEffect(() => {
     if (!chatFocus || !ready) return;
+    // the cursor goes to the composer without moving the page (the title stays in view); the thread scrolls inside its panel
     const el = document.getElementById("osx-conv");
-    el?.scrollIntoView?.({ block: "start" });
     const box = el?.querySelector<HTMLTextAreaElement>("#osx-input");
     if (box && !box.disabled) box.focus({ preventScroll: true });
   }, [chatFocus, ready]);

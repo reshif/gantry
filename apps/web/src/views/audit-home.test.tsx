@@ -90,6 +90,10 @@ describe("Audit", () => {
     mount(<AuditView />);
     const lock = await screen.findByText("No access to this sheet");
     expect(lock).toBeTruthy();
+    // T-51: the server's reason sits on its own line, not run into the sentence
+    const para = document.getElementById("aud-no-access")!.querySelector("p")!;
+    expect(para.querySelectorAll("br").length).toBe(2);
+    expect(para.innerHTML).toContain("Needs audit.view.<br>");
     fireEvent.click(await screen.findByText("Back to Home"));
     expect(window.location.hash).toBe("#home");
     expect(document.getElementById("aud-empty")).toBeNull();

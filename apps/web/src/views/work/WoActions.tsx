@@ -1,6 +1,6 @@
 /**
  * The one set of actions on a work order, the same labels in the same order wherever a work order is listed (work orders list, Inbox, Home, Agents at work,
- * the Floor drawer, gate lists, headers): the primary next action when this person may take it (Answer for an open question, Approve… for a pending gate,
+ * the Floor drawer, gate lists, headers): the primary next action when this person may take it (Answer for an open question, Approve for a pending gate,
  * each behind `useCan`), then Conversation, then Record. `omit` drops the one for the page you are already on.
  */
 import { useCan } from "../../api/can";
@@ -9,7 +9,7 @@ import { navigate } from "../../lib/router";
 import type { Needs } from "./needs";
 
 export type WoAction = "primary" | "conversation" | "record";
-export const WO_ACTION_LABELS = { conversation: "Conversation", record: "Record", answer: "Answer", approve: "Approve…" } as const;
+export const WO_ACTION_LABELS = { conversation: "Conversation", record: "Record", answer: "Answer", approve: "Approve" } as const;
 
 export function WoActions({ wo, project, repo, needs, idPrefix = "woa", omit = [], small = true, kind }: { wo: string; project: string; repo?: string | null; needs?: Needs | null; idPrefix?: string; omit?: WoAction[]; small?: boolean; kind?: "ghost" }) {
   const answer = useCan("wo.answer", { project, repo });

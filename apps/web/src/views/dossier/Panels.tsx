@@ -48,7 +48,10 @@ export const CRITERION: Record<string, { label: string; cls: string }> = {
 
 /** Acceptance criteria with Verify's verdict for each and the test counts of the record (`criteria` and `tests` come from GET .../record, which carries Verify's report). */
 export function CriteriaPanel({ wo, criteria, tests }: { wo: TWo; criteria?: Criterion[]; tests?: { passed: number; failed: number; added: number } }) {
-  const list = criteria ?? wo.criteria ?? [];
+  const verified = criteria?.length ? criteria : wo.criteria?.length ? wo.criteria : [];
+  // Before Verify has reported, the criteria are the ones the Brief lists (the same source the Brief panel and the Record read), shown without a verdict.
+  const fromBrief = (wo.brief?.ac ?? []).filter((x) => typeof x === "string" && x.trim());
+  const list: Criterion[] = verified.length ? verified : fromBrief.map((text, i) => ({ id: `AC${i + 1}`, text, status: "", tests: [] }));
   const ran = (tests?.passed ?? 0) + (tests?.failed ?? 0);
   return (
     <Panel title="Acceptance criteria" flush>
@@ -64,7 +67,7 @@ export function CriteriaPanel({ wo, criteria, tests }: { wo: TWo; criteria?: Cri
                     <div>{c.text}</div>
                     {c.tests?.length ? <div className="small muted mono">{c.tests.map((t) => `${t.name} ${t.result === "pass" ? "passed" : "failed"}`).join(" · ")}</div> : null}
                   </div>
-                  <Chip text={st.label} cls={st.cls} />
+                  {c.status ? <Chip text={st.label} cls={st.cls} /> : null}
                 </li>
               );
             })}

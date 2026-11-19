@@ -3,8 +3,9 @@
 .wos-legacy-h { margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.04em; font-size: var(--t-xs); }
 .osx-msg.is-legacy { opacity: 0.8; }
 .wos-goal { margin: 0 0 6px; overflow-wrap: anywhere; }
-.wos-list { margin: 2px 0 6px 16px; padding: 0; overflow-wrap: anywhere; }
+.wos-list { margin: 2px 0 6px 0; padding: 0 0 0 18px; overflow-wrap: anywhere; }
 .wos-brief { display: flex; flex-direction: column; gap: 4px; }
+.dz-conv .wos-brief { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); padding: 10px 12px; }
 .wos-diff { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .wos-plus { color: var(--ok, inherit); overflow-wrap: anywhere; }
 .wos-resolved { color: var(--muted); overflow-wrap: anywhere; }

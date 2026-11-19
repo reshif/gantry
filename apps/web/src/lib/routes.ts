@@ -115,3 +115,35 @@ export function landingFor(me: Me): { id: string; project: string | null } {
   if (only && !me.person.roles.some((g) => FACTORY_WIDE.has(g.role))) return { id: "floor", project: only.id };
   return { id: "home", project: null };
 }
+
+/**
+ * Words a person types for a screen that has another name (the palette matches them) and the old or likely addresses that should land on the screen they mean
+ * instead of "Sheet not found". `tab` is the project config tab (`?tab=`) the address stands for. Spend and gates are not screens of their own.
+ */
+export const ROUTE_KEYWORDS: Readonly<Record<string, string>> = {
+  inbox: "gates approvals approve decisions waiting on me",
+  "project-config": "spend budget cost approvers gates flow members repos mcp line control",
+  models: "spend cost prices budget routing vendors",
+  home: "spend overview",
+  account: "settings preferences profile",
+};
+
+export const ROUTE_ALIASES: Readonly<Record<string, { id: string; tab?: string }>> = {
+  spend: { id: "project-config", tab: "budget" },
+  budget: { id: "project-config", tab: "budget" },
+  cost: { id: "project-config", tab: "budget" },
+  costs: { id: "project-config", tab: "budget" },
+  gates: { id: "inbox" },
+  gate: { id: "inbox" },
+  approvals: { id: "inbox" },
+  approval: { id: "inbox" },
+  approvers: { id: "project-config", tab: "approvers" },
+  flow: { id: "project-config", tab: "flow" },
+  settings: { id: "account" },
+  config: { id: "project-config" },
+  "work-order": { id: "work-orders" },
+  workorders: { id: "work-orders" },
+  wo: { id: "work-orders" },
+  members: { id: "project-config", tab: "members" },
+  repos: { id: "project-config", tab: "repos" },
+};

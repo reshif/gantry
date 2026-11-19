@@ -129,7 +129,7 @@ export function Dossier({ id, tab: pathTab }: { id: string; tab: DossierTab }) {
         ) : tab === "runs" ? (
           <RunsPanel wo={wo} cat={cat} />
         ) : (
-          <div className="cols w21">
+          <div className="cols w21 dz-act">
             <Panel title="Timeline">
               {timeline.length ? (
                 <ol className="tl">

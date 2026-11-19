@@ -6,7 +6,7 @@ import type { Me } from "../api/types";
 import { useCanSession } from "../api/can";
 import { VIEWS } from "../views";
 import { useRegisterNewWorkOrder } from "../views/work-orders/New";
-import { hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, routeDef } from "../lib/routes";
+import { hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, routeDef, ROUTE_ALIASES } from "../lib/routes";
 import { formatHash, hashQuery, navigate, replaceHash, useHash } from "../lib/router";
 import { setProject, usePrefs } from "../lib/prefs";
 import { Btn, Empty, Panel, ViewHead } from "../ui/primitives";
@@ -56,12 +56,18 @@ export function Shell({ me }: { me: Me }) {
   const projectId = scoped ? (project?.id ?? null) : (pickProject(me, prefs.project) ?? null);
   const noProjectAccess = scoped && !!loc.project && !project;
 
+  // an old or likely address (#/spend, #/gates) that is no route lands on the screen that holds what it names
+  const alias = unknown ? ROUTE_ALIASES[loc.id.toLowerCase()] : undefined;
   // redirect (replace, no dead back step) to the canonical form of the URL
   useLayoutEffect(() => {
-    if (scoped && !loc.project && project) replaceHash(formatHash(routeId, loc.param, project.id) + hashQuery(window.location.hash));
+    if (alias) {
+      const pid = pickProject(me, prefs.project);
+      const to = isProjectRoute(alias.id) && !pid ? "home" : alias.id;
+      replaceHash(formatHash(to, null, isProjectRoute(to) ? (loc.project ?? pid) : null) + (alias.tab && to === alias.id ? `?tab=${alias.tab}` : hashQuery(window.location.hash)));
+    } else if (scoped && !loc.project && project) replaceHash(formatHash(routeId, loc.param, project.id) + hashQuery(window.location.hash));
     else if (loc.id === "" && landing) replaceHash(formatHash(landing.id, null, landing.project));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scoped, loc.project, loc.param, loc.id, project?.id, routeId]);
+  }, [scoped, loc.project, loc.param, loc.id, project?.id, routeId, alias]);
 
   // the URL wins: entering a project makes it the remembered one (views read it through prefs)
   const [synced, setSynced] = useState<string | null>(null);
@@ -154,7 +160,7 @@ export function Shell({ me }: { me: Me }) {
             <div className="view">
               <Empty id="no-project-access" title="You do not have access to this project" text="It may not exist, or you hold no role on it. Projects you cannot see are hidden from you." action={<p><a href="#projects" className="linkish">Back to all projects</a></p>} />
             </div>
-          ) : unknown ? (
+          ) : unknown && alias ? null : unknown ? (
             <div className="view" id="route-not-found">
               <ViewHead sheet="notfound" title="Sheet not found" sub={`There is no route called "${loc.id}".`} />
               <Panel>

@@ -121,3 +121,15 @@
 .wo-more-acts label { display: inline-flex; align-items: center; gap: 6px; }
 .wo-more-acts .wo-more-h { font-weight: 600; }
 .wo-more-acts .wo-cols { flex-wrap: wrap; gap: var(--s2) var(--s3); }
+/* phone: a work order is a compact card in place (id and title; station, class and priority on one line; needs; activity and cost on one line; actions in a row), not a label/value stack */
+@media (max-width: 720px) {
+  .wo-table table.tbl.cards tr { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 4px; padding: 8px 12px; }
+  .wo-table table.tbl.cards td { display: block; width: auto; max-width: 100%; padding: 0; }
+  .wo-table table.tbl.cards td.pri-cell, .wo-table table.tbl.cards td[data-label="Needs"], .wo-table table.tbl.cards td:last-child { width: 100%; }
+  .wo-table table.tbl.cards td:not([data-label="Needs"])::before { display: none; }
+  .wo-table table.tbl.cards td[data-label="Needs"]::before { display: block; margin-bottom: 1px; }
+  .wo-table table.tbl.cards td[data-label="Cost"] { margin-left: auto; }
+  .wo-table table.tbl.cards td[data-label="Station"] .sub { display: inline-flex; margin-left: 6px; }
+  .wo-table table.tbl.cards td:last-child .wo-acts { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+  .wo-table table.tbl.cards td:last-child .wo-acts .btn { width: auto; flex: 0 0 auto; white-space: nowrap; }
+}

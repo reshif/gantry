@@ -135,7 +135,7 @@ export default function AuditView() {
   const outcomes = ["ok", "denied", "error", ...(sum?.facets.outcomes ?? [])].filter((o, i, a) => a.indexOf(o) === i);
 
   const cols: Col<AuditRow>[] = [
-    { key: "at", label: "When", sort: (e) => e.at, render: (e) => <span className="mono small">{dayMon(e.at)}</span> },
+    { key: "at", label: "When", sort: (e) => e.at, render: (e) => <span className="mono small" style={{ whiteSpace: "nowrap" }}>{dayMon(e.at)}</span> },
     { key: "actor", label: "Actor", sort: (e) => name(e.actor, e.actorName).toLowerCase(), render: (e) => name(e.actor, e.actorName) },
     { key: "action", label: "Action", sort: (e) => e.action, render: (e) => <Btn label={e.action} small kind="ghost" cls="mono" id={`aud-row-${e.seq}`} aria={`Open entry ${e.seq}`} onClick={() => open(e.seq)} /> },
     { key: "target", label: "Target", render: (e) => <span className="aud-target">{e.target}</span> },
@@ -150,7 +150,7 @@ export default function AuditView() {
     return (
       <div className="view view-audit">
         <ViewHead title="Audit ledger" kicker="All lines" />
-        <Empty id="aud-no-access" icon="lock" title="No access to this sheet" text={`Your role cannot open Audit ledger. ${failureOf(feed.error).msg} Ask a factory admin for the audit.view permission.`} action={<Btn label="Back to Home" id="aud-home" onClick={() => navigate("home")} />} />
+        <Empty id="aud-no-access" icon="lock" title="No access to this sheet" text={<>Your role cannot open Audit ledger.<br />{failureOf(feed.error).msg}<br />Ask a factory admin for the audit.view permission.</>} action={<Btn label="Back to Home" id="aud-home" onClick={() => navigate("home")} />} />
       </div>
     );
   }

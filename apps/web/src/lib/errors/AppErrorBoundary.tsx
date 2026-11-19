@@ -71,11 +71,11 @@ function Fallback({ level, error, id, onRetry }: { level: BoundaryLevel; error: 
     // prototype crash sheet: "Something went wrong" header, one panel, Retry and Home
     return (
       <div className="view error-route" id="error-route">
-        <header className="ph vhead"><div className="title vhead-main"><h1 className="vtitle" tabIndex={-1} ref={head}>Something went wrong</h1></div></header>
+        <header className="ph vhead"><div className="title vhead-main"><h1 className="vtitle" tabIndex={-1} ref={head}>{chunk ? "This screen could not load" : "Something went wrong"}</h1></div></header>
         <section className="panel">
           <div className="state" role="alert">
             <svg className="art" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><path d="M12 3l10 18H2zM12 10v5M12 18h.01" /></svg>
-            <h3 className="empty-title">{chunk ? "This screen could not load" : "This sheet failed to draw"}</h3>
+            <h3 className="empty-title">{chunk ? "Reload to continue" : "This sheet failed to draw"}</h3>
             <p>{chunk ? "This screen could not load (a new version may have been deployed). Reload to get the latest version." : "Nothing you entered elsewhere was lost."}</p>
             {import.meta.env.DEV ? <pre className="error-detail">{error.message}</pre> : null}
             {id ? <p className="error-id">Error id <code>{id}</code></p> : null}

@@ -76,3 +76,5 @@
 .dfv-row.add .t{background:var(--ok-bg);color:var(--ok)}
 .dfv-row.del .t{background:var(--bad-bg);color:var(--bad)}
 .chg-file{display:flex;gap:8px;align-items:center}
+/* Activity tab: the Timeline panel is as tall as its events, not stretched to the long Conversation column beside it */
+.dz-act { align-items: start; }

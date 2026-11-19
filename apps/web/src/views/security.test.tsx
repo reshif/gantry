@@ -206,6 +206,7 @@ describe("Security screen", () => {
     const hidden = await byId("sec-no-access");
     expect(hidden.textContent).toContain("No access to this sheet");
     expect(hidden.textContent).toContain("Back to Home");
+    expect(hidden.querySelectorAll("p br").length).toBe(2); // T-51: the reason is its own line
     fireEvent.click(await byId("sec-home"));
     expect(window.location.hash).toBe("#home");
     expect(calls.some((c) => c.path === "/api/v1/security")).toBe(false);

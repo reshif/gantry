@@ -47,7 +47,7 @@ export default function SecurityView() {
     return (
       <div className="view view-security">
         <ViewHead title="Security" kicker="All lines" />
-        <Empty id="sec-no-access" icon="lock" title="No access to this sheet" text={`Your role cannot open Security. ${secQ.isError ? failureOf(secQ.error).msg : manage.reason} Ask a factory admin for the policy.view permission.`} action={<Btn label="Back to Home" id="sec-home" onClick={() => navigate("home")} />} />
+        <Empty id="sec-no-access" icon="lock" title="No access to this sheet" text={<>Your role cannot open Security.<br />{secQ.isError ? failureOf(secQ.error).msg : manage.reason}<br />Ask a factory admin for the policy.view permission.</>} action={<Btn label="Back to Home" id="sec-home" onClick={() => navigate("home")} />} />
       </div>
     );
   }

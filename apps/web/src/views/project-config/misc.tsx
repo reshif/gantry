@@ -127,7 +127,7 @@ export function ArchivePanel({ p }: { p: PcProps["p"] }) {
   const archived = p.status === "archived";
   return (
       <section className="panel pcf-dz" id="pcf-archive-panel" aria-label="Archive project">
-        <div className="panel-head"><h2 className="panel-title">{archived ? "Archived" : "Archive this project"}</h2><span className="mono small muted">project.archive</span></div>
+        <div className="panel-head"><h2 className="panel-title">{archived ? "Archived" : "Archive this project"}</h2></div>
         <div className="panel-body form-grid">
           <p>{archived ? `${p.name} is archived. It is read-only, hidden from people without a factory role, and refuses new work.` : `Archiving makes ${p.name} read-only, hides it from project members and refuses new work orders. In-flight work stops. You must type the project name to confirm.`}</p>
           <LockNote decision={ad} what="Archiving" />

@@ -7,8 +7,8 @@ import { LEAVE_MESSAGE, pageHasUnsaved } from "../lib/useLeaveGuard";
 import { useMe, usePeople, useProjects } from "../api/queries";
 import { navigate, parseHash } from "../lib/router";
 import { pickProject } from "../lib/routes";
-import { updatePrefs, usePrefs } from "../lib/prefs";
-import { Btn, Empty, Panel, Select, Tabs, ViewHead } from "../ui/primitives";
+import { usePrefs } from "../lib/prefs";
+import { Btn, Empty, Panel, Tabs, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { flowOf, useCatalogQuery, type PView } from "./projects/kit";
 import { useQueryParam } from "./projects/urlState";
@@ -115,7 +115,6 @@ export default function ProjectConfigView() {
     <div className="view pcf">
       <ViewHead
         kicker={p.key} title="Project config" sub={`${p.name} · ${p.key}`}
-        actions={<Select id="pcf-project" style={{ width: 200 }} aria-label="Project" value={p.id} options={projects.map((x) => ({ value: x.id, label: x.name }))} onChange={(v) => { updatePrefs({ project: v }); setTabQ(null); navigate("project-config"); }} />}
       />
       <Tabs revealActive idPrefix="pcf-tab" items={TABS.map((t) => ({ id: t[0], label: t[1], count: t[0] === "mcp" ? p.mcp.length : null }))} active={active} onChange={(id) => set({ tab: id })} />
       <div className="pcf-body" id="pcf-tab-panel" role="tabpanel" aria-labelledby={`pcf-tab-${active}`}>

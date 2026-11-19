@@ -659,6 +659,7 @@ describe("Project config", () => {
     expect(document.querySelector(".vhead .kicker")?.textContent).toBe("GNT-CFG-10·PAY");
     expect(document.querySelector(".vhead .vsub")?.textContent).toBe("Payments Platform · PAY");
     expect(document.getElementById("pcf-pages")).toBeNull(); // no More menu
+    expect(document.getElementById("pcf-project")).toBeNull(); // T-37: the project switcher is the top bar's, not a second one in the header
     expect(Array.from(document.querySelectorAll('[role="tab"]')).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Overview", "Flow", "Approvers", "MCP", "Budget", "Repos", "Members", "Line control"]);
     fireEvent.click(await byId("pcf-tab-flow"));
     expect(window.location.hash).toMatch(/\?tab=flow$/);

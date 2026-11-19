@@ -49,7 +49,7 @@ function Ticker({ model }: { model: FloorModel }) {
     <div className="fp-ticker" id="floor-kpis" aria-label="Line summary">
       <div className="tk" title={facts}>
         <span className="k">ON THE LINE</span>
-        <span className="v">{model.live.length}<small>{`of ${ctx.wos.filter((w) => w.bay !== "declined").length}`}</small></span>
+        <span className="v">{model.live.length}<small>{`of ${model.all.filter((b) => b.w.bay !== "declined").length}`}</small></span>
       </div>
       <div className={`tk${bn ? " bott" : ""}`}>
         <span className="k">BOTTLENECK</span>

@@ -46,7 +46,7 @@ export function ConnectedTab({ openInstance, onToggle }: { openInstance: (id: st
                 <dl className="kv int-card-kv">
                   <dt>Scope</dt><dd>{scope}</dd>
                   <dt>Last sync</dt><dd>{ago(i.lastSync)}</dd>
-                  {cfg.map(([k, v]) => [<dt key={`${k}-t`}>{k}</dt>, <dd key={`${k}-d`}><span className="mono small">{String(v)}</span></dd>])}
+                  {cfg.map(([k, v]) => [<dt key={`${k}-t`}>{t.fields.find((f) => f.key === k)?.label ?? k}</dt>, <dd key={`${k}-d`}>{typeof v === "boolean" ? <span className="small">{v ? "Yes" : "No"}</span> : <span className="mono small">{String(v)}</span>}</dd>])}
                   <dt>Secret</dt><dd>{i.secretMask}</dd>
                 </dl>
                 <div className="row">

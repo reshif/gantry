@@ -72,7 +72,7 @@ export default function HomeView() {
   const success = scores.length ? { v: scores.reduce((a, b) => a + b, 0) / scores.length, sub: "agents, last 7 days" } : hl?.evals && hl.evals.scored ? { v: hl.evals.passing / hl.evals.scored, sub: "agent versions passing evals" } : null;
   const budgetPct = hl && hl.spend.budget ? hl.spend.spent / hl.spend.budget : 0;
   const first = me.person.name.split(" ")[0];
-  const sub = away || (showWaiting ? `${greetingAt(new Date().getHours())}, ${first}. ${plural(pending, "approval")} ${pending === 1 ? "waits" : "wait"} on you${inboxTotal > pending ? ` (${inboxTotal} things in your Inbox)` : ""}.` : "What needs you, what is moving, and how the factory is doing.");
+  const sub = away || (showWaiting ? `${greetingAt(new Date().getHours())}, ${first}. ${plural(pending, "approval")} ${pending === 1 ? "waits" : "wait"} on you${inboxTotal > pending ? ` (${inboxTotal} things in your Inbox ${scope.project ? `for ${names.get(scope.project) ?? "this project"}` : "across all projects"})` : ""}.` : "What needs you, what is moving, and how the factory is doing.");
   const hasStats = showWaiting || !!m || !!hl;
   // The one primary action. Locked with the reason (never hidden) when this person may not submit, or no repo can take work yet.
   const submitBlock = s.setup ? "Finish setting up the factory first: no repo is Ready for work yet." : null;
