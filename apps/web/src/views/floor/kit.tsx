@@ -145,7 +145,7 @@ export function gateHaveNeed(ctx: FloorCtxValue, w: WorkOrder, gid: string): { h
 /** The label for the gate column of a card or row. */
 /** "Waiting: Verify is full (3/3)" on a work order that finished its station and waits for the next one, counted from the floor's own work orders. */
 export function wipChip(ctx: FloorCtxValue, w: WorkOrder): string | null {
-  const wait = w.state === "waiting" && !w.bay ? w.wipWait : null;
+  const wait = w.wipWait ?? null;
   if (!wait) return null;
   const s = wipStatus(ctx.cat, ctx.project, ctx.wos, wait.station);
   return `Waiting: ${ctx.cat.stations.find((x) => x.id === wait.station)?.name ?? wait.station} is full (${s.limit ? s.live : wait.live}/${s.limit || wait.limit})`;

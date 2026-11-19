@@ -106,4 +106,20 @@ describe("WIP limits on the Record", () => {
     expect(btn.getAttribute("aria-disabled") === "true" || btn.disabled).toBe(true);
     expect(btn.getAttribute("data-reason") ?? btn.title ?? "").toMatch(/Factory Admin/);
   });
+
+  it("also explains a send-back that waits, and an order that waits in its bay, and offers the override for both", async () => {
+    for (const [kind, text, over] of [["back", /It was sent back and goes in when a place frees/, {}], ["unpark", /It is in its bay and goes in when a place frees/, { state: "parked", bay: "hold", bayFrom: "verify" }]] as const) {
+      cleanup();
+      resetApp();
+      const w = stationed(3).waiting;
+      const base = travelerOf(w);
+      const t = travelerOf(w, { ...over, allowed: { ...base.allowed, approve: null, wipOverride: { allowed: true, reason: "" } } as never, wipWait: { station: "verify", since: NOW, live: 3, limit: 3, kind } } as never);
+      mockApi(readsFor(w, t));
+      window.location.hash = `#record/${w.id}`;
+      mount(<RecordView />);
+      await screen.findByRole("toolbar", { name: "Work order actions" }, { timeout: 4000 });
+      expect((await screen.findByText(text, {}, { timeout: 4000 })).textContent).toMatch(/Waiting: Verify is full \(3\/3\)/);
+      expect(await screen.findByRole("button", { name: "Move in anyway (with a reason)" })).toBeTruthy();
+    }
+  });
 });

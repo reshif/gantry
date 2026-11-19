@@ -135,7 +135,7 @@ export function useActionSpecs(wo: TWo, page = false): ActionSpec[] | null {
   if (wo.state === "failed" || wo.state === "blocked" || (wo.bay === "person" && (wo.bayCause === "failed" || wo.bayCause === "merge")))
     out.push({ key: "retry", label: wo.bayCause === "merge" ? "Retry merge" : `Retry ${stName(cat, stationId)}`, kind: "primary", icon: "refresh", id: "trv-retry", guard: stop ? no(stopWhy) : dec(wo, "sendback"), group: "main", onClick: () => void ops.retry(wo.id, undefined, ifm).then((r) => res(r)) });
   // The work order finished its station and the next one is full: the server decides who may push it in (a Factory Admin, with a reason).
-  if (wo.wipWait && wo.state === "waiting" && !wo.bay) {
+  if (wo.wipWait) {
     const wipName = stName(cat, wo.wipWait.station);
     out.push({
       key: "wipOverride",
