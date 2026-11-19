@@ -97,6 +97,28 @@ d("Factory Admin is universal", () => {
     expect((await lift("p-meera", "project:payments")).status).toBe(200);
   });
 
+  it("G2: during a halt the Factory Admin confirms the brief with a reason (audited); without one it asks; a non-admin is refused", async () => {
+    const id = (await w.submit("p-tomas", { title: "Brief confirmed during a halt" })).body.id as string;
+    await w.answerAll(id, "p-tomas");
+    expect((await stopProject("p-meera", "halt", "Holding the line")).status).toBe(200);
+    try {
+      expect((await w.confirm(id, "p-tomas")).status).toBe(409);
+      const bare = await w.call("p-asha", "POST", `/api/v1/work-orders/${id}/confirm-brief`, {});
+      expect(bare.status).toBe(409);
+      expect(bare.body.needs).toBe("override_reason");
+      const short = await w.call("p-asha", "POST", `/api/v1/work-orders/${id}/confirm-brief`, { reason: "no" });
+      expect(short.body.needs).toBe("override_reason");
+      const non = await w.call("p-priya", "POST", `/api/v1/work-orders/${id}/confirm-brief`, { reason: "I would like to confirm anyway" });
+      expect([403, 409]).toContain(non.status);
+      const ok = await w.call("p-asha", "POST", `/api/v1/work-orders/${id}/confirm-brief`, { reason: "Confirmed while the line is halted." });
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect((await w.events("gate.override")).at(-1)).toMatchObject({ actor: "p-asha" });
+      expect((await w.events("gate.override")).at(-1)?.after).toMatchObject({ gate: "G0G1", kind: "halt", text: "Confirmed while the line is halted." });
+    } finally {
+      expect((await lift("p-meera", "project:payments")).status).toBe(200);
+    }
+  });
+
   it("C(ii): a release freeze refuses everyone else, and the admin releases with a reason and an audit event", async () => {
     // G2 is made the release gate for this test; the seed's POL-110 denies release on repos under a freeze.
     const gates = DEFAULT_CATALOG.gates.map((g) => (g.id === "G2" ? { ...g, action: "release" } : g));

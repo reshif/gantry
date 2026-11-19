@@ -355,8 +355,8 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/api/v1/work-orders/:id/confirm-brief", async (req) => {
     const { id } = Id.parse(req.params);
-    const via = z.looseObject({ via: Via }).parse(req.body ?? {}).via;
-    return command(req, spec(id, "brief.confirm", await scopeOf(req, id)), (tx, a) => approveGate(tx, a, id, "G0G1", null, via ? { via } : {}));
+    const body = z.looseObject({ via: Via, reason: z.string().max(2000).optional() }).parse(req.body ?? {});
+    return command(req, { ...spec(id, "brief.confirm", await scopeOf(req, id)), ...(body.reason ? { overrideReason: body.reason } : {}) }, (tx, a) => approveGate(tx, a, id, "G0G1", null, { ...(body.via ? { via: body.via } : {}), ...(body.reason ? { reason: body.reason } : {}) }));
   });
 
   app.post("/api/v1/work-orders/:id/decline", async (req) => {
