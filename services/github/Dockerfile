@@ -2,7 +2,7 @@
 #   docker build -f services/github/Dockerfile -t gantry-github:dev .
 # Behind a TLS-intercepting proxy, add: --secret id=cacert,src=/path/to/ca-bundle.crt (optional; used only for npm ci and apk).
 # The image carries git (the seed clone and reading workspace object data) and doubles as the never-started workspace helper image (GITHUB_HELPER_IMAGE).
-FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS build
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY services/github/package.json services/github/
@@ -16,7 +16,7 @@ COPY services/github/tsconfig.json services/github/
 COPY services/github/src services/github/src
 RUN npm run build -w @gantry/domain && npm run build -w @gantry/github
 
-FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS deps
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY services/github/package.json services/github/
@@ -25,7 +25,7 @@ RUN --mount=type=secret,id=cacert,required=false \
     if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
     npm ci -w @gantry/github -w @gantry/domain --omit=dev --ignore-scripts && npm cache clean --force
 
-FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5
 ENV NODE_ENV=production
 # INSTALL_GIT=false exists only for sandboxes without an Alpine mirror; the broker cannot seed or publish without git.
 ARG INSTALL_GIT=true
