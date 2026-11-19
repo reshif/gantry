@@ -39,6 +39,18 @@ describe("Traveler drawer in the URL", () => {
   });
 });
 
+describe("Traveler drawer: why the run is not running (R1)", () => {
+  it("says it is waiting for a run slot, or for host disk, and shows a stop for a critically low disk as an alert", async () => {
+    await show({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ body: travelerOf(W, { wait: { label: "Waiting for a run slot (2 queued)", reason: "at the concurrent run limit (3)", since: null, kind: "slot" } }) }) });
+    const slot = await screen.findByText(/Waiting for a run slot \(2 queued\)/);
+    expect(slot.closest("#trv-wait")?.getAttribute("role")).toBe("status");
+    cleanup();
+    resetApp();
+    await show({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ body: travelerOf(W, { wait: { label: "Host disk critically low", reason: null, since: null, kind: "disk_critical" } }) }) });
+    expect((await screen.findByText(/Host disk critically low/)).closest("#trv-wait")?.getAttribute("role")).toBe("alert");
+  });
+});
+
 describe("Traveler drawer", () => {
   it("shows the position, the waiting gate with its progress and the title block", async () => {
     await show();

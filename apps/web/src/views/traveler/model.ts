@@ -39,7 +39,10 @@ export type TWo = WorkOrder & {
   allowed: { approve: (TDecision & { gate: string; instance: string }) | null; moves: Record<string, TMove>; can: Record<string, TDecision> };
   stop: TStop | null;
   route: string[];
+  /** Why the run is not running (R1): waiting for a run slot or low host disk, or stopped for a critically low host disk. */
+  wait?: RunWait | null;
 };
+export interface RunWait { label: string; reason: string | null; since: string | null; kind: "slot" | "disk" | "disk_critical" }
 
 export function useTravelerWo(id: string | null | undefined) {
   return useQuery({ queryKey: qk.workOrder(id ?? ""), queryFn: () => get<TWo>(api(`work-orders/${encodeURIComponent(id ?? "")}`)), enabled: !!id });

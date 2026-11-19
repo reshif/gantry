@@ -84,6 +84,7 @@ export function Summary({ c }: { c: Ctx }) {
         <Kv k="State">
           <span>
             <StateChip state={wo.state} compact /> {stateLine(wo, cat)}
+            {rec.wait ? <span className="small muted" id="rec-wait">{` · ${rec.wait.label}`}</span> : null}
           </span>
         </Kv>
         <Kv k="Route taken">

@@ -142,6 +142,12 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
             <span>{halt.reason}</span>
           </div>
         ) : null}
+        {wo.wait ? (
+          <div className={wo.wait.kind === "slot" ? "halt-banner" : "trv-killed"} role={wo.wait.kind === "disk_critical" ? "alert" : "status"} id="trv-wait">
+            <Icon name={wo.wait.kind === "slot" ? "halt" : "alert"} />
+            <span>{wo.wait.label}{wo.wait.reason ? ` · ${wo.wait.reason}` : ""}</span>
+          </div>
+        ) : null}
         {wo.blockReason ? <div className="callout callout-block"><Icon name="st-block" /><span>{wo.blockReason}</span></div> : null}
         {wo.failReason ? <div className="callout callout-fail"><Icon name="st-fail" /><span>{wo.failReason}</span></div> : null}
         <dl className="kv tb-drawer">
