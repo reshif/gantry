@@ -373,8 +373,8 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/v1/gate-instances/:id/approve", async (req) => {
     const { id } = Id.parse(req.params);
     const gi = parseGateId(id);
-    const body = z.looseObject({ via: Via, reason: z.string().trim().max(1000).optional() }).parse(req.body ?? {});
-    return command(req, { ...spec(gi.woId, await gateAction(req, gi.gateId, "approve"), await scopeOf(req, gi.woId)), ...(body.reason ? { overrideReason: body.reason } : {}) }, async (tx, a) => approveGate(tx, a, gi.woId, gi.gateId, await requireGatePin(tx, a.orgId, gi.woId, gi.gateId, gi.n), { ...(body.via ? { via: body.via } : {}), ...(body.reason ? { reason: body.reason } : {}) }));
+    const body = z.looseObject({ via: Via, reason: z.string().trim().max(1000).optional(), briefBase: z.string().max(40).optional() }).parse(req.body ?? {});
+    return command(req, { ...spec(gi.woId, await gateAction(req, gi.gateId, "approve"), await scopeOf(req, gi.woId)), ...(body.reason ? { overrideReason: body.reason } : {}) }, async (tx, a) => approveGate(tx, a, gi.woId, gi.gateId, await requireGatePin(tx, a.orgId, gi.woId, gi.gateId, gi.n), { ...(body.via ? { via: body.via } : {}), ...(body.reason ? { reason: body.reason } : {}), ...(body.briefBase ? { briefBase: body.briefBase } : {}) }));
   });
   app.post("/api/v1/gate-instances/:id/reject", async (req) => {
     const { id } = Id.parse(req.params);

@@ -9,7 +9,7 @@
  * says about it right now. The frontend renders it as a confirm card; confirming calls that endpoint under the person's own authority, so the
  * decision point, audit, stop checks and idempotency are the endpoint's own. A kind of proposal is offered only to a person who holds its console right (console.propose.*).
  */
-import { can, policyTrace, visibleProjects } from "@gantry/domain";
+import { briefBase, can, policyTrace, visibleProjects } from "@gantry/domain";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { decide, policyState, type PolicyStateLoaded } from "../../core/index.js";
 import type { Decision } from "@gantry/domain";
@@ -477,7 +477,7 @@ const PROPOSE: ToolDef[] = [
       return mk(ctx, {
         kind: "approve", title: `Approve ${gate} on ${id}`, summary: String(w.title ?? ""),
         steps: [mark(w.title, 160), ...(typeof prog.have === "number" ? [`Approvals so far: ${prog.have} of ${String(prog.need)}`] : [])],
-        call: { method: "POST", path: `/api/v1/gate-instances/${encodeURIComponent(instance)}/approve`, body: { via: "console" }, idempotent: false },
+        call: { method: "POST", path: `/api/v1/gate-instances/${encodeURIComponent(instance)}/approve`, body: { via: "console", ...(gate === "G0G1" ? { briefBase: briefBase(obj(w.brief) as never) } : {}) }, idempotent: false },
         perm: { action: actionForGate(st.catalog, gate), project: String(w.project) }, needsReason: null, phrase: null, danger: false, entities: [{ type: "wo", id: id! }], scope: { project: String(w.project), repo: w.repo ? String(w.repo) : null, wo: id! },
       });
     },
