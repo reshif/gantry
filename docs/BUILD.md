@@ -106,7 +106,9 @@ It opens a transaction, runs `can()` (a denial is audited in its own transaction
 | `vendor_keys.json` | edge |
 | `github_app.pem`, `github_app.json` | github |
 | `minio_root_password` | minio, api, worker, edge |
-| `keycloak_admin_password`, `oidc_client_secret` | keycloak; api |
+| `keycloak_admin_password` | keycloak only (the API never gets the master-admin password) |
+| `oidc_client_secret` | keycloak; api |
+| `idp_admin_client_secret` | keycloak (realm import); api (the scoped `gantry-admin` service account: manage-users in the gantry realm) |
 | `bootstrap_admin_password` | api (written by the owner, never generated; the first Factory Admin's initial password, with `GANTRY_BOOTSTRAP_ADMIN_USERNAME`) |
 
 ## Ports and hostnames (compose service names)

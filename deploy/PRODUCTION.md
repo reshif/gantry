@@ -16,7 +16,7 @@ local development stack, see [README.md](README.md).
 | Realm | 15 demo accounts with a shared password | no accounts; password policy; `sslRequired: all` |
 | Mail | Mailpit catches everything | your relay, for Gantry and Keycloak |
 | Demo sign-in cards, demo seed | configurable | forced off |
-| Factory Admin second factor | waived by default (`GANTRY_DEV_ADMIN_MFA_OPTIONAL`), so the password-only demo admin works | required, cannot be waived |
+| Second factor (MFA) | required for everyone; `GANTRY_DEV_ADMIN_MFA_OPTIONAL=true` is an explicit local opt-in, off by default | required for everyone, cannot be waived |
 | Backups | on request (`--profile backup`) | always: daily, with a weekly restore drill |
 | Limits | none | memory and process limits on every container |
 
@@ -72,38 +72,78 @@ The production realm has no accounts. Create people in Keycloak, or connect Keyc
   password in the `keycloak_admin_password` secret file.
 - **Your identity provider.** In the console: realm `gantry` > Identity providers (OIDC or SAML) or User federation (LDAP
   or Active Directory).
-- **The first Factory Admin.** Set `GANTRY_BOOTSTRAP_ADMIN_USERNAME` and write the initial password to the
-  `bootstrap_admin_password` secret file. While the organisation has no Factory Admin, the API creates that user in the
-  `gantry` realm with the password marked temporary and the required actions `UPDATE_PASSWORD` and `CONFIGURE_TOTP`
-  (it needs the `keycloak_admin_password` secret, mounted into the API). The first sign-in by that user changes the
-  password, sets up an authenticator app, and makes them Factory Admin of an empty organisation ("Set up the factory").
-  Everyone after them gets access only when a Factory Admin invites them or grants them a role. A weak or missing
-  password (under 12 characters or a default) is refused with a reason in the API log and no user is created. Once any
-  Factory Admin exists, changing or removing the secret does nothing. After the first sign-in, delete the secret file's
-  content. `GANTRY_BOOTSTRAP_ADMIN_EMAIL` still works but is deprecated.
+- **The first Factory Admin.** Set `GANTRY_BOOTSTRAP_ADMIN_USERNAME`, `GANTRY_BOOTSTRAP_ADMIN_EMAIL` (an address you read: the
+  enrolment link goes there) and write the initial password to the `bootstrap_admin_password` secret file. While the
+  organisation has no Factory Admin, the API creates that user in the `gantry` realm (as the scoped `gantry-admin` service
+  account, see "Identity-provider account" below) with the password marked temporary and the required actions `UPDATE_PASSWORD`,
+  `CONFIGURE_TOTP` and `CONFIGURE_RECOVERY_AUTHN_CODES`, and Keycloak emails that address a **one-time link, valid one hour**.
+  The identity provider refuses a sign-in with only a password, so that link is the only way in: it makes them choose a
+  password, set up an authenticator app and save recovery codes. After it, they sign in with password and code and become
+  Factory Admin of an empty organisation ("Set up the factory"). If the link expired before it was used, restart `gantry-api`:
+  while the user has no second factor and no Factory Admin exists, a fresh link is emailed. Without an address no link can be
+  sent and the API log says so. A weak or missing password (under 12 characters or a default) is refused with a reason in
+  the API log and no user is created. Once any Factory Admin exists, changing or removing the secret does nothing. After the
+  first sign-in, delete the secret file's content. The `GANTRY_BOOTSTRAP_ADMIN_EMAIL` setting alone (no username) is the
+  deprecated way to name the first admin.
 
-### Second sign-in factor for Factory Admins
+### Second sign-in factor (MFA is required for everyone)
 
-Everyone who holds Factory Admin (directly or through a team) must sign in with a password and a one-time code from an
-authenticator app. Other people are not asked for a code.
+**Every person** signs in with a password and a second factor: a one-time code from an authenticator app (TOTP), a security
+key or passkey (WebAuthn), or a single-use recovery code. There is no per-role policy and nothing to switch off. API keys and
+run or service tokens are not people and are unaffected; the allow-list recovery command still opens its own window, but the
+admin it lets in still signs in with both factors.
 
 - **Who decides.** Gantry does, not Keycloak alone. The API checks the sign-in's ID token for evidence of a second factor
-  (`amr` containing `otp`, `mfa`, `hwk` and so on, or an `acr` of `2`, `3` or `mfa`; change the accepted `acr` values with
-  `OIDC_MFA_ACR_VALUES`, first one is what is requested). A Factory Admin without it is refused at sign-in and on every
-  request, and sees a "Set up two-step sign-in" screen. This holds when a role is granted after sign-in.
-- **What Keycloak does.** The realm's `gantry-browser` flow is a step-up flow: level 1 is the password; level 2 is a TOTP code.
-  Gantry asks for level 2 (`acr_values=2`) when an admin follows the setup screen and on step-up by a session that has it.
-  A person with no authenticator is shown a QR code to scan the first time (required action `CONFIGURE_TOTP`).
-- **First admin.** The bootstrap user (`GANTRY_BOOTSTRAP_ADMIN_USERNAME`) is refused on a password-only first sign-in and becomes
-  Factory Admin only after signing in with a code. They see the setup screen, press "Set up and sign in", scan the QR code and continue.
-- **GitHub sign-in** cannot show a second factor to Gantry: admins use single sign-on.
-- **Lost device.** Gantry cannot reset it; reset the person's OTP credential in the Keycloak admin console
-  (Users > Credentials) and keep a second admin enrolled. Existing admin sessions end at their next request after upgrading (migration 0048) and sign in again.
-- **Check once after install.** Sign in as the first admin and confirm the code is asked for and the Factory view opens. If the
-  realm was imported before this change, re-import it or set the browser flow to `gantry-browser` by hand.
-- **Development.** `GANTRY_DEV_ADMIN_MFA_OPTIONAL=true` (default in `compose.yml` only) waives the check for the seeded demo admin, who has
-  a password and no authenticator. The API refuses to start with it on unless `GANTRY_PUBLIC_URL` is localhost, and
-  `compose.prod.yml` sets it to false. I chose the switch over seeding an OTP credential because a seeded secret is shared and guessable.
+  (`amr` containing `otp`, `mfa`, `hwk`, `webauthn` and so on, or an `acr` of `2`, `3` or `mfa`; change the accepted `acr`
+  values with `OIDC_MFA_ACR_VALUES`, the first one is what is requested). A person without it is refused at sign-in and on
+  every request, and sees the "Two-step sign-in" screen. Every sign-in sends `acr_values=2` and `prompt=login`, and every
+  step-up re-asks both factors (`max_age=0`); a step-up whose token has no `auth_time`, or one older than the step-up window, is refused.
+- **What Keycloak does.** The realm's `gantry-browser` flow is: password, then any second factor the person already has,
+  then level 2 is recorded (`acr` 2). A person with **no** second factor is refused (`gantry-no-factor`); the sign-in never
+  offers to set one up from a password alone, and there is no "forgot password" self-service. The whole flow is in
+  `realm-gantry.json` (the production realm is generated from it by `prod-realm.mjs`, which CI checks).
+- **Enrolment (S-122).** A first authenticator is set up only from a **one-time link emailed by Keycloak** (an
+  `executeActionsEmail` with `UPDATE_PASSWORD`, `CONFIGURE_TOTP`, `CONFIGURE_RECOVERY_AUTHN_CODES`; admin links live at most one
+  hour, the realm caps `actionTokenGeneratedByAdminLifespan` at 3600 s). Gantry sends it when a person is invited (and
+  again on a resend), and from People > Reset authenticator. After that, a person adds a security key or replaces a device in the Keycloak
+  account console, which asks for their existing factor first (every sign-in there is two-step too), or an administrator resets them.
+- **Reset (S-124).** People > Reset authenticator (`POST /api/v1/people/{id}/mfa-reset`): needs `people.manage`, a fresh two-factor
+  sign-in and a reason, is refused for yourself, removes the person's second factors at Keycloak, ends their Keycloak and Gantry
+  sessions, emails a new one-time link and records `people.mfa_reset` in the ledger. A reset done directly in the Keycloak console
+  is noticed at that person's next sign-in (their authenticator ids changed) and recorded as `auth.mfa_changed`; their open
+  Gantry sessions run until they end (back-channel logout, S-72, would end them at once). A sole Factory Admin who lost their device
+  cannot reset themselves from Gantry: use the Keycloak console as `admin` (Users > Credentials > delete the OTP, then Credential
+  reset > send the actions email with Update Password and Configure OTP), then they sign in with the one-time link.
+- **Identity-provider account (S-125).** The API never has the Keycloak master-admin password. It uses the realm client
+  `gantry-admin` (a service account that can manage users in the `gantry` realm and nothing else: not the realm, its flows or
+  its clients) with the secret file `idp_admin_client_secret`. Only the `keycloak` service reads `keycloak_admin_password`, to start.
+- **Sign-out (S-130).** Signing out of Gantry also sends the browser to Keycloak's end-session endpoint, with or without the
+  stored id-token, and every sign-in is `prompt=login`, so a leftover Keycloak session cannot sign anyone back in silently.
+  The Keycloak session itself lasts up to 30 minutes idle / 10 hours (realm `ssoSessionIdleTimeout`, `ssoSessionMaxLifespan`) if
+  the browser is closed without signing out; Gantry ignores it for sign-in, but someone at that browser could use Keycloak's own
+  account console until it ends, where every action needs the existing factor.
+- **GitHub sign-in** cannot show a second factor to Gantry (a brokered login skips the realm's browser flow): it is refused unless
+  that identity provider's *post-login flow* in Keycloak requires the second factor. Use single sign-on.
+- **Upgrading a running realm.** Keycloak's `--import-realm` skips a realm that exists, so editing the JSON does not change a live
+  one. Run the one-off migration once (see "Switching MFA on for an existing install" below).
+- **Development.** `GANTRY_DEV_ADMIN_MFA_OPTIONAL=true` (default **false** in `compose.yml` and always false in
+  `compose.prod.yml`) waives the check on a throwaway local stack with password-only demo users. The API refuses to start with it
+  on unless `GANTRY_PUBLIC_URL` is localhost.
+
+### Switching MFA on for an existing install
+
+1. Create the secret file `deploy/secrets/idp_admin_client_secret` (a long random string; the file is not generated for you). It
+   must be the same file the `keycloak` and `gantry-api` services mount (compose does this).
+2. Apply the realm configuration to the running Keycloak, once, from the host (the admin console is on loopback):
+   `node deploy/keycloak/apply-mfa-realm.mjs --url http://127.0.0.1:8081/idp --realm gantry --master-password-file deploy/secrets/keycloak_admin_password --admin-secret-file deploy/secrets/idp_admin_client_secret --realm-json deploy/keycloak/realm-gantry.prod.json --public-url https://$GANTRY_HOSTNAME`
+   (add `--dry-run` first to see the calls; use `realm-gantry.json` on a dev stack). It reads both files itself and prints neither. It
+   builds the new browser flow beside the old, switches, then removes the old; it registers the required actions, sets the OTP / WebAuthn
+   policy, adds the `gantry-admin` client with only `manage-users`, and does not touch users or their credentials. Safe to run again.
+3. Redeploy: `docker compose ... up -d` (the API image has migration 0053; `gantry-api` now mounts `idp_admin_client_secret` instead of
+   `keycloak_admin_password`, and `GANTRY_DEV_ADMIN_MFA_OPTIONAL` is false).
+4. Everyone is asked to enrol at their next sign-in: a person with no authenticator is refused with "Two-step sign-in" and needs a
+   one-time link. In People, use **Reset authenticator** on each person (or invite them again) so Keycloak emails it. People who already
+   have an authenticator app are unaffected. Gantry sessions made without a second factor end at their next request.
 
 ## TLS
 
@@ -255,7 +295,8 @@ separate from the backups:
 | `db_owner_password`, `db_password` | Reset them in Postgres, then update the files |
 | `session_key` | Everyone is signed out; nothing else is lost |
 | `oidc_client_secret` | Set a new one on the `gantry-web` client in Keycloak and in the file |
-| `keycloak_admin_password` | Reset it with Keycloak's admin recovery |
+| `keycloak_admin_password` | Reset it with Keycloak's admin recovery (only the `keycloak` service reads it; the API never does) |
+| `idp_admin_client_secret` | Set a new one on the `gantry-admin` client in Keycloak (Clients > gantry-admin > Credentials) and in the file, then restart `gantry-api` |
 | `github_app.pem` | Generate a new private key in the GitHub App's settings |
 
 Rotation without loss (re-encrypting under a new `data_key`) is not built yet. Until then, changing `data_key` means

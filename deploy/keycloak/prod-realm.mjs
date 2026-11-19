@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Writes realm-gantry.prod.json from realm-gantry.json: the same realm, client and user profile, without the demo
-// accounts and their shared password, with the public URL and the mail relay taken from the environment at import
+// accounts and their shared password (the scoped gantry-admin service account stays), with the public URL and the mail relay taken from the environment at import
 // (Keycloak replaces ${VAR} and ${VAR:default} in an imported realm), and a password policy.
 //
 //   node deploy/keycloak/prod-realm.mjs           # rewrite the production realm
@@ -13,7 +13,8 @@ const dev = JSON.parse(readFileSync(here("./realm-gantry.json"), "utf8"));
 const URL_ = "${GANTRY_PUBLIC_URL}";
 
 const realm = { ...dev };
-delete realm.users;
+// No demo accounts and no shared demo password; the scoped service account (manage-users in this realm only, S-125) stays.
+realm.users = dev.users.filter((u) => u.username.startsWith("service-account-"));
 Object.assign(realm, {
   sslRequired: "all",
   registrationAllowed: false,

@@ -15,7 +15,7 @@ deploy/smoke.sh
 Open https://localhost and sign in with a demo account such as `asha` / `gantry-dev`. Details, including trusting the local certificate, are in [deploy/README.md](deploy/README.md). New to Gantry? Start with the [guides](docs/guide/README.md). To run it on a server, see [deploy/PRODUCTION.md](deploy/PRODUCTION.md).
 
 - `GANTRY_DEV_SEED=true` loads the legacy demo organisation (people, projects, repos, work orders). It is for development and demos only.
-- Without it the organisation starts empty, and the first Factory Admin is the user `GANTRY_BOOTSTRAP_ADMIN_USERNAME`, created with the initial password you write to `deploy/secrets/bootstrap_admin_password` (`GANTRY_BOOTSTRAP_ADMIN_EMAIL` still works but is deprecated).
+- Without it the organisation starts empty, and the first Factory Admin is the user `GANTRY_BOOTSTRAP_ADMIN_USERNAME`, created with the initial password you write to `deploy/secrets/bootstrap_admin_password` (set `GANTRY_BOOTSTRAP_ADMIN_EMAIL` too: Keycloak emails that address the one-time link that sets the password and the authenticator). **MFA is required for everyone**: a password alone never signs anyone in, and the second factor is enrolled only from a one-time link an administrator issues. `GANTRY_DEV_ADMIN_MFA_OPTIONAL=true` is an explicit local dev opt-in (false by default), see [deploy/PRODUCTION.md](deploy/PRODUCTION.md).
 
 ## Layout
 
