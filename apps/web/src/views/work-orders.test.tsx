@@ -186,10 +186,10 @@ describe("Work orders empty tab and More panel", () => {
     expect(css).not.toMatch(/overflow-wrap: anywhere/);
   });
 
-  it("the title column keeps 26ch on a laptop and Needs is no wider than 32ch, so titles do not wrap to many lines", async () => {
+  it("the title column keeps 24ch on a laptop and Needs is no wider than 36ch, so titles do not wrap to many lines", async () => {
     const css = (await import("node:fs")).readFileSync("src/styles/views/workorders.css", "utf8");
-    expect(css).toMatch(/min-width: 641px\) \{ \.wo-table \.wo-idcell \{ min-width: 26ch; \}/);
-    expect(css).toMatch(/\.wo-table \.wo-needs \{[^}]*max-width: 32ch/);
+    expect(css).toMatch(/\.wo-table \.wo-idcell \{ min-width: 24ch; \}/);
+    expect(css).toMatch(/\.wo-table \.wo-needs \{[^}]*max-width: 36ch/);
   });
 });
 

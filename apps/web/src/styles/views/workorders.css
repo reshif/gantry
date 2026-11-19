@@ -10,9 +10,20 @@
 .wo-live { margin-top: var(--s3); color: var(--faint); font-size: var(--t-sm); }
 .wo-board { margin-top: var(--s2); }
 .wo-table td .wo-title { white-space: normal; max-width: 40ch; line-height: 1.35; }
-.wo-table .wo-needs { display: grid; gap: 1px; max-width: 32ch; min-width: 20ch; font-weight: 400; }
+.wo-table .wo-needs { display: grid; gap: 1px; max-width: 36ch; min-width: 14ch; font-weight: 400; }
 /* the title column keeps room to read at laptop width; the Needs column gives way first */
-@media (min-width: 641px) { .wo-table .wo-idcell { min-width: 26ch; } }
+@media (min-width: 641px) {
+  .wo-table .wo-idcell { min-width: 24ch; }
+  .wo-table .wo-idcell .wo-title { display: block; max-width: none; }
+  /* laptop widths: every column, Actions included, fits without scrolling inside the table; text wraps, nothing is cut with an ellipsis */
+  .wo-table th { white-space: normal; padding-inline: 6px; }
+  .wo-table td { padding-inline: 6px; }
+  .wo-table td .sub .chip { white-space: normal; }
+  .wo-table .wo-cls { font-size: 12.5px; }
+  .wo-table td:last-child { min-width: 0; }
+  .wo-table td:last-child .wo-acts { flex-direction: column; align-items: stretch; gap: 3px; }
+  .wo-table td:last-child .wo-acts .btn { padding-inline: 8px; font-size: 12px; }
+}
 .wo-table .wo-needs .wo-need-t { font-weight: 400; }
 .wo-table .wo-needs.is-mine .wo-need-t { color: var(--ink); }
 @media (max-width: 640px) { .wo-table td .wo-title { max-width: none; } }
