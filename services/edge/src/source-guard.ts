@@ -14,8 +14,8 @@ export interface SourceCaps {
   /** Failed edge-token compares one source may make per minute on the token routes (/service/v1, /mcp-admin/v1). Over it: 429 for every attempt until the minute is out. */
   tokenFailuresPerMinute: number;
 }
-/** How long an address must be quiet before its request count is forgotten (a new run on a reused address). */
-export const IDLE_RESET_MS = 5_000;
+/** Spec fetches (a run's first call) per source per minute, apart from the general window. */
+export const SPEC_PER_MINUTE = 30;
 export const DEFAULT_SOURCE_CAPS: SourceCaps = { maxConnections: 128, requestsPerMinute: 1200, tokenFailuresPerMinute: 20 };
 
 export interface GuardLog { warn(obj: object, msg: string): void }
@@ -27,7 +27,9 @@ const REFUSAL = (msg: string) => `HTTP/1.1 429 Too Many Requests\r\nContent-Type
 export class SourceGuard {
   readonly metrics: GuardMetrics = { connectionsRefused: 0, requestsRefused: 0, tokenAttemptsRefused: 0 };
   private readonly conns = new Map<string, number>();
-  private readonly rate = new Map<string, { since: number; n: number; last: number }>();
+  private readonly rate = new Map<string, number[]>();
+  private readonly specRate = new Map<string, number[]>();
+  private readonly lastRun = new Map<string, string>();
   private readonly fails = new Map<string, { since: number; n: number }>();
   private readonly logged = new Map<string, number>();
 
@@ -79,24 +81,41 @@ export class SourceGuard {
     });
   }
 
-  /** Counts one request from `ip`; false when the source is over its rate (the caller answers 429). */
-  request(ip: string | undefined): boolean {
+  /**
+   * Counts one request from `ip` in a true sliding 60 s window; false when the source is over its rate (the caller answers 429). The run's first call,
+   * the spec, has its own small window, so a new run on an address an earlier flooding run used up can still get in and be recognised (runStarted).
+   */
+  request(ip: string | undefined, kind: "general" | "spec" = "general"): boolean {
     if (!ip || !this.governs(ip)) return true;
     ip = plain(ip);
     const t = this.now();
-    let r = this.rate.get(ip);
-    // G-S2: the next run on this address (the launcher reuses the lowest free /28) must not inherit an earlier run's count. A source idle for IDLE_RESET_MS
-    // is treated as new; a run that keeps calling keeps its count.
-    if (!r || r.since <= t - 60_000 || r.last <= t - IDLE_RESET_MS) this.rate.set(ip, (r = { since: t, n: 0, last: t }));
-    r.last = t;
-    if (this.rate.size > 5000) this.rate.delete(this.rate.keys().next().value as string);
-    if (r.n >= this.caps.requestsPerMinute) {
+    const map = kind === "spec" ? this.specRate : this.rate;
+    const limit = kind === "spec" ? SPEC_PER_MINUTE : this.caps.requestsPerMinute;
+    let w = map.get(ip);
+    if (!w) map.set(ip, (w = []));
+    while (w.length && w[0]! <= t - 60_000) w.shift();
+    if (map.size > 5000) map.delete(map.keys().next().value as string);
+    if (w.length >= limit) {
       this.metrics.requestsRefused++;
-      this.note("requests", ip, this.caps.requestsPerMinute);
+      this.note(`requests:${kind}`, ip, limit);
       return false;
     }
-    r.n++;
+    w.push(t);
     return true;
+  }
+
+  /**
+   * A run was verified by the API on this address (its spec call answered 200). When it is a different run from the one last seen here, the address was
+   * released and reused (the launcher gives out the lowest free /28): the earlier run's request count is cleared (G-S2, R3). A hostile run cannot use this
+   * to reset itself: only a valid token of another run, which it does not hold, changes the run id.
+   */
+  runStarted(ip: string | undefined, runId: string): void {
+    if (!ip || !this.governs(ip)) return;
+    ip = plain(ip);
+    if (this.lastRun.get(ip) === runId) return;
+    this.lastRun.set(ip, runId);
+    if (this.lastRun.size > 5000) this.lastRun.delete(this.lastRun.keys().next().value as string);
+    this.rate.delete(ip);
   }
 
   /** True when this source has used up its failed token attempts for the minute (any address, runs or not). */

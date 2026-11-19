@@ -64,12 +64,12 @@ describe("S-92: one run cannot starve the shared edge", () => {
     closers.push(async () => { await gw.app.close(); await new Promise<void>((r) => api.server.close(() => r())); });
     const base = `http://127.0.0.1:${(gw.app.server.address() as AddressInfo).port}`;
     const codes: number[] = [];
-    for (let i = 0; i < 7; i++) codes.push((await fetch(`${base}/run/v1/spec`, { headers: { authorization: `Bearer ${makeToken("r1")}` } })).status);
+    for (let i = 0; i < 7; i++) codes.push((await fetch(`${base}/run/v1/other`, { headers: { authorization: `Bearer ${makeToken("r1")}` } })).status);
     expect(codes.slice(0, 4).every((c) => c !== 429)).toBe(true);
     expect(codes.slice(4)).toEqual([429, 429, 429]);
     expect((await fetch(`${base}/healthz`)).status).toBe(200);
     expect(gw.guard.metrics.requestsRefused).toBe(3);
-    const r = await fetch(`${base}/run/v1/spec`);
+    const r = await fetch(`${base}/run/v1/other`);
     expect(r.headers.get("retry-after")).toBe("5");
   });
 
@@ -98,16 +98,32 @@ describe("S-92: one run cannot starve the shared edge", () => {
   });
 });
 
-describe("G-S2: a new run on a reused address", () => {
-  it("is not refused for the earlier run's requests once the address has been quiet", () => {
+describe("G-S2 / R3: a new run on a reused address", () => {
+  it("uses a true sliding window: nothing resets by being quiet for a moment", () => {
     let t = 1_000_000;
     const g = new SourceGuard(caps({ requestsPerMinute: 3 }), "10.213.0.0/16", log, () => t);
     for (let i = 0; i < 3; i++) expect(g.request("10.213.0.2")).toBe(true);
+    t += 20_000;
     expect(g.request("10.213.0.2")).toBe(false);
-    t += 1000;
-    expect(g.request("10.213.0.2")).toBe(false); // a flooding run that keeps calling keeps its count
-    t += 6000; // run A is gone; run B gets the same address
+    t += 30_000; // 50 s after the first
+    expect(g.request("10.213.0.2")).toBe(false);
+    t += 11_000; // the first three have left the window
     expect(g.request("10.213.0.2")).toBe(true);
+  });
+
+  it("clears the count only when the API has verified a different run on the address, and the first call gets in meanwhile", () => {
+    const t = 1_000_000;
+    const g = new SourceGuard(caps({ requestsPerMinute: 3 }), "10.213.0.0/16", log, () => t);
+    g.runStarted("10.213.0.2", "run-A");
+    for (let i = 0; i < 3; i++) g.request("10.213.0.2");
+    expect(g.request("10.213.0.2")).toBe(false); // run A flooded
+    expect(g.request("10.213.0.2", "spec")).toBe(true); // run B's spec call still gets through
+    g.runStarted("10.213.0.2", "run-A"); // the same run again does not reset itself
+    expect(g.request("10.213.0.2")).toBe(false);
+    g.runStarted("10.213.0.2", "run-B"); // verified by the API: a new run on this address
+    expect(g.request("10.213.0.2")).toBe(true);
+    for (let i = 0; i < 30; i++) g.request("10.213.0.2", "spec");
+    expect(g.request("10.213.0.2", "spec")).toBe(false); // spec calls are limited too
   });
 });
 

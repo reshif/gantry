@@ -118,10 +118,15 @@ export function buildGateway(deps: GatewayDeps): Gateway {
     if (req.url === "/healthz") return;
     const ip = req.socket.remoteAddress;
     if (TOKEN_ROUTE.test(req.url) && guard.tokenBlocked(ip)) return reply.code(429).header("retry-after", "60").send({ ok: false, msg: "Too many failed attempts from this address; try again later." });
-    if (!guard.request(ip)) return reply.code(429).header("retry-after", "5").header("content-type", "application/json").send({ type: "error", error: { type: "rate_limit_error", message: "This run is making too many requests; slow down." } });
+    if (!guard.request(ip, req.url.startsWith("/run/v1/spec") ? "spec" : "general")) return reply.code(429).header("retry-after", "5").header("content-type", "application/json").send({ type: "error", error: { type: "rate_limit_error", message: "This run is making too many requests; slow down." } });
   });
   app.addHook("onResponse", async (req, reply) => {
     if (reply.statusCode === 401 && TOKEN_ROUTE.test(req.url)) guard.tokenFailed(req.socket.remoteAddress);
+    if (reply.statusCode === 200 && req.url.startsWith("/run/v1/spec")) {
+      const tok = bearerOf(req);
+      const id = tok ? runIdOfToken(tok) : null;
+      if (id) guard.runStarted(req.socket.remoteAddress, id);
+    }
   });
   // Bodies stay raw: the model request is forwarded byte for byte, run calls are parsed by their handlers.
   app.removeAllContentTypeParsers();
