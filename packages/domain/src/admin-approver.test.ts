@@ -19,6 +19,11 @@ describe("Factory Admin as an approver", () => {
     expect(reachOf([admin("a1")], project, rule({ sod: true }), "a1")).toEqual([]);
     expect(ruleWarning([admin("a1")], project, rule({ required: 2 }), "G2")).toMatch(/cannot pass/);
   });
+  it("the sod warning says an author's work order passes only by an audited override with a reason", () => {
+    const w = ruleWarning([admin("a1")], project, rule({ sod: true }), "G2");
+    expect(w).toContain("can pass this gate only by an override with a reason (audited)");
+    expect(w).not.toMatch(/never pass|ordinary approval/);
+  });
   it("gateApprovers: an admin is eligible; the author admin on a sod gate is override only", () => {
     const s = seedState();
     const hit = s.workOrders.flatMap((w) => Object.entries(w.gates).filter(([k, g]) => k !== "G0G1" && g.status === "waiting").map(([k]) => ({ w, k })))[0]!;
