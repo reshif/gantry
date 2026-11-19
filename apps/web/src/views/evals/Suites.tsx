@@ -11,6 +11,7 @@ import { IconBtn, Btn, Chip, Empty, Field, LockNote, Panel, Select, type Decisio
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { useOutcome, useAllRepos } from "../govern/data";
+import { ReposReadNote } from "../govern/ReposReadNote";
 import { DataView } from "../dataview";
 import { PassMark, ScoreN, agentOf, evalsUi, rerender, suiteOf, useEvalsData, useEvalsUi, versionModel, type EvalsData, type RunRow } from "./kit";
 
@@ -18,7 +19,7 @@ const asRules = (c: Suite["cases"][number]): Array<{ kind: string; [k: string]: 
 const short = (sha?: string | null): string => (sha ? sha.slice(0, 7) : "");
 
 function AddCaseDialog({ su, perm, onDone }: { su: Suite; perm: Decision; onDone: () => void }) {
-  const { repos } = useAllRepos();
+  const { repos, read: reposRead } = useAllRepos();
   const [f, setF] = useState({ name: "", task: "", checks: "", repo: "", commit: "", mention: "", nomention: "", notouch: "" });
   const [err, setErr] = useState("");
   const out = useOutcome();
@@ -30,6 +31,7 @@ function AddCaseDialog({ su, perm, onDone }: { su: Suite; perm: Decision; onDone
       <LockNote decision={perm} what="Eval suites" />
       <Field label="Case name" htmlFor="ev-case-name"><input id="ev-case-name" className="input" placeholder="e.g. Spec without a rollback section" value={f.name} disabled={off} onChange={set("name")} /></Field>
       <Field label="Task for the agent" htmlFor="ev-case-task" hint="What the agent is asked to do. Defaults to the case name. The checks below are never shown to it."><textarea id="ev-case-task" className="input" rows={3} value={f.task} disabled={off} onChange={set("task")} /></Field>
+      <ReposReadNote read={reposRead} id="ev-repos-read" />
       <div className="form-row">
         <Field label="Repo snapshot" htmlFor="ev-case-repo" hint="Pins the task to a repository. The run reads it only; nothing is written back.">
           <Select id="ev-case-repo" value={f.repo} disabled={off} options={[{ value: "", label: "No repository" }, ...repos.map((r) => ({ value: r.id, label: r.name }))]} onChange={(v) => setF((p) => ({ ...p, repo: v }))} />

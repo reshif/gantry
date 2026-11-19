@@ -44,10 +44,26 @@ async function gateDecided<T extends object>(req: Promise<ApiResult<T>>): Promis
   return { ...r, msg: `${r.msg}${now} Nothing was decided. The screen was refreshed; look again and decide.` };
 }
 
-/** Run a request and invalidate `slices` when it succeeded. */
-async function run<T extends object = Obj>(slices: readonly string[], req: Promise<ApiResult<T>>): Promise<ApiResult<T>> {
+export const CHANGED_MSG = "Someone changed this; it has been reloaded. Check it and save again.";
+
+/** Run a request and invalidate `slices` when it succeeded; a gate decision (see gateDecided) words its own refusal. */
+async function runGate<T extends object = Obj>(slices: readonly string[], req: Promise<ApiResult<T>>): Promise<ApiResult<T>> {
   const r = await req;
   if (r.ok) invalidateSlices([...slices, "audit"]);
+  return r;
+}
+
+/**
+ * Run a request and invalidate `slices` when it succeeded. A save refused as changed (409 conflict, 412 precondition failed
+ * with no named rule) also refetches `slices`, so the next save carries the version now on the server instead of failing the same way.
+ */
+async function run<T extends object = Obj>(slices: readonly string[], req: Promise<ApiResult<T>>): Promise<ApiResult<T>> {
+  const r = await runGate(slices, req);
+  if (!r.ok && (r.status === 409 || r.status === 412) && !r.rule) {
+    invalidateSlices([...slices, "audit"]);
+    // the server's stale-version refusal ends "Reload and try again." (nothing reloads by itself in that wording): say what Gantry did instead
+    return /Reload and try again\.?/i.test(r.msg) ? { ...r, msg: r.msg.replace(/\s*Reload and try again\.?/i, ` ${CHANGED_MSG}`) } : r;
+  }
   return r;
 }
 
@@ -123,9 +139,9 @@ export const ops = {
   /* ===== gates ===== */
   /** `instance` is the exact opening the person was shown (`WO-1:G2:3`, from `allowed.approve.instance` or Home's approvals). The server refuses a decision that does not name it. */
   approveGate: (woId: string, gateId: string, instance: string | undefined, via?: Via, v?: Versioned, note?: string) =>
-    gateDecided(run(["workOrders", "trust"], post(api(`gate-instances/${enc(gateInstanceId(woId, gateId, instance))}/approve`), note ? { via, reason: note } : { via }, opts(v)))),
+    gateDecided(runGate(["workOrders", "trust"], post(api(`gate-instances/${enc(gateInstanceId(woId, gateId, instance))}/approve`), note ? { via, reason: note } : { via }, opts(v)))),
   rejectGate: (woId: string, gateId: string, instance: string | undefined, reason: string, via?: Via, v?: Versioned) =>
-    gateDecided(run(["workOrders", "trust"], post(api(`gate-instances/${enc(gateInstanceId(woId, gateId, instance))}/reject`), { reason, via }, opts(v)))),
+    gateDecided(runGate(["workOrders", "trust"], post(api(`gate-instances/${enc(gateInstanceId(woId, gateId, instance))}/reject`), { reason, via }, opts(v)))),
 
   /* ===== moving work ===== */
   moveTo: (woId: string, target: string, reason?: string, via?: Via, v?: Versioned) =>

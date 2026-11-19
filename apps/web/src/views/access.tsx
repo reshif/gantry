@@ -9,6 +9,7 @@ import { useAccessMatrix, useFreezes, useMe, usePeople, usePolicies, useProjects
 import { Btn, Empty, LockNote, Panel, Stat, StatRow, Tabs, ViewHead, type Decision } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
 import { useAllRepos } from "./govern/data";
+import { ReposReadNote } from "./govern/ReposReadNote";
 import { Pager, setQS, useQS } from "./govern/kit";
 import { FreezeList, useFreezeDialog } from "./access/Freezes";
 import { MatrixTable } from "./access/Matrix";
@@ -34,7 +35,7 @@ export default function AccessView() {
   const projectsData = useProjects().data;
   const myProjects = me?.projects;
   const projects = useMemo(() => (projectsData ?? myProjects ?? []) as Project[], [projectsData, myProjects]);
-  const { repos } = useAllRepos();
+  const { repos, read: reposRead } = useAllRepos();
   const perm = dec(useCan("policy.edit"));
   const rperm = dec(useCan("role.edit"));
   const view = dec(useCan("policy.view"));
@@ -90,7 +91,7 @@ export default function AccessView() {
           tab === "check" ? <Simulator people={people} projects={projects} actions={actions} matrix={matrix} defaults={simDefaults()} />
           : tab === "matrix" ? <Panel title="What each role may do" flush><MatrixTable matrix={matrix} version={m?.version} roles={roles} actions={actions} newRole={newRole} /></Panel>
           : tab === "roles" ? <Panel title="Roles" flush><><RolesList roles={roles} matrix={matrix} actions={actions} people={people} onRights={showRights} onEdit={openRole} onRemove={removeRole} /><Pager id="acc-roles-pager" page={0} total={roles.length} onPage={() => undefined} /></></Panel>
-          : tab === "freezes" ? <Panel title="Change freezes" flush tools={<Btn label="New freeze" small kind="primary" icon="plus" id="acc-add-freeze" guard={perm} onClick={openFreeze} />}><FreezeList freezes={freezes} repos={repos} /></Panel>
+          : tab === "freezes" ? <Panel title="Change freezes" flush tools={<Btn label="New freeze" small kind="primary" icon="plus" id="acc-add-freeze" guard={perm} onClick={openFreeze} />}><><ReposReadNote read={reposRead} /><FreezeList freezes={freezes} repos={repos} /></></Panel>
           : (
             <Panel title="Conditional policies" flush>
               <PolicyTable

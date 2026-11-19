@@ -14,6 +14,7 @@ import { Async, qState } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { plural } from "../lib/plural";
 import { useAllRepos, useTeams } from "./govern/data";
+import { ReposReadNote } from "./govern/ReposReadNote";
 import { CountClear, PAGE_SIZE, Pager, parseSort, setQS, sortParam, useQS } from "./govern/kit";
 import { useInviteDialog } from "./people/InviteDialog";
 import { useTeamDialogs } from "./people/TeamDialog";
@@ -32,7 +33,7 @@ export default function PeopleView() {
   const teams = teamsQ.data ?? [];
   const projects = useProjects().data ?? me?.projects ?? [];
   const matrix = useAccessMatrix().data;
-  const { repos } = useAllRepos();
+  const { repos, read: reposRead } = useAllRepos();
   const roles = matrix?.roles ?? [];
   const perm = dec(useCan("people.manage"));
   const view = dec(useCan("people.view"));
@@ -69,7 +70,7 @@ export default function PeopleView() {
       <Tabs idPrefix="ppl-tab" active={active} onChange={(t) => setQS({ "ppl.tab": t === "people" ? "" : t, "ppl.page": "" })} items={[{ id: "people", label: "People", count: people.length }, { id: "teams", label: "Teams", count: teams.length }]} />
       <div id="ppl-tab-panel" role="tabpanel" aria-labelledby={`ppl-tab-${active}`}>
         <Async query={peopleQ} what="people" id="ppl">{() => active === "teams" ? (
-          <TeamGrid people={people} teams={teams} projects={projects as Project[]} repos={repos} roles={roles} perm={perm} invite={invite} teamDlg={teamDlg} ui={ui} />
+          <><ReposReadNote read={reposRead} /><TeamGrid people={people} teams={teams} projects={projects as Project[]} repos={repos} roles={roles} perm={perm} invite={invite} teamDlg={teamDlg} ui={ui} /></>
         ) : (
           <PeopleTable people={people} teams={teams} roles={roles} />
         )}</Async>

@@ -15,9 +15,10 @@ import { useUI } from "../ui/overlay-context";
 import { useHash, hashFor, navigate } from "../lib/router";
 import { useCatalog } from "./projects/kit";
 import { useAllRepos } from "./govern/data";
+import { ReposReadNote } from "./govern/ReposReadNote";
 import { AddMcp } from "./mcp/AddDialog";
 import { Detail } from "./mcp/Detail";
-import { dec } from "./mcp/kit";
+import { dec, mcpState } from "./mcp/kit";
 import { UsageTab } from "./mcp/Usage";
 import { ListView, healthTone, useTab } from "./connect/kit";
 import type { McpServer } from "@gantry/domain";
@@ -36,7 +37,7 @@ export default function McpView() {
   const projects = useProjects().data ?? [];
   const agents = useAgents().data ?? [];
   const cat = useCatalog();
-  const { repos } = useAllRepos();
+  const { repos, read: reposRead } = useAllRepos();
   const actor = useActors();
   const [tab, setTab] = useTab(["registry", "usage"]);
   const actorName = (id: string): string => actor(id).name;
@@ -44,7 +45,7 @@ export default function McpView() {
   if (hash.param) {
     return (
       <Async query={serversQ} what="MCP servers" id="mcp">
-        {() => <Detail srv={servers.find((m) => m.id === hash.param) ?? null} cat={cat} projects={projects} agents={agents} repos={repos} calls={calls} actorName={actorName} />}
+        {() => <><ReposReadNote read={reposRead} /><Detail srv={servers.find((m) => m.id === hash.param) ?? null} cat={cat} projects={projects} agents={agents} repos={repos} calls={calls} actorName={actorName} /></>}
       </Async>
     );
   }
@@ -52,7 +53,7 @@ export default function McpView() {
   const exposed = servers.reduce((n, m) => n + m.tools.filter((t) => t.allowed).length, 0);
   const total = servers.reduce((n, m) => n + m.tools.length, 0);
   const gated = calls.filter((u) => u.outcome === "gated").length;
-  const stateOf = (m: McpServer): string => (m.enabled === false ? "disabled" : m.health);
+  const stateOf = mcpState;
 
   const registry = (
     <Async query={serversQ} what="MCP servers" id="mcp" empty={<Empty id="mcp-empty" title="No MCP servers yet" text="An MCP server gives agents tools: a tracker, docs or a database. Register one, then choose the projects, stations and agents that may use it." />}>
@@ -62,7 +63,7 @@ export default function McpView() {
             id="mcp" noun="server" rows={servers} rowKey={(m) => m.id} rowId={(m) => `mcp-row-${m.id}`} onRow={(m) => navigate("mcp", m.id)}
             text={(m) => `${m.name} ${m.url} ${m.transport}`}
             filters={[
-              { key: "health", label: "Health", options: ["healthy", "degraded", "down", "disabled"], test: (m, v) => (v === "disabled" ? m.enabled === false : v === "down" ? down(m) : m.enabled !== false && m.health === v) },
+              { key: "health", label: "Health", options: ["healthy", "degraded", "down", "disabled", "needs re-approval"], test: (m, v) => (v === "needs re-approval" ? !!m.needsReapproval : v === "disabled" ? m.enabled === false : v === "down" ? down(m) : m.enabled !== false && m.health === v) },
               { key: "sensitivity", label: "Sensitivity", options: ["public", "internal", "confidential", "restricted"] },
             ]}
             columns={[

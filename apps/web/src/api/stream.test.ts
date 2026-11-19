@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { backoffDelay, parseChange, startStream, type EventSourceLike } from "./stream";
 import { bindQueryClient, expandSlices, onCanInvalidated } from "./keys";
+import { connection, pollWhenStreamDown } from "../lib/connection/store";
 
 describe("keys", () => {
   it("expands a slice to its dependents once", () => {
@@ -138,5 +139,45 @@ describe("startStream", () => {
     stop();
     timers.at(-1)!.fn(); // a pending reconnect after stop does nothing
     expect(sources).toHaveLength(3);
+  });
+
+  it("a superseded stream is shown as paused (not Live), screens poll meanwhile, and Reconnect opens a fresh stream", () => {
+    connection.reset();
+    const sources: ReturnType<typeof fakeSource>[] = [];
+    const stop = startStream({ create: () => { const s = fakeSource(); sources.push(s); return s.es; }, setTimer: () => 0 as unknown as ReturnType<typeof setTimeout>, clearTimer: () => undefined });
+    (sources[0]!.es.onopen as () => void)();
+    expect(connection.get()).toMatchObject({ state: "live", streamDown: false });
+    expect(pollWhenStreamDown(5000)()).toBe(false);
+    sources[0]!.fire("superseded");
+    expect(connection.get()).toMatchObject({ state: "paused", streamDown: true });
+    expect(pollWhenStreamDown(5000)()).toBe(5000);
+    connection.reconnect();
+    expect(sources).toHaveLength(2);
+    expect(connection.get().state).toBe("reconnecting");
+    (sources[1]!.es.onopen as () => void)();
+    expect(connection.get()).toMatchObject({ state: "live", streamDown: false });
+    stop();
+    connection.reset();
+  });
+
+  it("a capped tab (409 on connect) is named after two failed connects: paused, not Reconnecting forever", async () => {
+    connection.reset();
+    const sources: ReturnType<typeof fakeSource>[] = [];
+    const timers: Array<() => void> = [];
+    const stop = startStream({
+      create: () => { const s = fakeSource(); sources.push(s); return s.es; },
+      setTimer: (fn) => { timers.push(fn); return timers.length as unknown as ReturnType<typeof setTimeout>; },
+      clearTimer: () => undefined,
+      probe: () => Promise.resolve(409),
+    });
+    (sources[0]!.es.onerror as () => void)();
+    expect(connection.get().state).toBe("reconnecting");
+    timers.shift()!();
+    (sources[1]!.es.onerror as () => void)();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(connection.get().state).toBe("paused");
+    stop();
+    connection.reset();
   });
 });

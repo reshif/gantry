@@ -41,6 +41,10 @@ describe("needsOf: what a work order waits on, from the API's own data", () => {
     expect(n).toMatchObject({ kind: "question", mine: true, sub: "Which currency?" });
     expect(n.text).toMatch(/asks you$/);
   });
+  it("a question asked of a deactivated person splits into a chip and the bare question", () => {
+    const n = needsOf(w(), cat, waiting([{ wo: "WO-1", title: "t", project: "payments", question: "Asked of Sam Lee (deactivated): Which currency?" }]), names);
+    expect(n).toMatchObject({ kind: "question", askedOf: "Asked of Sam Lee (deactivated)", sub: "Which currency?" });
+  });
   it("a pending gate names the gate and the approvals so far", () => {
     const n = needsOf(w(), cat, waiting([], [{ wo: "WO-1", gate: "G5", gateLabel: "G5", project: "payments", projectName: "P", have: 0, need: 2 }]), names);
     expect(n).toMatchObject({ kind: "gate", text: "G5 approval (0 of 2)", mine: true });

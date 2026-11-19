@@ -143,6 +143,29 @@ describe("Floor: belt", () => {
     expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
   });
 
+  it("in the gate drawer an admin during a halt sees Approve anyway, is asked for a reason of 5+ characters, and the reason rides on the approve", async () => {
+    const calls = mockApi({
+      "GET /api/v1/work-orders/WO-2408": () => ({ body: { ...WOS.find((w) => w.id === "WO-2408"), version: 3, allowed: { approve: { allowed: false, reason: "The line is halted.", needs: "override_reason", override: true, overrideKind: "halt", gate: "G3d", instance: "WO-2408:G3d:1" }, moves: {}, can: {} } } }),
+      "POST /api/v1/gate-instances/WO-2408%3AG3d%3A1/approve": () => ({ body: { ok: true, msg: "G3d approved." } }),
+    });
+    mount(<FloorView />);
+    await screen.findAllByText("PAY");
+    fireEvent.click(document.getElementById("floor-gate-G3d") as HTMLElement);
+    const btn = await screen.findByRole("button", { name: /anyway/ });
+    await waitFor(() => expect(btn.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(btn);
+    expect((await screen.findAllByText(/The line is halted\./)).length).toBeGreaterThan(0);
+    const note = document.getElementById("gd-text") as HTMLTextAreaElement;
+    fireEvent.change(note, { target: { value: "abc" } });
+    fireEvent.click(document.getElementById("gd-ok")!);
+    expect((await screen.findAllByText(/at least 5 characters/)).length).toBeGreaterThan(0);
+    expect(bodyOf(calls, "POST", "/api/v1/gate-instances/WO-2408%3AG3d%3A1/approve")).toHaveLength(0);
+    fireEvent.change(note, { target: { value: "Hotfix for the payments outage" } });
+    fireEvent.click(document.getElementById("gd-ok")!);
+    await waitFor(() => expect(bodyOf(calls, "POST", "/api/v1/gate-instances/WO-2408%3AG3d%3A1/approve")).toHaveLength(1));
+    expect(bodyOf(calls, "POST", "/api/v1/gate-instances/WO-2408%3AG3d%3A1/approve")[0]!.body).toMatchObject({ reason: "Hotfix for the payments outage" });
+  });
+
   it("shows the approvals count and, on click, the approver rule for each work order waiting at the gate", async () => {
     mockApi({
       "GET /api/v1/work-orders/WO-2408": () => ({ body: { ...WOS.find((w) => w.id === "WO-2408"), version: 3, gateProgress: { G3d: { have: 1, need: 2 } }, allowed: { approve: { allowed: true, reason: "", needs: "", gate: "G3d", instance: "WO-2408:G3d:1" }, moves: {}, can: {} } } }),

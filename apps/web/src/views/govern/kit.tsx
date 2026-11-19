@@ -6,7 +6,7 @@
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Btn } from "../../ui/primitives";
 
-const EVENT = "gantry-qs";
+import { EVENT } from "./qs";
 const subscribe = (fn: () => void) => {
   window.addEventListener("popstate", fn);
   window.addEventListener(EVENT, fn);
@@ -42,24 +42,7 @@ export function setQS(patch: Record<string, string>): void {
   window.dispatchEvent(new Event(EVENT));
 }
 
-/** Screens that own each govern query prefix; any other screen drops the keys. */
-const OWNERS: Record<string, string[]> = { "acc.": ["access"], "ppl.": ["people", "person"] };
-
-/** Remove `acc.*` / `ppl.*` from the query string when the current route is not the one that owns them. */
-export function clearGovernQS(routeId: string): void {
-  const u = new URL(window.location.href);
-  let hit = false;
-  for (const k of Array.from(u.searchParams.keys())) {
-    const owner = Object.entries(OWNERS).find(([pre]) => k.startsWith(pre));
-    if (owner && !owner[1].includes(routeId)) {
-      u.searchParams.delete(k);
-      hit = true;
-    }
-  }
-  if (!hit) return;
-  window.history.replaceState(window.history.state, "", u.pathname + u.search + u.hash);
-  window.dispatchEvent(new Event(EVENT));
-}
+export { clearGovernQS } from "./qs";
 
 export const PAGE_SIZE = 12;
 

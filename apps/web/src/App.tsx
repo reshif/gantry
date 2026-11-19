@@ -6,7 +6,8 @@ import { useMeState } from "./api/queries";
 import { useClearDraftsOnUserSwitch } from "./lib/useDraft";
 import { startStream } from "./api/stream";
 import { canBatcher } from "./api/can";
-import { startConnectionWatch } from "./lib/connection/store";
+import { pollWhenStreamDown, startConnectionWatch } from "./lib/connection/store";
+import { watchStreamDown } from "./lib/connection/rearm";
 import { deriveSession, noteUnauthorized, registerSessionReset, useSessionLifecycle } from "./lib/session/session";
 import { ReconnectBanner } from "./lib/session/ReconnectBanner";
 import { AppErrorBoundary } from "./lib/errors/AppErrorBoundary";
@@ -18,12 +19,17 @@ import { Shell } from "./shell/Shell";
 import { lazyRetry } from "./lib/errors/lazyRetry";
 import { useDropStaleSearch } from "./lib/staleSearch";
 
+/** How often every read refetches while live updates are down. */
+export const STREAM_DOWN_POLL_MS = 20_000;
+
 export function makeQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: {
         staleTime: 15_000,
         refetchOnWindowFocus: true,
+        // the stream is how screens stay current; while it is down every live read polls (never while it is up). A query may set its own interval.
+        refetchInterval: pollWhenStreamDown(STREAM_DOWN_POLL_MS),
         // a 4xx is an answer (permission, missing), not a blip: do not retry it
         retry: (count, err) => !(err instanceof ApiError && err.status >= 400 && err.status < 500) && count < 2,
       },
@@ -57,6 +63,8 @@ function Root() {
   // live updates only while signed in
   useEffect(() => (signedIn ? startStream() : undefined), [signedIn]);
   useEffect(() => startConnectionWatch(), []);
+  // a drop of the stream starts the polling fallback on reads fetched while it was up (see lib/connection/rearm)
+  useEffect(() => watchStreamDown(client), [client]);
   useDropStaleSearch();
 
   // Branch on data FIRST: a failed refetch of /me must never unmount a signed-in app.

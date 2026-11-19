@@ -212,4 +212,13 @@ describe("Request changes at a gate (Inbox)", () => {
     expect(call.headers["if-match"]).toBe("5");
     expect(await screen.findByText("Changes requested on WO-2398 at G2")).toBeTruthy();
   });
+
+  it("a question asked of a deactivated person shows who it was asked of as its own chip", async () => {
+    const GONE = { ...CONV, question: "Asked of Sam Lee (deactivated): Which currency?" };
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [], conversations: [GONE] }, attention: [] }) }) });
+    mount(<InboxView />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Questions/ }));
+    expect(await screen.findByText("Asked of Sam Lee (deactivated)")).toBeTruthy();
+    expect(screen.getByText("Which currency?")).toBeTruthy();
+  });
 });

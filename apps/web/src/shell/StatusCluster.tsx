@@ -1,7 +1,7 @@
 /** Factory state, IST clock and shift, release windows and freezes (legacy status cluster, without the simulation control). */
 import { useEffect, useRef, useState } from "react";
 import { useCanMany } from "../api/can";
-import { useConnection } from "../lib/connection/store";
+import { PAUSED_HINT, connection, useConnection } from "../lib/connection/store";
 import { useFreezes, useMe, usePolicies, useRepos } from "../api/queries";
 import { statusInfo, type StatusInfo } from "../lib/status";
 import { usePrefs } from "../lib/prefs";
@@ -48,13 +48,14 @@ export function StatusCluster() {
   if (!s || !me) return null;
   const anyHalted = me.projects.some((p) => p.halted);
   const guardOf = (i: number) => (checks[i]?.pending ? undefined : checks[i]);
-  const [label, tone] = killed ? ["Stopped", "bad"] : anyHalted ? ["Halted", "warn"] : conn === "reconnecting" ? ["Reconnecting", "warn"] : conn === "offline" ? ["Offline", "warn"] : s.factory === "replay" ? ["Replay", "info"] : ["Live", "ok"];
-  const hint = conn === "live" ? "" : conn === "reconnecting" ? "Live updates dropped. Reconnecting; screens refresh on a timer meanwhile." : "No network. Showing the last information we had.";
+  const [label, tone] = killed ? ["Stopped", "bad"] : anyHalted ? ["Halted", "warn"] : conn === "reconnecting" ? ["Reconnecting", "warn"] : conn === "paused" ? ["Paused", "warn"] : conn === "offline" ? ["Offline", "warn"] : s.factory === "replay" ? ["Replay", "info"] : ["Live", "ok"];
+  const hint = conn === "live" ? "" : conn === "paused" ? PAUSED_HINT : conn === "reconnecting" ? "Live updates dropped. Reconnecting; screens refresh on a timer meanwhile." : "No network. Showing the last information we had.";
   const stop = makeStopActions(ui, me);
   const open = () => {
     if (!btn.current) return;
     const anchor = btn.current;
     ui.menu(anchor, null, [
+      ...(conn === "paused" ? [{ head: "Live updates" }, { label: "Reconnect (opened in another tab)", icon: "right", onClick: () => connection.reconnect() }] : []),
       { head: "Line control" },
       cp
         ? { label: cp.halted ? "Resume line" : "Halt line (pause the project)", icon: cp.halted ? "right" : "pause", guard: guardOf(0), onClick: () => (cp.halted ? void stop.resume(cp.id) : stop.halt(cp.id)) }
