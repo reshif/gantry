@@ -3,7 +3,7 @@
  * configuration right sets or raises the cap here. Only a raise that puts spend back under the cap lifts that budget halt, in the same transaction.
  * Manual halts, project and factory halts and the kill state are never touched.
  */
-import type { Tx } from "@gantry/db";
+import { appendEvent, enqueue, type EventCategory, type Tx } from "@gantry/db";
 import type { Actor, CommandResult } from "../../core/command.js";
 import { invalid } from "../../core/errors.js";
 import { job } from "../../core/jobs-contract.js";
@@ -94,4 +94,33 @@ export async function setWoCap(tx: Tx, a: Actor, woId: string, b: { usd: number;
     changes: resumed ? ["workOrders", "stops", "floor", "home", "models"] : ["workOrders", "models"],
     project: w.project,
   };
+}
+
+export const ZERO_CAP_LIFT_REASON = "cap taken off: $0 now means no cap";
+
+/**
+ * A one-off sweep, run at startup and safe to repeat: a project whose monthly budget is 0 has no cap now ($0 used to be a real cap), so a work order still halted by that
+ * project cap is resumed, each lift audited with the reason above. A work order that is still over its own cap stays halted. Halts only: nothing is deleted.
+ */
+export async function sweepZeroCapHalts(tx: Tx, orgId: string, now: Date = new Date()): Promise<string[]> {
+  const halts = (await tx.query<{ wo_id: string; reason: string; project_id: string }>(
+    `select s.wo_id, s.reason, w.project_id from stops s join work_orders w on w.org_id = s.org_id and w.id = s.wo_id join budgets b on b.org_id = w.org_id and b.project_id = w.project_id
+      where s.org_id = $1 and s.scope_type = 'wo' and s.mode = 'halt' and s.cause = 'budget' and s.lifted_at is null and b.monthly_limit_micros = 0 order by s.wo_id`, [orgId],
+  )).rows;
+  const actor: Actor = {
+    orgId, id: "system", kind: "service", personId: null, name: "Gantry", channel: "system", via: null, sessionId: null, ip: null, requestId: `zero-cap-sweep-${now.getTime()}`,
+    decision: { allowed: true, reason: "A monthly budget of 0 means no cap, so the halt it held is lifted.", rule: { kind: "service", id: "zero-cap-sweep", name: "Zero cap sweep" }, needs: "" }, ifMatch: null, idempotencyKey: null, now,
+  };
+  const lifted: string[] = [];
+  for (const h of halts) {
+    if (capOfReason(h.reason) !== "project") continue;
+    if ((await overBudget(tx, orgId, h.wo_id)).length) continue;
+    const l = await liftBudgetHalt(tx, actor, h.wo_id, ZERO_CAP_LIFT_REASON);
+    for (const e of l.events) {
+      await appendEvent(tx, { orgId, type: e.type, category: (e.category ?? "kill") as EventCategory, actor: "system", channel: "system", subject: e.subject ?? null, projectId: e.projectId ?? h.project_id, woId: e.woId ?? h.wo_id, woVersion: e.woVersion ?? null, outcome: e.outcome ?? "ok", before: e.before, after: e.after });
+    }
+    for (const j of l.jobs) await enqueue(tx, { orgId, ...j });
+    lifted.push(h.wo_id);
+  }
+  return lifted;
 }

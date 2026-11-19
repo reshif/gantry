@@ -133,6 +133,7 @@ export async function readProjects(db: Queryable, orgId: string, stops?: ActiveS
       })),
       mcp: Array.isArray(cfg.mcp) ? cfg.mcp : [],
       pageOnCall: cfg.oncallPage !== false,
+      pagedFor: pagedFor(cfg.oncallPage !== false),
       oncall: Array.isArray(cfg.oncall) ? (cfg.oncall as unknown[]).filter((x): x is string => typeof x === "string") : [],
       budget: { monthly: b ? Math.round(num(b.monthly_limit_micros) / 1_000_000) : 0, capped: b ? num(b.monthly_limit_micros) > 0 : false, mtd: num(spend.rows.find((x) => x.project_id === r.id)?.micros) / 1_000_000, alertAt: b ? num(b.alert_at) : 0.8 },
       created: ms(r.created_at) ?? 0,
@@ -244,6 +245,9 @@ export async function readSecurity(db: Queryable, orgId: string): Promise<Versio
   const r = rows[0];
   return r ? { version: r.version, value: { ...DEFAULT_SECURITY, ...(r.body as SecuritySettings) } } : { version: 0, value: DEFAULT_SECURITY };
 }
+
+/** What the on-call page covers, in words the page shows: kill and restore always, the rest while the project keeps the default page on. */
+const pagedFor = (on: boolean): string[] => (on ? ["kill", "restore", "halts", "blocked", "security hold", "escalations"] : ["kill", "restore"]);
 
 export const DEFAULT_SECURITY: SecuritySettings = {
   sso: { provider: "OpenID Connect", domain: "", enforced: false, entity: "" },

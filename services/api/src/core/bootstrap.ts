@@ -4,6 +4,7 @@ import type pg from "pg";
 import type { Config } from "./config.js";
 import { DEFAULT_SECURITY } from "./read/index.js";
 import { seedDemoAudit } from "../areas/audit/seed.js";
+import { sweepZeroCapHalts } from "../areas/workorders/budget.js";
 import { ensureDefaultModel } from "../areas/models/default.js";
 import { addNewKitCases, loadStarterKit, upgradeOnboardingAgent } from "../areas/agents/starter-kit.js";
 
@@ -103,6 +104,8 @@ export async function bootstrapOrg(pool: pg.Pool, config: Pick<Config, "orgSlug"
         await appendEvent(tx, { orgId: id, type: "matrix.defaults", category: "access", actor: "system", channel: "system", subject: { type: "matrix", id: String(cur.version + 1) }, after: { added: [...addedIds], roles: newRoles.map((r) => r.id), note: "built-in defaults for new actions and roles; existing cells unchanged" } });
       }
     }
+    const swept = await sweepZeroCapHalts(tx, id);
+    if (swept.length) log?.info({ workOrders: swept }, "budget halts of a $0 monthly budget lifted: $0 now means no cap");
     // A connected vendor with callable enabled models but no routing default (connected before the default was set automatically): set one now.
     const auto = await ensureDefaultModel(tx, id, "startup");
     if (auto) log?.info({ model: auto }, "routing default set");

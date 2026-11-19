@@ -64,13 +64,16 @@ d("round 4: notifications of kill, restore and resume", () => {
     const inst = await mail();
     const k = await killFactory();
     expect(k.status, JSON.stringify(k.body)).toBe(200);
-    const rows = await outboxFor("kill");
+    // The admins' own notice, then the on-call page of the projects (people not already reached).
+    const all = await outboxFor("kill");
+    const rows = all.filter((r: { payload: { to: string[] } }) => r.payload.to.includes("asha@acme.dev"));
     expect(rows).toHaveLength(1);
+    expect(all.length).toBeLessThanOrEqual(2);
     expect(rows[0].destination).toMatch(new RegExp(`^smtp:${inst}:`));
     expect(rows[0].payload.mandatory).toBe(true);
     expect(rows[0].payload.to).toContain("asha@acme.dev");
-    const dl = await w.q(`select status, event_type from deliveries where event_type = 'kill'`);
-    expect(dl).toEqual([{ status: "pending", event_type: "kill" }]);
+    const dl = await w.q(`select status, event_type from deliveries where event_type = 'kill' order by created_at`);
+    expect(dl[0]).toEqual({ status: "pending", event_type: "kill" });
     await restoreFactory();
   });
 

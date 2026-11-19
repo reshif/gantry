@@ -9,7 +9,7 @@ import { obj } from "../../core/read/rows.js";
 import { loadSample, slackBlocks, type CardSample } from "./cards.js";
 import { emitOne, newDeliveryId, recordDelivery } from "./emit.js";
 import { isMandatoryEvent, notifyEventFor, type EventLike } from "./events.js";
-import { condOf, factoryAdmins, hoursOk, loadInstances, resolveOnCall, type Dest, type InstInfo } from "./routing.js";
+import { adminsToPage, condOf, factoryAdmins, hoursOk, loadInstances, resolveOnCall, type Dest, type InstInfo } from "./routing.js";
 import { defaultTarget } from "../integrations/connectors.js";
 
 export interface ProducerOptions {
@@ -63,12 +63,15 @@ export async function produceNotifications(tx: Tx, e: EventInput, ap: AppendedEv
   const overrides = repoId ? await repoOverrides(tx, orgId, repoId, m.event) : [];
   // What reached a connection (not a failed row): a kill that reaches nobody falls back to the Factory Admins (S-35).
   let delivered = 0;
+  // Every address any route or fallback of this event reaches, so nobody is paged twice for it (the on-call page skips them).
+  const reached = new Set<string>();
   if (!projects.length) {
     // A factory kill with no kill route in any project: every connection open to the factory gets it, else the Factory Admins.
     const sample = await loadSample(tx, { orgId, publicUrl, event: m.event, projectId: null, woId: e.woId ?? null, source: like, at: ap.recordedAt });
-    const base = { orgId, eventId: ap.id, event: m.event, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo };
+    const base = { orgId, eventId: ap.id, event: m.event, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo, reached };
     delivered += await fallbackMandatory(tx, { ...base, project: null });
     if (!delivered) await fallbackAdmins(tx, { ...base, project: e.projectId ?? null });
+    await pageFactory(tx, e, ap, { orgId, event: m.event, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo, reached });
     return;
   }
   for (const project of projects) {
@@ -79,8 +82,6 @@ export async function produceNotifications(tx: Tx, e: EventInput, ap: AppendedEv
     let produced = 0;
     let carried = 0;
     const seen = new Set<string>();
-    // Every address a route or fallback of this event reaches, so the default on-call page never pages the same person twice.
-    const reached = new Set<string>();
     for (const r of routes) {
       if (!m.mandatory) {
         if (!r.enabled) continue;
@@ -110,6 +111,33 @@ export async function produceNotifications(tx: Tx, e: EventInput, ap: AppendedEv
     if (m.mandatory && !delivered && project === projects[projects.length - 1]) await fallbackAdmins(tx, { orgId, eventId: ap.id, event: m.event, project: e.projectId ?? null, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo, reached });
     if (e.projectId && pagesOnCall(m.event, e.type)) await pageOnCall(tx, e, ap, { orgId, project, event: m.event, mandatory: m.mandatory, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo, reached });
   }
+  // A factory-wide kill or restore (no project) that routes of some project carried still pages everyone on call, whatever channel carried it.
+  if (!e.projectId && m.mandatory) await pageFactory(tx, e, ap, { orgId, event: m.event, repoId, woId: e.woId ?? null, sample: await loadSample(tx, { orgId, publicUrl, event: m.event, projectId: null, woId: e.woId ?? null, source: like, at: ap.recordedAt }), insts, woFacts: wo, reached });
+}
+
+interface FactoryPageCtx { orgId: string; event: string; repoId: string | null; woId: string | null; sample: CardSample; insts: InstInfo[]; woFacts: WoFacts | null; reached: ReadonlySet<string> }
+
+/**
+ * The page of a factory-wide kill or restore: the on-call people of EVERY project plus the Factory Admins (present first; all of them when every admin is away),
+ * one email, deduped by address and minus anyone already reached. One `notify.page` audit event. Kill and restore cannot be switched off.
+ */
+async function pageFactory(tx: Tx, e: EventInput, ap: AppendedEvent, c: FactoryPageCtx): Promise<void> {
+  const emails = new Set<string>();
+  const who = new Map<string, string>();
+  const projects = (await tx.query<{ id: string }>(`select id from projects where org_id = $1 order by id`, [c.orgId])).rows;
+  for (const p of projects) {
+    const oc = await resolveOnCall(tx, c.orgId, p.id, ap.recordedAt, false);
+    oc.emails.forEach((x, i) => { emails.add(x); who.set(x, oc.ids[i] ?? x); });
+  }
+  const admins = await adminsToPage(tx, c.orgId, ap.recordedAt);
+  for (const r of await factoryAdmins(tx, c.orgId)) if (admins.ids.includes(r.id)) { emails.add(r.email.toLowerCase()); who.set(r.email.toLowerCase(), r.id); }
+  const to = [...emails].filter((x) => !c.reached.has(x));
+  if (!to.length) return;
+  const em = await emitOne(tx, { orgId: c.orgId, eventId: ap.id, event: c.event, mandatory: true, project: null, route: null, dest: { channel: "email", target: to.join(","), integration: null }, repo: c.repoId, wo: c.woId, sample: c.sample, insts: c.insts, woFacts: c.woFacts, page: true });
+  await appendEvent(tx, {
+    orgId: c.orgId, type: "notify.page", category: "integrations", actor: "system", channel: "system", subject: { type: "factory", id: "factory" }, woId: c.woId, outcome: em.status === "pending" ? "ok" : "failed", causationId: ap.id,
+    after: { event: c.event, source: e.type, scope: "factory", paged: to.map((x) => who.get(x) ?? x), ...(admins.allAway ? { note: "all admins away: paged anyway" } : {}), delivery: em.deliveryId, ...(em.status === "failed" ? { error: em.error } : {}) },
+  });
 }
 
 /** The urgent events that page the people on call by default: kill, restore, an andon halt (not its resume), a blocked work order, a security hold, a gate escalation. */
@@ -134,7 +162,7 @@ async function pageOnCall(tx: Tx, e: EventInput, ap: AppendedEvent, c: PageCtx):
   const byEmail = new Map((oc.fallback ? await factoryAdmins(tx, c.orgId) : (await tx.query<{ id: string; email: string }>(`select id, email from people where org_id = $1 and id = any($2)`, [c.orgId, oc.ids])).rows).map((r) => [r.email.toLowerCase(), r.id]));
   await appendEvent(tx, {
     orgId: c.orgId, type: "notify.page", category: "integrations", actor: "system", channel: "system", subject: { type: "project", id: c.project }, projectId: c.project, woId: c.woId, outcome: em.status === "pending" ? "ok" : "failed", causationId: ap.id,
-    after: { event: c.event, source: e.type, paged: emails.map((x) => byEmail.get(x) ?? x), ...(oc.fallback ? { fallback: "Factory Admins (nobody on call is active and present)" } : {}), delivery: em.deliveryId, ...(em.status === "failed" ? { error: em.error } : {}) },
+    after: { event: c.event, source: e.type, paged: emails.map((x) => byEmail.get(x) ?? x), ...(oc.fallback ? { fallback: "Factory Admins (nobody on call is active and present)" } : {}), ...(oc.allAway ? { note: "all admins away: paged anyway" } : {}), delivery: em.deliveryId, ...(em.status === "failed" ? { error: em.error } : {}) },
   });
 }
 

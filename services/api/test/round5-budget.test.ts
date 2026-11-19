@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { issueRunToken } from "../src/areas/internal/tokens.js";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 import { world } from "./flow-helpers.js";
+import { sweepZeroCapHalts } from "../src/areas/workorders/budget.js";
 
 const d = TEST_URL ? describe : describe.skip;
 const EDGE = { authorization: "Bearer edge-token-for-tests" };
@@ -65,6 +66,25 @@ d("round 5 budget (S-43, S-44, S-45)", () => {
     expect(cap.status).toBe(200);
     expect(await w.q(`select monthly_zero_cap from budgets where project_id = 'payments'`)).toEqual([{ monthly_zero_cap: false }]);
     expect((await w.call("p-asha", "GET", "/api/v1/budgets")).body.find((x: { project: string }) => x.project === "payments")).toMatchObject({ capped: true });
+    await w.call(ADMIN, "PATCH", "/api/v1/projects/payments/config", { path: "budget.monthly", value: 1000 });
+  });
+
+  it("G-P3: the sweep lifts a project-cap halt left under a budget of 0 and audits it; a halt under a real cap is kept; nothing is deleted", async () => {
+    await w.call(ADMIN, "PUT", "/api/v1/budgets/payments", { perWorkOrder: 0 });
+    await w.q(`delete from usage_meter where project_id = 'payments'`);
+    await w.call(ADMIN, "PATCH", "/api/v1/projects/payments/config", { path: "budget.monthly", value: 0.01 });
+    const a = await run("WO-G3A"); await a.usage();
+    expect((await stops("WO-G3A")).map((s: { cause: string }) => s.cause)).toEqual(["budget"]);
+    // The state a deploy leaves: the halt of the old $0 cap is still on while the project now reads no cap.
+    await w.q(`update budgets set monthly_limit_micros = 0, monthly_zero_cap = true where project_id = 'payments'`);
+    expect((await stops("WO-G3A"))[0].lifted_at).toBeNull();
+    const lifted = await withTx(t.db.app, (tx) => sweepZeroCapHalts(tx, t.orgId));
+    expect(lifted).toContain("WO-G3A");
+    expect((await stops("WO-G3A"))[0].lifted_at).not.toBeNull();
+    const ev = await w.q(`select after, before from events where wo_id = 'WO-G3A' and type = 'resume'`);
+    expect(JSON.stringify(ev)).toMatch(/cap taken off: \$0 now means no cap/);
+    expect(await w.q(`select 1 from stops where wo_id = 'WO-G3A'`), "the stop row stays").toHaveLength(1);
+    expect(await withTx(t.db.app, (tx) => sweepZeroCapHalts(tx, t.orgId)), "safe to repeat").toEqual([]);
     await w.call(ADMIN, "PATCH", "/api/v1/projects/payments/config", { path: "budget.monthly", value: 1000 });
   });
 
