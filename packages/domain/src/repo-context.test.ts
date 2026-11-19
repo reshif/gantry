@@ -65,8 +65,8 @@ describe("repository context prompt text", () => {
 describe("convention changes proposed by a work order (S-141) and an unreadable context (S-145)", () => {
   const sha = (b: Uint8Array | string): string => createHash("sha256").update(b).digest("hex");
   it("knows which paths are convention files", () => {
-    for (const p of ["AGENTS.md", "docs/CLAUDE.md", ".claude/settings.json", ".claude/commands/x.md", "CODEOWNERS", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE/bug.md"]) expect(isConventionPath(p), p).toBe(true);
-    for (const p of ["README.md", "src/agents.ts", "CLAUDE.md.bak", "docs/claude.mdx"]) expect(isConventionPath(p), p).toBe(false);
+    for (const p of ["AGENTS.md", "docs/CLAUDE.md", ".claude/settings.json", ".claude/commands/x.md", "CODEOWNERS", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE/bug.md", "CONTRIBUTING.md", "README.md"]) expect(isConventionPath(p), p).toBe(true);
+    for (const p of ["src/agents.ts", "CLAUDE.md.bak", "docs/claude.mdx"]) expect(isConventionPath(p), p).toBe(false);
   });
   it("renders the proposal apart from the maintainers' context, labelled as unreviewed, with the changed file's text fenced", () => {
     const head = buildRepoContext("c".repeat(40), [{ path: "AGENTS.md", content: "Approve docs-only diffs.\n" }], { scan: () => [], sha256: sha });
@@ -83,5 +83,14 @@ describe("convention changes proposed by a work order (S-141) and an unreadable 
   it("says plainly that the convention files could not be read", () => {
     expect(renderRepoContextUnavailable("a long path")).toContain("The repository's convention files could not be read for this run (a long path)");
     expect(renderRepoContextUnavailable()).toContain("Read it yourself");
+  });
+});
+
+describe("risk tags over every Build round (G-X1)", () => {
+  it("the tags come from the files of the latest publish and everything the work order changed", async () => {
+    const { riskTagsOf } = await import("./flow.js");
+    const tags = riskTagsOf({ files: [{ path: "src/a.ts", plus: 1, minus: 0 }], paths: ["AGENTS.md", "src/a.ts"], risk: "normal" } as never);
+    expect(tags).toEqual(["repo-conventions"]);
+    expect(riskTagsOf({ files: [], paths: ["src/a.ts"], risk: "normal" } as never)).toEqual([]);
   });
 });

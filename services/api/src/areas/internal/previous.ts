@@ -61,6 +61,14 @@ function fit(r: { station: string; summary: string; output: unknown }, budget: n
   return { ...out, output: null, truncated: { bytes, keptFields: [], omittedFields: [] } };
 }
 
+/** The stations whose work belongs to the round a send-back discarded: the returned station and every station after it, in the order the rows first show them. */
+export function discardedStations(rows: ReadonlyArray<{ station: string }>, redo?: { station: string }): Set<string> {
+  if (!redo) return new Set();
+  const seen = [...new Set(rows.map((r) => r.station))];
+  const from = seen.indexOf(redo.station);
+  return new Set(from >= 0 ? seen.slice(from) : []);
+}
+
 /**
  * `rows` in creation order. Returns the latest succeeded result of each station, in the order the stations first appear, within `cap` bytes.
  * `redo` is set for a station that a send-back returned (S-146): the results of that station and of every station after it that were written before the

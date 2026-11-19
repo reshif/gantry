@@ -1,6 +1,6 @@
 import type { Queryable } from "@gantry/db";
 import { PROPOSED_CONVENTIONS_TITLE, REPO_CONTEXT_LAYER_NAME, ProposedConventions, RepoContext, checkMatches, renderProposedConventions, renderRepoContext, renderRepoContextUnavailable } from "@gantry/domain";
-import { compactPrevious, type StationResultRow } from "./previous.js";
+import { compactPrevious, discardedStations, type StationResultRow } from "./previous.js";
 import { agentConfig } from "./metering.js";
 import { runLimitsOf } from "../agents/run-limits.js";
 import { testCommandRules } from "../onboarding/testcmd.js";
@@ -301,12 +301,21 @@ async function handoff(db: Queryable, c: RunCtx): Promise<unknown> {
   const sc = c.attemptData.scout as { id: string; question: string; focus: string } | undefined;
   const sw = swarmOf(c.woData);
   const scouts = !sc && sw?.endedAt && sw.station === c.station ? sw.scouts.map((x) => ({ id: x.id, question: x.question, focus: x.focus, state: x.state, summary: x.summary ?? "" })) : undefined;
-  const change = await changeFact(db, c, prior as StationResultRow[]);
-  const ci = c.station === "build" ? null : await ciFact(db, c);
+  const redo = redoOf(c);
+  const old = discardedStations(prior as StationResultRow[], redo);
+  const DISCARDED = "This was written before the send-back that returned this station: it belongs to a discarded round and shows what the work looked like then, not now.";
+  // A document, the change fact and the CI fact from before the send-back are kept and marked, never presented as the current state of the work (G-X3).
+  const documentsMarked = documents.map(({ at, ...d }) => (redo && d.station && old.has(d.station) && typeof at === "number" && at < redo.since ? { ...d, fromDiscardedRound: true as const, discardedRoundNote: DISCARDED } : d));
+  const changeRaw = await changeFact(db, c, prior as StationResultRow[]);
+  const ciRaw = c.station === "build" ? null : await ciFact(db, c);
+  const pubAt = redo ? Number((await db.query<{ t: number | null }>(`select (extract(epoch from max(occurred_at)) * 1000)::float8 as t from events where org_id = $1 and wo_id = $2 and type = 'run.published'`, [c.orgId, c.woId])).rows[0]?.t ?? 0) : 0;
+  const stale = !!redo && old.has("build") && pubAt > 0 && pubAt < redo.since;
+  const change = changeRaw && stale ? { ...changeRaw, fromDiscardedRound: true, discardedRoundNote: DISCARDED } : changeRaw;
+  const ci = ciRaw && stale ? { ...ciRaw, fromDiscardedRound: true, discardedRoundNote: DISCARDED } : ciRaw;
   const review = await reviewFact(db, c, brief);
   const returned = returnedFact(c);
   return {
-    workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, ...(change ? { change } : {}), ...(ci ? { ci } : {}), ...(review ? { review } : {}), ...(returned ? { returned } : {}), previous: compactPrevious(prior as StationResultRow[], c.woId, undefined, redoOf(c)), documents, dialogue, sources, research,
+    workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, ...(change ? { change } : {}), ...(ci ? { ci } : {}), ...(review ? { review } : {}), ...(returned ? { returned } : {}), previous: compactPrevious(prior as StationResultRow[], c.woId, undefined, redo), documents: documentsMarked, dialogue, sources, research,
     ...(sc ? { scout: { id: sc.id, question: sc.question, focus: sc.focus, note: `You are scout ${sc.id}. Answer only this question, write your findings to research/scout-${sc.id.toLowerCase()}.md with write_document, cite web sources, and end. You cannot send scouts or propose a plan.` } } : {}),
     ...(scouts ? { scouts } : {}),
   };

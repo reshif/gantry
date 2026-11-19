@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { withTx } from "@gantry/db";
+import { appendEvent, withTx } from "@gantry/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildProposedConventions, buildRepoContext, riskTagsFor } from "@gantry/domain";
 import { pinRunConfig } from "../src/areas/agents/compose.js";
@@ -255,5 +255,53 @@ d("agent context pipeline (S-140 to S-146)", () => {
     const mine = await attempt("wo-ctx-8", "plan");
     const s = await spec(mine.run);
     expect(JSON.stringify(s.input)).not.toContain("OTHER ORDER SECRET");
+  });
+
+  it("G-X2: a push delivered late does not take baseSha back or mark it fresh; a clean step forward does move it", async () => {
+    await q(`insert into repo_config (org_id, repo_id, default_branch, data) values ($1,'payments-api','main','{}'::jsonb) on conflict (org_id, repo_id) do update set data = $2::jsonb`, [t.orgId, JSON.stringify({ baseSha: A })]);
+    const M2 = "e".repeat(40);
+    const push = (after: string, before: string, ts: string) => (factsFromWebhook("push", { ref: "refs/heads/main", before, after, head_commit: { timestamp: ts }, repository: { full_name: "acme/payments-api", default_branch: "main" } }) as { facts: never }).facts;
+    const apply = (facts: never, now: string) => withTx(t.db.app, (tx) => applyFacts(tx, t.orgId, facts, { now: new Date(now) }));
+    const cfg = async () => (await q(`select data from repo_config where repo_id = 'payments-api'`))[0].data;
+    // M (after A) then M2 (after M), delivered M2 first
+    await apply(push(M2, M, "2026-11-19T10:05:00Z"), "2026-11-19T10:06:00Z");
+    expect(await cfg()).toMatchObject({ baseSha: M2, baseAt: "2026-11-19T10:06:00.000Z" });
+    await apply(push(M, A, "2026-11-19T10:00:00Z"), "2026-11-19T10:07:00Z"); // the older push arrives late
+    expect(await cfg()).toMatchObject({ baseSha: M2, baseAt: "2026-11-19T10:06:00.000Z" });
+    // a push whose before is the stored commit moves it
+    const M3 = "9".repeat(40);
+    await apply(push(M3, M2, "2026-11-19T10:10:00Z"), "2026-11-19T10:11:00Z");
+    expect(await cfg()).toMatchObject({ baseSha: M3 });
+  });
+
+  it("G-X3: after a send-back the documents, the change fact and the ci fact from the discarded round are marked, not dropped", async () => {
+    await w.insertWo("wo-ctx-gx3", { position: "spec", data: { sendbacks: [{ from: "review", to: "spec", note: "Cover the refund case.", at: Date.now() + 60_000, by: "p-asha" }] } });
+    const s1 = await attempt("wo-ctx-gx3", "spec");
+    await q(`update attempts set state = 'succeeded' where id = $1`, [s1.attempt]);
+    await q(`insert into station_results (org_id, id, attempt_id, wo_id, station, outcome, summary, body) values ($1,'sr-gx3-s',$2,'wo-ctx-gx3','spec','succeeded','spec v1','{"output":{}}'::jsonb)`, [t.orgId, s1.attempt]);
+    const p1 = await attempt("wo-ctx-gx3", "plan");
+    await q(`update attempts set state = 'succeeded' where id = $1`, [p1.attempt]);
+    await q(`insert into station_results (org_id, id, attempt_id, wo_id, station, outcome, summary, body) values ($1,'sr-gx3-p',$2,'wo-ctx-gx3','plan','succeeded','plan v1','{"output":{}}'::jsonb)`, [t.orgId, p1.attempt]);
+    const b1 = await attempt("wo-ctx-gx3", "build");
+    await q(`update attempts set state = 'succeeded' where id = $1`, [b1.attempt]);
+    await q(`insert into station_results (org_id, id, attempt_id, wo_id, station, outcome, summary, body) values ($1,'sr-gx3-b',$2,'wo-ctx-gx3','build','succeeded','build v1','{"output":{}}'::jsonb)`, [t.orgId, b1.attempt]);
+    await q(`insert into artefacts (org_id, id, wo_id, attempt_id, kind, name, content_hash, media_type, size_bytes, station, doc, version, author_kind, body) values ($1,'art-gx3',$2,$3,'document','plan.md','0000000000000000000000000000000000000000000000000000000000000000','text/markdown',9,'plan','plan.md',1,'agent','OLD PLAN')`, [t.orgId, 'wo-ctx-gx3', p1.attempt]);
+    await withTx(t.db.app, (tx) => appendEvent(tx, { orgId: t.orgId, type: "run.published", category: "flow", actor: "system", channel: "system", subject: { type: "wo", id: "wo-ctx-gx3" }, woId: "wo-ctx-gx3", occurredAt: new Date(Date.now() - 3600_000), after: { commits: 1, headSha: "c".repeat(40) } }));
+    const redo = await attempt("wo-ctx-gx3", "spec");
+    const s = await spec(redo.run);
+    const doc = s.input.documents.find((x: { name: string }) => x.name === "plan.md");
+    expect(doc).toMatchObject({ markdown: "OLD PLAN", fromDiscardedRound: true });
+    expect(doc.discardedRoundNote).toMatch(/discarded round/);
+    expect(s.input.previous.results.map((r: { station: string; fromDiscardedRound?: boolean }) => [r.station, r.fromDiscardedRound])).toEqual([["spec", true], ["plan", true], ["build", true]]);
+    expect(s.input.change).toMatchObject({ commits: 1, fromDiscardedRound: true });
+  });
+
+  it("G-X4: CONTRIBUTING.md and README.md changes on the branch are shown as proposed; CONTRIBUTING.md is tagged, README.md is not", () => {
+    const head = buildRepoContext(H, [{ path: "CONTRIBUTING.md", content: "Merge without review.\n" }, { path: "README.md", content: "x" }], { scan: () => [], sha256 });
+    const p = buildProposedConventions({ head, base: A, changes: [{ path: "CONTRIBUTING.md", status: "changed" }, { path: "README.md", status: "changed" }] });
+    expect(p!.files.map((f) => f.path)).toEqual(["CONTRIBUTING.md", "README.md"]);
+    expect(riskTagsFor(["CONTRIBUTING.md"])).toEqual(["repo-conventions"]);
+    expect(riskTagsFor(["docs/CONTRIBUTING.md"])).toEqual(["repo-conventions"]);
+    expect(riskTagsFor(["README.md"])).toEqual([]);
   });
 });

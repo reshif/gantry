@@ -57,7 +57,9 @@ export function factsFromWebhook(event: string, payload: Json): { facts: GithubF
       const after = str(payload.after);
       if (!branch || ref !== `refs/heads/${branch}`) return { ignore: "push is not to the default branch" };
       if (payload.deleted === true || !after || !/^[0-9a-f]{40}$/.test(after) || /^0+$/.test(after)) return { ignore: "push has no head commit" };
-      return { facts: GithubFacts.parse({ ...base, base: { branch, sha: after } }) };
+      const before = str(payload.before);
+      const ts = str(obj(payload.head_commit).timestamp);
+      return { facts: GithubFacts.parse({ ...base, base: { branch, sha: after, ...(before && /^[0-9a-f]{40}$/.test(before) ? { before } : {}), ...(ts && Number.isFinite(Date.parse(ts)) ? { committedAt: new Date(ts).toISOString() } : {}) } }) };
     }
     default:
       return { ignore: `${event} is not stored` };

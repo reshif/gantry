@@ -126,7 +126,7 @@ export const REPO_CONTEXT_LAYER_NAME = "Repository context";
  */
 export function isConventionPath(path: string): boolean {
   const p = path.replace(/^\.?\/+/, "");
-  return /(^|\/)(AGENTS|CLAUDE)\.md$/i.test(p) || /(^|\/)\.claude\//i.test(p) || /(^|\/)CODEOWNERS$/.test(p) || /(^|\/)pull_request_template(\.md$|\/)/i.test(p);
+  return /(^|\/)(AGENTS|CLAUDE)\.md$/i.test(p) || /(^|\/)\.claude\//i.test(p) || /(^|\/)(CONTRIBUTING|README)(\.md)?$/i.test(p) || /(^|\/)CODEOWNERS$/.test(p) || /(^|\/)pull_request_template(\.md$|\/)/i.test(p);
 }
 
 const sha40 = z.string().regex(/^[0-9a-f]{40}$/);
