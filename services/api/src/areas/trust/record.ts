@@ -155,10 +155,11 @@ export async function afterFinish(tx: Tx, orgId: string, woId: string, now: Date
   for (const agent of agents) await ensureCell(tx, orgId, { agent, cls: wo.class, project: wo.project_id }, "system", now);
   const res = await evaluateCells(tx, orgId, { project: wo.project_id, cls: wo.class, agents }, now, sink);
   // A finished run that did not demote its cell counts toward the end of its probation; a demotion resets the cell's evidence, so it ends it.
-  for (const agent of agents) {
-    const row = (await cellRows(tx, orgId, trustCellId(agent, wo.class, wo.project_id), true))[0];
+  // Every cell in force for the agent and scope counts: the project cell and the repo cell of this work order (S-38).
+  const inScope = (await cellRows(tx, orgId, undefined, true)).filter((c) => !!c.agent_id && agents.includes(c.agent_id) && c.project_id === wo.project_id && c.class === wo.class && (c.repo_id === null || c.repo_id === wo.repo_id));
+  for (const row of inScope) {
     const prob = row ? probationOf(row.data) : null;
-    if (!row || !prob) continue;
+    if (!prob) continue;
     const left = lvlNum(row.level) < 2 || res.demoted > 0 ? 0 : prob.runsLeft - 1;
     if (left > 0) await tx.query(`update trust_cells set data = jsonb_set(data, '{probation,runsLeft}', to_jsonb($3::int)), updated_at = now() where org_id = $1 and id = $2`, [orgId, row.id, left]);
     else {
