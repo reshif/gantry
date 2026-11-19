@@ -77,8 +77,9 @@ export async function runWrapper(deps: WrapperDeps): Promise<number> {
   phase = "working";
   // S-90: the run's workspace is capped; over it, the run is stopped with a clear failure.
   let overCap: { used: number } | undefined;
+  let unmeasurable = false;
   const unwatch = env.workspaceMaxBytes
-    ? watchWorkspace({ dir: env.workspace, maxBytes: env.workspaceMaxBytes, ...deps.workspaceCheck, onOver: (used) => { overCap = { used }; log(workspaceMessage(env.workspaceMaxBytes!, used)); abort("workspace_full"); } })
+    ? watchWorkspace({ dir: env.workspace, maxBytes: env.workspaceMaxBytes, ...deps.workspaceCheck, onOver: (used) => { overCap = { used }; log(workspaceMessage(env.workspaceMaxBytes!, used)); abort("workspace_full"); }, onUnmeasurable: (n) => { unmeasurable = true; log(`workspace size could not be measured ${n} times in a row; stopping the run`); abort("workspace_full"); } })
     : () => undefined;
 
   const checkpoint = async (cp: Checkpoint) => {
@@ -108,7 +109,9 @@ export async function runWrapper(deps: WrapperDeps): Promise<number> {
     outcome = { ...outcome, status: "failed", error: { code: "wall_clock", msg: `wall-clock limit ${spec.limits.wallClockSeconds}s reached` } };
   }
 
-  if (overCap && env.workspaceMaxBytes) {
+  if (unmeasurable) {
+    outcome = { ...outcome, status: "failed", error: { code: "workspace_unmeasurable", msg: "The workspace size could not be measured three times in a row, so the run was stopped (a cap that cannot be checked is not assumed to hold)." } };
+  } else if (overCap && env.workspaceMaxBytes) {
     outcome = { ...outcome, status: "failed", error: { code: "workspace_over_limit", msg: workspaceMessage(env.workspaceMaxBytes, overCap.used) } };
   }
 

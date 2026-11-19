@@ -229,9 +229,63 @@ export class RunManager {
       // fail closed: a disk that cannot be measured is not known to have room
       return `host free disk cannot be measured (${messageOf(e)}); not starting new runs`;
     }
-    if (free >= d.minFreeBytes) return undefined;
     const gb = (n: number) => (n / 2 ** 30).toFixed(1);
-    return `host free disk is ${gb(free)} GB, under the ${gb(d.minFreeBytes)} GB floor; not starting new runs until it recovers`;
+    if (free < d.minFreeBytes) return `host free disk is ${gb(free)} GB, under the ${gb(d.minFreeBytes)} GB floor; not starting new runs until it recovers`;
+    // Room for this run to reach its cap beside the runs already holding a workspace (G-S8): the floor plus (runs + 1) x cap.
+    if (this.cfg.workspace.backing === "disk") {
+      const held = await Promise.resolve().then(() => this.docker.listVolumes({ filters: { label: [`${LABEL_MANAGED}=${MANAGED_BY}`] } })).then((r) => r.Volumes?.length ?? 0, () => 0);
+      const need = d.minFreeBytes + (held + 1) * this.cfg.workspace.maxMb * 2 ** 20;
+      if (free < need) return `host free disk is ${gb(free)} GB; ${held + 1} workspaces of up to ${gb(this.cfg.workspace.maxMb * 2 ** 20)} GB beside the ${gb(d.minFreeBytes)} GB floor need ${gb(need)} GB; not starting new runs until it recovers`;
+    }
+    return undefined;
+  }
+
+  private lastSizes = new Map<string, number>();
+  private monitor: NodeJS.Timeout | undefined;
+  private ticking = false;
+  /** Called every few seconds (startDiskMonitor); exported for tests. Returns the run it stopped, if any. */
+  async diskTick(): Promise<string | undefined> {
+    const d = this.cfg.disk;
+    if (!d.probePath || d.minFreeBytes <= 0) return undefined;
+    let free: number;
+    try {
+      const s = await statfs(d.probePath);
+      free = Number(s.bavail) * Number(s.bsize);
+    } catch {
+      return undefined; // the admission check fails closed on its own
+    }
+    if (free >= d.hardFloorBytes) return undefined;
+    // Critically low: stop the run whose workspace grew fastest since the last look (the biggest one when nothing grew).
+    const df = (await (this.docker as unknown as { df: () => Promise<{ Volumes?: Array<{ Name: string; Labels?: Record<string, string> | null; UsageData?: { Size?: number } }> }> }).df().catch(() => undefined))?.Volumes ?? [];
+    let best: { runId: string; growth: number; size: number } | undefined;
+    const now = new Map<string, number>();
+    for (const v of df) {
+      const id = v.Labels?.[LABEL_RUN];
+      if (!id || v.Labels?.[LABEL_MANAGED] !== MANAGED_BY) continue;
+      const size = Math.max(0, v.UsageData?.Size ?? 0);
+      now.set(id, size);
+      const growth = size - (this.lastSizes.get(id) ?? size);
+      if (!best || growth > best.growth || (growth === best.growth && size > best.size)) best = { runId: id, growth, size };
+    }
+    this.lastSizes = now;
+    if (!best) return undefined;
+    const gb = (n: number) => (n / 2 ** 30).toFixed(1);
+    console.error(`launcher: host disk critically low (${gb(free)} GB free, hard floor ${gb(d.hardFloorBytes)} GB): stopping run ${best.runId} (workspace ${gb(best.size)} GB, grew ${gb(Math.max(0, best.growth))} GB since the last check)`);
+    this.criticalStops.push({ runId: best.runId, at: Date.now(), freeBytes: free });
+    await this.stop(best.runId, { keepWorkspace: false }).catch(() => undefined);
+    return best.runId;
+  }
+  /** Runs stopped for critically low host disk, so the status can say why they ended. */
+  readonly criticalStops: Array<{ runId: string; at: number; freeBytes: number }> = [];
+
+  startDiskMonitor(): void {
+    if (this.monitor) return;
+    this.monitor = setInterval(() => {
+      if (this.ticking) return;
+      this.ticking = true;
+      void this.diskTick().catch(() => undefined).finally(() => { this.ticking = false; });
+    }, this.cfg.disk.checkSeconds * 1000);
+    this.monitor.unref();
   }
 
   private async ensureNetwork(input: StartRunInput): Promise<Result<{ created: boolean; subnet?: string }, LauncherError>> {

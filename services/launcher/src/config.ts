@@ -25,7 +25,7 @@ export interface LauncherConfig {
   /** S-90: each run's /workspace is capped. `tmpfs` makes the cap hard (a size-limited volume, paid for in RAM); `disk` relies on the wrapper's measurement. */
   workspace: { maxMb: number; backing: "disk" | "tmpfs" };
   /** S-90: refuse to start new runs when the host's free disk is under `minFreeBytes`. `probePath` is any directory on the run volumes' filesystem (a small volume mounted read-only). */
-  disk: { probePath?: string; minFreeBytes: number };
+  disk: { probePath?: string; minFreeBytes: number; /** Below this the launcher stops the fastest-growing runs. */ hardFloorBytes: number; checkSeconds: number };
   /** S-93: how the concurrency was chosen, for the start-up log. */
   sizing: { source: "configured" | "derived"; hostMemBytes: number; hostCpus: number; memoryRatio: number; cpuRatio: number; reserveBytes: number };
 }
@@ -55,6 +55,8 @@ const EnvSchema = z.object({
   WORKSPACE_MAX_MB: int(64, 1 << 22).default(10240),
   WORKSPACE_BACKING: z.enum(["disk", "tmpfs"]).default("disk"),
   MIN_FREE_DISK_GB: z.coerce.number().min(0).max(1 << 20).default(20),
+  DISK_HARD_FLOOR_GB: z.coerce.number().min(0).max(1 << 20).optional(),
+  DISK_CHECK_SECONDS: z.coerce.number().min(1).max(3600).default(5),
   DISK_PROBE_PATH: z.string().min(1).optional(),
   // The edge's EDGE_RUN_SUBNET (compose derives both from one variable). When given, the pool must lie inside it: a run network outside the edge's
   // run subnet would make its callers "system" at the edge (S-102).
@@ -133,6 +135,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, host: HostCapac
     }
   }
 
+  // A tmpfs workspace is memory, charged to the run's own limit: a size above it would hit the OOM killer before it hit the cap (G-S8).
+  if (e.WORKSPACE_BACKING === "tmpfs" && e.WORKSPACE_MAX_MB > e.RUNNER_MEMORY_MB) {
+    return err({ kind: "config", msg: `WORKSPACE_MAX_MB ${e.WORKSPACE_MAX_MB} with WORKSPACE_BACKING=tmpfs exceeds RUNNER_MEMORY_MB ${e.RUNNER_MEMORY_MB}: a RAM-backed workspace must fit inside the run's memory limit (leave room for the run's processes). Lower WORKSPACE_MAX_MB, raise RUNNER_MEMORY_MB, or use a dedicated filesystem (deploy/README.md)` });
+  }
+
   const edgeUrl = e.EDGE_URL;
   const proxyUrl = e.RUNNER_PROXY_URL ?? `http://${new URL(edgeUrl).hostname}:8444`;
 
@@ -160,7 +167,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, host: HostCapac
     },
     tokenFile: e.LAUNCHER_TOKEN_FILE,
     workspace: { maxMb: e.WORKSPACE_MAX_MB, backing: e.WORKSPACE_BACKING },
-    disk: { minFreeBytes: Math.round(e.MIN_FREE_DISK_GB * 2 ** 30) },
+    disk: { minFreeBytes: Math.round(e.MIN_FREE_DISK_GB * 2 ** 30), hardFloorBytes: Math.round((e.DISK_HARD_FLOOR_GB ?? e.MIN_FREE_DISK_GB / 2) * 2 ** 30), checkSeconds: e.DISK_CHECK_SECONDS },
     sizing: { source: e.MAX_CONCURRENT_RUNS === undefined ? "derived" : "configured", hostMemBytes: host.memBytes, hostCpus: host.cpus, memoryRatio: e.RUN_MEMORY_OVERCOMMIT_RATIO, cpuRatio: e.RUN_CPU_OVERCOMMIT_RATIO, reserveBytes: reserve },
   };
   if (e.DISK_PROBE_PATH !== undefined) cfg.disk.probePath = e.DISK_PROBE_PATH;

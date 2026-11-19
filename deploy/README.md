@@ -76,6 +76,33 @@ Limits and host settings the run sandbox relies on (findings S-90 to S-102 of th
 
 **Per-source caps at the edge (S-92, S-102).** `EDGE_SOURCE_MAX_CONNECTIONS` (128 per listener), `EDGE_SOURCE_REQUESTS_PER_MINUTE` (1200) and `EDGE_TOKEN_FAILURES_PER_MINUTE` (20) bound what one run (one source address) can do; over a cap the edge answers 429 and logs `edge source over its cap`. `EDGE_RUN_SUBNET` must be a valid CIDR (the edge refuses to start otherwise) and must contain the launcher's `RUN_SUBNET_POOL` (the launcher refuses to start otherwise); compose derives both from `RUN_SUBNET_POOL`.
 
+**Continuous disk monitor (G-S8).** The launcher reads host free disk every `DISK_CHECK_SECONDS` (5), not only when a run starts. Under `MIN_FREE_DISK_GB` it admits no new run (dispatches wait: the order shows "Waiting: host disk low"). Under `DISK_HARD_FLOOR_GB` (default half the floor) it stops the run whose workspace grew fastest since the last look (it reads volume sizes from the Docker `system/df` call, which the socket proxy now allows) and logs "host disk critically low". A new run also needs free space of at least the floor plus (workspaces held + 1) x `WORKSPACE_MAX_MB`. The wrapper's own measure counts files that were deleted while still open (it sums the blocks of every open descriptor under `/workspace`) and stops the run when a measurement fails three times in a row. With `WORKSPACE_BACKING=tmpfs` the size must fit inside `RUNNER_MEMORY_MB`; a larger size is refused at start.
+
+**Waiting is not failing (G-S3).** When the launcher has no run slot, or the disk is under its floor, the dispatch waits, for as long as it takes, and never fails the attempt or spends its retry budget. The run shows "Waiting for a run slot (n queued)" or "Waiting: host disk low". `WORKER_MAX_DISPATCH_DEFERRALS` is no longer used by dispatch. Alert on a dispatch that has waited a long time. The run's wall clock starts when its runner starts, not while it waits.
+
+**Production-grade hard cap: a fixed-size filesystem for run volumes.** The measure above is a guard with a delay; a hard cap needs the kernel. ext4 has no per-directory quota without special mount options, so give run volumes a filesystem of their own, of fixed size, and keep Postgres and MinIO off it. Run these on the host with the stack stopped, after a backup, and try them on a test host first (`/srv/gantry` and 200G are examples):
+
+```bash
+docker compose -f deploy/compose.yml down
+# 1. Postgres and MinIO leave the Docker volume area: copy them to /srv/gantry and bind-mount them (compose: pgdata and objdata as bind mounts of these paths).
+sudo mkdir -p /srv/gantry/pgdata /srv/gantry/objdata
+sudo rsync -aHAX /var/lib/docker/volumes/gantry_pgdata/_data/ /srv/gantry/pgdata/
+sudo rsync -aHAX /var/lib/docker/volumes/gantry_objdata/_data/ /srv/gantry/objdata/
+# 2. A fixed-size sparse image, formatted ext4 with no reserved blocks, mounted over Docker's volume directory.
+sudo systemctl stop docker docker.socket
+sudo mkdir -p /var/lib/docker/volumes.old && sudo rsync -aHAX /var/lib/docker/volumes/ /var/lib/docker/volumes.old/
+sudo truncate -s 200G /var/lib/gantry-runs.img
+sudo mkfs.ext4 -F -m 0 -L gantry-runs /var/lib/gantry-runs.img
+echo '/var/lib/gantry-runs.img /var/lib/docker/volumes ext4 loop,nosuid,nodev,noatime 0 2' | sudo tee -a /etc/fstab
+sudo mount /var/lib/docker/volumes
+sudo rsync -aHAX /var/lib/docker/volumes.old/ /var/lib/docker/volumes/
+sudo systemctl start docker
+```
+
+A run that fills this filesystem gets ENOSPC inside it and stops; the host disk, Postgres and MinIO are unaffected. With XFS the same is done with a project quota (`mount -o prjquota`, `xfs_quota -x -c 'project -s -p <dir> <id>' -c 'limit -p bsoft=10g bhard=10g <id>' /var/lib/docker/volumes`), set per `ws-*` directory by a host-side job. Point `DISK_PROBE_PATH` at the same filesystem (the `diskprobe` volume does, since it lives under the mount).
+
+**What the git front does and does not do (G-S6).** The agent's shell finds `/opt/gantry-wrapper/bin/git` first. It runs only status, diff, log, show, add, commit, rev-parse, ls-files, rm, mv, restore and branch, only on `/workspace/.git` with the work tree `/workspace` (a `.git` file, a symlink or `core.worktree` pointing elsewhere is refused), only when the repository config holds nothing but the keys a seeded repository has (`user.*`, basic `core.*`, `remote.*.url` and `fetch`, `branch.*`), and with every caller-set `GIT_CONFIG_*` dropped. Edit, Write and NotebookEdit are denied on `.git`, `**/.git`, `**/gitdir`, `.gitattributes` and `.gitmodules`. **This does not make the shell safe.** A "may run tests" agent runs arbitrary code by design (`npm test`, `pytest`, `go test` run whatever the repository says, can call `/usr/bin/git` directly and can write `.git/config`); the container is the boundary for that, not the front. The front only narrows what an agent that may write the branch but not run tests can do.
+
 **Host settings to apply (not done by compose).**
 
 * S-99 `ptrace_scope`: the run token lives in the wrapper's memory, protected from tool processes of the same uid only by Yama. Require `kernel.yama.ptrace_scope` of 1 or higher: `echo 'kernel.yama.ptrace_scope = 1' | sudo tee /etc/sysctl.d/60-gantry-yama.conf && sudo sysctl --system`, and verify with `cat /proc/sys/kernel/yama/ptrace_scope`. A host without Yama is not supported.

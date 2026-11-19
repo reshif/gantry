@@ -84,7 +84,7 @@ export const KNOWN_BUILTIN_TOOLS = [
  * every spelling of the path (relative, nested, absolute). `.gitattributes` and `.gitmodules` are named too: they select the filters and drivers.
  * The git front (bin/git) is the second rail: it refuses to run when the config names such a program.
  */
-export const GIT_PATH_DENIES: string[] = ["Edit", "Write", "NotebookEdit"].flatMap((t) => [`${t}(.git)`, `${t}(.git/**)`, `${t}(**/.git/**)`, `${t}(/workspace/.git/**)`, `${t}(**/.gitattributes)`, `${t}(**/.gitmodules)`]);
+export const GIT_PATH_DENIES: string[] = ["Edit", "Write", "NotebookEdit"].flatMap((t) => [`${t}(.git)`, `${t}(.git/**)`, `${t}(**/.git)`, `${t}(**/.git/**)`, `${t}(**/gitdir)`, `${t}(//workspace/.git)`, `${t}(//workspace/.git/**)`, `${t}(**/.gitattributes)`, `${t}(**/.gitmodules)`]);
 
 /** Directory of the git front, first on the harness's PATH (runner/wrapper/bin, installed at /opt/gantry-wrapper/bin). */
 export const GIT_FRONT_DIR = fileURLToPath(new URL("../../bin", import.meta.url));
@@ -167,6 +167,7 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, relayUrl: stri
   cloneEnv.PATH = [GIT_FRONT_DIR, cloneEnv.PATH ?? "/usr/local/bin:/usr/bin:/bin"].join(":");
   Object.assign(cloneEnv, {
     HOME: join(SCRATCH, "home"),
+    GANTRY_WORKSPACE: env.workspace,
     ...cacheEnv(env.workspace),
     CLAUDE_CONFIG_DIR: join(SCRATCH, "claude-config"),
     // The harness talks to the edge's model gateway through the loopback relay, which adds the run token; the vendor key never enters the runner.

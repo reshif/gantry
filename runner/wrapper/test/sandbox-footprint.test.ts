@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
+import { closeSync, openSync, unlinkSync, writeSync, chmodSync, existsSync, realpathSync, symlinkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,7 +9,7 @@ import { EdgeClient } from "../src/edge.js";
 import { readEnv } from "../src/env.js";
 import { runWrapper } from "../src/main.js";
 import { RunSpec } from "../src/spec.js";
-import { duBytes, watchWorkspace, workspaceMessage } from "../src/workspace-cap.js";
+import { duBytes, openDeletedBytes, watchWorkspace, workspaceBytes, workspaceMessage } from "../src/workspace-cap.js";
 import { startFakeEdge, type FakeEdge } from "./helpers.js";
 
 const TOKEN = "run-token-abcdef123456";
@@ -50,6 +50,39 @@ describe("S-90: the wrapper stops a run whose workspace is over its cap", () => 
     expect(workspaceMessage(10 * 2 ** 30, 11 * 2 ** 30)).toMatch(/workspace over 10\.0 GB/);
   });
 
+  it("G-S7: counts a file that was unlinked while still open, which du cannot see", async () => {
+    const d = tmp();
+    const f = join(d, "hidden");
+    const fd = openSync(f, "w");
+    try {
+      writeSync(fd, Buffer.alloc(4 * 1024 * 1024, 1));
+      unlinkSync(f);
+      expect(await duBytes(d)).toBeLessThan(1024 * 1024);
+      expect(await openDeletedBytes(d)).toBeGreaterThanOrEqual(4 * 1024 * 1024);
+      expect(await workspaceBytes(d)).toBeGreaterThanOrEqual(4 * 1024 * 1024);
+      expect(await openDeletedBytes(join(d, "elsewhere"))).toBe(0);
+    } finally {
+      closeSync(fd);
+    }
+    expect(await openDeletedBytes(d)).toBe(0);
+  });
+
+  it("G-S7: a measurement that keeps failing stops the run after three tries, instead of counting as no breach", async () => {
+    let over = 0;
+    let unmeasurable = 0;
+    const stop = watchWorkspace({ dir: "/x", maxBytes: 100, intervalMs: 5, measure: async () => { throw new Error("du timed out"); }, onOver: () => void over++, onUnmeasurable: () => void unmeasurable++ });
+    await new Promise((r) => setTimeout(r, 80));
+    stop();
+    expect(unmeasurable).toBe(1);
+    expect(over).toBe(0);
+    let n = 0;
+    let u2 = 0;
+    const stop2 = watchWorkspace({ dir: "/x", maxBytes: 100, intervalMs: 5, measure: async () => { if (++n % 3 !== 0) throw new Error("x"); return 1; }, onOver: () => undefined, onUnmeasurable: () => void u2++ });
+    await new Promise((r) => setTimeout(r, 80));
+    stop2();
+    expect(u2).toBe(0); // a success in between resets the count
+  });
+
   it("a run that fills its workspace is aborted and fails with workspace_over_limit", async () => {
     const spec = RunSpec.parse({ adapter: "stub", station: "spec", instructions: "x", input: {} });
     edge = await startFakeEdge(spec, TOKEN);
@@ -71,7 +104,7 @@ describe("S-91: a write-only agent cannot run commands through git config", () =
   const denies = inv.args[inv.args.indexOf("--disallowedTools") + 1]!.split(",");
 
   it("denies every file tool on .git, in every spelling, even when the tool is granted", () => {
-    for (const t of ["Edit", "Write", "NotebookEdit"]) for (const p of [".git/**", "**/.git/**", "/workspace/.git/**", "**/.gitattributes", "**/.gitmodules"]) expect(denies).toContain(`${t}(${p})`);
+    for (const t of ["Edit", "Write", "NotebookEdit"]) for (const p of [".git/**", "**/.git", "**/.git/**", "//workspace/.git/**", "**/gitdir", "**/.gitattributes", "**/.gitmodules"]) expect(denies).toContain(`${t}(${p})`);
     expect(GIT_PATH_DENIES.length).toBeGreaterThan(0);
   });
 
@@ -88,9 +121,9 @@ describe("S-91: a write-only agent cannot run commands through git config", () =
   describe("the git front, against real git (replay of the probe)", () => {
     const front = join(GIT_FRONT_DIR, "git");
     const base = () => ({ PATH: process.env.PATH!, HOME: tmp(), GIT_AUTHOR_NAME: "a", GIT_AUTHOR_EMAIL: "a@a", GIT_COMMITTER_NAME: "a", GIT_COMMITTER_EMAIL: "a@a" });
-    const run = (cwd: string, args: string[]) => {
+    const run = (cwd: string, args: string[], extra: Record<string, string> = {}) => {
       try {
-        return { code: 0, out: execFileSync(front, args, { cwd, env: base(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) };
+        return { code: 0, out: execFileSync(front, args, { cwd, env: { ...base(), GANTRY_WORKSPACE: realpathSync(cwd.replace(/\/sub$/, "")), ...extra }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) };
       } catch (e) {
         const x = e as { status: number; stderr: string };
         return { code: x.status, out: x.stderr };
@@ -146,6 +179,57 @@ describe("S-91: a write-only agent cannot run commands through git config", () =
         expect(run(d, args).code, args.join(" ")).toBe(126);
       }
       expect(existsSync(join(d, ".git", "x"))).toBe(false);
+    });
+
+    it("G-S6: refuses a trailer command, however the config got there", () => {
+      const d = repo();
+      appendFileSync(join(d, ".git", "config"), `\n[trailer "sign"]\n\tcommand = touch ${d}/PWNED\n`);
+      writeFileSync(join(d, "g"), "x\n");
+      run(d, ["add", "g"]);
+      expect(run(d, ["commit", "-qm", "x", "--trailer", "sign: y"]).code).toBe(126);
+      expect(existsSync(join(d, "PWNED"))).toBe(false);
+    });
+
+    it("G-S6: refuses any config key off the allow-list (an unknown *.command, uploadpack hook, core.worktree) and accepts the seeded ones", () => {
+      for (const block of ["[uploadpack]\n\tpackObjectsHook = id\n", "[core]\n\tworktree = /tmp\n", "[foo \"x\"]\n\tcommand = id\n", "[url \"ssh://x/\"]\n\tinsteadOf = a\n"]) {
+        const d = repo();
+        appendFileSync(join(d, ".git", "config"), `\n${block}`);
+        expect(run(d, ["status"]).code, block).toBe(126);
+      }
+      const ok = repo();
+      execFileSync("git", ["remote", "add", "origin", "https://example.invalid/a/b.git"], { cwd: ok });
+      execFileSync("git", ["config", "user.name", "Gantry"], { cwd: ok });
+      expect(run(ok, ["status"]).code).toBe(0);
+    });
+
+    it("G-S6: the repository must be the workspace's own .git: a gitdir redirection, a symlinked .git and a nested repository are refused", () => {
+      const d = repo();
+      // a repository somewhere else with a config the agent wrote, and a work tree that points at it through a .git file
+      const gd = join(d, "gd");
+      execFileSync("git", ["init", "-q", "--bare", gd]);
+      mkdirSync(join(d, "sub"));
+      writeFileSync(join(d, "sub", ".git"), `gitdir: ${gd}\n`);
+      expect(run(join(d, "sub"), ["status"]).code).toBe(126);
+      const e = repo();
+      rmSync(join(e, ".git"), { recursive: true });
+      symlinkSync(gd, join(e, ".git"));
+      expect(run(e, ["status"]).code).toBe(126);
+    });
+
+    it("G-S6: caller-set GIT_CONFIG_COUNT keys do not reach git (a filter set that way never runs)", () => {
+      const d = repo();
+      const c = join(d, "c.sh");
+      writeFileSync(c, `#!/bin/sh\ntouch ${d}/PWN_ENV\ncat\n`);
+      chmodSync(c, 0o755);
+      writeFileSync(join(d, ".gitattributes"), "* filter=x\n");
+      writeFileSync(join(d, "f"), "changed\n");
+      run(d, ["add", "-A"], { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "filter.x.clean", GIT_CONFIG_VALUE_0: c });
+      expect(existsSync(join(d, "PWN_ENV"))).toBe(false);
+    });
+
+    it("G-S6: only the listed subcommands run", () => {
+      const d = repo();
+      for (const sub of ["config", "fetch", "push", "clone", "remote", "filter-branch", "submodule", "worktree"]) expect(run(d, [sub]).code, sub).toBe(126);
     });
 
     it("does not run a hook", () => {

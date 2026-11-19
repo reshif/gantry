@@ -55,6 +55,8 @@ export function route(method: string, rawPath: string): Route {
       if (path === "/containers/json") return { ...ok(), list: "containers" };
       if (path === "/networks") return { ...ok(), list: "networks" };
       if (path === "/volumes") return { ...ok(), list: "volumes" };
+      // Volume sizes for the disk monitor (G-S8); the launcher keeps only its own ws-* volumes from the answer.
+      if (path === "/system/df") return ok();
       // Reads are owned-only too: an inspect carries env (a runner's run token), binds, mounts and addresses.
       if ((x = m(`/containers/${SEG}/json`))) return ok({ kind: "container", id: x[1]!, edgeOk: true });
       if ((x = m(`/networks/${SEG}`))) return ok({ kind: "network", id: x[1]! });
@@ -229,9 +231,26 @@ export function checkTokenArchive(query: URLSearchParams, raw: Buffer): Decision
   return allow;
 }
 
+/**
+ * Keys a body may carry, exactly. Docker's decoder matches field names case-insensitively, so a checked key in another case (`driveropts`, `internal`)
+ * would pass a check of the exact name and still be honoured (G-S10). Anything outside the list, in any case, is refused.
+ */
+function unknownKey(o: Obj, allowed: readonly string[]): string | undefined {
+  return Object.keys(o).find((k) => !allowed.includes(k));
+}
+const NETWORK_KEYS = ["Name", "Driver", "Internal", "Attachable", "EnableIPv6", "CheckDuplicate", "IPAM", "Labels", "Options"] as const;
+const VOLUME_KEYS = ["Name", "Driver", "Labels", "DriverOpts"] as const;
+
 /** A run network: internal, bridge, named run-<id>, owned. */
 export function checkNetwork(body: unknown): Decision {
   if (!isObj(body)) return deny("The body is not a JSON object.");
+  const extraKey = unknownKey(body, NETWORK_KEYS);
+  if (extraKey !== undefined) return deny(`The network body key "${extraKey}" is not part of the run network template (keys are matched exactly; Docker matches them in any case).`);
+  if (isObj(body.IPAM)) {
+    const bad = unknownKey(body.IPAM, ["Driver", "Config", "Options"]);
+    if (bad !== undefined) return deny(`The IPAM key "${bad}" is not part of the run network template.`);
+    if (Array.isArray(body.IPAM.Config)) for (const c of body.IPAM.Config) if (isObj(c) && unknownKey(c, ["Subnet"]) !== undefined) return deny("An IPAM config entry carries only a Subnet.");
+  }
   if (typeof body.Name !== "string" || !/^run-[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(body.Name)) return deny("Only run networks (run-<run>) may be created.");
   if (body.Internal !== true) return deny("A run network must be internal (no route out except through the edge).");
   if (body.Driver !== undefined && body.Driver !== "bridge") return deny("A run network uses the bridge driver.");
@@ -247,6 +266,8 @@ export function checkNetwork(body: unknown): Decision {
  */
 export function checkVolume(body: unknown, limits: VolumeLimits = DEFAULT_VOLUME_LIMITS): Decision {
   if (!isObj(body)) return deny("The body is not a JSON object.");
+  const extraKey = unknownKey(body, VOLUME_KEYS);
+  if (extraKey !== undefined) return deny(`The volume body key "${extraKey}" is not part of the workspace volume template (keys are matched exactly; Docker matches them in any case).`);
   if (typeof body.Name !== "string" || !/^ws-[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(body.Name)) return deny("Only workspace volumes (ws-<run>) may be created.");
   if (body.Driver !== undefined && body.Driver !== "local") return deny("A workspace volume uses the local driver.");
   if (!empty(body.DriverOpts)) {
