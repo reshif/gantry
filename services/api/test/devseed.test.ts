@@ -31,7 +31,7 @@ d("dev seed loader and read mappers (rows -> legacy shapes)", () => {
 
   it("people round-trip, including roles, teams, away, on-call and legacy extras", async () => {
     const got = (await readPeople(t.db.app, t.orgId)) as unknown as Array<Record<string, unknown>>;
-    // `mfa` is a boolean column: absent in the seed reads back as false.
+    // `mfa` is a boolean column the seed fills (false when it says nothing); a person who has never been seen reads null, which the seed never produces.
     const norm = (ps: Array<Record<string, any>>) => ps.map(({ version: _v, ...p }) => ({ mfa: false, ...p, teams: [...p.teams].sort() }));
     // on call is read back derived (owner decision 7): on call for any project, or a Factory Admin; the seed's global switch is not stored
     const want = S.people.map((p) => ({ ...p, oncall: isOnCall(S as never, p as never, null) }));
@@ -72,7 +72,7 @@ d("dev seed loader and read mappers (rows -> legacy shapes)", () => {
     expect(cat.actions).toEqual(seed.catalog.actions);
     expect((await readRoles(t.db.app, t.orgId)).map((x) => strip(x, "version"))).toEqual(seed.catalog.roles);
     const sec = await readSecurity(t.db.app, t.orgId);
-    expect(sec.value).toEqual({ killNeedsStepUp: true, stepUpWindowMinutes: 15, ...(seed.state.security as object), ipAllow: [], researchHosts: [], chatCapUsdPerDay: null });
+    expect(sec.value).toEqual({ killNeedsStepUp: true, stepUpWindowMinutes: 15, ...(seed.state.security as object), ipAllow: [], researchHosts: [], vendorLanRanges: [], chatCapUsdPerDay: null });
   });
 
   it("the loaded policy state decides exactly like the in-memory seed", async () => {

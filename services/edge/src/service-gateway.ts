@@ -191,11 +191,11 @@ export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
     try {
       const payload = JSON.stringify({ ...body, model: route.upstreamModel ?? route.modelId });
       // One retry for a connection-level failure (nothing has reached the caller yet: headers are only written after a response arrives). Never after a timeout or abort.
-      const res = await f(url, { method: "POST", headers, body: payload, signal: ac.signal }).catch(async (e: unknown) => {
+      const res = await f(url, { method: "POST", headers, body: payload, signal: ac.signal, lan: route.lan } as RequestInit).catch(async (e: unknown) => {
         if (ac.signal.aborted) throw e;
         req.log.warn({ purpose, err: e instanceof Error ? e.message : String(e) }, "service model call failed, retrying once");
         await new Promise((r) => setTimeout(r, 400));
-        return f(url, { method: "POST", headers, body: payload, signal: ac.signal });
+        return f(url, { method: "POST", headers, body: payload, signal: ac.signal, lan: route.lan } as RequestInit);
       });
       if (res.status === 429 || res.status === 529 || res.status === 503) {
         const ra = Number(res.headers.get("retry-after"));

@@ -14,6 +14,7 @@ const realm = JSON.parse(readFileSync(fileURLToPath(new URL("../../../deploy/key
   users: Array<{ username: string; email: string; enabled: boolean; emailVerified: boolean; requiredActions?: string[]; attributes: Record<string, string[]>; credentials: Array<{ type: string; temporary: boolean }> }>;
   [k: string]: unknown;
 };
+const demoUsers = realm.users.filter((u) => !u.username.startsWith("service-account-")); // the realm also carries the scoped gantry-admin service account (S-125)
 const seed = devSeed().state;
 const IDS = ["p-asha", "p-daniel", "p-meera", "p-tomas", "p-fatima", "p-kenji", "p-sam", "p-priya", "p-lena", "p-omar"];
 
@@ -40,7 +41,7 @@ describe("demo cards, Keycloak realm and seed agree", () => {
     }
   });
   it("realm users that are not in the cards still map to real seed people (no orphan identity)", () => {
-    for (const u of realm.users) expect(seed.people.some((p) => p.id === u.attributes.gantry_id?.[0] && p.email === u.email), u.username).toBe(true);
+    for (const u of demoUsers) expect(seed.people.some((p) => p.id === u.attributes.gantry_id?.[0] && p.email === u.email), u.username).toBe(true);
   });
   it("the realm has a TOTP step-up flow, but no demo user has an authenticator: the demo cards stay password-only", () => {
     expect(realm.otpPolicyType).toBe("totp");
@@ -48,11 +49,11 @@ describe("demo cards, Keycloak realm and seed agree", () => {
     // the custom browser flow replaces Keycloak's default, so it must keep the provider redirector (GitHub sign-in uses kc_idp_hint) and the SSO cookie
     const top = (realm as unknown as { authenticationFlows: { alias: string; authenticationExecutions: { authenticator?: string }[] }[] }).authenticationFlows.find((f) => f.alias === "gantry-browser")!;
     expect(top.authenticationExecutions.map((e) => e.authenticator)).toEqual(expect.arrayContaining(["auth-cookie", "identity-provider-redirector"]));
-    for (const u of realm.users) {
+    for (const u of demoUsers) {
       expect(u.requiredActions ?? [], u.username).toEqual([]);
       expect(u.credentials.map((c) => c.type), u.username).toEqual(["password"]);
     }
-    // so no card may promise an MFA step, and the dev stack waives the Factory Admin factor (GANTRY_DEV_ADMIN_MFA_OPTIONAL) for the demo admin
+    // so no card may promise an MFA step; every demo person enrols through the one-time link (a People action, mail in the dev mail catcher) unless the stack opts in to the dev waiver (GANTRY_DEV_ADMIN_MFA_OPTIONAL=true)
     expect(DEMO_ACCOUNTS.filter((a) => /MFA/i.test(a.note + a.role)).map((a) => a.id)).toEqual([]);
     for (const id of ["p-asha", "p-daniel", "p-lena", "p-omar"]) expect((seed.people.find((p) => p.id === id) as { mfa?: boolean }).mfa).toBe(true);
   });
@@ -170,15 +171,10 @@ d("an empty organisation (no seed)", () => {
   afterAll(() => t.close());
   const req = { ip: "203.0.113.9", userAgent: "vitest", requestId: "r", method: "sso" as const };
   it("the first ordinary sign-in is an account with no access; only the configured bootstrap email becomes Factory Admin", async () => {
+    // S-71: with no sign-in domain list a stranger is created pending approval and gets no session at all.
     const plain = await signIn(t.app.gantry, { sub: "kc-a", email: "asha@acme.dev", emailVerified: true, name: "Asha Raman", gantryId: "p-asha" }, req);
-    expect(plain.ok).toBe(true);
-    if (!plain.ok) return;
-    const s = await t.session(plain.personId);
-    const me = await t.app.inject({ method: "GET", url: "/api/v1/me", headers: s.headers });
-    expect(me.statusCode).toBe(200);
-    expect(me.json().person.roles).toEqual([]);
-    const can = await t.app.inject({ method: "POST", url: "/api/v1/can", headers: s.headers, payload: { checks: ACTIONS.filter((a) => a.scope !== "project").map((a) => ({ action: a.id })) } });
-    expect(can.json().results.filter((x: { allowed: boolean }) => x.allowed)).toEqual([]);
+    expect(plain).toMatchObject({ ok: false, reason: "pending_approval" });
+    expect((await t.db.admin.query(`select status from people where email = 'asha@acme.dev'`)).rows[0].status).toBe("invited");
     const boss = await signIn(t.app.gantry, { sub: "kc-b", email: "boss@acme.dev", emailVerified: true, name: "The Boss" }, req);
     expect(boss.ok).toBe(true);
     if (!boss.ok) return;

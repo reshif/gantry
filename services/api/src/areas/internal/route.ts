@@ -1,5 +1,6 @@
 import type { Queryable } from "@gantry/db";
 import type { RunCtx } from "./context.js";
+import { readSecurity } from "../../core/read/index.js";
 import { loadFacts, repoTagsFor } from "../models/facts.js";
 import { resolveModel, type Pick } from "../models/resolve.js";
 
@@ -15,6 +16,8 @@ export interface ModelRoute {
   crossModel?: boolean;
   /** A custom or on-prem endpoint vendor with no stored key (an on-prem server without a token): the edge sends no key. */
   keyless?: boolean;
+  /** LAN ranges a Factory Admin opened for on-prem vendors; the edge's address guard lets a vendor endpoint inside them through (S-68). Absent: public addresses only. */
+  lan?: string[];
 }
 export interface ModelAlternate {
   vendor: string;
@@ -62,6 +65,7 @@ export async function resolveRoute(db: Queryable, c: RunCtx, requested: string |
     const v = vendors.get(p.vendor)!;
     return (v.endpoint || (/anthropic|claude/i.test(`${v.id} ${v.product}`) ? ANTHROPIC_BASE_URL : "")).replace(/\/+$/, "");
   };
+  const lan = (await readSecurity(db, c.orgId)).value.vendorLanRanges ?? [];
   const base = baseOf(res.pick);
   if (!base) return { ok: false, reason: `Vendor ${vendors.get(res.pick.vendor)!.name} has no endpoint.` };
   const alternates: ModelAlternate[] = res.alternates
@@ -69,7 +73,7 @@ export async function resolveRoute(db: Queryable, c: RunCtx, requested: string |
     .filter((p) => p.baseUrl !== "");
   return {
     ok: true,
-    route: { vendor: res.pick.vendor, baseUrl: base, modelId: res.pick.model, upstreamModel: res.pick.upstream, ...(res.pick.crossModel ? { crossModel: true } : {}), ...(keyless(res.pick) ? { keyless: true } : {}), ...(alternates.length ? { alternates } : {}) },
+    route: { vendor: res.pick.vendor, baseUrl: base, modelId: res.pick.model, upstreamModel: res.pick.upstream, ...(res.pick.crossModel ? { crossModel: true } : {}), ...(keyless(res.pick) ? { keyless: true } : {}), ...(alternates.length ? { alternates } : {}), ...(lan.length ? { lan } : {}) },
     flags: { sameModel: res.pick.sameModel, crossModel: res.pick.crossModel, wanted: res.wanted },
   };
 }

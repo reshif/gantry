@@ -62,7 +62,7 @@ d("OIDC sign-in against a local issuer", () => {
     // A named account forces the login form, so another person's SSO session at the provider cannot stand in for it.
     expect(u.searchParams.get("prompt")).toBe("login");
     const plain = new URL(String((await t.app.inject("/auth/login")).headers.location));
-    expect(plain.searchParams.get("prompt")).toBeNull(); // a plain sign-in may reuse the provider's session
+    expect(plain.searchParams.get("prompt")).toBe("login"); // S-130: a plain sign-in never reuses the provider's own session
     const c = r.cookies.find((x) => x.name === "gantry_oidc")!;
     expect(c).toMatchObject({ httpOnly: true, sameSite: "Lax", secure: true });
     expect(c.value).not.toContain(u.searchParams.get("state")!); // sealed, not readable
@@ -377,8 +377,9 @@ d("an empty org: bootstrap admin", () => {
     expect(can.json().results.map((r: { allowed: boolean }) => r.allowed)).toEqual([true, true]);
 
     const other = await signInFlow(t, issuer, { sub: "other-1", email: "other@corp.example", email_verified: true, name: "Other", auth_time: now() });
-    const me2 = (await t.app.inject({ url: "/api/v1/me", headers: { cookie: `__Host-gantry_session=${other.session!.value}` } })).json();
-    expect(me2.person.roles).toEqual([]);
+    // S-71: no sign-in domain list here, so a stranger is created as invited (pending approval) and gets no session until an admin approves.
+    expect(other.session).toBeUndefined();
+    expect((await t.db.admin.query(`select status from people where email = 'other@corp.example'`)).rows[0].status).toBe("invited");
     // a second sign-in of the bootstrap email does not grant again once an admin exists
     await t.db.admin.query(`update role_assignments set revoked_at = now()`);
     await t.db.admin.query(`insert into role_assignments (org_id, id, person_id, role_id, scope_type) select org_id, 'ra-x', id, 'factory_admin', 'factory' from people where email = 'other@corp.example'`);

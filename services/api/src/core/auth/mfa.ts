@@ -1,6 +1,7 @@
 import type { Queryable } from "@gantry/db";
 
-export const MFA_REQUIRED_MSG = "Factory Admins sign in with two steps. Set up two-step sign-in (an authenticator app) at your identity provider, then sign in again.";
+/** MFA is required for everyone (S-121). The only way to a first authenticator is the one-time link an administrator issues; a password alone never offers it (S-122). */
+export const MFA_REQUIRED_MSG = "Everyone signs in with two steps: your password and a second factor (an authenticator app, a security key or a recovery code). This sign-in had no second factor. Use the one-time enrolment link you were emailed to set up two-step sign-in, or ask an administrator to send you one, then sign in again.";
 
 /** Whether the person holds Factory Admin now, directly or through a team (live, unexpired grants only). */
 export async function holdsFactoryAdmin(db: Queryable, orgId: string, personId: string): Promise<boolean> {
@@ -12,6 +13,11 @@ export async function holdsFactoryAdmin(db: Queryable, orgId: string, personId: 
   return (rowCount ?? 0) > 0;
 }
 
-/** The 401 body for a Factory Admin whose session lacks a second factor. `needs` lets the client show the guided screen. */
-export const mfaRefusal = { ok: false as const, msg: MFA_REQUIRED_MSG, needs: "mfa_setup" as const, rule: { kind: "invariant" as const, id: "ADMIN-MFA", name: "Second sign-in factor for Factory Admins" } };
+/** The 401 body for a session that lacks a second factor (any person). `needs` lets the client show the guided screen. */
+export const mfaRefusal = { ok: false as const, msg: MFA_REQUIRED_MSG, needs: "mfa_setup" as const, rule: { kind: "invariant" as const, id: "MFA", name: "Second sign-in factor for everyone" } };
 
+
+/** The MFA policy the server enforces, shown on the Security page (S-127). Not stored and not editable: a second factor is required of every person. */
+export function mfaPolicy(waived: boolean): { policy: "everyone"; required: true; waived: boolean; methods: string[] } {
+  return { policy: "everyone", required: true, waived, methods: ["totp", "webauthn", "recovery"] };
+}

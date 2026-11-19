@@ -2,6 +2,7 @@
  * Integration commands (spec 8.8, 12.1). Each runs inside `command()`: decision point, event and state in one transaction, a denial audited.
  * Secrets are sealed with the data key and never appear in a row, an event or a response other than as a mask.
  */
+import { egressAdded, urlHosts } from "../internal/egress.js";
 import { randomBytes } from "node:crypto";
 import type { IntegrationType } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
@@ -106,7 +107,7 @@ export async function addInstance(tx: Tx, a: Actor, dataKey: Buffer | null, b: z
     [a.orgId, id, t.id, b.name, b.enable === true, json({ ...config, _meta: meta }), sealed.enc, sealed.mask, health],
   );
   const row = (await readInstanceRow(tx, a.orgId, id))!;
-  const events: Cmd["events"] = [{ type: "integration.add", category: eventCat, subject: { type: "integration", id }, projectId: null, after: { name: b.name, type: t.id, config, projects, secretMask: sealed.mask, enabled: row.enabled } }];
+  const events: Cmd["events"] = [{ type: "integration.add", category: eventCat, subject: { type: "integration", id }, projectId: null, after: { name: b.name, type: t.id, config, projects, secretMask: sealed.mask, enabled: row.enabled } }, ...egressAdded([], urlHosts(config), { kind: "integration", id, name: b.name })];
   return { msg: `${b.name} added${row.enabled ? " and switched on" : ". It is switched off until you turn it on"}.`, changes: ["integrationInstances", "home"], project: null, events, extra: { integration: instanceFromRow(row) } };
 }
 
@@ -160,7 +161,7 @@ export async function updateInstance(tx: Tx, a: Actor, dataKey: Buffer | null, i
   const after = { name, config, projects, connected: enabled, ...(Object.keys(incoming).length ? { secretMask: maskText } : {}) };
   return {
     msg: `${name} saved.`, changes: ["integrationInstances", "integrations", "home"], project: null,
-    events: [{ type: "integration.edit", category: eventCat, subject: { type: "integration", id: row.id }, projectId: null, before, after: { ...after, changed } }],
+    events: [{ type: "integration.edit", category: eventCat, subject: { type: "integration", id: row.id }, projectId: null, before, after: { ...after, changed } }, ...egressAdded(urlHosts(cfg), urlHosts(config), { kind: "integration", id: row.id, name })],
     extra: { integration: instanceFromRow((await readInstanceRow(tx, a.orgId, row.id))!) },
   };
 }

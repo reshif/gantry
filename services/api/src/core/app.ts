@@ -10,7 +10,7 @@ import { ApiSettingsCache } from "../areas/apikeys/config.js";
 import { gateApiKey, logApiRequest, noteRejectedKey } from "../areas/apikeys/gate.js";
 import { authenticateApiKey } from "./auth/apikeys.js";
 import { authenticateService } from "./auth/service.js";
-import { holdsFactoryAdmin, mfaRefusal } from "./auth/mfa.js";
+import { mfaRefusal } from "./auth/mfa.js";
 import { csrfFor, findSession, revokeSessions, touchSession } from "./auth/sessions.js";
 import { sessionMayPassAllowList } from "./auth/ip-recovery.js";
 import type { Config } from "./config.js";
@@ -19,6 +19,8 @@ import { safeEqual } from "./crypto.js";
 import { installErrorHandler } from "./errors.js";
 import { enforceWriteGate } from "./write-gate.js";
 import { createOidcAdapter, type OidcAdapter } from "./oidc.js";
+import { bodyHasNul, hasNul } from "./nul.js";
+import type { IdpAdmin } from "./auth/idp-admin.js";
 import { canonicalPath } from "./paths.js";
 import { pinVia } from "./command.js";
 import { readOrg } from "./read/index.js";
@@ -33,6 +35,8 @@ export interface BuildOptions {
   /** Resolved org uuid (see bootstrapOrg). */
   orgId: string;
   oidc?: OidcAdapter;
+  /** The identity provider's admin API (the scoped service account): enrolment links, authenticator resets, the per-person factor status. Null/absent: those say so. */
+  idpAdmin?: IdpAdmin | null;
   logger?: boolean | object;
   /** Requests per minute per client (default 600). */
   rateLimitMax?: number;
@@ -129,7 +133,7 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
     },
   }, o.sweepMs);
   const oidc = o.oidc ?? createOidcAdapter(config.oidc);
-  const gantry: Gantry = { pool, config, orgId, hub, oidc, security, apiSettings: new ApiSettingsCache(pool, orgId), heartbeatMs: o.heartbeatMs ?? 15_000 };
+  const gantry: Gantry = { pool, config, orgId, hub, oidc, idpAdmin: o.idpAdmin ?? null, security, apiSettings: new ApiSettingsCache(pool, orgId), heartbeatMs: o.heartbeatMs ?? 15_000 };
   app.decorate("gantry", gantry);
   app.decorateRequest("gx", undefined as never);
 
@@ -147,12 +151,17 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
   app.addHook("onRequest", async (req, reply) => {
     req.gx = { orgId, principal: null, session: null, ip: req.ip, requestId: req.id, channel: "web", reply };
     const path = canonicalPath(req.url);
-    if (path === null) return void (await reply.code(400).send({ ok: false, msg: "Malformed request path." }));
+    if (path === null || hasNul(req.url)) return void (await reply.code(400).send({ ok: false, msg: "Malformed request path." }));
     if (path.startsWith("/internal/v1/")) return authInternal(req, reply);
     if (path.startsWith("/api/v1/")) {
       await authApi(app, req, reply);
       if (!reply.sent) await enforceReadGate(req, reply);
     }
+  });
+
+  // S-69: Postgres refuses U+0000 in text, so a NUL in a JSON body would surface as a 500. Refuse it at the door, once, for every route.
+  app.addHook("preValidation", async (req, reply) => {
+    if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body) && bodyHasNul(req.body)) return void (await reply.code(400).send({ ok: false, msg: "Text cannot contain a NUL character." }));
   });
 
   // The audit channel comes from the transport: a client-sent `via` is pinned to what the caller may claim.
@@ -241,9 +250,10 @@ async function authApi(app: FastifyInstance, req: FastifyRequest, reply: import(
     await revokeSessions(g.pool, g.orgId, s.personId, null, "system").catch(() => undefined);
     return unauth("This account is not active.", true);
   }
-  // A Factory Admin's session must come from a sign-in with a second factor. Checked on every request, not only at sign-in, because the
-  // role can be granted after the session began. The 401 says what to do; the session is kept so the guided screen can still reach /me.
-  if (!s.secondFactor && !g.config.adminMfaOptional && (await holdsFactoryAdmin(g.pool, g.orgId, s.personId))) {
+  // Everyone's session must come from a sign-in with a second factor (S-121). Checked on every request, not only at sign-in, so a session made before
+  // the rule (or while it was waived) cannot linger. People only: API keys and run/service tokens never reach this code (they are not people), and the
+  // allow-list recovery CLI opens a window that still ends in a normal sign-in. The 401 says what to do; the session is kept so the guided screen can reach /me.
+  if (!s.secondFactor && !g.config.adminMfaOptional) {
     await reply.code(401).send({ ...mfaRefusal, config: await publicConfig(app).catch(() => ({ demoAccounts: g.config.demoAccounts, githubLogin: false })) });
     return;
   }

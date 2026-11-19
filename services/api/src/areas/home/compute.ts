@@ -119,6 +119,15 @@ async function attention(db: Queryable, orgId: string, st: Flow, stops: ActiveSt
     const p = st.projects.find((x) => x.id === r.project);
     add({ id: `hm-att-access-${r.id}`, sev: 2, icon: "human", title: `${r.personName} was mentioned but cannot open ${p?.name ?? r.project}`, where: p?.name ?? r.project, sub: `${r.byName} mentioned them${r.wo ? ` on ${r.wo}` : ""}. Nothing was granted: give them a role or dismiss the request.`, act: { label: "Open people", route: "people", project: r.project } });
   }
+  // S-71 / G-A7 / G-B2: people waiting for approval, and sign-ins the pending cap or the per-address limit refused in the last hour. One item each (the id carries no count, so it is one card), for whoever manages people.
+  if (sc.holds("people.manage")) {
+    const waiting = Number((await db.query(`select count(*)::int as n from people where org_id = $1 and status = 'invited' and data->>'pendingApproval' = 'true'`, [orgId])).rows[0]?.n ?? 0);
+    const refused = (await db.query<{ rule: string; n: number }>(`select rule, count(*)::int as n from events where org_id = $1 and type = 'auth.signin' and outcome = 'denied' and rule in ('SIGNIN-PENDING_CAP','SIGNIN-PENDING_RATE') and occurred_at > now() - interval '1 hour' group by rule`, [orgId])).rows;
+    const cap = refused.find((r) => r.rule === "SIGNIN-PENDING_CAP")?.n ?? 0;
+    const rate = refused.find((r) => r.rule === "SIGNIN-PENDING_RATE")?.n ?? 0;
+    if (cap + rate > 0) add({ id: "hm-att-pending-refused", sev: 1, icon: "alert", title: `${cap + rate} sign-in${cap + rate === 1 ? "" : "s"} refused: ${cap ? "pending cap reached" : "too many new accounts from one address"}`, where: "Sign-in", sub: `In the last hour: ${cap} refused at the cap of waiting accounts, ${rate} at the per-address limit. ${waiting} waiting for approval. Approve or decline them in People.`, act: { label: "Open people", route: "people" } });
+    else if (waiting > 0) add({ id: "hm-att-pending", sev: 2, icon: "human", title: `${waiting} ${waiting === 1 ? "person" : "people"} waiting for approval`, where: "Sign-in", sub: "They signed in, but no sign-in domain list admits them. Approve or decline them in People.", act: { label: "Open people", route: "people" } });
+  }
   const stationName = (w: HomeWorkOrder): string => st.catalog.stations[w.station]?.name ?? "";
   for (const w of st.workOrders) {
     if (!inFlight(w) || !seeProject(w.project)) continue;

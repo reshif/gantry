@@ -102,6 +102,7 @@ export const WRITE_GATES: Readonly<Record<string, WriteGate>> = {
   [`POST ${P}/teams/:id/roles`]: A("people.manage"), [`DELETE ${P}/teams/:id/roles/:grant`]: A("people.manage"),
   [`POST ${P}/invites`]: A("people.manage"), [`POST ${P}/invites/:id/accept`]: A("people.manage"), [`POST ${P}/invites/:id/resend`]: A("people.manage"),
   [`PUT ${P}/people/:id/factory-roles/:role`]: A("people.manage"), [`DELETE ${P}/people/:id/factory-roles/:role`]: A("people.manage"),
+  [`POST ${P}/people/:id/mfa-reset`]: A("people.manage"),
   [`POST ${P}/people/:id/deactivate`]: A("people.manage"), [`POST ${P}/people/:id/reactivate`]: A("people.manage"), [`PUT ${P}/people/:id/teams`]: A("people.manage"),
   [`PUT ${P}/people/:id/oncall`]: SELF("retired; always answers 410"), [`PUT ${P}/people/:id/away`]: SELF("a person sets their own away status; for someone else the handler needs people.manage or approvers.edit"),
   // projects
@@ -116,7 +117,7 @@ export const WRITE_GATES: Readonly<Record<string, WriteGate>> = {
   [`POST ${P}/projects/:id/archive`]: A("project.archive"), [`POST ${P}/projects/:id/unarchive`]: A("project.archive"),
   // session and security
   [`DELETE ${P}/sessions/:id`]: SELF("own sessions; another person's need security.manage, decided in the handler"), [`PATCH ${P}/security`]: A("security.manage"), [`POST ${P}/security/recovery/confirm`]: A("security.manage"),
-  [`POST ${P}/can`]: SELF("a read-only batch question about the caller's own rights"), "POST /auth/logout": X("sign-out clears the caller's own session"),
+  [`POST ${P}/can`]: SELF("a read-only batch question about the caller's own rights"), "POST /auth/logout": X("sign-out clears the caller's own session"), "POST /auth/backchannel-logout": X("a logout token signed by the identity provider (OIDC Back-Channel Logout)"),
   // stops
   [`POST ${P}/stops`]: PICK((r) => stopOf(body(r).mode === "kill" ? "kill" : "halt", body(r).scope), "halt.factory", "line.halt", "kill.factory", "kill.project", "kill.workorder"),
   [`DELETE ${P}/stops/:id`]: PICK((r) => stopOf("resume", stopIdScope(r)), "resume.factory", "line.resume"),

@@ -20,7 +20,7 @@ Open https://localhost. Caddy signs a certificate from its local CA; either acce
 docker compose -f deploy/compose.yml cp ingress:/data/caddy/pki/authorities/local/root.crt ./gantry-local-root.crt
 ```
 
-Sign in with a seeded demo account, for example `asha` / `gantry-dev` (all 15 people from the legacy seed exist; the username is the email prefix and the `gantry_id` claim is the legacy id such as `p-asha`). **The demo accounts and the shared password are for local development only.** Mail sent by the stack appears at https://localhost/mail/ (development profile only, see below). Keycloak's admin console is at http://localhost:8081/idp/admin/ on the host itself (`admin`, password in `deploy/secrets/keycloak_admin_password`); it is not served on the public site.
+Sign in with a seeded demo account, for example `asha` / `gantry-dev` (all 15 people from the legacy seed exist; the username is the email prefix and the `gantry_id` claim is the legacy id such as `p-asha`). **The demo accounts and the shared password are for local development only, and MFA is required for everyone: a demo person has no authenticator yet, so with `GANTRY_DEV_SEED=true` either opt in to the waiver on this throwaway stack (`GANTRY_DEV_ADMIN_MFA_OPTIONAL=true` in `deploy/.env`, off by default and refused off localhost) or enrol each person from the one-time link Keycloak mails to Mailpit.** Mail sent by the stack appears at https://localhost/mail/ (development profile only, see below). Keycloak's admin console is at http://localhost:8081/idp/admin/ on the host itself (`admin`, password in `deploy/secrets/keycloak_admin_password`); it is not served on the public site.
 
 Stop and wipe: `docker compose -f deploy/compose.yml down -v`.
 
@@ -36,7 +36,30 @@ Stop and wipe: `docker compose -f deploy/compose.yml down -v`.
 
 Ingress routes: `/api/*`, `/auth/*`, `/hooks/*` to `gantry-api:8000` (no buffering, so server-sent events stream); `/idp/realms/gantry/*` and `/idp/resources/*` to Keycloak `:8081`; any other `/idp/*` path (the admin console, the admin REST API, the `master` realm) answers 404; everything else to `gantry-web:8080`.
 
-`GANTRY_INGRESS_PROFILE` picks the development routes from `caddy/profiles/`. `dev` (the compose default for this local stack) adds `/mail/*` to Mailpit `:8025`. `prod` (the Caddyfile default) adds nothing, so set `GANTRY_INGRESS_PROFILE=prod` for any shared or production install.
+`GANTRY_INGRESS_PROFILE` picks the development routes from `caddy/profiles/`. The default is `prod`, which adds nothing: no `/mail`, no `/v3`. `dev` is an explicit opt-in that adds `/mail/*` (Mailpit `:8025`, which holds every invite link and notification mail) and the `/v3` design preview. **To keep Mailpit at `/mail/` and the preview at `/v3/` on a local or preview stack, set `GANTRY_INGRESS_PROFILE=dev`** in the environment `docker compose` runs with (an exported variable, or the compose env file you already use) before the next `up`; recreate only the `ingress` service for it to take effect (`docker compose -p gantry up -d ingress`). Never set it on a stack that binds beyond loopback. The demo accounts are separately tied to a localhost URL (`core/config.ts`).
+
+### Back-channel logout (sessions end with the identity)
+
+The API serves `POST /auth/backchannel-logout` (OIDC Back-Channel Logout 1.0). Keycloak posts a signed logout token there when a user signs out at Keycloak, is disabled, or has sessions revoked; the API verifies it (signature, issuer, audience, age, event) and revokes the matching Gantry sessions. The realm files set the client's `backchannel.logout.url` to `http://gantry-api:8000/auth/backchannel-logout` (container to container, never through the ingress) with session required. A realm that already exists is not re-imported, so on a running stack set it by hand once: Keycloak admin console, realm `gantry`, client `gantry-web`, Settings, Logout settings, "Backchannel logout URL" `http://gantry-api:8000/auth/backchannel-logout`, "Backchannel logout session required" on.
+
+### Vendor LAN ranges (on-prem models)
+
+The model gateway (edge) refuses vendor endpoints that are loopback, link-local (metadata), on a Gantry network or private, resolving the name on every call. An on-prem vendor on a private address needs its range listed: Security setting `vendorLanRanges` (IPv4 CIDR inside 10/8, 192.168/16 or 100.64/10), set by a Factory Admin with a fresh sign-in and audited. `EDGE_ALLOW_PRIVATE_UPSTREAMS=true` turns the edge guard off for a development stack.
+
+What is never openable (`CONTROL_CIDRS` in `packages/domain/src/netguard.ts`): the pinned compose networks (control 10.89.17.0/24, front 172.18, dockerapi 172.19, egress 172.20, launch 172.22, wsapi 172.23, all /16) and Docker's whole default pool **172.16.0.0/12** (per-run networks and docker0 come from it). A range that overlaps any of them is refused when saved, so:
+- **172.16.0.0/12 is not a LAN range.** A model host on a 172.16-172.31 address stops working at the edge and cannot be listed.
+- **10.0.0.0/8 is refused** because it covers 10.89.17.0/24. List the real range instead, for example `10.0.0.0/16`.
+- Compose service names (`gantry-*`, `postgres`, `minio`, `keycloak`, `mailpit`, ...) are never a vendor host.
+
+Pinning the compose subnets matches what the existing stack already uses; on a stack created before the pin, `docker compose up` sees a changed network definition and recreates the networks (and the containers on them), so apply it in a maintenance window.
+
+**If your model host really is on 172.16-31:** move Docker's pool away from the corporate LAN, then narrow `CONTROL_CIDRS` to match.
+1. Pick a pool the LAN does not use, for example `10.200.0.0/16` split into /24 (it must not overlap the LAN or 10.89.17.0/24).
+2. On the Docker host, edit `/etc/docker/daemon.json`: `{ "default-address-pools": [ { "base": "10.200.0.0/16", "size": 24 } ] }`.
+3. Stop the stack (`docker compose -p gantry down`), restart the daemon (`systemctl restart docker`), remove the old gantry networks if `down` left any, and change the `ipam` subnets in `deploy/compose.yml` (front, dockerapi, egress, launch, wsapi) to blocks inside the new pool.
+4. In `packages/domain/src/netguard.ts` replace `172.16.0.0/12` and the old 172.x /16 entries in `CONTROL_CIDRS` with the new pool and the new subnets, rebuild and redeploy the API and edge.
+5. Then list the model host's 172.x range in Security.
+Do this only with the owner's agreement: it changes the networks of every container.
 
 ### Keycloak admin console
 
@@ -62,7 +85,7 @@ Seeding order (spec 4.3): the launcher does not clone. Call `POST /v1/runs` with
 
 ## Configuration
 
-Non-secret settings come from environment variables in `compose.yml`; override them in your shell or a `deploy/.env` file: `GANTRY_ORG_ID`, `GANTRY_ORG_NAME`, `GANTRY_DEV_SEED`, `GANTRY_BOOTSTRAP_ADMIN_USERNAME`, `GANTRY_BOOTSTRAP_ADMIN_EMAIL` (deprecated), `OIDC_GITHUB_IDP_ALIAS`, `RUNNER_VARIANTS`, `RUN_SUBNET_POOL`, `MAX_CONCURRENT_RUNS`, `WORKSPACE_MAX_MB`, `WORKSPACE_BACKING`, `MIN_FREE_DISK_GB`, `RUN_MEMORY_OVERCOMMIT_RATIO`, `CONTROL_PLANE_MEMORY_MB`, `DOCKER_GID`, `DOCKER_SOCKET`, `GANTRY_SECRETS_DIR`, `MINIO_IMAGE`, `KEYCLOAK_IMAGE`, `GANTRY_HOSTNAME`, `GANTRY_TLS`, `GANTRY_IMAGE_PREFIX`, `GANTRY_VERSION`, and the `GANTRY_BACKUP_*` settings (PRODUCTION.md). Set `COMPOSE_PROJECT_NAME` (or `-p`) to run a second copy; the launcher finds the edge through the compose project label.
+Non-secret settings come from environment variables in `compose.yml`; override them in your shell or a `deploy/.env` file: `GANTRY_ORG_ID`, `GANTRY_ORG_NAME`, `GANTRY_DEV_SEED`, `GANTRY_BOOTSTRAP_ADMIN_USERNAME`, `GANTRY_BOOTSTRAP_ADMIN_EMAIL` (where the bootstrap admin's one-time enrolment link goes), `OIDC_GITHUB_IDP_ALIAS`, `RUNNER_VARIANTS`, `RUN_SUBNET_POOL`, `MAX_CONCURRENT_RUNS`, `DOCKER_GID`, `DOCKER_SOCKET`, `GANTRY_SECRETS_DIR`, `MINIO_IMAGE`, `KEYCLOAK_IMAGE`, `GANTRY_HOSTNAME`, `GANTRY_TLS`, `GANTRY_IMAGE_PREFIX`, `GANTRY_VERSION`, and the `GANTRY_BACKUP_*` settings (PRODUCTION.md). Set `COMPOSE_PROJECT_NAME` (or `-p`) to run a second copy; the launcher finds the edge through the compose project label.
 
 ## Sandbox hardening
 
@@ -115,7 +138,7 @@ A run that fills this filesystem gets ENOSPC inside it and stops; the host disk,
 
 ## Keycloak realm
 
-`keycloak/realm-gantry.json` is imported at start (`start-dev --import-realm`). The confidential client `gantry-web` uses the authorization-code flow with PKCE `S256` required and redirect URI `https://localhost/auth/callback`; direct password grants are off. Its secret is `${GANTRY_OIDC_CLIENT_SECRET}` in the JSON: the container's entrypoint reads `/run/secrets/oidc_client_secret` into that variable inside the container just before starting Keycloak, and Keycloak substitutes it during import (nothing is passed through compose environment). Tokens carry `gantry_id`, `gantry_title`, `acr` and `auth_time`. For step-up (spec 14.1) the API requests `prompt=login` (or `max_age=0`) and checks `auth_time`; Factory Admins also need a second factor (TOTP at level 2 of the realm's `gantry-browser` step-up flow, checked by the API from `acr`/`amr`); the dev stack waives it with `GANTRY_DEV_ADMIN_MFA_OPTIONAL` (default true in compose.yml), see PRODUCTION.md. The issuer is `https://localhost/idp/realms/gantry`; because `localhost` inside a container is the container itself, the API reaches Keycloak at `OIDC_INTERNAL_URL=http://keycloak:8081/idp/realms/gantry` (Keycloak runs with `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true`, so discovery fetched there advertises internal back-channel URLs and the public issuer).
+`keycloak/realm-gantry.json` is imported at start (`start-dev --import-realm`). The confidential client `gantry-web` uses the authorization-code flow with PKCE `S256` required and redirect URI `https://localhost/auth/callback`; direct password grants are off. Its secret is `${GANTRY_OIDC_CLIENT_SECRET}` in the JSON: the container's entrypoint reads `/run/secrets/oidc_client_secret` into that variable inside the container just before starting Keycloak, and Keycloak substitutes it during import (nothing is passed through compose environment). Tokens carry `gantry_id`, `gantry_title`, `acr` and `auth_time`. For step-up (spec 14.1) the API requests `prompt=login` (or `max_age=0`) and checks `auth_time`; MFA is required for everyone (the realm's `gantry-browser` flow: password, then an authenticator app, security key or recovery code the person already has; a person with none is refused and enrols only from a one-time admin-issued link; checked by the API from `acr`/`amr`). `GANTRY_DEV_ADMIN_MFA_OPTIONAL=true` is an explicit dev opt-in that waives it, false by default.yml), see PRODUCTION.md. The issuer is `https://localhost/idp/realms/gantry`; because `localhost` inside a container is the container itself, the API reaches Keycloak at `OIDC_INTERNAL_URL=http://keycloak:8081/idp/realms/gantry` (Keycloak runs with `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true`, so discovery fetched there advertises internal back-channel URLs and the public issuer).
 
 People can't change their own email address or username in Keycloak's account console: in the realm's user profile, both are editable by admins only. Gantry links a person by their verified email the first time they sign in, so a self-edited address could otherwise claim someone else's Gantry account. An invited person is claimed only through the invite email's link, which carries a one-time token (valid 14 days, single use).
 
@@ -148,3 +171,11 @@ docker compose -f deploy/compose.yml exec gantry-api node dist/cli/allowlist-rec
 - The command refuses a person who is not an active Factory Admin, and an allow-list that is empty. A second run replaces the admin's earlier unused window.
 - Audited: `auth.allowlist_recovery.opened` (actor `operator`), `auth.allowlist_recovery.used` (the admin, with the address) and `auth.allowlist_recovery.address_added` or `.address_declined`, all in Audit under Auth.
 - No HTTP route opens a window. Nobody without shell access to the server host can use it.
+
+## MFA rollout runbook
+
+MFA is required for everyone. To switch an existing install, follow "MFA rollout runbook (an existing install)" in [PRODUCTION.md](PRODUCTION.md). In short:
+1. check the first Factory Admin (and a second one) has an authenticator in the Keycloak console; 2. set the realm's mail server and create `deploy/secrets/idp_admin_client_secret`;
+3. run `deploy/keycloak/apply-mfa-realm.mjs ... --smtp-test-to <address>` once (it refuses to switch the flow unless a test mail is sent; `--dry-run` first);
+4. deploy the API and web together, then sign the first admin out and in once; 5. send enrolment links from People > Reset authenticator and confirm one works;
+6. rollback: bind the built-in `browser` flow in the console. A compromise of the API or of the service-account secret can plant a factor (it is detected and emailed, not prevented): see PRODUCTION.md.

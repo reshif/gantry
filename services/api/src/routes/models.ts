@@ -8,11 +8,12 @@
  *   GET /api/v1/budgets, PUT /api/v1/budgets/{project}
  * Every state-changing handler goes through command() (docs/BUILD.md, spec 15.4). Only `model.edit` changes vendors, models, routing and prices.
  */
-import { validateTemplateValues, vendorTemplate, VENDOR_TEMPLATES, visibleProjects } from "@gantry/domain";
+import { templateEndpoint, validateTemplateValues, vendorTemplate, VENDOR_TEMPLATES, visibleProjects } from "@gantry/domain";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { slug } from "../areas/agents/config.js";
-import { command, decide, policyState, refuse } from "../core/index.js";
-import { addModel, addVendor, publishPrices, qualifyVendor, removeModel, setModelContext, setModelEnabled, setRouting, setVendor, setWoBudget } from "../areas/models/commands.js";
+import { appendEvent, withTx } from "@gantry/db";
+import { command, mayCallOut, policyState, refuse } from "../core/index.js";
+import { checkEndpoint, lanRangesOf, addModel, addVendor, publishPrices, qualifyVendor, removeModel, setModelContext, setModelEnabled, setRouting, setVendor, setWoBudget } from "../areas/models/commands.js";
 import { resolveFor } from "../areas/models/facts.js";
 import { costMicros, listPriceVersions, priceBookAt } from "../areas/models/prices.js";
 import { discoverModels, discoveryHosts, type DiscoverResult } from "../areas/models/discovery.js";
@@ -135,8 +136,15 @@ export const modelRoutes: FastifyPluginAsync = async (app) => {
    * has no way to be handed unsaved ones. A failure is audited and comes back as a 422 with the reason; nothing is stored.
    */
   const discover = async (req: import("fastify").FastifyRequest, t: NonNullable<ReturnType<typeof vendorTemplate>>, values: Record<string, string>): Promise<DiscoverResult | null> => {
-    if (!(await decide(req, "model.edit", {})).allowed) return null;
-    allowDiscoveryHosts(discoveryHosts(t, values));
+    // G-A1: the right AND a fresh sign-in come before any network call or allow-list entry; otherwise the command that follows refuses and audits.
+    if (!(await mayCallOut(req, "model.edit"))) return null;
+    // G-A2: the API never fetches an endpoint that checkEndpoint would refuse (metadata, loopback, control plane, service names).
+    checkEndpoint(templateEndpoint(t, values), { allowHttp: false, lan: await withTx(g.pool, (tx) => lanRangesOf(tx, g.orgId)) });
+    // The discovery host is on the worker's list for five minutes so this one call can go through the proxy; the grant is ledgered here (by a stepped-up caller), and the command's own egress.host.added row follows when it commits.
+    const hosts = discoveryHosts(t, values);
+    allowDiscoveryHosts(hosts);
+    const who = req.gx.principal;
+    await withTx(g.pool, (tx) => appendEvent(tx, { orgId: g.orgId, type: "egress.discovery.allowed", category: "config", actor: who?.id ?? "unknown", channel: "web", subject: { type: "vendor-discovery", id: t.id }, outcome: "ok", rule: "STEP-UP", after: { hosts, minutes: 5, list: "worker" }, requestId: req.id, sourceIp: req.ip || null }));
     const http = opsEnv(app).http;
     let r = await discoverModels(http, t, values);
     // The edge caches the system allow-list for a few seconds; a host added a moment ago may need one more try.
