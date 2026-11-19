@@ -524,6 +524,22 @@ describe("Floor: precision sheet", () => {
     expect(cell.textContent).toMatch(/S5 3\/1\+2 over/);
   });
 
+  it("T-60: a station with a WIP limit of 0 is unlimited: no OVER, no LIMIT 0, a NO LIMIT marker clear of the 0 label", async () => {
+    const free = { ...PAYMENTS, version: 1, flow: { ...PAYMENTS.flow, stations: { ...PAYMENTS.flow.stations, build: { ...PAYMENTS.flow.stations.build, wip: 0 } } } };
+    mockApi({ "GET /api/v1/projects": () => ({ body: [free] }), "GET /api/v1/projects/payments": () => ({ body: free }), "GET /api/v1/projects/payments/floor": () => ({ body: { ...floorRead(), project: free } }) });
+    mount(<FloorView />);
+    await screen.findByRole("heading", { name: "Floor" });
+    const build = document.querySelector('[data-station="build"]') as HTMLElement;
+    expect(build.classList.contains("over")).toBe(false);
+    expect(build.textContent).not.toMatch(/OVER|LIMIT 0/);
+    expect(build.textContent).toMatch(/NO LIMIT/);
+    expect(build.getAttribute("aria-label") ?? build.querySelector("[role=button]")?.getAttribute("aria-label")).not.toMatch(/over limit|limit 0/);
+    // the "0" axis label and the marker label never share a position
+    const zero = Array.from(build.querySelectorAll("text.fp-t.f")).find((t) => t.textContent === "0");
+    const marker = Array.from(build.querySelectorAll("text.fp-t.m")).find((t) => t.textContent === "NO LIMIT");
+    expect(Number(marker!.getAttribute("x")) - Number(zero!.getAttribute("x"))).toBeGreaterThan(50);
+  });
+
   it("says plainly when nothing is over a limit", async () => {
     mockApi({ "GET /api/v1/projects/payments/floor": only(["WO-2398"]) });
     mount(<FloorView />);
