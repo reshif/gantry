@@ -154,6 +154,15 @@ async function restoreOne(fx: Fx, w: Wo, s: StopDb, catalog: Catalog): Promise<v
     w.state = (prev.state === "running" || prev.state === "waiting" || prev.state === "parked" ? prev.state : "running") as Wo["state"];
     w.position = prev.position;
     note(w, fx, fx.actor, `Restored after ${s.mode === "kill" ? "kill" : "halt"}: ${s.reason}`);
+    // An order that was waiting for a full station (any kind of wait, an epic child waiting for Build included) comes back INTO that wait: same target and kind, same
+    // state, no station re-entered and no gate opened. The promotion lets it in when a place frees.
+    if (w.data.wipWait) {
+      w.state = (prev.state as Wo["state"]) ?? w.state;
+      w.position = prev.position;
+      delete w.data.stopClosedGates;
+      ev(fx, w, "wo.state", { from: "killed", to: w.state, station: prev.station, text: "restored, still waiting for a place" }, { category: "kill" });
+      return;
+    }
     // The kill freed its place and someone may have taken it: a restore never pushes a station over its limit, the order waits (kind restore) until a place frees.
     // Whatever state it was killed in (a restore that was itself waiting is parked on its station), an order back on a station needs a place; only one in a bay does not.
     const reenters = !catalog.bays.some((b) => b.id === w.position);
