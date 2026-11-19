@@ -5,7 +5,6 @@ import { agentOffKind } from "../src/areas/session/core.js";
 
 const d = TEST_URL ? describe : describe.skip;
 const ADMIN = "p-asha";
-const CELL = "ag-spec|feature|payments";
 d("round 2: rolling back to a never-tested version (S-40)", () => {
   let t: TestApp;
   beforeAll(async () => {
