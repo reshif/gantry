@@ -2,7 +2,7 @@
 #   docker build -f services/worker/Dockerfile -t gantry-worker:dev .
 # Same code tree as gantry-api (it imports @gantry/api/core) with its own entry. It has no HTTP port; the healthcheck reads a heartbeat file.
 # Behind a TLS-intercepting proxy, add: --secret id=cacert,src=/path/to/ca-bundle.crt (optional; used only for npm ci).
-FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS build
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS build
 WORKDIR /app
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false
 COPY package.json package-lock.json tsconfig.base.json ./
@@ -23,7 +23,7 @@ COPY services/worker/tsconfig.json services/worker/
 COPY services/worker/src services/worker/src
 RUN npm run build -w @gantry/domain && npm run build -w @gantry/db && npm run build -w @gantry/api && npm run build -w @gantry/worker
 
-FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS deps
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS deps
 WORKDIR /app
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false
 COPY package.json package-lock.json ./
@@ -35,7 +35,7 @@ RUN --mount=type=secret,id=cacert,required=false \
     if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
     npm ci -w @gantry/worker -w @gantry/api -w @gantry/db -w @gantry/domain --omit=dev --ignore-scripts && npm cache clean --force
 
-FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
