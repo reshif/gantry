@@ -36,11 +36,13 @@ export class FakeLauncher {
   runs = new Map<string, FakeRun>();
   calls: Call[] = [];
   /** Answer 429 to start-run (the launcher is full). */
-  capacity = false;
+  capacity: boolean | string = false;
   /** Runs that survive stop-run (a container that will not die). */
   stuck = new Set<string>();
   /** Fail this many stop-run calls with teardown_incomplete. */
   stopFailures = 0;
+  /** Runs the launcher stopped for a critically low host disk (its list answer). */
+  criticalStops: Array<{ runId: string; at: number; freeBytes: number }> = [];
   /** Runs the double lists although nobody started them (orphans left by a crash). */
   onStop: ((id: string) => void | Promise<void>) | null = null;
   onStart: ((r: Record<string, any>) => void | Promise<void>) | null = null;
@@ -67,7 +69,7 @@ export class FakeLauncher {
       await this.onStart?.(b);
       const allowed = new Set(["runId", "workspaceRef", "variant", "runToken", "seedComplete"]);
       if (Object.keys(b).some((k) => !allowed.has(k))) return send(res, 422, { ok: false, msg: "invalid request" });
-      if (this.capacity) return send(res, 429, { ok: false, kind: "capacity", msg: "at capacity" });
+      if (this.capacity) return send(res, 429, { ok: false, kind: "capacity", msg: typeof this.capacity === "string" ? this.capacity : "at the concurrent run limit (3)" });
       const have = this.runs.get(b.runId);
       if (have?.state === "started") return send(res, 200, { ok: true, runId: b.runId, state: "running" });
       const state = b.seedComplete === false ? "prepared" : "started";
@@ -88,7 +90,7 @@ export class FakeLauncher {
     }
     if (req.method === "GET" && u.pathname === "/v1/runs") {
       this.calls.push({ op: "list", at: Date.now() });
-      return send(res, 200, { ok: true, runs: [...this.runs.values()].map((r) => ({ runId: r.runId, variant: r.variant, workspaceRef: r.workspaceRef, container: r.state === "started" ? { id: `c-${r.runId}` } : null, network: { name: `run-${r.runId}` }, volume: { name: `ws-${r.runId}` } })), capacity: { max: 32, networks: this.runs.size } });
+      return send(res, 200, { ok: true, runs: [...this.runs.values()].map((r) => ({ runId: r.runId, variant: r.variant, workspaceRef: r.workspaceRef, container: r.state === "started" ? { id: `c-${r.runId}` } : null, network: { name: `run-${r.runId}` }, volume: { name: `ws-${r.runId}` } })), capacity: { max: 32, networks: this.runs.size }, criticalStops: this.criticalStops });
     }
     send(res, 404, { ok: false, msg: "not found" });
   }

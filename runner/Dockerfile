@@ -80,6 +80,8 @@ RUN groupadd -g 10001 runner \
  && mkdir -p /workspace && chown 10001:10001 /workspace
 COPY --from=wrapper-deps /opt/gantry-wrapper /opt/gantry-wrapper
 COPY --from=wrapper-build /src/runner/wrapper/dist /opt/gantry-wrapper/dist
+# The git front the agent's shell finds first on PATH (S-91): refuses config-borne commands. Root-owned, not writable by the runner.
+COPY --chmod=0755 runner/wrapper/bin/git /opt/gantry-wrapper/bin/git
 # Hooks never run inside git operations the agent performs (spec 5.4 T9): hooksPath points at nothing.
 # The agent commits locally as Gantry; it never pushes (gantry-github publishes after the step).
 ENV NODE_ENV=production \

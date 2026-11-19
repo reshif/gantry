@@ -1,9 +1,10 @@
 import type Dockerode from "dockerode";
 import type { ContainerInspectInfo, NetworkInspectInfo } from "dockerode";
 import { firstFreeBlock, formatCidr, parseCidr, type Cidr } from "./cidr.js";
+import { statfs } from "node:fs/promises";
 import type { LauncherConfig } from "./config.js";
 import { err, ok, type Result } from "./result.js";
-import { LABEL_MANAGED, LABEL_RUN, LABEL_VARIANT, LABEL_WORKSPACE, MANAGED_BY, names, networkOptions, createRequest, runLabels, runnerContainerOptions, tokenArchive, WORKSPACE_PATH, type StartRunInput } from "./template.js";
+import { LABEL_MANAGED, LABEL_RUN, LABEL_VARIANT, LABEL_WORKSPACE, MANAGED_BY, names, networkOptions, createRequest, runLabels, runnerContainerOptions, tokenArchive, volumeDriverOpts, WORKSPACE_PATH, type StartRunInput } from "./template.js";
 
 export type LauncherError =
   | { kind: "capacity"; msg: string }
@@ -45,6 +46,8 @@ export interface RunInventoryEntry {
 export interface RunInventory {
   runs: RunInventoryEntry[];
   capacity: { max: number; networks: number };
+  /** Runs stopped because the host disk was critically low (most recent last), so the worker can say why they ended. */
+  criticalStops?: Array<{ runId: string; at: number; freeBytes: number }>;
 }
 
 const statusOf = (e: unknown): number | undefined => (typeof e === "object" && e !== null ? (e as { statusCode?: number }).statusCode : undefined);
@@ -136,7 +139,11 @@ export class RunManager {
     if (net.value.subnet) base.subnet = net.value.subnet;
     if (!startNow) return ok(base);
 
+    let tokenFiled: { putArchive: (b: Buffer, o: { path: string }) => Promise<unknown> } | undefined;
     const rollback = async () => {
+      // S-96: the volume is kept when it was not created in this call (it holds the seeded repository), so the token file must not stay in it.
+      // The proxy's only PUT is a token archive: overwrite the file with a one-byte stand-in while the container still exists.
+      if (tokenFiled) await Promise.resolve().then(() => tokenFiled!.putArchive(tokenArchive("x", this.cfg.limits.uid, this.cfg.limits.gid), { path: WORKSPACE_PATH })).catch(() => undefined);
       await this.removeContainerQuiet(cname);
       await this.detachAll(names.network(id));
       if (net.value.created) await this.removeNetworkQuiet(names.network(id));
@@ -162,6 +169,7 @@ export class RunManager {
     try {
       const container = await this.docker.createContainer(createRequest(runnerContainerOptions(this.cfg, input)));
       // The token goes into the workspace volume as a file the wrapper reads and unlinks first thing; it is never in the create body or the environment.
+      tokenFiled = container;
       await container.putArchive(tokenArchive(input.runToken, this.cfg.limits.uid, this.cfg.limits.gid), { path: WORKSPACE_PATH });
       await this.attachEdge(names.network(id), edge);
       await container.start();
@@ -199,12 +207,95 @@ export class RunManager {
     } catch (e) {
       if (statusOf(e) !== 404) return err({ kind: "docker", msg: messageOf(e) });
     }
+    // S-90: no new run starts on a nearly full disk (the database and the object store share it). Deferred by the worker like any capacity answer.
+    const low = await this.lowDisk();
+    if (low) return err({ kind: "capacity", msg: low });
     try {
-      await this.docker.createVolume({ Name: name, Driver: "local", Labels: runLabels(input) });
+      const opts = volumeDriverOpts(this.cfg);
+      await this.docker.createVolume({ Name: name, Driver: "local", Labels: runLabels(input), ...(opts ? { DriverOpts: opts } : {}) });
       return ok({ created: true });
     } catch (e) {
       return err({ kind: "docker", msg: messageOf(e) });
     }
+  }
+
+  /** A message when the host's free disk is under the floor; undefined when there is room, or when no probe path is configured. */
+  async lowDisk(): Promise<string | undefined> {
+    const d = this.cfg.disk;
+    if (!d.probePath || d.minFreeBytes <= 0) return undefined;
+    let free: number;
+    try {
+      const s = await statfs(d.probePath);
+      free = Number(s.bavail) * Number(s.bsize);
+    } catch (e) {
+      // fail closed: a disk that cannot be measured is not known to have room
+      return `host free disk cannot be measured (${messageOf(e)}); not starting new runs`;
+    }
+    const gb = (n: number) => (n / 2 ** 30).toFixed(1);
+    if (free < d.minFreeBytes) return `host free disk is ${gb(free)} GB, under the ${gb(d.minFreeBytes)} GB floor; not starting new runs until it recovers`;
+    // Room for this run to reach its cap beside the runs already holding a workspace (G-S8): the floor plus (runs + 1) x cap.
+    if (this.cfg.workspace.backing === "disk") {
+      const held = await Promise.resolve().then(() => this.docker.listVolumes({ filters: { label: [`${LABEL_MANAGED}=${MANAGED_BY}`] } })).then((r) => r.Volumes?.length ?? 0, () => 0);
+      const need = d.minFreeBytes + (held + 1) * this.cfg.workspace.maxMb * 2 ** 20;
+      if (free < need) return `host free disk is ${gb(free)} GB; ${held + 1} workspaces of up to ${gb(this.cfg.workspace.maxMb * 2 ** 20)} GB beside the ${gb(d.minFreeBytes)} GB floor need ${gb(need)} GB; not starting new runs until it recovers`;
+    }
+    return undefined;
+  }
+
+  private lastSizes = new Map<string, number>();
+  private tick = 0;
+  private monitor: NodeJS.Timeout | undefined;
+  private ticking = false;
+  /** Called every few seconds (startDiskMonitor); exported for tests. Returns the run it stopped, if any. */
+  async diskTick(): Promise<string | undefined> {
+    const d = this.cfg.disk;
+    if (!d.probePath || d.minFreeBytes <= 0) return undefined;
+    let free: number;
+    try {
+      const s = await statfs(d.probePath);
+      free = Number(s.bavail) * Number(s.bsize);
+    } catch {
+      return undefined; // the admission check fails closed on its own
+    }
+    // Sizes are tracked continuously (R4): every tick when free space is within twice the floor, once a minute otherwise (the call walks every volume),
+    // so the first critical tick already knows who is growing.
+    this.tick++;
+    const critical = free < d.hardFloorBytes;
+    if (!critical && free >= d.minFreeBytes * 2 && this.tick % 12 !== 0) return undefined;
+    // Critically low: stop the run whose workspace grew fastest since the last look (the biggest one when nothing grew).
+    const df = (await (this.docker as unknown as { df: () => Promise<{ Volumes?: Array<{ Name: string; Labels?: Record<string, string> | null; UsageData?: { Size?: number } }> }> }).df().catch(() => undefined))?.Volumes ?? [];
+    let best: { runId: string; growth: number; size: number } | undefined;
+    const now = new Map<string, number>();
+    for (const v of df) {
+      const id = v.Labels?.[LABEL_RUN];
+      if (!id || v.Labels?.[LABEL_MANAGED] !== MANAGED_BY) continue;
+      const size = Math.max(0, v.UsageData?.Size ?? 0);
+      now.set(id, size);
+      const growth = size - (this.lastSizes.get(id) ?? size);
+      if (!best || growth > best.growth || (growth === best.growth && size > best.size)) best = { runId: id, growth, size };
+    }
+    this.lastSizes = now;
+    if (!critical || !best) return undefined;
+    const gb = (n: number) => (n / 2 ** 30).toFixed(1);
+    console.error(`launcher: host disk critically low (${gb(free)} GB free, hard floor ${gb(d.hardFloorBytes)} GB): stopping run ${best.runId} (workspace ${gb(best.size)} GB, grew ${gb(Math.max(0, best.growth))} GB since the last check)`);
+    // The workspace is kept as evidence (the worker's reaper reclaims it after an hour). The victim is listed only once its stop succeeded: the worker
+    // ends the order's attempt on this list, and must never do so for a container that is still running.
+    const stopped = await this.stop(best.runId, { keepWorkspace: true }).catch(() => undefined);
+    if (!stopped || !stopped.ok) return undefined;
+    this.criticalStops.push({ runId: best.runId, at: Date.now(), freeBytes: free });
+    return best.runId;
+  }
+  /** Runs stopped for critically low host disk, so the status can say why they ended. */
+  readonly criticalStops: Array<{ runId: string; at: number; freeBytes: number }> = [];
+
+  startDiskMonitor(): void {
+    if (this.monitor) return;
+    this.monitor = setInterval(() => {
+      if (this.ticking) return;
+      this.ticking = true;
+      void this.diskTick().catch(() => undefined).finally(() => { this.ticking = false; });
+    }, this.cfg.disk.checkSeconds * 1000);
+    this.monitor.unref();
   }
 
   private async ensureNetwork(input: StartRunInput): Promise<Result<{ created: boolean; subnet?: string }, LauncherError>> {
@@ -379,6 +470,7 @@ export class RunManager {
       return ok({
         runs: [...runs.values()].sort((a, b) => a.runId.localeCompare(b.runId)),
         capacity: { max: this.cfg.maxConcurrentRuns, networks: networks.length },
+        criticalStops: this.criticalStops.slice(-50),
       });
     } catch (e) {
       return err({ kind: "docker", msg: messageOf(e) });

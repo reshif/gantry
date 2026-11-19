@@ -132,6 +132,24 @@ async function attention(db: Queryable, orgId: string, st: Flow, stops: ActiveSt
     else if (w.bay === "sechold") add({ id: `hm-att-wo-${w.id}`, sev: 0, icon: "shield", title: `${w.id} on security hold`, where: p?.name ?? w.project, sub: w.bayReason || w.title, act });
     else if (w.bay === "person") add({ id: `hm-att-wo-${w.id}`, sev: 2, icon: "human", title: `${w.id} needs a person`, where: p?.name ?? w.project, sub: w.bayReason || w.title, act });
   }
+  // R1: a run that cannot start (no run slot, host disk low) or was stopped for a critically low host disk is a factory matter: slot waits show after 10 minutes, disk waits at once.
+  if (sc.holds("audit.view")) {
+    const waits = await db.query<{ wo_id: string; project_id: string; wait: { label?: string; reason?: string; since?: string } | null; blocker: { code?: string; label?: string } | null }>(
+      `select r.wo_id, w.project_id, r.data->'dispatchWait' as wait, r.data->'blocker' as blocker from runs r join work_orders w on w.org_id = r.org_id and w.id = r.wo_id
+        where r.org_id = $1 and ((r.ended_at is null and r.data ? 'dispatchWait') or (r.data->'blocker'->>'code' = 'host_disk_critical' and r.updated_at > now() - interval '24 hours')) order by r.created_at limit 20`,
+      [orgId],
+    );
+    for (const r of waits.rows) {
+      const p = st.projects.find((x) => x.id === r.project_id);
+      const act = { label: "Traveler", route: "traveler", wo: r.wo_id, project: r.project_id };
+      if (r.blocker?.code === "host_disk_critical") add({ id: `hm-att-disk-${r.wo_id}`, sev: 0, icon: "alert", title: `${r.wo_id}: host disk critically low`, where: p?.name ?? r.project_id, sub: r.blocker.label ?? "The run was stopped because the host disk is critically low.", act });
+      else if (r.wait) {
+        const disk = /disk/i.test(r.wait.label ?? "");
+        const since = r.wait.since ? Date.parse(r.wait.since) : now;
+        if (disk || now - since >= 10 * 60_000) add({ id: `hm-att-wait-${r.wo_id}`, sev: disk ? 1 : 2, icon: "alert", title: `${r.wo_id}: ${r.wait.label ?? "waiting to start"}`, where: p?.name ?? r.project_id, sub: `${r.wait.reason ?? ""} · waiting ${fmt.ago(since, now)}`.replace(/^ · /, ""), act });
+      }
+    }
+  }
   for (const g of waitingGates(st.workOrders, st.projects, now).filter((x) => x.late && seeProject(x.wo.project))) {
     if (!(sc.holds("audit.view", g.wo.project) || sc.holds("wo.move", g.wo.project) || canApprove(st, sc.me.id, g.wo, g.gate, now))) continue;
     const d = gateDef(st.catalog, g.gate);

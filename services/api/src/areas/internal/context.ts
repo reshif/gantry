@@ -13,6 +13,8 @@ export interface RunCtx {
   runState: string;
   runModel: string | null;
   runData: Record<string, unknown>;
+  /** When the run started; with `runData.wallClockSeconds` it bounds model calls (S-94). */
+  runStartedAt: Date | null;
   attemptData: Record<string, unknown>;
   tupleId: string | null;
   agentId: string | null;
@@ -34,7 +36,7 @@ export interface RunCtx {
 
 export async function loadRunCtx(db: Queryable, orgId: string, runId: string, lock = false): Promise<RunCtx | null> {
   const { rows } = await db.query(
-    `select r.id as run_id, r.attempt_id, r.wo_id, r.state as run_state, r.model_id as run_model, r.data as run_data,
+    `select r.id as run_id, r.attempt_id, r.wo_id, r.state as run_state, r.model_id as run_model, r.data as run_data, r.started_at as run_started_at,
             a.station, a.fencing::text as fencing, a.state as attempt_state, a.data as attempt_data, a.tuple_id,
             t.agent_id, t.agent_version, t.model_id as tuple_model, t.skill_versions, t.instruction_hash,
             w.project_id, w.repo_id, w.parent_id, w.class as wo_class, w.data as wo_data, p.name as project_name, p.status as project_status, p.config as project_config, p.overlay
@@ -50,7 +52,7 @@ export async function loadRunCtx(db: Queryable, orgId: string, runId: string, lo
   if (!x) return null;
   return {
     orgId, runId: x.run_id, attemptId: x.attempt_id, woId: x.wo_id, station: x.station, fencing: x.fencing, attemptState: x.attempt_state, runState: x.run_state,
-    runModel: x.run_model, runData: x.run_data ?? {}, attemptData: x.attempt_data ?? {}, tupleId: x.tuple_id, agentId: x.agent_id, agentVersion: x.agent_version,
+    runModel: x.run_model, runData: x.run_data ?? {}, runStartedAt: x.run_started_at ? new Date(x.run_started_at) : null, attemptData: x.attempt_data ?? {}, tupleId: x.tuple_id, agentId: x.agent_id, agentVersion: x.agent_version,
     tupleModel: x.tuple_model, skillVersions: x.skill_versions ?? {}, instructionHash: x.instruction_hash, projectId: x.project_id, projectName: x.project_name,
     projectStatus: x.project_status, projectConfig: x.project_config ?? {}, overlay: x.overlay ?? "", repoId: x.repo_id, parentId: x.parent_id ?? null, woClass: x.wo_class, woData: x.wo_data ?? {},
   };
@@ -96,6 +98,13 @@ export async function guardRun(db: Queryable, c: RunCtx, tok: TokenRow | null, o
   if (tok.attempt_id !== c.attemptId || tok.fencing !== c.fencing) return { code: "superseded", reason: "This run was superseded by a newer attempt (fencing number changed)." };
   if (!["queued", "running"].includes(c.attemptState)) return { code: "superseded", reason: `The attempt is ${c.attemptState}, not current.` };
   if (["stopped", "reaped", "succeeded", "failed"].includes(c.runState)) return { code: "ended", reason: `The run has ended (${c.runState}).` };
+  // S-94: past its wall clock a run gets no model calls or egress, whether or not the launcher has managed to stop it yet (the watchdog also revokes the token).
+  if (o.mode === "model") {
+    const limit = Number(c.runData.wallClockSeconds);
+    if (c.runStartedAt && (c.runData.dispatch as { phase?: string } | undefined)?.phase === "started" && Number.isFinite(limit) && limit > 0 && Date.now() > c.runStartedAt.getTime() + limit * 1000) {
+      return { code: "ended", reason: `The run is past its wall-clock limit of ${limit} seconds.` };
+    }
+  }
   const stops = await activeStopsFor(db, c);
   const blocking = o.mode === "model" ? stops[0] : stops.find((s) => s.mode === "kill");
   if (blocking) return { code: "stopped", reason: describeStop(blocking) };

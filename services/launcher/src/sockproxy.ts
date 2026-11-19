@@ -13,7 +13,7 @@
  * RUNNER_CPUS (ceilings a runner create must state and stay under), GITHUB_HELPER_IMAGE (workspace profile).
  */
 import http from "node:http";
-import { checkConnect, checkContainer, checkHelperCreate, checkList, checkNetwork, checkTokenArchive, checkVolume, isHelper, managed, route, routeWorkspace, slimNetworks, type Decision, type RunnerLimits } from "./sockpolicy.js";
+import { checkConnect, checkContainer, checkHelperCreate, checkList, checkNetwork, checkTokenArchive, checkVolume, isHelper, managed, route, routeWorkspace, slimNetworks, type Decision, type RunnerLimits, type VolumeLimits } from "./sockpolicy.js";
 import { LABEL_MANAGED } from "./template.js";
 
 const SOCKET = process.env.DOCKER_SOCKET || "/var/run/docker.sock";
@@ -23,6 +23,7 @@ const EDGE_SERVICE = process.env.EDGE_COMPOSE_SERVICE || "gantry-edge";
 const EDGE_PROJECT = process.env.EDGE_COMPOSE_PROJECT || "";
 const HELPER_IMAGE = process.env.GITHUB_HELPER_IMAGE || "gantry-github:dev";
 const uid = Number(process.env.RUNNER_UID || 10001);
+const volumeLimits: VolumeLimits = { maxMb: Number(process.env.WORKSPACE_MAX_MB || 10240), uid: Number(process.env.RUNNER_UID || 10001), gid: Number(process.env.RUNNER_UID || 10001) };
 const limits: RunnerLimits = {
   uid,
   gid: uid,
@@ -228,7 +229,7 @@ function launcherHandler(req: http.IncomingMessage, res: http.ServerResponse): v
     const d =
       r.body === "container" ? checkContainer(pb.parsed, q, images, limits)
       : r.body === "network" ? checkNetwork(pb.parsed)
-      : r.body === "volume" ? checkVolume(pb.parsed)
+      : r.body === "volume" ? checkVolume(pb.parsed, volumeLimits)
       : checkConnect(pb.parsed);
     if (!d.ok) return refuse(res, method, url, d.why);
     if (r.body === "connect" && !(await isEdge(String((pb.parsed as { Container: string }).Container)))) return refuse(res, method, url, "Only the edge may be connected to a run network.");

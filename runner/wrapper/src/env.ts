@@ -7,12 +7,15 @@ export interface RunEnv {
   runToken: string;
   runId: string;
   workspace: string;
+  /** The run's /workspace cap in bytes (S-90); 0 or absent: none set. */
+  workspaceMaxBytes?: number;
 }
 
 const Schema = z.object({
   EDGE_URL: z.string().url(),
   GANTRY_RUN_ID: z.string().min(1),
   GANTRY_WORKSPACE: z.string().min(1).default("/workspace"),
+  GANTRY_WORKSPACE_MAX_MB: z.coerce.number().int().min(0).max(1 << 22).default(0),
 });
 
 /**
@@ -24,5 +27,5 @@ export function readEnv(token: string, env: NodeJS.ProcessEnv = process.env): Re
   if (token.length < 8) return err("The run token is too short.");
   const p = Schema.safeParse(env);
   if (!p.success) return err(p.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
-  return ok({ edgeUrl: p.data.EDGE_URL.replace(/\/+$/, ""), runToken: token, runId: p.data.GANTRY_RUN_ID, workspace: p.data.GANTRY_WORKSPACE });
+  return ok({ edgeUrl: p.data.EDGE_URL.replace(/\/+$/, ""), runToken: token, runId: p.data.GANTRY_RUN_ID, workspace: p.data.GANTRY_WORKSPACE, ...(p.data.GANTRY_WORKSPACE_MAX_MB > 0 ? { workspaceMaxBytes: p.data.GANTRY_WORKSPACE_MAX_MB * 1024 * 1024 } : {}) });
 }

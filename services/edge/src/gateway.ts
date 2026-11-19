@@ -9,6 +9,7 @@ import { NoObjectStore, TraceIncrements, type ObjectStore } from "./trace.js";
 import { SseUsage, usageFromJson, type Usage } from "./usage.js";
 import { VendorKeys } from "./vendor-keys.js";
 import { registerMcpRoutes, type McpMetrics } from "./mcp/routes.js";
+import { DEFAULT_SOURCE_CAPS, SourceGuard } from "./source-guard.js";
 import { registerServiceRoutes, type ServiceMetrics } from "./service-gateway.js";
 import { registerResearchRoutes, type ResearchDeps } from "./research.js";
 import { stepsOf } from "./steps.js";
@@ -23,6 +24,8 @@ export interface GatewayDeps {
   /** Tests: the research fetcher's outbound fetch (production uses undici with a public-only dispatcher). */
   researchFetch?: ResearchDeps["fetchImpl"];
   logger?: boolean | { level: string };
+  /** One guard shared with the forward proxy (main.ts); built from the config when absent. */
+  guard?: SourceGuard;
 }
 
 export interface GatewayMetrics {
@@ -76,6 +79,7 @@ const bearerOf = (req: FastifyRequest): string | null => {
 };
 
 export interface Gateway {
+  guard: SourceGuard;
   app: FastifyInstance;
   metrics: GatewayMetrics;
   keys: VendorKeys;
@@ -105,6 +109,24 @@ export function buildGateway(deps: GatewayDeps): Gateway {
     logger: deps.logger ?? { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.authorization", "req.headers['x-api-key']", "req.headers['proxy-authorization']"] },
     bodyLimit: cfg.maxBodyBytes,
     trustProxy: false,
+  });
+  // S-92 / S-102: per-source caps. A run cannot hold the shared edge's sockets or flood it; failed edge-token compares are limited per source.
+  const guard = deps.guard ?? new SourceGuard(cfg.sourceCaps ?? DEFAULT_SOURCE_CAPS, cfg.runSubnet, { warn: (o, m) => app.log.warn(o, m) });
+  guard.attach(app.server, "model");
+  const TOKEN_ROUTE = /^\/(service\/v1|mcp-admin\/v1)\//;
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.url === "/healthz") return;
+    const ip = req.socket.remoteAddress;
+    if (TOKEN_ROUTE.test(req.url) && guard.tokenBlocked(ip)) return reply.code(429).header("retry-after", "60").send({ ok: false, msg: "Too many failed attempts from this address; try again later." });
+    if (!guard.request(ip, req.url.startsWith("/run/v1/spec") ? "spec" : "general")) return reply.code(429).header("retry-after", "5").header("content-type", "application/json").send({ type: "error", error: { type: "rate_limit_error", message: "This run is making too many requests; slow down." } });
+  });
+  app.addHook("onResponse", async (req, reply) => {
+    if (reply.statusCode === 401 && TOKEN_ROUTE.test(req.url)) guard.tokenFailed(req.socket.remoteAddress);
+    if (reply.statusCode === 200 && req.url.startsWith("/run/v1/spec")) {
+      const tok = bearerOf(req);
+      const id = tok ? runIdOfToken(tok) : null;
+      if (id) guard.runStarted(req.socket.remoteAddress, id);
+    }
   });
   // Bodies stay raw: the model request is forwarded byte for byte, run calls are parsed by their handlers.
   app.removeAllContentTypeParsers();
@@ -450,5 +472,5 @@ export function buildGateway(deps: GatewayDeps): Gateway {
   // Model calls for the console and "explain why not" (spec 12.6): the API calls with the edge token, the key stays here.
   const service = registerServiceRoutes({ app, cfg, api, keys, limiter, fetchImpl: f, track, store, maxTraceBytes: cfg.maxTraceBytes });
 
-  return { app, metrics, mcp, service, research, keys, limiter, api, store, drain: async () => void (await Promise.allSettled([...pending])) };
+  return { guard, app, metrics, mcp, service, research, keys, limiter, api, store, drain: async () => void (await Promise.allSettled([...pending])) };
 }

@@ -46,7 +46,7 @@ Every Gantry container is read-only with a `/tmp` tmpfs, `cap_drop: ALL`, `no-ne
 
 ## Run networks and the address pool
 
-Docker's default pools allow only a few dozen bridge networks. The launcher therefore gives each run an explicit `/28` taken from a dedicated range, `10.213.0.0/16` by default (`RUN_SUBNET_POOL`), capped at `MAX_CONCURRENT_RUNS` (32). Keep that range free on the host: do not use it for a VPN, a LAN or Docker's own `default-address-pools` in `/etc/docker/daemon.json`. Compose's own networks come from Docker's defaults, which do not overlap it. The launcher also checks every existing network's subnet before choosing one.
+Docker's default pools allow only a few dozen bridge networks. The launcher therefore gives each run an explicit `/28` taken from a dedicated range, `10.213.0.0/16` by default (`RUN_SUBNET_POOL`), capped at `MAX_CONCURRENT_RUNS` (unset by default: derived from the host's memory and CPUs at launcher start, at most 32; see "Sandbox hardening"). Keep that range free on the host: do not use it for a VPN, a LAN or Docker's own `default-address-pools` in `/etc/docker/daemon.json`. Compose's own networks come from Docker's defaults, which do not overlap it. The launcher also checks every existing network's subnet before choosing one.
 
 ## Launcher
 
@@ -62,7 +62,56 @@ Seeding order (spec 4.3): the launcher does not clone. Call `POST /v1/runs` with
 
 ## Configuration
 
-Non-secret settings come from environment variables in `compose.yml`; override them in your shell or a `deploy/.env` file: `GANTRY_ORG_ID`, `GANTRY_ORG_NAME`, `GANTRY_DEV_SEED`, `GANTRY_BOOTSTRAP_ADMIN_USERNAME`, `GANTRY_BOOTSTRAP_ADMIN_EMAIL` (deprecated), `OIDC_GITHUB_IDP_ALIAS`, `RUNNER_VARIANTS`, `RUN_SUBNET_POOL`, `MAX_CONCURRENT_RUNS`, `DOCKER_GID`, `DOCKER_SOCKET`, `GANTRY_SECRETS_DIR`, `MINIO_IMAGE`, `KEYCLOAK_IMAGE`, `GANTRY_HOSTNAME`, `GANTRY_TLS`, `GANTRY_IMAGE_PREFIX`, `GANTRY_VERSION`, and the `GANTRY_BACKUP_*` settings (PRODUCTION.md). Set `COMPOSE_PROJECT_NAME` (or `-p`) to run a second copy; the launcher finds the edge through the compose project label.
+Non-secret settings come from environment variables in `compose.yml`; override them in your shell or a `deploy/.env` file: `GANTRY_ORG_ID`, `GANTRY_ORG_NAME`, `GANTRY_DEV_SEED`, `GANTRY_BOOTSTRAP_ADMIN_USERNAME`, `GANTRY_BOOTSTRAP_ADMIN_EMAIL` (deprecated), `OIDC_GITHUB_IDP_ALIAS`, `RUNNER_VARIANTS`, `RUN_SUBNET_POOL`, `MAX_CONCURRENT_RUNS`, `WORKSPACE_MAX_MB`, `WORKSPACE_BACKING`, `MIN_FREE_DISK_GB`, `RUN_MEMORY_OVERCOMMIT_RATIO`, `CONTROL_PLANE_MEMORY_MB`, `DOCKER_GID`, `DOCKER_SOCKET`, `GANTRY_SECRETS_DIR`, `MINIO_IMAGE`, `KEYCLOAK_IMAGE`, `GANTRY_HOSTNAME`, `GANTRY_TLS`, `GANTRY_IMAGE_PREFIX`, `GANTRY_VERSION`, and the `GANTRY_BACKUP_*` settings (PRODUCTION.md). Set `COMPOSE_PROJECT_NAME` (or `-p`) to run a second copy; the launcher finds the edge through the compose project label.
+
+## Sandbox hardening
+
+Limits and host settings the run sandbox relies on (findings S-90 to S-102 of the sandbox review).
+
+**Workspace size (S-90).** Each run's `/workspace` is capped at `WORKSPACE_MAX_MB` (default 10240). The wrapper inside the run measures it every 5 seconds and, over the cap, stops the run with the failure `workspace_over_limit` ("workspace over N GB"). For a hard cap set `WORKSPACE_BACKING=tmpfs`: the launcher then creates the volume as a size-limited tmpfs (`type=tmpfs`, `o=size=<n>m,uid=10001,gid=10001,mode=0755`; the socket proxy allows exactly that shape and nothing else). A tmpfs workspace is memory, charged to the run's own memory limit, so use it only where RAM allows (ext4 has no per-volume quota without special mount options). The default is `disk`.
+
+**Free-disk floor (S-90).** The launcher refuses to start a new run when the host's free disk is under `MIN_FREE_DISK_GB` (default 20). It measures the filesystem of the read-only `diskprobe` volume, which is the one run volumes, Postgres and MinIO share; the dispatch is deferred with the reason "host free disk is X GB, under the Y GB floor". Alert on host disk as well (node exporter or equivalent); the guard does not replace an alert.
+
+**Concurrency against the host (S-93).** At start the launcher compares `MAX_CONCURRENT_RUNS` x `RUNNER_MEMORY_MB` with the host's memory minus `CONTROL_PLANE_MEMORY_MB` (default 4096), times `RUN_MEMORY_OVERCOMMIT_RATIO` (default 1.5), and the CPUs likewise (`RUN_CPU_OVERCOMMIT_RATIO`, default 2). With `MAX_CONCURRENT_RUNS` unset it picks the largest value that fits (a 14 GiB, 12 CPU host gets 3). A value that does not fit is refused at start with the numbers in the log. The control-plane services carry `mem_limit`, `mem_reservation`, `pids_limit` and a negative `oom_score_adj` in `compose.yml` (production values stay in `compose.prod.yml`).
+
+**Per-source caps at the edge (S-92, S-102).** `EDGE_SOURCE_MAX_CONNECTIONS` (128 per listener), `EDGE_SOURCE_REQUESTS_PER_MINUTE` (1200) and `EDGE_TOKEN_FAILURES_PER_MINUTE` (20) bound what one run (one source address) can do; over a cap the edge answers 429 and logs `edge source over its cap`. `EDGE_RUN_SUBNET` must be a valid CIDR (the edge refuses to start otherwise) and must contain the launcher's `RUN_SUBNET_POOL` (the launcher refuses to start otherwise); compose derives both from `RUN_SUBNET_POOL`.
+
+**Continuous disk monitor (G-S8).** The launcher reads host free disk every `DISK_CHECK_SECONDS` (5), not only when a run starts. Under `MIN_FREE_DISK_GB` it admits no new run (dispatches wait: the order shows "Waiting: host disk low"). Under `DISK_HARD_FLOOR_GB` (default half the floor) it stops the run whose workspace grew fastest (it reads volume sizes from the Docker `system/df` call, which the socket proxy now allows; sizes are tracked every tick when free space is under twice the floor, once a minute otherwise) with its workspace kept as evidence for an hour. The worker's reaper reads the launcher's `criticalStops` and ends that run's attempt with the blocker "Host disk critically low", which the order's traveler and record show and the Inbox lists for people who may view the audit. A new run also needs free space of at least the floor plus (workspaces held + 1) x `WORKSPACE_MAX_MB`. The wrapper's own measure counts files that were deleted while still open (it sums the blocks of every open descriptor under `/workspace`) and stops the run when a measurement fails three times in a row. With `WORKSPACE_BACKING=tmpfs` the size must fit inside `RUNNER_MEMORY_MB`; a larger size is refused at start.
+
+**Waiting is not failing (G-S3).** When the launcher has no run slot, or the disk is under its floor, the dispatch waits, for as long as it takes, and never fails the attempt or spends its retry budget. The traveler and Record (`wait` field) show "Waiting for a run slot (n queued)" or "Waiting: host disk low"; the Home attention list raises an item for a disk wait at once and for a slot wait after 10 minutes, for people who hold `audit.view` factory-wide (Factory Admins, Auditor). `WORKER_MAX_DISPATCH_DEFERRALS` is no longer used by dispatch. Alert on a dispatch that has waited a long time. The run's wall clock starts when its runner starts, not while it waits.
+
+**Guarantee level (R2).** Without `WORKSPACE_BACKING=tmpfs` or the fixed-size filesystem below, the workspace cap is best-effort: the wrapper's measure (tree plus deleted-but-open files) can be evaded by a process that makes itself non-dumpable or hides its descriptors from `/proc`, and a fast writer overshoots between checks. Only a size-limited tmpfs or a fixed-size filesystem is a hard guarantee.
+
+**Production-grade hard cap: a fixed-size filesystem for run volumes.** The measure above is a guard with a delay; a hard cap needs the kernel. ext4 has no per-directory quota without special mount options, so give run volumes a filesystem of their own, of fixed size, and keep Postgres and MinIO off it. Run these on the host with the stack stopped, after a backup, and try them on a test host first (`/srv/gantry` and 200G are examples):
+
+```bash
+docker compose -f deploy/compose.yml down
+# 1. Postgres and MinIO leave the Docker volume area: copy them to /srv/gantry and bind-mount them (compose: pgdata and objdata as bind mounts of these paths).
+sudo mkdir -p /srv/gantry/pgdata /srv/gantry/objdata
+sudo rsync -aHAX /var/lib/docker/volumes/gantry_pgdata/_data/ /srv/gantry/pgdata/
+sudo rsync -aHAX /var/lib/docker/volumes/gantry_objdata/_data/ /srv/gantry/objdata/
+# 2. A fixed-size sparse image, formatted ext4 with no reserved blocks, mounted over Docker's volume directory.
+sudo systemctl stop docker docker.socket
+sudo mkdir -p /var/lib/docker/volumes.old && sudo rsync -aHAX /var/lib/docker/volumes/ /var/lib/docker/volumes.old/
+sudo truncate -s 200G /var/lib/gantry-runs.img
+sudo mkfs.ext4 -F -m 0 -L gantry-runs /var/lib/gantry-runs.img
+echo '/var/lib/gantry-runs.img /var/lib/docker/volumes ext4 loop,nosuid,nodev,noatime 0 2' | sudo tee -a /etc/fstab
+sudo mount /var/lib/docker/volumes
+sudo rsync -aHAX /var/lib/docker/volumes.old/ /var/lib/docker/volumes/
+sudo systemctl start docker
+```
+
+A run that fills this filesystem gets ENOSPC inside it and stops; the host disk, Postgres and MinIO are unaffected. With XFS the same is done with a project quota (`mount -o prjquota`, `xfs_quota -x -c 'project -s -p <dir> <id>' -c 'limit -p bsoft=10g bhard=10g <id>' /var/lib/docker/volumes`), set per `ws-*` directory by a host-side job. Point `DISK_PROBE_PATH` at the same filesystem (the `diskprobe` volume does, since it lives under the mount).
+
+**What the git front does and does not do (G-S6).** The agent's shell finds `/opt/gantry-wrapper/bin/git` first. It runs only status, diff, log, show, add, commit, rev-parse, ls-files, rm, mv, restore and branch, only on `/workspace/.git` with the work tree `/workspace` (a `.git` file, a symlink or `core.worktree` pointing elsewhere is refused), only when the repository config holds nothing but the keys a seeded repository has (`user.*`, basic `core.*`, `remote.*.url` and `fetch`, `branch.*`), and with every caller-set `GIT_CONFIG_*` dropped. Edit, Write and NotebookEdit are denied on `.git`, `**/.git`, `**/gitdir`, `.gitattributes` and `.gitmodules`. **This does not make the shell safe.** A "may run tests" agent runs arbitrary code by design (`npm test`, `pytest`, `go test` run whatever the repository says, can call `/usr/bin/git` directly and can write `.git/config`); the container is the boundary for that, not the front. The front only narrows what an agent that may write the branch but not run tests can do.
+
+**Host settings to apply (not done by compose).**
+
+* S-99 `ptrace_scope`: the run token lives in the wrapper's memory, protected from tool processes of the same uid only by Yama. Require `kernel.yama.ptrace_scope` of 1 or higher: `echo 'kernel.yama.ptrace_scope = 1' | sudo tee /etc/sysctl.d/60-gantry-yama.conf && sudo sysctl --system`, and verify with `cat /proc/sys/kernel/yama/ptrace_scope`. A host without Yama is not supported.
+* S-97 host services: a run's internal network still reaches the host through the bridge address. Bind every host service to `127.0.0.1` (sshd `ListenAddress`, dev servers, node exporter `--web.listen-address=127.0.0.1:9100`), check with `ss -ltn` (only `127.0.0.x` and `::1`), and drop run traffic to the host: `sudo iptables -I DOCKER-USER -s 10.213.0.0/16 -d <host addresses> -j DROP` for each non-loopback host address (or an equivalent `INPUT` rule for `10.213.0.0/16`), adjusted if `RUN_SUBNET_POOL` differs. Repeat for IPv6 if enabled.
+* S-98 edge forwarding: compose sets `net.ipv4.ip_forward=0` on `gantry-edge`. Confirm with `docker exec <edge> cat /proc/sys/net/ipv4/ip_forward` (0) after a deploy.
+* S-100 cost and turns: set a per-run or project cost ceiling for every project (without one a run spends until its wall clock); `--max-turns` is a harness flag only. Not fixed in code yet.
+* S-101 egress hosts: `DEFAULT_RUN_HOSTS` gives every station GitHub, npm, yarn, Go, crates, Maven and RubyGems; a station that builds nothing does not need them. Trim per project. Per-station defaults are not implemented yet.
 
 ## Keycloak realm
 

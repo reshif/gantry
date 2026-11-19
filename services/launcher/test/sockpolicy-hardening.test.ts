@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { BIG_HOST } from "./host.js";
 import { runnerContainerOptions, names } from "../src/template.js";
 import { checkContainer, checkHelperCreate, checkList, DEFAULT_LIMITS, isHelper, route, routeWorkspace, slimNetworks } from "../src/sockpolicy.js";
 
-const cfgR = loadConfig({ RUNNER_VARIANTS: "base=gantry-runner:dev", EDGE_URL: "http://gantry-edge:8443" });
+const cfgR = loadConfig({ RUNNER_VARIANTS: "base=gantry-runner:dev", EDGE_URL: "http://gantry-edge:8443" }, BIG_HOST);
 if (!cfgR.ok) throw new Error(cfgR.error.msg);
 const cfg = cfgR.value;
 const input = { runId: "r1", workspaceRef: "repo/acme@abc123", variant: "base", runToken: "tok_0123456789abcdef" };

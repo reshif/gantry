@@ -1,0 +1,65 @@
+#!/bin/sh
+# Gantry's git front for the agent's shell (S-91, G-S6). Put first on the harness's PATH by the wrapper; the image keeps it root-owned.
+# An agent that may "write the branch" can run a few local git commands. Git can run programs from configuration (filter, textconv, diff.external,
+# trailer.*.command, aliases, sshCommand ...) and write files with --output, so this front is an ALLOW-LIST:
+#   1. only a short list of subcommands, and no global option, --output, --ext-diff, --textconv, --gpg-sign ...;
+#   2. only the repository at $GANTRY_WORKSPACE/.git with its work tree at $GANTRY_WORKSPACE: a `.git` file, a symlink or core.worktree that points
+#      elsewhere is refused;
+#   3. only a short list of repository config keys; anything else (any *.command, filter, alias, include, hook, url rewrite ...) refuses the run;
+#   4. the real git runs with system and global config off, every GIT_CONFIG_* variable from the caller dropped, hooks and fsmonitor off, no editor.
+# This is not a sandbox: a test command ("may run tests") runs arbitrary code by design and can call /usr/bin/git directly. The front narrows the
+# git commands the harness's allow-list lets a write-only agent run.
+REAL="${GANTRY_REAL_GIT:-/usr/bin/git}"
+WS="${GANTRY_WORKSPACE:-/workspace}"
+refuse() { echo "git: refused by the Gantry sandbox: $1" >&2; exit 126; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-pager | --no-optional-locks) shift ;;
+    -*) refuse "the global option $1 is not allowed" ;;
+    *) break ;;
+  esac
+done
+if [ $# -eq 0 ]; then exec "$REAL" --version; fi
+sub="$1"; shift
+
+case "$sub" in
+  status | diff | log | show | add | commit | rev-parse | ls-files | rm | mv | restore | branch | whatchanged) ;;
+  *) refuse "git $sub is not allowed here (allowed: status diff log show add commit rev-parse ls-files rm mv restore branch)" ;;
+esac
+
+for a in "$@"; do
+  [ "$a" = "--" ] && break
+  # `git commit -S` signs through gpg.program (also inside a bundle of short flags); log's -S is a text search and stays allowed.
+  if [ "$sub" = commit ]; then case "$a" in --*) ;; -*S*) refuse "the option $a (signing) is not allowed" ;; esac; fi
+  case "$a" in
+    --ou | --out* | --ext* | --text | --textc* | --git* | --work* | --exec* | --conf* | --upload-pack* | --receive-pack* | --gpg* | --sign* | --show-sig* | --template* | --trailer-command*)
+      refuse "the option $a is not allowed" ;;
+  esac
+done
+
+# Nothing the caller put in the environment shapes git: not config, not the repository location.
+for v in $(env | sed -n 's/^\(GIT_CONFIG[A-Z_0-9]*\)=.*/\1/p'); do unset "$v"; done
+unset GIT_EXTERNAL_DIFF GIT_SSH GIT_SSH_COMMAND GIT_ASKPASS GIT_PROXY_COMMAND GIT_DIR GIT_WORK_TREE GIT_EXEC_PATH GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_ATTR_SOURCE GIT_TRACE GIT_TRACE2 GIT_PAGER GIT_EDITOR
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true GIT_PAGER=cat GIT_ATTR_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0
+
+# Where git thinks the repository is must be exactly the run's workspace.
+where=$("$REAL" -c safe.directory="$WS" rev-parse --absolute-git-dir --show-toplevel 2>/dev/null) || refuse "this is not the workspace repository"
+gitdir=$(printf '%s\n' "$where" | sed -n 1p)
+top=$(printf '%s\n' "$where" | sed -n 2p)
+[ "$gitdir" = "$WS/.git" ] && [ "$top" = "$WS" ] || refuse "the repository is at $gitdir (work tree $top); only $WS/.git with the work tree $WS is allowed (no .git file, symlink or core.worktree)"
+
+# Only these repository config NAMES (section, subsection and variable, as git prints them with --name-only, so a subsection cannot pose as a variable);
+# each whole name must match the anchored list. Anything else refuses, and these words refuse wherever they stand in a name.
+listed=$("$REAL" -c safe.directory="$WS" config --list --name-only --show-scope --no-includes 2>/dev/null) || refuse "the repository config cannot be read"
+listed=$(printf '%s\n' "$listed" | grep -Ev '^(command|system|global)[[:space:]]')
+bad=$(printf '%s\n' "$listed" | grep -Ei '(^|[.[:space:]])(promisor|uploadpack|vcs|sshcommand)([.]|$)' | head -1)
+[ -n "$bad" ] || bad=$(printf '%s\n' "$listed" | grep -Eiv '^(local|worktree)[[:space:]]+(user\.(name|email)|core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|safecrlf|quotepath)|extensions\.objectformat|init\.defaultbranch|safe\.directory|remote\.[A-Za-z0-9_-]+\.(url|fetch|pushurl)|branch\.[A-Za-z0-9_./-]+\.(remote|merge))$' | head -1)
+if [ -n "$bad" ]; then
+  refuse "the repository config holds a name that is not on the allow-list (${bad#*[[:space:]]}); remove it from .git/config"
+fi
+
+case "$sub" in
+  diff | log | show | whatchanged) set -- --no-ext-diff --no-textconv "$@" ;;
+esac
+exec "$REAL" -c safe.directory="$WS" -c core.hooksPath=/dev/null -c core.fsmonitor=false -c diff.external= -c core.pager=cat -c protocol.ext.allow=never "$sub" "$@"

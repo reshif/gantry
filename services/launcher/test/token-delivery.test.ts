@@ -4,12 +4,13 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { BIG_HOST } from "./host.js";
 import { RunManager } from "../src/manager.js";
 import { DEFAULT_LIMITS, checkContainer, checkTokenArchive, route } from "../src/sockpolicy.js";
 import { createRequest, names, runnerContainerOptions, tokenArchive, TOKEN_FILE_NAME } from "../src/template.js";
 
 const TOKEN = "tok_0123456789abcdef";
-const cfgR = loadConfig({ RUNNER_VARIANTS: "base=gantry-runner:dev", EDGE_URL: "http://gantry-edge:8443", EDGE_PROXY_URL: "http://run:x@gantry-edge:8444" });
+const cfgR = loadConfig({ RUNNER_VARIANTS: "base=gantry-runner:dev", EDGE_URL: "http://gantry-edge:8443", EDGE_PROXY_URL: "http://run:x@gantry-edge:8444" }, BIG_HOST);
 if (!cfgR.ok) throw new Error(cfgR.error.msg);
 const cfg = cfgR.value;
 const input = { runId: "r1", workspaceRef: "repo/acme@abc123", variant: "base", runToken: TOKEN };
