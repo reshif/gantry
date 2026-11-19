@@ -14,7 +14,8 @@
     align-items: center; padding: var(--s2) 0 var(--s2) var(--s3);
   }
   .wo-table .dtable td { display: block; padding: 0; min-width: 0; grid-template-columns: none; }
-  .wo-table .dtable td::before { content: none; }
+  .wo-table .dtable td::before, .wo-table table.tbl.cards td::before { content: none; display: none; }
+  .wo-table .dtable .wo-needs { max-width: none; min-width: 0; }
   .wo-table .dtable td.hide-sm { display: none; }
   .wo-acts { flex-direction: column; gap: 0; }
   .wo-acts .icon-btn { width: 44px; height: 44px; }
