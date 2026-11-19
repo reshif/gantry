@@ -8,6 +8,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { appendEvent, enqueue, withTx } from "@gantry/db";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
+import { bodyHasNul } from "../../core/nul.js";
 import { job } from "../../core/jobs-contract.js";
 import { sha256 } from "../github/store.js";
 import { open } from "../integrations/secrets.js";
@@ -56,7 +57,8 @@ export const triggerHookRoutes: FastifyPluginAsync = async (app) => {
     // S-70: the signature is checked first, and everything an unsigned caller could learn about the connection (unknown id, switched off, no secret) answers the same 401.
     // An unknown id is verified against a dummy secret so the answer takes the same time.
     const inst = await readInstanceRow(g.pool, g.orgId, id);
-    const type = inst ? await readType(g.pool, g.orgId, inst.type_id) : null;
+    // Equal work for a known and an unknown id (the type read happens for both), and the denial audit is not awaited: the answer takes the same time either way (G-A3).
+    const type = await readType(g.pool, g.orgId, inst?.type_id ?? "__none__");
     const known = Boolean(inst && type && type.source && !type.builtIn);
     const key = type?.fields.find((f) => f.type === "secret")?.key ?? "secret";
     let secret = "";
@@ -67,13 +69,17 @@ export const triggerHookRoutes: FastifyPluginAsync = async (app) => {
       // Unauthenticated: sampled, so a flood of forged calls can't grow the ledger one row per request. Only a real connection is audited.
       if (known) {
         const smp = hookDenials.sample(`trigger:${id}`, req.ip);
-        if (smp.audit) await audit("trigger.hook.denied", !secret ? "The connection has no signing secret." : sig ? "The signature does not match or is outside the five-minute window." : "The signature header is missing.", smp.suppressed);
+        if (smp.audit) void audit("trigger.hook.denied", !secret ? "The connection has no signing secret." : sig ? "The signature does not match or is outside the five-minute window." : "The signature header is missing.", smp.suppressed);
       }
       return reply.code(401).send({ ok: false, msg: "Invalid signature." });
     }
     if (!inst.enabled) return reply.code(409).send({ ok: false, msg: `${inst.name} is switched off.` });
     let parsed: z.infer<typeof Body>;
-    try { parsed = Body.parse(JSON.parse(raw.toString("utf8"))); } catch (e) {
+    try {
+      const j: unknown = JSON.parse(raw.toString("utf8"));
+      if (bodyHasNul(j)) return reply.code(400).send({ ok: false, msg: "Text cannot contain a NUL character." }); // G-A4
+      parsed = Body.parse(j);
+    } catch (e) {
       return reply.code(422).send({ ok: false, msg: "The body must be JSON with id, repo and the event's fields.", ...(e instanceof z.ZodError ? { issues: e.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`) } : {}) });
     }
     const hash = sha256(raw);

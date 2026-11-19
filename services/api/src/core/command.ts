@@ -6,13 +6,25 @@ import {
 } from "@gantry/db";
 import type { FastifyRequest } from "fastify";
 import { publishChange } from "./changes.js";
-import { decideFor, refuseDecision, stepUpSatisfied, type Scope } from "./decide.js";
+import { decide, decideFor, refuseDecision, stepUpSatisfied, type Scope } from "./decide.js";
 import { Refusal, refuse } from "./errors.js";
 import { checkDeclared } from "./write-gate.js";
 import { readApiSettings } from "../areas/apikeys/config.js";
 import { readSecurity } from "./read/index.js";
 import { loadPolicyState } from "./read/state.js";
 import { loadStopSnapshot, refreshStopSnapshot } from "./stop-snapshot.js";
+
+/**
+ * Whether a route may make a network call on the caller's behalf BEFORE its command opens (a connection test, a discovery): the decision point allows the
+ * action AND, for an action that needs a fresh sign-in, the session has one. A false answer means "do not call out": the command that follows then
+ * refuses and audits the refusal with the right reason (denied or step-up).
+ */
+export async function mayCallOut(req: FastifyRequest, action: string): Promise<boolean> {
+  if (!(await decide(req, action, {})).allowed) return false;
+  if (!(req.gx.principal?.kind === "person" && needsStepUp(action))) return true;
+  const sec = await readSecurity(req.server.gantry.pool, req.server.gantry.orgId).then((v) => v.value).catch(() => null);
+  return stepUpSatisfied(req, (sec?.stepUpWindowMinutes ?? 15) * 60);
+}
 
 export interface EventSpec {
   type: string;

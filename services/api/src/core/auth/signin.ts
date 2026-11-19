@@ -37,9 +37,15 @@ const DENY = {
   different_person: "That sign-in was a different person, so the change was cancelled. Sign in again as yourself.",
   identity_mismatch: "This account is linked to a different identity at the provider.",
   mfa_required: MFA_REQUIRED_MSG,
+  pending_cap: "Too many people are waiting for approval right now. Ask a Factory Admin to approve or decline the waiting accounts, then try again.",
+  pending_rate: "Too many new accounts were requested from this network address. Try again later.",
   pending_approval: "Your sign-in is recorded, but an administrator has to approve your account before you can use Gantry. Ask a Factory Admin to approve you.",
   invite_required: "This account has not been linked to your sign-in yet. Open the invite link from your email to join (it is valid for 14 days), or ask an administrator to invite you again.",
 } as const;
+
+/** Most accounts that may wait for approval at once, and most one source address may start in an hour (S-71, G-A7). */
+export const MAX_PENDING_PEOPLE = 50;
+export const MAX_PENDING_PER_IP_HOUR = 5;
 
 const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "user";
 
@@ -127,6 +133,15 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
     // already linked to this identity) and refuses the session until a Factory Admin approves (POST /invites/:id/accept). The bootstrap admin is exempt.
     const isBootstrap = bootUser || (!!g.config.bootstrapAdminEmail && email === g.config.bootstrapAdminEmail.toLowerCase() && claims.emailVerified === true);
     const pendingApproval = !sec.domains.length && !isBootstrap;
+    if (!person && pendingApproval) {
+      // G-A7: creating pending people is bounded: a total cap, and a few per source address per hour.
+      const waiting = Number((await tx.query(`select count(*)::int as n from people where org_id = $1 and status = 'invited' and data->>'pendingApproval' = 'true'`, [orgId])).rows[0]?.n ?? 0);
+      if (waiting >= MAX_PENDING_PEOPLE) return deny("pending_cap", null);
+      if (r.ip) {
+        const fromIp = Number((await tx.query(`select count(*)::int as n from events where org_id = $1 and type = 'people.provisioned' and source_ip = $2::inet and occurred_at > now() - interval '1 hour'`, [orgId, r.ip])).rows[0]?.n ?? 0);
+        if (fromIp >= MAX_PENDING_PER_IP_HOUR) return deny("pending_rate", null);
+      }
+    }
     if (!person) {
       const id = await freePersonId(tx, orgId, claims.gantryId, claims.preferredUsername ?? email.split("@")[0]!);
       await tx.query(`insert into people (org_id, id, name, title, email, idp_subject, status, last_seen_at, data) values ($1,$2,$3,$4,$5,$6,$7, now(), $8::jsonb)`, [orgId, id, claims.name ?? email.split("@")[0], claims.gantryTitle ?? "", email, claims.sub, pendingApproval ? "invited" : "active", JSON.stringify(pendingApproval ? { pendingApproval: true, requestedAt: Date.now() } : {})]);

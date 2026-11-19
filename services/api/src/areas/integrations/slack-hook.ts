@@ -7,6 +7,7 @@
  * person at click time, the gate must be named for chat on that connection and never a release, hotfix, security hold or risk-tagged change, and the gate
  * instance on the card must still be the open one (a stale click is refused). The vote is stored with channel, chat user id, person and instance id.
  */
+import { bodyHasNul } from "../../core/nul.js";
 import { hookDenials } from "../../core/denial-sampler.js";
 import { createHash } from "node:crypto";
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
@@ -107,6 +108,8 @@ export const slackHookRoutes: FastifyPluginAsync = async (app) => {
         return res.code(400).send({ ok: false, msg: "The body is not valid JSON." });
       }
     }
+    // G-A4: a NUL in a signed body is a 400, not a database error.
+    if (bodyHasNul(json) || (form && [...form].some(([k, v]) => k.includes("\u0000") || v.includes("\u0000")))) return res.code(400).send({ ok: false, msg: "Text cannot contain a NUL character." });
     if (json?.type === "url_verification" && typeof json.challenge === "string") return res.send({ challenge: json.challenge });
 
     // Replay: the same signed request again creates nothing new. Slack's trigger id when it has one, else the body hash.

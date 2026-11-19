@@ -8,7 +8,7 @@
  */
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { visibleProjects } from "@gantry/domain";
-import { command, decide, policyState, refuse, type CommandSpec } from "../core/index.js";
+import { command, decide, mayCallOut, policyState, refuse, type CommandSpec } from "../core/index.js";
 import { checkAccess } from "../areas/mcp/access.js";
 import { addServer, applyDiscovery, checkAuth, checkUrl, grantWrites, patchServer, recordDiscovery, removeServer } from "../areas/mcp/commands.js";
 import { discoverTools, type Discovery, type EdgeTarget } from "../areas/mcp/edge-client.js";
@@ -26,7 +26,7 @@ export const mcpRoutes: FastifyPluginAsync = async (app) => {
   const g = app.gantry;
   const spec = (idem = false): CommandSpec => ({ action: "mcp.edit", scope: {}, ...(idem ? { idempotent: true } : {}) });
   /** The network call to the edge happens before the transaction opens, and only for a caller the decision point allows (a denial is then audited by `command`). */
-  const discoverFirst = async (req: FastifyRequest, t: EdgeTarget): Promise<Discovery | null> => ((await decide(req, "mcp.edit", {})).allowed ? discoverTools(g.config.secrets.edgeToken, t) : null);
+  const discoverFirst = async (req: FastifyRequest, t: EdgeTarget): Promise<Discovery | null> => ((await mayCallOut(req, "mcp.edit")) ? discoverTools(g.config.secrets.edgeToken, t) : null);
   const denied: Discovery = { ok: false, msg: "Not permitted." };
 
   /** The target of a saved server, with its credential opened for the edge. */

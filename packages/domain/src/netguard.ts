@@ -86,18 +86,35 @@ export function isPrivateAddress(addr: string): boolean {
 /** Never reachable by a vendor call, whatever an admin lists: loopback, the unspecified address, link-local (cloud metadata is 169.254.169.254) and IPv6 equivalents. */
 const NEVER_V4 = ["0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/3"];
 
-/** Compose networks that hold the control plane (deploy/compose.yml `control`); also never reachable. */
-export const CONTROL_CIDRS: readonly string[] = ["10.89.17.0/24"];
+/**
+ * Compose networks that hold the control plane, never reachable by a vendor call and never inside a LAN range (G-A6). They are the subnets pinned in
+ * deploy/compose.yml (control 10.89.17.0/24, front 172.18, dockerapi 172.19, egress 172.20, launch 172.22, wsapi 172.23) plus Docker's whole default
+ * pool 172.16.0.0/12, which also holds the per-run networks and docker0. An on-prem model host belongs in 10/8, 192.168/16 or 100.64/10.
+ */
+export const CONTROL_CIDRS: readonly string[] = ["10.89.17.0/24", "172.18.0.0/16", "172.19.0.0/16", "172.20.0.0/16", "172.22.0.0/16", "172.23.0.0/16", "172.16.0.0/12"];
+
+/** Compose service names: refused as a vendor host even when a LAN range is listed. */
+const SERVICE_NAME = /^(gantry-[a-z0-9-]+|ingress|postgres|minio|keycloak|mailpit|prometheus|alertmanager|volume-init)\.?$/;
 
 /** The ranges an admin may open for an on-prem vendor: private ranges only (RFC 1918 and 100.64/10), never loopback or link-local. */
-export const LAN_OPENABLE_V4: readonly string[] = ["10.0.0.0/8", "100.64.0.0/10", "172.16.0.0/12", "192.168.0.0/16"];
+export const LAN_OPENABLE_V4: readonly string[] = ["10.0.0.0/8", "100.64.0.0/10", "192.168.0.0/16"];
 
-/** True when `cidr` is an IPv4 range (a bare address is a /32) inside private space. (The control network is refused at connect time even when a listed range covers it.) */
+/** Whether two IPv4 CIDRs share any address. */
+function overlaps(a: string, b: string): boolean {
+  const [ab, as] = a.split("/");
+  const [bb, bs] = b.split("/");
+  const la = Number(as ?? 32);
+  const lb = Number(bs ?? 32);
+  return la <= lb ? inCidr(bb!, `${ab}/${la}`) : inCidr(ab!, `${bb}/${lb}`);
+}
+
+/** True when `cidr` is an IPv4 range (a bare address is a /32) inside private space that overlaps no control network. (Connect time refuses the control networks even if a stale range covers them.) */
 export function validLanCidr(cidr: string): boolean {
   const [base, bitsS] = cidr.split("/");
   if (!base || ipv4ToInt(base) === null) return false;
   const bits = bitsS === undefined ? 32 : Number(bitsS);
   if (!Number.isInteger(bits) || bits < 8 || bits > 32) return false;
+  if (CONTROL_CIDRS.some((c) => overlaps(c, `${base}/${bits}`))) return false;
   return LAN_OPENABLE_V4.some((c) => inCidr(base, c) && bits >= Number(c.split("/")[1]));
 }
 
@@ -108,7 +125,7 @@ export function validLanCidr(cidr: string): boolean {
 export function forbiddenVendorName(host: string, lanListed = false): boolean {
   const h = host.toLowerCase().replace(/\.$/, "");
   if (net.isIP(h.replace(/^\[|\]$/g, ""))) return false;
-  if (h === "localhost" || h.endsWith(".localhost")) return true;
+  if (h === "localhost" || h.endsWith(".localhost") || SERVICE_NAME.test(h)) return true;
   return !lanListed && (!h.includes(".") || h.endsWith(".internal") || h.endsWith(".local"));
 }
 

@@ -532,8 +532,13 @@ services:
     networks: [control]
 
 networks:
+  # Subnets are pinned (G-A6) to the ranges the stack already uses, so Gantry's address guard can name them as control networks and no LAN range can open them.
+  # Keep them in step with CONTROL_CIDRS in packages/domain/src/netguard.ts. Per-run networks come from Docker's default pool (172.16.0.0/12), also guarded.
   front:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
   control:
     driver: bridge
     internal: true
@@ -545,16 +550,28 @@ networks:
   launch:
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
   # Launcher <-> socket proxy only.
   dockerapi:
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: 172.19.0.0/16
   # Broker <-> workspace socket proxy only.
   wsapi:
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: 172.23.0.0/16
   egress:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
 
 volumes:
   pgdata:

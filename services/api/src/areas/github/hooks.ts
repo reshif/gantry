@@ -2,6 +2,7 @@
  * POST /hooks/github (spec 8.10, 11.6): verify the signature over the raw body, refuse replays by delivery id, store the payload and a delivery row,
  * enqueue a `github.event` job and acknowledge. Nothing is interpreted here: webhooks are hints, and processing is a job (`processGithubDelivery`).
  */
+import { bodyHasNul } from "../../core/nul.js";
 import { hookDenials } from "../../core/denial-sampler.js";
 import type { FastifyPluginAsync } from "fastify";
 import { appendEvent, decrypt, enqueue, withTx } from "@gantry/db";
@@ -58,7 +59,9 @@ export const githubHookRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(401).send({ ok: false, msg: "Invalid signature." });
     }
     if (!/^[A-Za-z0-9._:-]{8,100}$/.test(delivery) || !/^[a-z_]{1,50}$/.test(event)) return reply.code(400).send({ ok: false, msg: "Missing or malformed X-GitHub-Delivery or X-GitHub-Event." });
-    try { JSON.parse(raw.toString("utf8")); } catch { return reply.code(400).send({ ok: false, msg: "The body is not valid JSON." }); }
+    try {
+      if (bodyHasNul(JSON.parse(raw.toString("utf8")))) return reply.code(400).send({ ok: false, msg: "Text cannot contain a NUL character." }); // G-A4
+    } catch { return reply.code(400).send({ ok: false, msg: "The body is not valid JSON." }); }
 
     const hash = sha256(raw);
     const fresh = await withTx(g.pool, async (tx) => {
