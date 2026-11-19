@@ -52,11 +52,12 @@ export async function applyFacts(tx: Tx, orgId: string, f: GithubFacts, o: { now
   const touched = new Set<string>();
 
   if (f.base) {
-    // Quiet bookkeeping (no event): the worker seeds new workspaces from repo_config.data.baseSha when a work order has no commit of its own.
+    // Quiet bookkeeping (no event): the worker seeds new workspaces from repo_config.data.baseSha when a work order has no commit of its own. `baseAt` is when the
+    // commit was last confirmed, so dispatch can tell a recorded commit that is fresh from one that has to be checked against GitHub (S-140).
     await tx.query(
-      `update repo_config set data = jsonb_set(jsonb_set(data, '{baseSha}', to_jsonb($3::text)), '{baseBranch}', to_jsonb($4::text)), updated_at = now()
-        where org_id = $1 and repo_id = $2 and (data->>'baseSha' is distinct from $3 or data->>'baseBranch' is distinct from $4)`,
-      [orgId, repo.id, f.base.sha, f.base.branch],
+      `update repo_config set data = data || jsonb_build_object('baseSha', $3::text, 'baseBranch', $4::text, 'baseAt', $5::text), updated_at = now()
+        where org_id = $1 and repo_id = $2`,
+      [orgId, repo.id, f.base.sha, f.base.branch, (o.now ?? new Date()).toISOString()],
     );
   }
 

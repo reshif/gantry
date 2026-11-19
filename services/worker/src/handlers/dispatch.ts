@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { applyStationResult, attemptIsCurrent, recordDispatchPrompt, refuseStationRun, stationRunBlock, endCarrierAttempt, isCarrier, issueRunToken, parseJob, pinRunConfig, revokeRunTokens, loadRunLimits, type RunPin } from "@gantry/api/core";
-import type { RepoContext } from "@gantry/domain";
-import { enqueue, withTx, type Job, type Tx } from "@gantry/db";
+import { applyStationResult, attemptIsCurrent, recordDispatchPrompt, refuseStationRun, stationRunBlock, endCarrierAttempt, isCarrier, issueRunToken, parseJob, pinRunConfig, resolveWoContext, revokeRunTokens, loadRunLimits, tupleInstructionHash, type ResolvedContext, type RunPin } from "@gantry/api/core";
+import { buildProposedConventions, type ProposedConventions, type RepoContext } from "@gantry/domain";
+import { appendEvent, enqueue, withTx, type Job, type Tx } from "@gantry/db";
 import type { Deps } from "../deps.js";
 import { errMsg, PermanentError, TransientError } from "../errors.js";
 import type { HandlerCtx } from "../runner.js";
-import { coveringStops, loadAttempt, resolveSeedBase, resolveSeedCommit, runIdFor, volumeFor, type AttemptInfo } from "./common.js";
+import type { SeedOutcome } from "../clients/broker.js";
+import { chooseSeedCommit, coveringStops, loadAttempt, resolveSeedBase, runIdFor, storedSeedChoice, volumeFor, type AttemptInfo, type SeedChoice } from "./common.js";
 import { failEvalCase } from "./evals.js";
 import { teardownRun } from "./teardown.js";
 
@@ -20,10 +21,29 @@ interface Pinned {
   limits: { turns: number; wallClockSeconds: number; costUsd?: number };
   /** The composition recorded on the run (spec 10.2): layer versions, instruction hash, skill versions. */
   record: Record<string, unknown> | null;
+  /** What the version tuple is made of, so it can be written again once the repository's convention files are known (S-144). */
+  tuple: TupleParts | null;
+  /** Set when a pinned part of the work order's context was retired and moved. */
+  repin: ResolvedContext["repin"];
+}
+
+interface TupleParts { agentId: string; version: number; manifestHash: string; harness: string; model: string; skillVersions: Record<string, number> }
+
+/** Writes the version tuple for these parts and the repository context hash the run was given, and points the attempt at it. The id covers the repository context hash. */
+async function writeTuple(tx: Tx, a: AttemptInfo, t: TupleParts, repoContextHash: string | null): Promise<string> {
+  const instruction = tupleInstructionHash(t.manifestHash, repoContextHash);
+  const id = `tup-${sha([t.agentId, t.version, instruction, t.harness, t.model, JSON.stringify(t.skillVersions)].join("\0")).slice(0, 20)}`;
+  await tx.query(
+    `insert into agent_version_tuples (org_id, id, agent_id, agent_version, skill_versions, instruction_hash, harness_version, model_id) values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8)
+     on conflict (org_id, id) do nothing`,
+    [a.orgId, id, t.agentId, t.version, JSON.stringify(t.skillVersions), instruction, t.harness, t.model],
+  );
+  await tx.query(`update attempts set tuple_id = $3, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, a.attemptId, id]);
+  return id;
 }
 
 /** Pins the agent version that will run (spec 13.1: agent version, skill versions, instruction hash, harness, model) and records it on the attempt. */
-async function pinTuple(tx: Tx, a: AttemptInfo): Promise<Pinned> {
+async function pinTuple(tx: Tx, a: AttemptInfo, now: Date, commit: string | null): Promise<Pinned> {
   const agentId = typeof a.attemptData.agent === "string" ? a.attemptData.agent : "";
   const found = agentId ? (await tx.query<{ live_version: number | null; data: Record<string, unknown> }>(`select live_version, data from agents where org_id = $1 and id = $2`, [a.orgId, agentId])).rows[0] : undefined;
   // The run's limits are frozen here (runs.data.limits): the spec, the meter and the watchdog all read what is written now. A run with no agent or no agent version still honours the station override.
@@ -31,21 +51,25 @@ async function pinTuple(tx: Tx, a: AttemptInfo): Promise<Pinned> {
     const r = await loadRunLimits(tx, { orgId: a.orgId, projectId: a.projectId, station: a.station, attemptData: a.attemptData }, { body, data, budgetUsd: body.budget ?? data.budget });
     return { wallClockSeconds: r.wallClockSeconds, limits: { turns: r.turns, wallClockSeconds: r.wallClockSeconds, ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) } };
   };
-  const none = async (): Promise<Pinned> => ({ tupleId: null, model: null, adapter: "stub", ...(await limitsFor({}, found?.data ?? {})), record: null });
+  const none = async (): Promise<Pinned> => ({ tupleId: null, model: null, adapter: "stub", ...(await limitsFor({}, found?.data ?? {})), record: null, tuple: null, repin: null });
   if (!agentId) return none();
   // An eval case runs the version (and model) the person picked for the run, which need not be the live one (spec 13.2); real work always runs the live version.
   const evalVersion = a.attemptData.eval && Number.isInteger(a.attemptData.agentVersion) ? Number(a.attemptData.agentVersion) : null;
   const evalModel = a.attemptData.eval && typeof a.attemptData.model === "string" && a.attemptData.model !== "" ? a.attemptData.model : null;
   const ag = found ? { ...found, live_version: evalVersion ?? found.live_version } : found;
   if (!ag || ag.live_version === null) return none();
+  // S-143: real work runs the agent version, layers, guidelines and skills pinned on the work order at its first dispatch, not whatever is published now. An eval case
+  // runs the version the person picked, and an onboarding step has no work order context of its own.
+  const woLevel = !a.woData.eval && !isCarrier(a.woData);
+  const wc = woLevel ? await resolveWoContext(tx, { orgId: a.orgId, woId: a.woId, projectId: a.projectId, repoId: a.repoId, commit, agentId, liveVersion: ag.live_version, now }) : null;
+  const version = wc?.agentVersion ?? ag.live_version;
   const v = (await tx.query<{ body: Record<string, unknown>; harness_version: string; instruction_hash: string | null; model_id: string | null }>(
-    `select body, harness_version, instruction_hash, model_id from agent_versions where org_id = $1 and agent_id = $2 and version = $3`, [a.orgId, agentId, ag.live_version],
+    `select body, harness_version, instruction_hash, model_id from agent_versions where org_id = $1 and agent_id = $2 and version = $3`, [a.orgId, agentId, version],
   )).rows[0];
   if (!v) return none();
   // Spec 10.2: the four-layer composition (factory base, project overlay, this agent version, the repository's guidelines at the pinned commit) and the
   // skills bundle are composed now and pinned, so the version tuple's instruction hash names the whole text the run is given.
-  const commit = a.repoId ? await resolveSeedCommit(tx, a.orgId, a.woId, a.repoId).catch(() => null) : null;
-  const run: RunPin | null = await pinRunConfig(tx, { orgId: a.orgId, agentId, agentVersion: ag.live_version, projectId: a.projectId, repoId: a.repoId, commit });
+  const run: RunPin | null = await pinRunConfig(tx, { orgId: a.orgId, agentId, agentVersion: version, projectId: a.projectId, repoId: a.repoId, commit, ...(wc ? { pin: wc.instructionPin, skillVersions: wc.skillVersions } : {}) });
   let skillVersions: Record<string, number> = run?.skillVersions ?? {};
   if (!run) {
     const skills = (await tx.query<{ skill_id: string; version: number | null }>(
@@ -56,27 +80,27 @@ async function pinTuple(tx: Tx, a: AttemptInfo): Promise<Pinned> {
     for (const s of skills) if (s.version !== null) skillVersions[s.skill_id] = s.version;
   }
   const model = evalModel || run?.modelOverride || v.model_id || (typeof v.body.model === "string" ? v.body.model : null);
-  const instruction = run?.manifest.hash ?? v.instruction_hash ?? sha(typeof v.body.instructions === "string" ? v.body.instructions : "");
-  const id = `tup-${sha([agentId, ag.live_version, instruction, v.harness_version, model ?? "", JSON.stringify(skillVersions)].join("\0")).slice(0, 20)}`;
-  await tx.query(
-    `insert into agent_version_tuples (org_id, id, agent_id, agent_version, skill_versions, instruction_hash, harness_version, model_id) values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8)
-     on conflict (org_id, id) do nothing`,
-    [a.orgId, id, agentId, ag.live_version, JSON.stringify(skillVersions), instruction, v.harness_version, model ?? ""],
-  );
-  await tx.query(`update attempts set tuple_id = $3, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, a.attemptId, id]);
+  const manifestHash = run?.manifest.hash ?? v.instruction_hash ?? sha(typeof v.body.instructions === "string" ? v.body.instructions : "");
+  const tuple: TupleParts = { agentId, version, manifestHash, harness: v.harness_version, model: model ?? "", skillVersions };
+  // The repository's convention files are read when the workspace is seeded, after this: the tuple is written again with their hash once they are known (S-144).
+  const id = await writeTuple(tx, a, tuple, null);
   const frozen = await limitsFor(v.body, ag.data);
-  const record = run ? { instructionPin: run.pin, promptManifest: run.manifest, composed: { hash: run.composed.hash, layers: run.composed.layers.map((l) => ({ name: l.name, version: l.version, hash: l.hash })), skills: run.skills.map((x) => ({ id: x.id, version: x.version })), agentVersion: ag.live_version, tupleId: id } } : null;
-  return { tupleId: id, model: model && model !== "" ? model : null, adapter: model ? "claude" : "stub", ...frozen, record };
+  const record = run ? { instructionPin: run.pin, ...(wc ? { contextPin: { id: wc.pin.id, pinnedAt: wc.pin.pinnedAt } } : {}), promptManifest: run.manifest, composed: { hash: run.composed.hash, layers: run.composed.layers.map((l) => ({ name: l.name, version: l.version, hash: l.hash })), skills: run.skills.map((x) => ({ id: x.id, version: x.version })), agentVersion: version, tupleId: id } } : null;
+  return { tupleId: id, model: model && model !== "" ? model : null, adapter: model ? "claude" : "stub", ...frozen, record, tuple, repin: wc?.repin ?? null };
 }
 
 /** Records the run, pins the tuple and issues a fresh per-run token (any earlier token of the run is revoked). All in one transaction. */
-async function prepareRun(deps: Deps, a: AttemptInfo, runId: string): Promise<{ token: string; pinned: Pinned }> {
+async function prepareRun(deps: Deps, a: AttemptInfo, runId: string, commit: string | null): Promise<{ token: string; pinned: Pinned }> {
   return withTx(deps.pool, async (tx) => {
-    const pinned = await pinTuple(tx, a);
+    const pinned = await pinTuple(tx, a, deps.now(), commit);
+    // A pinned part of the work order's context was retired and moved: the audit trail says what changed (S-143).
+    if (pinned.repin) {
+      await appendEvent(tx, { orgId: a.orgId, type: "wo.context.repin", category: "agents", actor: "system", channel: "system", subject: { type: "wo", id: a.woId }, projectId: a.projectId, woId: a.woId, outcome: "ok", before: pinned.repin.before, after: { ...pinned.repin.after, reason: pinned.repin.reason, by: "system", station: a.station, attempt: a.attemptId } });
+    }
     await tx.query(
       `insert into runs (org_id, id, attempt_id, wo_id, state, model_id, data) values ($1,$2,$3,$4,'starting',$5,$6::jsonb)
        on conflict (org_id, id) do update set data = runs.data || excluded.data, model_id = excluded.model_id, updated_at = now()`,
-      [a.orgId, runId, a.attemptId, a.woId, pinned.model, JSON.stringify({ adapter: pinned.adapter, wallClockSeconds: pinned.wallClockSeconds, limits: pinned.limits, ...(pinned.record ?? {}), dispatch: { phase: "preparing", worker: deps.workerId } })],
+      [a.orgId, runId, a.attemptId, a.woId, pinned.model, JSON.stringify({ adapter: pinned.adapter, wallClockSeconds: pinned.wallClockSeconds, limits: pinned.limits, ...(pinned.record ?? {}), dispatchSnapshot: { repoId: a.repoId }, dispatch: { phase: "preparing", worker: deps.workerId } })],
     );
     await revokeRunTokens(tx, { orgId: a.orgId, runIds: [runId], reason: "re-dispatched" });
     const t = await issueRunToken(tx, runId, a.attemptId, a.fencing, { orgId: a.orgId });
@@ -84,13 +108,36 @@ async function prepareRun(deps: Deps, a: AttemptInfo, runId: string): Promise<{ 
   });
 }
 
-async function recordRepoContext(deps: Deps, a: AttemptInfo, runId: string, rc: RepoContext | null): Promise<void> {
-  const value = rc ? { ...rc, offeredAt: deps.now().toISOString() } : { commit: null, files: [], hash: null, offeredAt: deps.now().toISOString(), unavailable: true };
+/**
+ * What the repository's convention files said, recorded on the run before the runner starts: the run spec's prompt is built from it, and the record (paths, sizes,
+ * hashes, what was inlined or withheld) shows later exactly what the agent was offered. `rc` is the maintainers' version (read at the target branch head); `proposed`
+ * is what the work order's own branch changed in those files (S-141), kept apart so it is never presented as theirs. `rc` null records that nothing could be read, with the reason (S-145).
+ */
+async function recordRepoContext(deps: Deps, a: AttemptInfo, runId: string, rc: RepoContext | null, proposed: ProposedConventions | null, pinned: Pinned, why?: string): Promise<void> {
+  const offeredAt = deps.now().toISOString();
+  const value = rc ? { ...rc, offeredAt } : { commit: null, files: [], hash: null, offeredAt, unavailable: true, unavailableReason: why ?? "the broker sent no readable repository context" };
   await withTx(deps.pool, async (tx) => {
-    await tx.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, runId, JSON.stringify({ repoContext: value })]);
+    const tupleId = pinned.tuple ? await writeTuple(tx, a, pinned.tuple, rc ? rc.hash : "unavailable") : null;
+    await tx.query(
+      `update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`,
+      [a.orgId, runId, JSON.stringify({ repoContext: value, repoContextHash: rc ? rc.hash : "unavailable", ...(proposed ? { repoContextProposed: proposed } : {}), ...(tupleId && pinned.record ? { composed: { ...(pinned.record.composed as object), tupleId } } : {}) })],
+    );
     // The prompt is now fully known: the hash recorded for the run names exactly what it will be given, repository context included.
     if (!a.woData.eval && !isCarrier(a.woData)) await recordDispatchPrompt(tx, a.orgId, runId);
   });
+}
+
+/**
+ * Which convention files the run is given. The files are the maintainers' only when read from the target branch (S-141): a work order's own branch can change them,
+ * so a station seeded at that branch's head reads them at the target branch head instead (`baseRepoContext`), and what the branch changed arrives as a proposal.
+ * A seed commit that is the repository's own commit (no pull request, no commit of the work order's) is the target branch itself.
+ */
+export function conventionsFor(seeded: SeedOutcome, baseBranch: string | null, commit: string): { rc: RepoContext | null; proposed: ProposedConventions | null; why?: string } {
+  if (!baseBranch) return { rc: seeded.repoContext, proposed: null, ...(seeded.repoContext ? {} : { why: "the broker sent no readable repository context" }) };
+  const head = seeded.repoContext;
+  const proposed = head && seeded.conventionChanges ? buildProposedConventions({ head, base: seeded.base, changes: seeded.conventionChanges }) : null;
+  if (seeded.base && seeded.baseRepoContext) return { rc: seeded.baseRepoContext, proposed };
+  return { rc: null, proposed, why: `the work order's branch is at ${commit.slice(0, 12)} and the target branch head could not be read, so the branch's own files are not offered as the repository's conventions` };
 }
 
 async function markStarted(deps: Deps, a: AttemptInfo, runId: string, startupLeaseMs: number): Promise<void> {
@@ -213,7 +260,16 @@ export async function attemptDispatch(job: Job, ctx: HandlerCtx): Promise<unknow
     return { alreadyRunning: true, runId };
   }
 
-  const { token, pinned } = await prepareRun(deps, a, runId);
+  // The commit the workspace is seeded at, decided before the run is prepared so the guidelines are recorded against it. A work order with no commit of its own starts from the
+  // default branch as it is now (S-140); the answer, or the reason it could not be had, is recorded on the run.
+  let choice: SeedChoice | null = null;
+  let choiceError: unknown = null;
+  if (a.repo) {
+    try {
+      choice = a.repo.full ? await chooseSeedCommit(deps.pool, a.orgId, a.woId, { id: a.repo.id, full: a.repo.full }, { broker: deps.broker, now: deps.now, staleMs: deps.cfg.baseStaleMs }) : await storedSeedChoice(deps.pool, a.orgId, a.woId, a.repo.id);
+    } catch (e) { choiceError = e; }
+  }
+  const { token, pinned } = await prepareRun(deps, a, runId, choice?.commit ?? null);
   // An agent with no model must not quietly run the canned stub: the run fails with the reason, unless stubs were enabled on purpose (tests, local development).
   if (pinned.adapter === "stub" && !deps.cfg.allowStubAdapter) {
     return failDispatch(deps, a, runId, "no_model", "This agent has no model, so the run was not started. Choose a model for the agent on the Agents page, then run the station again.");
@@ -223,14 +279,16 @@ export async function attemptDispatch(job: Job, ctx: HandlerCtx): Promise<unknow
     const prep = await deps.launcher.start({ ...base, seedComplete: false });
     if (prep.state === "capacity") return await defer(deps, job, a, runId, prep.msg);
     if (a.repo?.full) {
-      const commit = await resolveSeedCommit(deps.pool, a.orgId, a.woId, a.repo.id);
+      if (!choice) throw choiceError;
+      const commit = choice.commit;
       const baseBranch = await resolveSeedBase(deps.pool, a.orgId, a.woId, a.repo.defaultBranch);
       const seeded = await deps.broker.seed({ repo: a.repo.full, commit, volume: volumeFor(runId), ...(baseBranch ? { baseBranch } : {}) });
       // What the workspace holds, as a fact on the run: the seed commit (the publisher's base) and the target branch head the agents diff against (null: none could be read).
-      await withTx(deps.pool, (tx) => tx.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, runId, JSON.stringify({ seed: { commit, base: seeded.base, baseBranch: seeded.baseBranch } })]));
+      await withTx(deps.pool, (tx) => tx.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, runId, JSON.stringify({ seed: { commit, base: seeded.base, baseBranch: seeded.baseBranch, source: choice.source, why: choice.why } })]));
       // What the repository's convention files said at this commit, recorded on the run before the runner starts: the run spec's prompt is built from it,
       // and the record (paths, sizes, hashes, what was inlined or withheld) shows later exactly what the agent was offered.
-      await recordRepoContext(deps, a, runId, seeded.repoContext);
+      const conv = conventionsFor(seeded, baseBranch, commit);
+      await recordRepoContext(deps, a, runId, conv.rc, conv.proposed, pinned, conv.why);
     }
     // S-95: a kill that landed while the workspace was being seeded must not get a runner. Checked again right before the start.
     const before = await startBlock(deps, job.orgId, a);

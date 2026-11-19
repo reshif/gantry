@@ -29,7 +29,8 @@ export { notifyEventFor, isMandatoryEvent } from "../areas/notifications/events.
 // Triggers (wave 4): evaluating offered events and schedule ticks in the worker, and the event source observer shared by the API and the worker.
 export * from "../areas/triggers/index.js";
 // Agents (wave 4): the four-layer instruction composition pinned on a run at dispatch (spec 10.2), shared by the API's run spec and the worker.
-export { pinRunConfig, type RunPin, type InstructionPin } from "../areas/agents/compose.js";
+export { pinRunConfig, tupleInstructionHash, type RunPin, type InstructionPin } from "../areas/agents/compose.js";
+export { resolveWoContext, type ResolvedContext } from "../areas/agents/context-pin.js";
 export { recordDispatchPrompt } from "../areas/internal/spec.js";
 export { stationRunBlock } from "../areas/session/core.js";
 // Evals and trust (wave 4): the eval runtime the worker drives (cases through the same runtime as work, graded by deterministic checks) and the trust evaluation job.

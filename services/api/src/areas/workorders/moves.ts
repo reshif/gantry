@@ -10,6 +10,7 @@ import { begin, done, flowFor, person, type CmdResult } from "./ctx.js";
 import { approveInner } from "./gates.js";
 import { declineInner, parkInto, resumeAt } from "./intake.js";
 import { saveWo, type Wo } from "./model.js";
+import { repinWoContext } from "../agents/context-pin.js";
 import { limitInRange, limitRangeText, loadRunLimits } from "../agents/run-limits.js";
 import { liftBudgetHalt } from "./budget.js";
 import { capOfReason, overBudget, overText } from "./budget-state.js";
@@ -329,3 +330,21 @@ export async function setRecordSummary(tx: Tx, actor: Actor, woId: string, text:
 }
 
 void arriveAtGate;
+
+/**
+ * "Refresh instructions" (S-143): a work order runs on the context pinned at its first dispatch (factory base, overlay, guidelines, agent and skill versions); this is the
+ * deliberate way to move it to what is published now. Audited as `wo.context.repin` with the before and after and the person's reason. It changes nothing for a run
+ * already started; the next station, retry or send-back redo is composed from the new pin.
+ */
+export async function refreshContext(tx: Tx, actor: Actor, woId: string, reason?: string): Promise<CmdResult> {
+  const { fx, w } = await begin(tx, actor, woId, "wo.sendback");
+  const by = person(actor, "Refreshing instructions is");
+  const r = await repinWoContext(tx, { orgId: fx.orgId, woId: w.id, projectId: w.project, repoId: w.repo ?? null, now: fx.now });
+  // `saveWo` writes the whole data object from the locked copy: the new pin has to be in it.
+  w.data.contextPin = r.pin;
+  const why = reason?.trim() || "A person chose Refresh instructions.";
+  note(w, fx, by, `Refreshed the instructions this work order runs on (${r.before?.id ?? "no pin"} to ${r.after.id}). ${why}`);
+  ev(fx, w, "wo.context.repin", { ...r.after, reason: why, by, trigger: "person" }, { category: "agents", before: r.before });
+  await saveWo(fx.tx, fx.orgId, w);
+  return done(fx, `${w.id} now runs on instructions ${r.after.id}.`, w.project, { version: w.version, context: r.after });
+}

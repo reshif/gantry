@@ -39,6 +39,8 @@ export interface InstructionPin {
   agentVersion: number | null;
   /** The repo guidelines as read for this run, so a later edit does not change what the run was told. */
   guidelines: { text: string; hash: string; commit: string | null } | null;
+  /** The project's overlay text when it has no published overlay version (it lives on the project row), so an edit to it does not reach a pinned run. */
+  overlay?: string | null;
 }
 
 export interface Composed {
@@ -90,6 +92,11 @@ export interface ComposeInput {
   projectId: string | null;
   repoId: string | null;
   pin?: InstructionPin | null;
+  /**
+   * The pin is the whole snapshot: nothing is read live that the pin left empty. A run is dispatched with a pin, and a repository chosen after dispatch must not
+   * bring in guidelines the run was not given along with the conventions (the dispatch snapshot is used consistently).
+   */
+  frozen?: boolean;
   /** Used when the agent has no stored configuration (a run whose agent was removed). */
   fallbackAgentText?: string;
   fallbackOverlay?: string;
@@ -116,9 +123,12 @@ export async function loadAgentVersion(db: Queryable, orgId: string, agentId: st
   return { version: r.v, label, body: r.body, name: r.name, data: r.data ?? {} };
 }
 
-/** The effective configuration of an agent version: its snapshot over the agent's stored defaults. */
+/**
+ * The effective configuration of an agent version: what the version recorded, with the defaults for any key it did not record. A version is immutable, so it is
+ * never completed from the agent's live working copy (`agents.data`): an edit to the draft must not change a run that is pinned to a version (S-142).
+ */
 export function versionCfg(av: AgentBody): ReturnType<typeof cfgOf> {
-  return cfgOf({ ...av.data, ...av.body });
+  return cfgOf(av.body);
 }
 
 export async function projectInfo(db: Queryable, orgId: string, projectId: string | null): Promise<{ id: string; name: string; overlay: string } | null> {
@@ -138,17 +148,17 @@ export async function composeLayers(db: Queryable, i: ComposeInput, av: AgentBod
   const baseRow = await published(db, i.orgId, "base", "", i.pin?.base ?? null);
   const proj = await projectInfo(db, i.orgId, i.projectId);
   const projRow = i.projectId ? await published(db, i.orgId, "project", i.projectId, i.pin?.project ?? null) : null;
-  const overlay = projRow?.body ?? proj?.overlay ?? i.fallbackOverlay ?? "";
+  const overlay = projRow?.body ?? (i.pin && i.pin.overlay !== undefined && i.pin.project === null ? i.pin.overlay : proj?.overlay) ?? i.fallbackOverlay ?? "";
   const agentText = av ? agentLayerText(versionCfg(av), proj) : i.fallbackAgentText ?? "";
   let guidelines: InstructionPin["guidelines"] = i.pin?.guidelines ?? null;
-  if (!guidelines && i.repoId) {
+  if (!guidelines && i.repoId && !i.frozen) {
     const text = (await db.query<{ guidelines: string }>(`select guidelines from repos where org_id = $1 and id = $2`, [i.orgId, i.repoId])).rows[0]?.guidelines ?? "";
     guidelines = { text, hash: sha256(text), commit: await repoCommit(db, i.orgId, i.repoId) };
   }
   const layer = (key: Layer["key"], version: number | null, text: string, commit?: string | null): Layer => ({ key, name: LAYER_NAMES[key], version, text, hash: sha256(text), ...(commit !== undefined ? { commit } : {}) });
   return {
     layers: [layer("base", baseRow?.version ?? null, baseRow?.body ?? ""), layer("project", projRow?.version ?? null, overlay), layer("agent", av?.version ?? null, agentText), layer("repo", null, guidelines?.text ?? "", guidelines?.commit ?? null)],
-    pin: { base: baseRow?.version ?? null, project: projRow?.version ?? null, agentVersion: av?.version ?? null, guidelines },
+    pin: { base: baseRow?.version ?? null, project: projRow?.version ?? null, agentVersion: av?.version ?? null, guidelines, overlay: projRow ? null : (proj?.overlay ?? null) },
   };
 }
 
@@ -186,17 +196,18 @@ const LAYER_SOURCE: Record<Layer["key"], string> = {
 };
 
 /** The manifest parts of a composed system prompt in the order the model sees them: the used layers, the skills, then what the runner appends. */
-export function instructionParts(layers: Layer[], skills: SkillOut[], repoContext = ""): ManifestPart[] {
+export function instructionParts(layers: Layer[], skills: SkillOut[], repoContext = "", proposed = ""): ManifestPart[] {
   return [
     ...layers.map((l): ManifestPart => ({ kind: "layer", name: l.name, source: LAYER_SOURCE[l.key], version: l.version, sha256: l.hash, bytes: Buffer.byteLength(l.text) })),
-    ...(repoContext ? [part("repo_context", "Repository context", "the repository's convention files at the pinned commit (runs.data.repoContext)", null, repoContext)] : []),
+    ...(repoContext ? [part("repo_context", "Repository context", "the repository's convention files at the target branch head (runs.data.repoContext)", null, repoContext)] : []),
+    ...(proposed ? [part("repo_context", "Proposed convention changes", "convention files the work order's branch changed (runs.data.repoContextProposed)", null, proposed)] : []),
     ...skills.map((k): ManifestPart => ({ kind: "skill", name: k.name, source: `skill_versions ${k.id}`, version: k.version, sha256: k.hash, bytes: k.bytes })),
   ];
 }
 
 /** The parts of a station run's system prompt: the instruction parts, then what the runner appends. */
-export function composedParts(layers: Layer[], skills: SkillOut[], repoContext = ""): ManifestPart[] {
-  return [...instructionParts(layers, skills, repoContext), ...runnerParts()];
+export function composedParts(layers: Layer[], skills: SkillOut[], repoContext = "", proposed = ""): ManifestPart[] {
+  return [...instructionParts(layers, skills, repoContext, proposed), ...runnerParts()];
 }
 
 /** The version each skill is pinned at in a new agent version: the attachment's own pin, else the skill's latest. Skills with no published version are left out. */
@@ -227,13 +238,23 @@ export interface RunPin {
  * Called when a run is dispatched (spec 10.2): composes the instructions for this agent version, project and repository, and returns what to record.
  * `composed.hash` is the instruction hash of the version tuple, so it identifies the whole composition, not the agent text alone.
  */
-export async function pinRunConfig(db: Queryable, o: { orgId: string; agentId: string; agentVersion: number; projectId: string; repoId: string | null; commit?: string | null }): Promise<RunPin | null> {
+export async function pinRunConfig(db: Queryable, o: { orgId: string; agentId: string; agentVersion: number; projectId: string; repoId: string | null; commit?: string | null; pin?: InstructionPin | null; skillVersions?: Record<string, number> | null }): Promise<RunPin | null> {
   const av = await loadAgentVersion(db, o.orgId, o.agentId, o.agentVersion);
   if (!av) return null;
-  const { layers, pin } = await composeLayers(db, { orgId: o.orgId, agentId: o.agentId, agentVersion: o.agentVersion, projectId: o.projectId, repoId: o.repoId }, av);
+  // With a work order's context pin the layers and the skills come from the pin (S-143); without one they are the latest published ones.
+  const { layers, pin } = await composeLayers(db, { orgId: o.orgId, agentId: o.agentId, agentVersion: o.agentVersion, projectId: o.projectId, repoId: o.repoId, ...(o.pin ? { pin: o.pin, frozen: true } : {}) }, av);
   if (pin.guidelines && o.commit) pin.guidelines = { ...pin.guidelines, commit: o.commit };
   const withCommit = layers.map((l) => (l.key === "repo" && o.commit ? { ...l, commit: o.commit } : l));
-  const skills = await resolveSkills(db, { orgId: o.orgId, agentId: o.agentId, body: av.body, projectId: o.projectId, withContent: false });
+  const skills = await resolveSkills(db, { orgId: o.orgId, agentId: o.agentId, body: av.body, projectId: o.projectId, withContent: false, ...(o.skillVersions ? { versions: o.skillVersions } : {}) });
   const composed = assemble(withCommit);
   return { manifest: buildManifest("run", composedParts(composed.layers, skills)), modelOverride: versionCfg(av).overrides[o.projectId]?.model ?? null, composed, pin, skillVersions: Object.fromEntries(skills.map((s) => [s.id, s.version])), skills };
+}
+
+/**
+ * The instruction hash of a version tuple (S-144): the hash of the composition Gantry pins at dispatch, together with the hash of the repository's convention files the
+ * run was given. Two runs of one agent version given different AGENTS.md files are therefore different tuples, so evals and trust never compare them as the same.
+ * `repoContextHash` is null when the run has no repository, and "unavailable" when the files could not be read.
+ */
+export function tupleInstructionHash(manifestHash: string, repoContextHash: string | null): string {
+  return repoContextHash === null ? manifestHash : sha256(`${manifestHash}\0repo_context\0${repoContextHash}`);
 }

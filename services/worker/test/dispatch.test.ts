@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { tupleInstructionHash } from "@gantry/api/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TEST_URL } from "./db.js";
 import { startWorld, type World } from "./world.js";
@@ -17,8 +19,10 @@ d("attempt.dispatch and run.result", () => {
     const starts = w.launcher.calls.filter((c) => c.op === "start");
     expect(starts.map((c) => c.body!.seedComplete)).toEqual([false, true]);
     expect(w.broker.calls.filter((c) => c.op === "seed").map((c) => c.body)).toEqual([{ repo: "acme/payments-api", commit: "1".repeat(40), volume: `ws-${runId}` }]);
+    // the commit's age is unknown (onboarding recorded none): GitHub is asked once, answers nothing here, and the run says the recorded commit was used and why
+    expect((await w.q(`select data->'seed' as s from runs where id = $1`, [runId]))[0].s).toMatchObject({ commit: "1".repeat(40), source: "base_sha" });
     // Order: prepare -> seed -> start.
-    const t = [starts[0]!.at, w.broker.calls[0]!.at, starts[1]!.at];
+    const t = [starts[0]!.at, w.broker.calls.find((c) => c.op === "seed")!.at, starts[1]!.at];
     expect([...t].sort((a, b) => a - b)).toEqual(t);
     const token = starts[1]!.body!.runToken as string;
     expect(token).toMatch(/^grt\./);
@@ -77,7 +81,7 @@ d("attempt.dispatch and run.result", () => {
     await w.drain();
     const seed = w.broker.calls.find((c) => c.op === "seed")!;
     expect(seed.body).toEqual({ repo: "acme/payments-api", commit: head, volume: `ws-${runId}`, baseBranch: "develop" });
-    expect((await w.q(`select data->'seed' as s from runs where id = $1`, [runId]))[0].s).toEqual({ commit: head, base: "6".repeat(40), baseBranch: "develop" });
+    expect((await w.q(`select data->'seed' as s from runs where id = $1`, [runId]))[0].s).toEqual({ commit: head, base: "6".repeat(40), baseBranch: "develop", source: "pr_head", why: "The head of this work order's open pull request." });
   });
 
   it("records the repository context the broker read at the seeded commit on the run (paths, sizes, hashes, what was inlined), so the run spec can offer it", async () => {
@@ -107,7 +111,10 @@ d("attempt.dispatch and run.result", () => {
     expect(tuple).toMatchObject({ agent_id: "ag-build", agent_version: 2 });
     expect(tuple.skill_versions).toEqual({ "sk-testdesign": expect.any(Number) });
     // the tuple's instruction hash is the hash of the whole composition, which the run records with its layer versions
-    expect(run.promptManifest.hash).toBe(tuple.instruction_hash); // covers the skills and the runner text too, not only the layers
+    // (the broker sent no repository context here, so the run records that and the tuple's hash covers it: S-144)
+    const layersManifestHash = createHash("sha256").update(run.promptManifest.parts.filter((p: { kind: string }) => p.kind !== "repo_context").map((p: { kind: string; name: string; version: number | null; sha256: string }) => [p.kind, p.name, p.version ?? "", p.sha256].join("\0")).join("\n")).digest("hex");
+    expect(run.repoContextHash).toBe("unavailable");
+    expect(tuple.instruction_hash).toBe(tupleInstructionHash(layersManifestHash, "unavailable"));
     expect(run.composed.hash).not.toBe(tuple.instruction_hash);
     expect(run.composed.layers.map((l: { name: string }) => l.name)).toEqual(["Factory base", "Project overlay", "Agent", "Repo guidelines (Gantry)"]);
     expect(run.composed.layers[0].version).toBe(4);
