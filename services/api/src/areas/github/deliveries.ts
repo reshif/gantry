@@ -5,6 +5,7 @@
 import { appendEvent, type Tx } from "@gantry/db";
 import { publishChange } from "../../core/changes.js";
 import { offerWebhookToTriggers } from "../triggers/sources.js";
+import { applyAccessLost } from "../onboarding/apply.js";
 import { applyFacts, findRepo } from "./store.js";
 import { GithubFacts, type PullRequestFact } from "./facts.js";
 
@@ -20,7 +21,7 @@ function prFact(p: Json): PullRequestFact {
   const merged = p.merged === true || !!str(p.merged_at);
   return {
     number: Number(p.number), githubId: typeof p.id === "number" ? p.id : null, title: str(p.title) ?? "", state: merged ? "merged" : p.state === "closed" ? "closed" : "open", draft: p.draft === true,
-    headSha: str(head.sha), baseBranch: str(obj(p.base).ref), headBranch: str(head.ref), url: str(p.html_url), mergedAt: str(p.merged_at), mergeCommitSha: merged ? str(p.merge_commit_sha) : null,
+    headSha: str(head.sha), baseBranch: str(obj(p.base).ref), headBranch: str(head.ref), url: str(p.html_url), mergedAt: str(p.merged_at), updatedAt: str(p.updated_at), mergeCommitSha: merged ? str(p.merge_commit_sha) : null,
     labels: labels(p.labels), author: str(obj(p.user).login),
   };
 }
@@ -54,6 +55,32 @@ export function factsFromWebhook(event: string, payload: Json): { facts: GithubF
   }
 }
 
+/** `installation` deleted or suspended, `installation_repositories` removed (S-64): the repos the App can no longer reach are marked and held. Added, created or unsuspended is recorded only. */
+async function applyInstallation(tx: Tx, orgId: string, event: string, payload: Json, deliveryId: string, now: Date): Promise<{ lost: number; restored: number } | null> {
+  const action = String(payload.action ?? "");
+  const lostEvent = event === "installation" ? action === "deleted" || action === "suspend" : event === "installation_repositories" && action === "removed";
+  const backEvent = event === "installation" ? action === "created" || action === "unsuspend" : event === "installation_repositories" && action === "added";
+  if (!lostEvent && !backEvent) return null;
+  const names = (v: unknown): string[] => (Array.isArray(v) ? v.map((r) => str(obj(r).full_name)).filter((x): x is string => !!x) : []);
+  const listed = event === "installation_repositories" ? names(lostEvent ? payload.repositories_removed : payload.repositories_added) : names(payload.repositories);
+  const installation = typeof obj(payload.installation).id === "number" ? (obj(payload.installation).id as number) : null;
+  // A removal names its repos; an uninstall or suspension may not, so every repo of that installation counts too.
+  const repos = (await tx.query<{ id: string; name: string; project_id: string }>(
+    `select id, name, project_id from repos where org_id = $1 and (github_full_name = any($2::text[]) or ($3::bigint is not null and installation_id = $3::bigint)) order by id`, [orgId, listed, installation],
+  )).rows;
+  let lost = 0; let restored = 0;
+  for (const r of repos) {
+    if (lostEvent) {
+      const a = await applyAccessLost(tx, orgId, { repoId: r.id, now, delivery: deliveryId, reason: event === "installation" ? `The GitHub App was ${action === "deleted" ? "uninstalled" : "suspended"}.` : "The repository was removed from the GitHub App." });
+      if (a.applied) lost++;
+    } else {
+      await appendEvent(tx, { orgId, type: "github.app.access_restored", category: "integrations", actor: "github", channel: "github", subject: { type: "repo", id: r.id }, projectId: r.project_id, outcome: "ok", after: { delivery: deliveryId, note: "Access is back. Nothing resumes by itself: a person verifies the repo again." }, causationId: deliveryId });
+      restored++;
+    }
+  }
+  return { lost, restored };
+}
+
 export async function processGithubDelivery(tx: Tx, orgId: string, deliveryId: string, o: { now?: Date } = {}): Promise<DeliveryOutcome> {
   const d = (await tx.query<{ event_type: string; payload_hash: string; status: string }>(
     `select event_type, payload_hash, status from inbound_deliveries where org_id = $1 and source = 'github' and delivery_id = $2 for update`, [orgId, deliveryId])).rows[0];
@@ -65,6 +92,14 @@ export async function processGithubDelivery(tx: Tx, orgId: string, deliveryId: s
   try { payload = obj(JSON.parse(blob?.content.toString("utf8") ?? "")); } catch { await mark("failed"); return { status: "failed", reason: "stored payload is unreadable" }; }
   // Events that carry no stored fact (a pull request comment, a workflow or suite that failed on the default branch) may be a trigger's source (spec 11.7).
   await offerWebhookToTriggers(tx, orgId, d.event_type, payload);
+  if (d.event_type === "installation" || d.event_type === "installation_repositories") {
+    const r = await applyInstallation(tx, orgId, d.event_type, payload, deliveryId, o.now ?? new Date());
+    if (r) {
+      await publishChange(tx, { org: orgId, keys: ["repos", "projects", "audit", ...(r.lost ? ["stops", "floor", "workOrders", "home"] : [])] });
+      await mark("processed");
+      return { status: "processed", applied: r.lost + r.restored, drift: 0 };
+    }
+  }
   let m: ReturnType<typeof factsFromWebhook>;
   try { m = factsFromWebhook(d.event_type, payload); } catch (e) { await mark("failed"); return { status: "failed", reason: `unexpected payload shape: ${(e as Error).message.slice(0, 200)}` }; }
   if ("ignore" in m) { await mark("ignored"); return { status: "ignored", reason: m.ignore }; }

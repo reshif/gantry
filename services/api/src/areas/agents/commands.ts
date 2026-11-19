@@ -201,7 +201,7 @@ export async function newAgentVersion(tx: Tx, a: Actor, id: string, label: strin
   const n = Math.max(0, ...vers.map((v) => v.version)) + 1;
   await tx.query(
     `insert into agent_versions (org_id, agent_id, version, body, harness_version, instruction_hash, model_id, note, published_at, published_by) values ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,now(),$9)`,
-    [a.orgId, id, n, json({ label, rc: true, diff, ...body }), live?.body.harness ? String(live.body.harness) : "", sha256(cfg.instructions), cfg.model || null, note ?? "", a.id],
+    [a.orgId, id, n, json({ label, rc: true, diff, ...(live ? { base: live.version, baseLabel: labelOf(live) } : {}), ...body }), live?.body.harness ? String(live.body.harness) : "", sha256(cfg.instructions), cfg.model || null, note ?? "", a.id],
   );
   await tx.query(`update agents set version = version + 1 where org_id = $1 and id = $2`, [a.orgId, id]);
   return {
@@ -219,6 +219,12 @@ export async function promoteAgent(tx: Tx, a: Actor, id: string, ref: string): P
   if (v.version === row.live_version) throw conflict(`${row.name} ${label} is already on the floor.`);
   const promoted = new Set(Array.isArray(row.data.promoted) ? (row.data.promoted as unknown[]) : []);
   if (v.body.rc !== true || promoted.has(v.version)) throw conflict(`${label} was on the floor before. Roll back to it instead.`);
+  // S-59: a candidate is a copy of the floor it was cut from; promoting it after the floor moved would put back what a later promotion changed.
+  if (typeof v.body.base === "number" && row.live_version !== null && v.body.base !== row.live_version) {
+    const floor = vers.find((x) => x.version === row.live_version);
+    const was = typeof v.body.baseLabel === "string" ? v.body.baseLabel : `version ${v.body.base}`;
+    throw conflict(`${label} was cut from ${was}; the floor is now ${floor ? labelOf(floor) : `version ${row.live_version}`}: the floor moved; re-cut the candidate (cut a new version, or edit the skill again) so it starts from the current floor.`);
+  }
   const el = await eligibility(tx, a.orgId, row, v);
   if (!el.ok) {
     throw refuse("denied", `Blocked: ${el.text}.`, { needs: `Needs ${el.needs}`, rule: { kind: "gate", id: "EVAL-GATE", name: "Eval promotion gate" } });

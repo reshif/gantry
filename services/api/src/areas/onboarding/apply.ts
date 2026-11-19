@@ -357,6 +357,29 @@ export async function applyJobDead(tx: Tx, orgId: string, o: { repoId: string; n
   return { applied: true };
 }
 
+/**
+ * S-64: GitHub told us the App can no longer reach the repo (the repo was removed from the installation, or the installation was deleted or suspended). The repo is marked not ready
+ * with the reason "GitHub App access removed" and halted with the readiness halt, so its live work orders are held in place (the existing hold mechanism) and nothing new starts.
+ * Access coming back does not resume anything: a person verifies the repo again (which lifts this halt) or resumes it. Idempotent: a repo already marked is left as it is.
+ */
+export async function applyAccessLost(tx: Tx, orgId: string, o: { repoId: string; now: Date; reason: string; delivery?: string | null }): Promise<Applied> {
+  const c = await current(tx, orgId, o.repoId, null, o.now, { excepted: true });
+  if (isApplied(c)) return c;
+  const { repo, doc } = c;
+  const msg = `GitHub App access removed. ${o.reason} Give the App access to ${repo.name} again in GitHub, then verify the repo; its work orders are held until then.`;
+  if (doc.blocker === msg || (doc.stage === "person" && String(doc.blocker ?? "").startsWith("GitHub App access removed"))) return skipped("Already marked as not reachable.");
+  doc.stage = "person";
+  doc.blocker = msg;
+  delete doc.readyAt;
+  stamp(doc, SYSTEM, `Needs a person: ${msg}`, o.now);
+  await tx.query(`update repos set readiness_checked_at = $3, readiness_state = 'lost' where org_id = $1 and id = $2`, [orgId, repo.id, o.now]);
+  const halt = await raiseReadinessHalt(tx, orgId, repo, "GitHub App access removed", o.now);
+  await sysEvent(tx, orgId, repo, "github.app.access_removed", { category: "integrations", actor: "github", channel: "github", outcome: "regression", after: { reason: o.reason, halted: !!halt, ...(o.delivery ? { delivery: o.delivery } : {}) }, occurredAt: o.now });
+  if (halt) { await appendEvent(tx, halt.eventInput); await enqueue(tx, { orgId, ...halt.job }); }
+  await finish(tx, orgId, repo, doc, ["stops", "floor", "workOrders", "home"]);
+  return { applied: true };
+}
+
 /* ------------------------------------------------------------------ verification and readiness ---- */
 
 export interface VerificationInput { repoId: string; runId: string | null; trigger: "merge" | "manual" | "schedule"; by: string | null; now: Date; results: ReadinessResult[] }

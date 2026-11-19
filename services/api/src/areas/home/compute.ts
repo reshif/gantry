@@ -253,7 +253,7 @@ async function myConversations(db: Queryable, orgId: string, st: Flow, st0: Poli
   const asks = await db.query<{ wo_id: string; ask_of: string; question: string }>(`select wo_id, ask_of, question from wo_questions where org_id = $1 and status = 'open' order by created_at`, [orgId]);
   for (const a of asks.rows) {
     const w = st.workOrders.find((x) => x.id === a.wo_id);
-    if (!w || !vis.has(w.project) || w.state === "done" || w.state === "killed" || out.some((x) => x.wo === w.id)) continue;
+    if (!w || !vis.has(w.project) || w.state === "done" || w.state === "killed" || w.bay === "declined" || out.some((x) => x.wo === w.id)) continue;
     const gone = askedOfGone(st.people, w.requestedBy);
     if (asksMe(a.ask_of, me, { project: w.project, requestedBy: w.requestedBy, requesterActive: requesterActive(st.people, w.requestedBy) }, (act) => decideFor(st0, principal, act, { project: w.project, time: now }).allowed)) out.push({ wo: w.id, title: w.title, project: w.project, question: `${gone && (a.ask_of === "requester" || a.ask_of === "anyone") ? `${gone}: ` : ""}${a.question}`.slice(0, 160) });
   }

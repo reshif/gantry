@@ -47,7 +47,7 @@ export async function cutSkillCandidates(tx: Tx, a: { orgId: string; id: string 
     await tx.query(
       `insert into agent_versions (org_id, agent_id, version, body, harness_version, instruction_hash, model_id, note, published_at, published_by)
        select org_id, agent_id, $3, $4::jsonb, harness_version, instruction_hash, model_id, $5, now(), $6 from agent_versions where org_id = $1 and agent_id = $2 and version = $7`,
-      [a.orgId, ag.id, n, json({ ...body, label, rc: true, diff, source: { type: "skill.edit", skill: skill.id, version: skill.label, by: a.id } }), `${skill.name} ${skill.label}: ${note}`, a.id, live.version],
+      [a.orgId, ag.id, n, json({ ...body, label, rc: true, diff, base: live.version, baseLabel: labelOf(live), source: { type: "skill.edit", skill: skill.id, version: skill.label, by: a.id } }), `${skill.name} ${skill.label}: ${note}`, a.id, live.version],
     );
     await tx.query(`update agents set version = version + 1 where org_id = $1 and id = $2`, [a.orgId, ag.id]);
     made.push({ agent: ag.id, name: ag.name, version: label, n });

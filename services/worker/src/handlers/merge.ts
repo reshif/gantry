@@ -31,12 +31,21 @@ export async function mergeRequest(job: Job, ctx: HandlerCtx): Promise<unknown> 
     return { parked: r.parked, reason };
   };
 
-  const wo = (await deps.pool.query<{ project_id: string; repo_id: string | null; parent_id: string | null; data: { merging?: { prNumber?: number } } }>(
-    `select project_id, repo_id, parent_id, data from work_orders where org_id = $1 and id = $2`, [org, woId],
+  const wo = (await deps.pool.query<{ project_id: string; repo_id: string | null; parent_id: string | null; state: string; position: string; data: { merging?: { prNumber?: number } } }>(
+    `select project_id, repo_id, parent_id, state, position, data from work_orders where org_id = $1 and id = $2`, [org, woId],
   )).rows[0];
   if (!wo) return { skipped: "unknown work order" };
   const stops = await coveringStops(deps.pool, org, { woId, projectId: wo.project_id, repoId: wo.repo_id, parentId: wo.parent_id });
   if (stops.length) return { skipped: `${stops[0]!.mode} at ${stops[0]!.scopeType} scope` };
+  // S-60: re-check the order right before merging; a person's decline, park or hold since the approval stands.
+  if (wo.state === "parked" || wo.state === "done" || wo.state === "killed") {
+    const reason = `the order is not in the approved, mergeable state (${wo.state}, ${wo.position})`;
+    await withTx(deps.pool, (tx) => recordEvent(tx, {
+      orgId: org, type: "github.merge.skipped", category: "integrations", subject: { type: "wo", id: woId }, woId, projectId: wo.project_id,
+      after: { number: prNumber, headSha, reason }, idempotencyKey: `merge:${woId}:${prNumber}:${headSha}:skipped:${wo.state}:${wo.position}`,
+    }));
+    return { skipped: `the order is in a bay: ${reason}` };
+  }
   if (wo.data.merging?.prNumber !== prNumber) return { skipped: "no merge is waiting for that pull request" };
   const pr = (await deps.pool.query<{ head_sha: string | null; state: string }>(`select head_sha, state from pull_requests where org_id = $1 and wo_id = $2 and number = $3`, [org, woId, prNumber])).rows[0];
   if (pr?.state === "closed") return park(`Pull request #${prNumber} was closed without merging.`);
