@@ -241,6 +241,25 @@ describe("S-91: a write-only agent cannot run commands through git config", () =
       expect(run(d, ["commit", "-qm", "ok"]).code).toBe(0);
     });
 
+    it("R6: a subsection that looks like a key (remote \"o.url=b\" with uploadpack) is refused, and the promisor program never runs", () => {
+      const d = repo();
+      const prog = join(d, "up.sh");
+      writeFileSync(prog, `#!/bin/sh\ntouch ${d}/PWNED\nexit 1\n`);
+      chmodSync(prog, 0o755);
+      appendFileSync(join(d, ".git", "config"), `\n[remote "o.url=b"]\n\tuploadpack = ${prog}\n\tpromisor = true\n\turl = ${d}\n`);
+      expect(run(d, ["show", "HEAD"]).code).toBe(126);
+      expect(existsSync(join(d, "PWNED"))).toBe(false);
+      for (const block of ["[remote \"o\"]\n\tpromisor = true\n", "[remote \"o\"]\n\tvcs = x\n", "[remote \"o.url\"]\n\tfoo = 1\n", "[uploadpack]\n\tallowfilter = true\n", "[branch \"a=b\"]\n\tremote = o\n"]) {
+        const e = repo();
+        appendFileSync(join(e, ".git", "config"), `\n${block}`);
+        expect(run(e, ["status"]).code, block).toBe(126);
+      }
+      const ok = repo();
+      execFileSync("git", ["remote", "add", "origin", "https://example.invalid/a/b.git"], { cwd: ok });
+      execFileSync("git", ["config", "branch.main.remote", "origin"], { cwd: ok });
+      expect(run(ok, ["status"]).code).toBe(0);
+    });
+
     it("G-S6: only the listed subcommands run", () => {
       const d = repo();
       for (const sub of ["config", "fetch", "push", "clone", "remote", "filter-branch", "submodule", "worktree"]) expect(run(d, [sub]).code, sub).toBe(126);

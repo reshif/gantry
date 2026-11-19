@@ -49,11 +49,14 @@ gitdir=$(printf '%s\n' "$where" | sed -n 1p)
 top=$(printf '%s\n' "$where" | sed -n 2p)
 [ "$gitdir" = "$WS/.git" ] && [ "$top" = "$WS" ] || refuse "the repository is at $gitdir (work tree $top); only $WS/.git with the work tree $WS is allowed (no .git file, symlink or core.worktree)"
 
-# Only these repository config keys (lower-cased section and name, as git prints them); anything else refuses.
-listed=$("$REAL" -c safe.directory="$WS" config --list --show-scope --no-includes 2>/dev/null) || refuse "the repository config cannot be read"
-bad=$(printf '%s\n' "$listed" | grep -Ev '^(command|system|global)[[:space:]]' | grep -Eiv '^(local|worktree)[[:space:]]+(user\.(name|email)=|core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|safecrlf|quotepath)=|extensions\.objectformat=|init\.defaultbranch=|safe\.directory=|remote\.[A-Za-z0-9_-]+\.(url|fetch|pushurl)=|branch\.[A-Za-z0-9_./-]+\.(remote|merge)=)' | head -1)
+# Only these repository config NAMES (section, subsection and variable, as git prints them with --name-only, so a subsection cannot pose as a variable);
+# each whole name must match the anchored list. Anything else refuses, and these words refuse wherever they stand in a name.
+listed=$("$REAL" -c safe.directory="$WS" config --list --name-only --show-scope --no-includes 2>/dev/null) || refuse "the repository config cannot be read"
+listed=$(printf '%s\n' "$listed" | grep -Ev '^(command|system|global)[[:space:]]')
+bad=$(printf '%s\n' "$listed" | grep -Ei '(^|[.[:space:]])(promisor|uploadpack|vcs|sshcommand)([.]|$)' | head -1)
+[ -n "$bad" ] || bad=$(printf '%s\n' "$listed" | grep -Eiv '^(local|worktree)[[:space:]]+(user\.(name|email)|core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|safecrlf|quotepath)|extensions\.objectformat|init\.defaultbranch|safe\.directory|remote\.[A-Za-z0-9_-]+\.(url|fetch|pushurl)|branch\.[A-Za-z0-9_./-]+\.(remote|merge))$' | head -1)
 if [ -n "$bad" ]; then
-  refuse "the repository config holds a key that is not on the allow-list (${bad#*[[:space:]]}); remove it from .git/config"
+  refuse "the repository config holds a name that is not on the allow-list (${bad#*[[:space:]]}); remove it from .git/config"
 fi
 
 case "$sub" in

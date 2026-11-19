@@ -278,9 +278,11 @@ export class RunManager {
     if (!critical || !best) return undefined;
     const gb = (n: number) => (n / 2 ** 30).toFixed(1);
     console.error(`launcher: host disk critically low (${gb(free)} GB free, hard floor ${gb(d.hardFloorBytes)} GB): stopping run ${best.runId} (workspace ${gb(best.size)} GB, grew ${gb(Math.max(0, best.growth))} GB since the last check)`);
+    // The workspace is kept as evidence (the worker's reaper reclaims it after an hour). The victim is listed only once its stop succeeded: the worker
+    // ends the order's attempt on this list, and must never do so for a container that is still running.
+    const stopped = await this.stop(best.runId, { keepWorkspace: true }).catch(() => undefined);
+    if (!stopped || !stopped.ok) return undefined;
     this.criticalStops.push({ runId: best.runId, at: Date.now(), freeBytes: free });
-    // The workspace is kept as evidence (the worker's reaper reclaims it after an hour).
-    await this.stop(best.runId, { keepWorkspace: true }).catch(() => undefined);
     return best.runId;
   }
   /** Runs stopped for critically low host disk, so the status can say why they ended. */

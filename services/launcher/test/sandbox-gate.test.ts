@@ -79,6 +79,19 @@ describe("G-S8: the disk is watched continuously", () => {
     expect(stop).not.toHaveBeenCalled();
   });
 
+  it("a run is listed as stopped for low disk only after its stop succeeded", async () => {
+    const docker = { df: async () => ({ Volumes: [vol("a", 100)] }), listVolumes: async () => ({ Volumes: [] }) };
+    const m = new RunManager(docker as never, load({ DISK_PROBE_PATH: "/", MIN_FREE_DISK_GB: "1000000" }));
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const stop = vi.spyOn(m, "stop").mockResolvedValueOnce({ ok: false, error: { kind: "teardown_incomplete" } } as never);
+    expect(await m.diskTick()).toBeUndefined();
+    expect(m.criticalStops).toEqual([]);
+    stop.mockResolvedValueOnce({ ok: true } as never);
+    expect(await m.diskTick()).toBe("a");
+    expect(m.criticalStops.map((x) => x.runId)).toEqual(["a"]);
+    log.mockRestore();
+  });
+
   it("the sockproxy allows the one read it needs for this, and only that path", () => {
     expect(route("GET", "/v1.43/system/df").decision.ok).toBe(true);
     expect(route("GET", "/system/events").decision.ok).toBe(false);
