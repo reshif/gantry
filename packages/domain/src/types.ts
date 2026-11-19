@@ -1123,6 +1123,8 @@ export interface McpServer {
   protocolRevision?: string;
   enabled?: boolean;
   disabledReason?: string | null;
+  /** The address or transport changed and its tools were not approved again; it cannot be switched on until they are. */
+  needsReapproval?: boolean;
   healthDetail?: string | null;
   discoveredAt?: Ms | null;
   version?: number;
@@ -1186,7 +1188,8 @@ export interface IntegrationInstance {
   name: string;
   config: Record<string, string | boolean | undefined>;
   secretMask: string;
-  status: "healthy" | "failing" | "offline" | (string & {});
+  /** "unknown" means the connection was never tested, or its settings changed since (shown as "Not tested yet"). */
+  status: "healthy" | "failing" | "offline" | "unknown" | (string & {});
   connected: boolean;
   projects: "all" | Id[];
   lastSync: Ms;

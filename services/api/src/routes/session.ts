@@ -18,6 +18,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { recordSignInFailure, signIn } from "../core/auth/signin.js";
 import { validIpEntry } from "../core/security.js";
+import { pendingRecovery } from "../core/auth/ip-recovery.js";
 import { csrfFor, findSession, listSessions, revokeSessions } from "../core/auth/sessions.js";
 import { publishChange } from "../core/changes.js";
 import { command } from "../core/command.js";
@@ -321,6 +322,40 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
         };
       },
     );
+  });
+
+  /* ------------------------------------------------------------ allow-list recovery (confirmation only) */
+  // The window itself is opened ONLY by the operator command on the server host (src/cli/allowlist-recovery.ts); no route can open one.
+  // These two routes let the admin the window let in see the address and decide, in the app, whether it joins the allow-list.
+
+  app.get("/api/v1/security/recovery", async (req) => {
+    const who = req.gx.principal;
+    if (who?.kind !== "person" || !req.gx.session) throw refuse("denied", "Sign in to continue.");
+    const p = await pendingRecovery(g.pool, g.orgId, req.gx.session.id);
+    return p ? { pending: true, address: p.address, signedInAt: p.usedAt.getTime() } : { pending: false };
+  });
+
+  app.post("/api/v1/security/recovery/confirm", async (req) => {
+    const body = z.object({ add: z.boolean() }).parse(req.body);
+    const sessionId = req.gx.session?.id ?? null;
+    return command(req, { action: "security.manage", stepUp: true }, async (tx, a) => {
+      const w = sessionId ? (await tx.query<{ id: string; used_ip: string }>(`select id, host(used_ip) as used_ip from allowlist_recovery where org_id = $1 and session_id = $2 and status = 'used' for update`, [g.orgId, sessionId])).rows[0] : undefined;
+      if (!w) throw refuse("conflict", "There is no recovery sign-in waiting for your confirmation.");
+      if (body.add) {
+        const cur = await readSecurity(tx, g.orgId);
+        if (!cur.value.ipAllow.includes(w.used_ip)) {
+          const next = { ...cur.value, ipAllow: [...cur.value.ipAllow, w.used_ip] };
+          await tx.query(`insert into security_settings (org_id, version, body, note, published_at, published_by) values ($1,$2,$3::jsonb,$4, now(), $5)`, [g.orgId, cur.version + 1, JSON.stringify(next), "Added by confirmed allow-list recovery", a.id]);
+          g.security.invalidate();
+        }
+      }
+      await tx.query(`update allowlist_recovery set status = $3 where org_id = $1 and id = $2`, [g.orgId, w.id, body.add ? "added" : "declined"]);
+      return {
+        msg: body.add ? `${w.used_ip} was added to the IP allow-list.` : "The allow-list is unchanged.",
+        events: [{ type: body.add ? "auth.allowlist_recovery.address_added" : "auth.allowlist_recovery.address_declined", category: "auth", subject: { type: "security", id: "settings" }, after: { window: w.id, address: w.used_ip } }],
+        extra: { added: body.add, address: w.used_ip }, changes: ["security"], project: null,
+      };
+    });
   });
 
   /* ------------------------------------------------------------ can, stream */

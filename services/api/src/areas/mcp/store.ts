@@ -9,6 +9,7 @@ export interface ServerRow {
   url: string;
   enabled: boolean;
   disabled_reason: string | null;
+  address_unapproved: boolean;
   secret_enc: string | null;
   secret_mask: string | null;
   version: number;
@@ -38,7 +39,7 @@ export interface ToolRow {
   pending_hash: string | null;
 }
 
-const SERVER_SQL = `select s.id, s.name, s.url, s.enabled, s.disabled_reason, s.secret_enc, s.secret_mask, s.version, s.transport, s.protocol_revision, s.auth_mode, s.auth_header,
+const SERVER_SQL = `select s.id, s.name, s.url, s.enabled, s.disabled_reason, s.address_unapproved, s.secret_enc, s.secret_mask, s.version, s.transport, s.protocol_revision, s.auth_mode, s.auth_header,
        s.sensitivity, s.health, s.health_detail, s.discovered_at, sc.projects, sc.repos, sc.agents, sc.stations, sc.classes
   from mcp_servers s left join mcp_scopes sc on sc.org_id = s.org_id and sc.server_id = s.id`;
 
@@ -71,7 +72,7 @@ export function serverOf(r: ServerRow, tools: ToolRow[]): McpServer {
     writeGate: true,
     tools: tools.filter((t) => t.server_id === r.id).map(toolOf),
     projects: asScope(r.projects, []), repos: asScope(r.repos, []), agents: asScope(r.agents, []), stations: asScope(r.stations, []), classes: asScope(r.classes, "all"),
-    protocolRevision: r.protocol_revision, enabled: r.enabled, disabledReason: r.disabled_reason, healthDetail: r.health_detail,
+    protocolRevision: r.protocol_revision, enabled: r.enabled, disabledReason: r.disabled_reason, needsReapproval: r.address_unapproved, healthDetail: r.health_detail,
     discoveredAt: r.discovered_at ? r.discovered_at.getTime() : null, version: r.version,
   };
 }

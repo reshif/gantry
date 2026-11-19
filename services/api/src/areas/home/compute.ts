@@ -1,6 +1,6 @@
 import { involved } from "../onboarding/session/updates.js";
 import { involvedInWo } from "../workorders/session/updates.js";
-import { asksMe } from "../workorders/asked.js";
+import { askedOfGone, asksMe, requesterActive } from "../workorders/asked.js";
 import { openAccessRequests } from "../workorders/session/mentions.js";
 import { fmt, gateDecision, gateDef, gateProgress, istToday, istTime, isFactoryAdmin, roleHolds, rolesIn, visibleProjects, type Person, type Project, type Repo } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
@@ -254,7 +254,8 @@ async function myConversations(db: Queryable, orgId: string, st: Flow, st0: Poli
   for (const a of asks.rows) {
     const w = st.workOrders.find((x) => x.id === a.wo_id);
     if (!w || !vis.has(w.project) || w.state === "done" || w.state === "killed" || out.some((x) => x.wo === w.id)) continue;
-    if (asksMe(a.ask_of, me, { project: w.project, requestedBy: w.requestedBy }, (act) => decideFor(st0, principal, act, { project: w.project, time: now }).allowed)) out.push({ wo: w.id, title: w.title, project: w.project, question: a.question.slice(0, 160) });
+    const gone = askedOfGone(st.people, w.requestedBy);
+    if (asksMe(a.ask_of, me, { project: w.project, requestedBy: w.requestedBy, requesterActive: requesterActive(st.people, w.requestedBy) }, (act) => decideFor(st0, principal, act, { project: w.project, time: now }).allowed)) out.push({ wo: w.id, title: w.title, project: w.project, question: `${gone && (a.ask_of === "requester" || a.ask_of === "anyone") ? `${gone}: ` : ""}${a.question}`.slice(0, 160) });
   }
   // The work-order session: the agent asked or proposed, or Gantry posted an update (a station finished, a gate decided), and this person has not opened it since.
   const ups = await db.query<{ wo_id: string; project_id: string; title: string; body: string }>(

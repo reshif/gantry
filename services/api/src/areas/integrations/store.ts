@@ -68,7 +68,7 @@ export const configOf = (config: Record<string, unknown>): Record<string, unknow
 
 export function instanceFromRow(r: InstanceRow): IntegrationInstance {
   const meta = metaOf(r.config);
-  const status = !r.enabled ? "offline" : r.health === "failing" ? "failing" : r.health === "offline" ? "offline" : "healthy";
+  const status = !r.enabled ? "offline" : r.health === "failing" ? "failing" : r.health === "offline" ? "offline" : r.health === "unknown" ? "unknown" : "healthy";
   return {
     id: r.id, type: r.type_id, name: r.name, config: configOf(r.config) as IntegrationInstance["config"], secretMask: r.secret_mask ?? "", status, connected: r.enabled, projects: meta.projects,
     lastSync: meta.lastSync ?? ms(r.updated_at) ?? 0, createdBy: meta.createdBy ?? "", createdAt: ms(r.created_at) ?? 0, ...(meta.targetId ? { targetId: meta.targetId } : {}),

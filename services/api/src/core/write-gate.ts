@@ -115,7 +115,7 @@ export const WRITE_GATES: Readonly<Record<string, WriteGate>> = {
   [`PUT ${P}/projects/:id/oncall`]: A("project.members"), [`POST ${P}/projects/:id/oncall/handover`]: SELF("the person on call hands over without a right"),
   [`POST ${P}/projects/:id/archive`]: A("project.archive"), [`POST ${P}/projects/:id/unarchive`]: A("project.archive"),
   // session and security
-  [`DELETE ${P}/sessions/:id`]: SELF("own sessions; another person's need security.manage, decided in the handler"), [`PATCH ${P}/security`]: A("security.manage"),
+  [`DELETE ${P}/sessions/:id`]: SELF("own sessions; another person's need security.manage, decided in the handler"), [`PATCH ${P}/security`]: A("security.manage"), [`POST ${P}/security/recovery/confirm`]: A("security.manage"),
   [`POST ${P}/can`]: SELF("a read-only batch question about the caller's own rights"), "POST /auth/logout": X("sign-out clears the caller's own session"),
   // stops
   [`POST ${P}/stops`]: PICK((r) => stopOf(body(r).mode === "kill" ? "kill" : "halt", body(r).scope), "halt.factory", "line.halt", "kill.factory", "kill.project", "kill.workorder"),
