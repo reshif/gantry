@@ -41,6 +41,8 @@ export class FakeLauncher {
   stuck = new Set<string>();
   /** Fail this many stop-run calls with teardown_incomplete. */
   stopFailures = 0;
+  /** Runs the launcher stopped for a critically low host disk (its list answer). */
+  criticalStops: Array<{ runId: string; at: number; freeBytes: number }> = [];
   /** Runs the double lists although nobody started them (orphans left by a crash). */
   onStop: ((id: string) => void | Promise<void>) | null = null;
   onStart: ((r: Record<string, any>) => void | Promise<void>) | null = null;
@@ -88,7 +90,7 @@ export class FakeLauncher {
     }
     if (req.method === "GET" && u.pathname === "/v1/runs") {
       this.calls.push({ op: "list", at: Date.now() });
-      return send(res, 200, { ok: true, runs: [...this.runs.values()].map((r) => ({ runId: r.runId, variant: r.variant, workspaceRef: r.workspaceRef, container: r.state === "started" ? { id: `c-${r.runId}` } : null, network: { name: `run-${r.runId}` }, volume: { name: `ws-${r.runId}` } })), capacity: { max: 32, networks: this.runs.size } });
+      return send(res, 200, { ok: true, runs: [...this.runs.values()].map((r) => ({ runId: r.runId, variant: r.variant, workspaceRef: r.workspaceRef, container: r.state === "started" ? { id: `c-${r.runId}` } : null, network: { name: `run-${r.runId}` }, volume: { name: `ws-${r.runId}` } })), capacity: { max: 32, networks: this.runs.size }, criticalStops: this.criticalStops });
     }
     send(res, 404, { ok: false, msg: "not found" });
   }

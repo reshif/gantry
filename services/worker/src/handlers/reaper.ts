@@ -1,5 +1,5 @@
 import { applyJobDead, applyStationResult, endCarrierAttempt, expireLeases, failEvalAttempt, pendingStops, revokeRunTokens, job as buildJob } from "@gantry/api/core";
-import { enqueue, withTx, type Job } from "@gantry/db";
+import { enqueue, withTx, type Job, type Tx } from "@gantry/db";
 import type { Deps } from "../deps.js";
 import { errMsg } from "../errors.js";
 import type { HandlerCtx } from "../runner.js";
@@ -10,6 +10,7 @@ export interface SweepReport {
   leasesExpired: number;
   orphansRemoved: string[];
   watchdog: string[];
+  diskCritical?: string[];
   /** Repos whose onboarding step's job died and were handed back to a person. */
   onboardingFreed?: string[];
 }
@@ -44,8 +45,8 @@ export async function reapOrphans(deps: Deps, orgId: string): Promise<string[]> 
   const removed: string[] = [];
   const graceMs = deps.cfg.reaperGraceMs;
   for (const r of live) {
-    const row = (await deps.pool.query<{ state: string; attempt_state: string; lease_until: Date | null; created_at: Date }>(
-      `select r.state, a.state as attempt_state, a.lease_until, r.created_at from runs r join attempts a on a.org_id = r.org_id and a.id = r.attempt_id where r.org_id = $1 and r.id = $2`,
+    const row = (await deps.pool.query<{ state: string; attempt_state: string; lease_until: Date | null; created_at: Date; evidence: boolean }>(
+      `select r.state, a.state as attempt_state, a.lease_until, r.created_at, (r.data->'blocker'->>'code' = 'host_disk_critical' and r.updated_at > now() - interval '1 hour') as evidence from runs r join attempts a on a.org_id = r.org_id and a.id = r.attempt_id where r.org_id = $1 and r.id = $2`,
       [orgId, r.runId],
     )).rows[0];
     const now = deps.now().getTime();
@@ -55,7 +56,7 @@ export async function reapOrphans(deps: Deps, orgId: string): Promise<string[]> 
     else orphan = row.lease_until !== null && row.lease_until.getTime() + graceMs < now;
     // Another organisation's run is not ours to remove: a run row that exists in no org at all is.
     if (!row && (await deps.pool.query(`select 1 from runs where id = $1 and org_id <> $2 limit 1`, [r.runId, orgId])).rowCount) continue;
-    if (!orphan) continue;
+    if (!orphan || row?.evidence) continue;
     try {
       await deps.launcher.stop(r.runId, { keepWorkspace: false });
       removed.push(r.runId);
@@ -65,6 +66,44 @@ export async function reapOrphans(deps: Deps, orgId: string): Promise<string[]> 
     }
   }
   return removed;
+}
+
+/** Ends a run's attempt with a failed result, the way the flow engine expects for each kind of work order (eval case, onboarding step, real work). */
+async function failRunAttempt(tx: Tx, deps: Deps, orgId: string, r: { attempt_id: string; fencing: string }, code: string, msg: string): Promise<void> {
+  // An eval case ends with an error on its item; real work goes through the flow engine.
+  const isEval = (await tx.query(`select 1 from attempts a join work_orders w on w.org_id = a.org_id and w.id = a.wo_id where a.org_id = $1 and a.id = $2 and w.source = 'eval'`, [orgId, r.attempt_id])).rowCount;
+  const isCarrierWo = (await tx.query(`select 1 from attempts a join work_orders w on w.org_id = a.org_id and w.id = a.wo_id where a.org_id = $1 and a.id = $2 and w.source = 'onboarding'`, [orgId, r.attempt_id])).rowCount;
+  if (isCarrierWo) {
+    const j = await endCarrierAttempt(tx, orgId, r.attempt_id, { code, msg }, deps.now());
+    if (j) await enqueue(tx, { orgId, kind: j.kind, queue: j.queue, payload: j.payload, ...(j.dedupeKey ? { dedupeKey: j.dedupeKey } : {}) });
+  } else if (isEval) {
+    const f = await failEvalAttempt(tx, orgId, r.attempt_id, { code, msg }, deps.now());
+    await enqueueJobs(tx, orgId, f.jobs);
+  } else await applyStationResult(tx, r.attempt_id, Number(r.fencing), { status: "failed", summary: msg, error: { code, msg } });
+}
+
+/**
+ * Runs the launcher stopped because the host disk was critically low (its hard-floor monitor): the order's blocker says so, instead of a lease timeout (R1).
+ * The workspace was kept as evidence; reapOrphans leaves it for an hour.
+ */
+export async function diskCriticalSweep(deps: Deps, orgId: string): Promise<string[]> {
+  const stops = await deps.launcher.criticalStops().catch(() => []);
+  const out: string[] = [];
+  for (const s of stops) {
+    const r = (await deps.pool.query<{ id: string; attempt_id: string; fencing: string }>(
+      `select r.id, r.attempt_id, a.fencing::text as fencing from runs r join attempts a on a.org_id = r.org_id and a.id = r.attempt_id
+        where r.org_id = $1 and r.id = $2 and r.state in ('starting','running') and a.state in ('queued','running')`, [orgId, s.runId],
+    )).rows[0];
+    if (!r) continue;
+    const msg = "Host disk critically low: the run was stopped so the host disk does not fill. Its workspace is kept for an hour for review. Free disk space, then run the station again.";
+    await withTx(deps.pool, async (tx) => {
+      await revokeRunTokens(tx, { orgId, runIds: [r.id], reason: "host disk critically low" });
+      await tx.query(`update runs set state = 'stopped', ended_at = now(), updated_at = now(), data = (data - 'dispatchWait') || $3::jsonb where org_id = $1 and id = $2`, [orgId, r.id, JSON.stringify({ endedBy: "host disk critically low", blocker: { code: "host_disk_critical", label: "Host disk critically low", at: new Date(s.at).toISOString() } })]);
+      await failRunAttempt(tx, deps, orgId, r, "host_disk_critical", msg);
+    });
+    out.push(r.id);
+  }
+  return out;
 }
 
 /**
@@ -87,17 +126,7 @@ export async function wallClockWatchdog(deps: Deps, orgId: string): Promise<stri
       await deps.launcher.stop(r.id, { keepWorkspace: false });
       await withTx(deps.pool, async (tx) => {
         await tx.query(`update runs set state = 'stopped', ended_at = now(), updated_at = now(), data = data || '{"endedBy":"wall-clock watchdog"}'::jsonb where org_id = $1 and id = $2`, [orgId, r.id]);
-        const msg = `The run exceeded its wall-clock limit of ${r.limit_s} seconds and was stopped.`;
-        // An eval case ends with an error on its item; real work goes through the flow engine.
-        const isEval = (await tx.query(`select 1 from attempts a join work_orders w on w.org_id = a.org_id and w.id = a.wo_id where a.org_id = $1 and a.id = $2 and w.source = 'eval'`, [orgId, r.attempt_id])).rowCount;
-        const isCarrierWo = (await tx.query(`select 1 from attempts a join work_orders w on w.org_id = a.org_id and w.id = a.wo_id where a.org_id = $1 and a.id = $2 and w.source = 'onboarding'`, [orgId, r.attempt_id])).rowCount;
-        if (isCarrierWo) {
-          const j = await endCarrierAttempt(tx, orgId, r.attempt_id, { code: "wall_clock_exceeded", msg }, deps.now());
-          if (j) await enqueue(tx, { orgId, kind: j.kind, queue: j.queue, payload: j.payload, ...(j.dedupeKey ? { dedupeKey: j.dedupeKey } : {}) });
-        } else if (isEval) {
-          const f = await failEvalAttempt(tx, orgId, r.attempt_id, { code: "wall_clock_exceeded", msg }, deps.now());
-          await enqueueJobs(tx, orgId, f.jobs);
-        } else await applyStationResult(tx, r.attempt_id, Number(r.fencing), { status: "failed", summary: msg, error: { code: "wall_clock_exceeded", msg } });
+        await failRunAttempt(tx, deps, orgId, r, "wall_clock_exceeded", `The run exceeded its wall-clock limit of ${r.limit_s} seconds and was stopped.`);
       });
       out.push(r.id);
     } catch (e) {
@@ -125,6 +154,7 @@ export async function reaperSweep(job: Job, ctx: HandlerCtx): Promise<SweepRepor
   // Eval cases that lost their lease or sat behind a stop end with an error, so an eval run is never stuck (spec 13.2).
   report.leasesExpired += await evalSweep(deps, org);
   report.watchdog = await wallClockWatchdog(deps, org);
+  report.diskCritical = await diskCriticalSweep(deps, org);
   report.orphansRemoved = await reapOrphans(deps, org);
   report.onboardingFreed = await onboardingSweep(deps, org);
   return report;

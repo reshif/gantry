@@ -116,4 +116,22 @@ d("sandbox teardown order", () => {
     await w.drain(3);
     expect(w.launcher.runs.has(a.runId)).toBe(false);
   });
+
+  it("R1: a run the launcher stopped for a critically low host disk gets that as its blocker, not a lease timeout, and its workspace is kept for an hour", async () => {
+    const a = await w.workOrderAt("WO-9320", { station: "research", repo: null });
+    await w.drain();
+    w.launcher.criticalStops.push({ runId: a.runId, at: Date.now(), freeBytes: 1e9 });
+    await w.enqueue("reaper.sweep", {}, { dedupeKey: "sbx-crit" });
+    await w.drain();
+    const run = (await w.q(`select state, data from runs where id = $1`, [a.runId]))[0];
+    expect(run.state).toBe("stopped");
+    expect(run.data.blocker).toMatchObject({ code: "host_disk_critical", label: "Host disk critically low" });
+    const att = (await w.q(`select state, outcome from attempts where id = $1`, [a.attemptId]))[0];
+    expect(att.state).toBe("failed");
+    expect(att.outcome).toBe("failed");
+    const wo = (await w.q(`select data::text as d from work_orders where id = 'WO-9320'`))[0];
+    expect(wo.d).toMatch(/Host disk critically low/);
+    // the workspace survives the sweep that just ran (evidence), unlike an ordinary orphan
+    expect(w.launcher.calls.filter((c) => c.op === "stop" && c.runId === a.runId && c.keepWorkspace === "false").length).toBe(0);
+  });
 });

@@ -132,7 +132,7 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     const v = await visible(req);
     const t = await readTraveler(g.pool, req.gx.orgId, v.viewer, id);
     if (!t) throw refuse("not_found", "No such work order.");
-    return { ...t.wo, gateProgress: t.progress, allowed: t.allowed, stop: t.stop, route: t.route };
+    return { ...t.wo, gateProgress: t.progress, allowed: t.allowed, stop: t.stop, route: t.route, wait: t.wait };
   });
 
   app.get("/api/v1/conversations", async (req) => {

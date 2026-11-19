@@ -66,6 +66,22 @@ export interface Traveler {
   allowed: { approve: (Decision & { gate: string; instance: string }) | null; moves: Record<string, MoveCheck>; can: Record<string, Decision> };
   stop: CoveringStop | null;
   route: string[];
+  /** Why the work order's run is not running yet, or was stopped by the host (R1): "Waiting for a run slot (n queued)", "Waiting: host disk low", "Host disk critically low". */
+  wait: RunWait | null;
+}
+
+export interface RunWait { label: string; reason: string | null; since: string | null; kind: "slot" | "disk" | "disk_critical" }
+
+/** The work order's latest run that is waiting for the launcher, or was stopped for a critically low host disk. */
+export async function readRunWait(db: Queryable, orgId: string, woId: string): Promise<RunWait | null> {
+  const r = (await db.query<{ wait: { label?: string; reason?: string; since?: string } | null; blocker: { code?: string; label?: string } | null; ended: boolean }>(
+    `select data->'dispatchWait' as wait, data->'blocker' as blocker, ended_at is not null as ended from runs where org_id = $1 and wo_id = $2 order by created_at desc limit 1`, [orgId, woId],
+  )).rows[0];
+  if (!r) return null;
+  if (r.blocker?.code === "host_disk_critical") return { label: r.blocker.label ?? "Host disk critically low", reason: null, since: null, kind: "disk_critical" };
+  if (!r.wait || r.ended) return null;
+  const label = r.wait.label ?? "Waiting to start";
+  return { label, reason: r.wait.reason ?? null, since: r.wait.since ?? null, kind: /disk/i.test(label) ? "disk" : "slot" };
 }
 
 const ACTIONS = { answer: "wo.answer", classify: "wo.classify", decline: "wo.decline", park: "wo.park", sendback: "wo.sendback", reassign: "wo.reassign", move: "wo.move", confirm: "brief.confirm", summary: "wo.answer" } as const;
@@ -94,7 +110,7 @@ export async function readTraveler(db: Queryable, orgId: string, viewer: string 
     const d = gateDecision(st, viewer, wo, waiting[0], now);
     approve = { ...d, gate: waiting[0], instance: inst?.id ?? `${woId}:${waiting[0]}` };
   }
-  return { wo: { ...wo, version: row.version }, progress, allowed: { approve, moves, can: cans }, stop, route: route(st.catalog, project, wo.cls) };
+  return { wo: { ...wo, version: row.version }, progress, allowed: { approve, moves, can: cans }, stop, route: route(st.catalog, project, wo.cls), wait: await readRunWait(db, orgId, woId) };
 }
 
 /* ------------------------------------------------------------------------- conversations */
@@ -216,6 +232,7 @@ export async function readRecord(db: Queryable, orgId: string, woId: string) {
     attempts: attempts.map((a) => ({ id: a.id, station: a.station, visit: a.visit, fencing: Number(a.fencing), state: a.state, outcome: a.outcome, startedAt: iso(a.started_at), endedAt: iso(a.ended_at), tuple: a.tuple_id, agent: a.data.agent ?? null })),
     results: results.map((r) => ({ id: r.id, attempt: r.attempt_id, station: r.station, outcome: r.outcome, summary: r.summary, at: iso(r.created_at), output: obj(r.body).output ?? null })),
     runs: runs.map((r) => ({ id: r.id, attempt: r.attempt_id, state: r.state, model: r.model_id, at: iso(r.created_at) })),
+    wait: await readRunWait(db, orgId, woId),
     code: { pullRequests: prs.map((p) => ({ number: p.number, state: p.state, draft: p.draft, headSha: p.head_sha, title: p.title, url: p.url, mergedAt: iso(p.merged_at) })), commits: commits.map((c) => ({ sha: c.sha, message: c.message, author: c.author, at: iso(c.committed_at) })), files: wo.files ?? [], diff: wo.diff, tests: wo.tests },
     outcomes: wo.outcomes ?? [], totals, completeness: completeness(full), summary,
     events: events.map((e) => ({ seq: Number(e.seq), at: iso(e.occurred_at), type: e.type, by: e.actor, outcome: e.outcome, detail: e.after })),
