@@ -44,7 +44,22 @@ The API serves `POST /auth/backchannel-logout` (OIDC Back-Channel Logout 1.0). K
 
 ### Vendor LAN ranges (on-prem models)
 
-The model gateway (edge) refuses vendor endpoints that are loopback, link-local (metadata), on the control network or private, resolving the name on every call. An on-prem vendor on a private address needs its range listed: Security setting `vendorLanRanges` (IPv4 CIDR inside 10/8, 192.168/16 or 100.64/10, overlapping no Gantry network), set by a Factory Admin with a fresh sign-in and audited. Gantry's own networks are never openable: the compose subnets are pinned (control 10.89.17.0/24, front 172.18, dockerapi 172.19, egress 172.20, launch 172.22, wsapi 172.23, all /16) and Docker's whole default pool 172.16.0.0/12 (per-run networks, docker0) is refused too; a range that overlaps any of them is refused when saved. Pinning matches what the existing stack already uses; on a stack created before the pin, `docker compose up` sees a changed network definition and recreates the networks (and the containers on them), so apply it in a maintenance window. `EDGE_ALLOW_PRIVATE_UPSTREAMS=true` turns the edge guard off for a development stack.
+The model gateway (edge) refuses vendor endpoints that are loopback, link-local (metadata), on a Gantry network or private, resolving the name on every call. An on-prem vendor on a private address needs its range listed: Security setting `vendorLanRanges` (IPv4 CIDR inside 10/8, 192.168/16 or 100.64/10), set by a Factory Admin with a fresh sign-in and audited. `EDGE_ALLOW_PRIVATE_UPSTREAMS=true` turns the edge guard off for a development stack.
+
+What is never openable (`CONTROL_CIDRS` in `packages/domain/src/netguard.ts`): the pinned compose networks (control 10.89.17.0/24, front 172.18, dockerapi 172.19, egress 172.20, launch 172.22, wsapi 172.23, all /16) and Docker's whole default pool **172.16.0.0/12** (per-run networks and docker0 come from it). A range that overlaps any of them is refused when saved, so:
+- **172.16.0.0/12 is not a LAN range.** A model host on a 172.16-172.31 address stops working at the edge and cannot be listed.
+- **10.0.0.0/8 is refused** because it covers 10.89.17.0/24. List the real range instead, for example `10.0.0.0/16`.
+- Compose service names (`gantry-*`, `postgres`, `minio`, `keycloak`, `mailpit`, ...) are never a vendor host.
+
+Pinning the compose subnets matches what the existing stack already uses; on a stack created before the pin, `docker compose up` sees a changed network definition and recreates the networks (and the containers on them), so apply it in a maintenance window.
+
+**If your model host really is on 172.16-31:** move Docker's pool away from the corporate LAN, then narrow `CONTROL_CIDRS` to match.
+1. Pick a pool the LAN does not use, for example `10.200.0.0/16` split into /24 (it must not overlap the LAN or 10.89.17.0/24).
+2. On the Docker host, edit `/etc/docker/daemon.json`: `{ "default-address-pools": [ { "base": "10.200.0.0/16", "size": 24 } ] }`.
+3. Stop the stack (`docker compose -p gantry down`), restart the daemon (`systemctl restart docker`), remove the old gantry networks if `down` left any, and change the `ipam` subnets in `deploy/compose.yml` (front, dockerapi, egress, launch, wsapi) to blocks inside the new pool.
+4. In `packages/domain/src/netguard.ts` replace `172.16.0.0/12` and the old 172.x /16 entries in `CONTROL_CIDRS` with the new pool and the new subnets, rebuild and redeploy the API and edge.
+5. Then list the model host's 172.x range in Security.
+Do this only with the owner's agreement: it changes the networks of every container.
 
 ### Keycloak admin console
 

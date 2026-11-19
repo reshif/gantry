@@ -146,5 +146,20 @@ d("merge gate: ordering of step-up, endpoint checks, hooks, logout replay, pendi
     const over = await signIn(t.app.gantry, claims(200), req("198.51.100.77"));
     expect(over).toMatchObject({ ok: false, reason: "pending_cap" });
     expect((over as { msg: string }).msg).toMatch(/waiting for approval/);
+    // G-B2: Factory Admins get one attention item for the refused sign-ins, and the people-manage check keeps it from anyone else
+    const home = await w.call("p-asha", "GET", "/api/v1/home");
+    const items = JSON.stringify(home.body).match(/hm-att-pending-refused/g) ?? [];
+    expect(items, "one item, not one per refusal").toHaveLength(1);
+    expect(JSON.stringify(home.body)).toMatch(/sign-ins? refused: pending cap reached/);
+    expect(JSON.stringify((await w.call("p-tomas", "GET", "/api/v1/home")).body)).not.toContain("hm-att-pending-refused");
+  });
+
+  it("G-B1: the saved-range message names what is refused; cosmetic: egress.host.added is one row per host", async () => {
+    const cur = (await w.call("p-asha", "GET", "/api/v1/security")).body;
+    const r = await w.call("p-asha", "PATCH", "/api/v1/security", { path: "vendorLanRanges", value: ["172.20.0.0/16"] }, { "if-match": String(cur.version) });
+    expect(r.status).toBe(422);
+    expect(r.body.msg).toMatch(/not 172\.16\.0\.0\/12/);
+    const { egressAdded } = await import("../src/areas/internal/egress.js");
+    expect(egressAdded(["a.example"], ["b.example", "b.example", "a.example"], { kind: "vendor", id: "v", name: "V" }).map((e) => e.after.host)).toEqual(["b.example"]);
   });
 });

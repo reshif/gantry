@@ -52,7 +52,7 @@ export const urlHosts = (v: unknown): string[] => {
 /** Audit rows for hosts a vendor or integration change adds to the worker's list (S-67): one `egress.host.added` per new host, naming where it came from. */
 export function egressAdded(before: string[], after: string[], from: { kind: "vendor" | "integration"; id: string; name: string }): Array<{ type: string; category: "config"; subject: { type: string; id: string }; projectId: null; after: { host: string; list: "worker"; source: string; sourceName: string } }> {
   const had = new Set(before);
-  return after.filter((h) => !had.has(h)).map((host) => ({ type: "egress.host.added", category: "config" as const, subject: { type: from.kind, id: from.id }, projectId: null, after: { host, list: "worker" as const, source: `${from.kind} ${from.id}`, sourceName: from.name } }));
+  return [...new Set(after)].filter((h) => !had.has(h)).map((host) => ({ type: "egress.host.added", category: "config" as const, subject: { type: from.kind, id: from.id }, projectId: null, after: { host, list: "worker" as const, source: `${from.kind} ${from.id}`, sourceName: from.name } }));
 }
 
 /** Every host on the run and worker lists with where it came from (Security, "Egress hosts and where they came from"). */

@@ -68,7 +68,7 @@ const SecuritySchema = z.object({
   stepUpWindowMinutes: z.number().int().min(5).max(60).optional(),
   githubLogin: z.boolean(),
   researchHosts: z.array(z.string().max(253).refine(isResearchHost, "A research host must be a DNS name, not an IP address.")).max(200).optional(),
-  vendorLanRanges: z.array(z.string().max(32).refine(validLanCidr, "A LAN range is an IPv4 CIDR inside 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 or 100.64.0.0/10.")).max(20).optional(),
+  vendorLanRanges: z.array(z.string().max(32).refine(validLanCidr, "A LAN range is an IPv4 CIDR inside 10.0.0.0/8, 192.168.0.0/16 or 100.64.0.0/10 that overlaps no Gantry network: not 172.16.0.0/12 (Docker's pool), and not a range covering 10.89.17.0/24 (so not 10.0.0.0/8; use 10.0.0.0/16, for example).")).max(20).optional(),
   chatCapUsdPerDay: z.number().min(0).max(100_000).nullable().optional(),
 });
 
@@ -311,6 +311,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
         const parsed = SecuritySchema.safeParse(next);
         if (!parsed.success) {
           const bad = body.path === "ipAllow" && Array.isArray(body.value) ? body.value.filter((x) => typeof x !== "string" || !validIpEntry(x)).slice(0, 3).map((x) => JSON.stringify(String(x).slice(0, 60))) : [];
+          if (body.path === "vendorLanRanges") throw invalid(parsed.error.issues[0]?.message ?? "That is not a valid LAN range.");
           throw invalid(bad.length ? `Not an IP address or CIDR range: ${bad.join(", ")}.` : `That value is not valid for ${body.path}.`);
         }
         const before = getPath(cur.value, body.path);
