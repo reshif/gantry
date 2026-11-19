@@ -5,6 +5,7 @@ import type { z } from "zod";
 import type { Actor, CommandResult, EventSpec } from "../../core/command.js";
 import { capOfReason, overBudget, overText } from "../workorders/budget-state.js";
 import { liftBudgetHalt } from "../workorders/budget.js";
+import { dispatchQueued, newFx } from "../workorders/engine.js";
 import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
 import { readCatalog, readPeople, readRoles, readTemplates } from "../../core/read/index.js";
 import { parseConfigEdit, type ConfigEdit } from "./config.js";
@@ -274,7 +275,16 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
       throw invalid(`${path} is not an editable project setting.`);
   }
   const flowVersion = await persistDraft(tx, org, draft, a.id, path);
-  return done("project.config", before, after, `Saved ${path}.`, "config", flowVersion);
+  const saved = await done("project.config", before, after, `Saved ${path}.`, "config", flowVersion);
+  if (edit.kind !== "slots" || !(Number(after) > Number(before))) return saved;
+  // Raising the coding slots: queued work takes the free slots now, in priority then age order (S-32).
+  const fx = await newFx(tx, org, a.id, a.now);
+  const started = await dispatchQueued(fx, projectId);
+  if (!started.length) return saved;
+  return {
+    ...saved, msg: `Saved ${path}. ${started.join(", ")} left the Queue for the new slot${started.length > 1 ? "s" : ""}.`,
+    events: [...saved.events, ...fx.events], jobs: [...(saved.jobs ?? []), ...fx.jobs], changes: [...new Set([...(saved.changes ?? []), "workOrders", "floor", "home"])],
+  };
 }
 
 const modeText = (m: string): string => (m === "auto" ? "automatic" : m === "mixed" ? "checks, then a person" : "a human approval");
