@@ -57,7 +57,7 @@ function MfaSetup() {
         <li>Then sign in below: your password first, then the code from the app.</li>
       </ol>
       <Btn label="Sign in with two steps" kind="primary" id="auth-mfa-go" icon="key" cls="block" onClick={() => window.location.assign(`/auth/login${sp.size ? `?${sp.toString()}` : ""}`)} />
-      <p className="muted small" style={{ marginTop: 12 }}>No link, or it expired? Ask an administrator to send you a new one (People, Reset authenticator). The link works once and lasts one hour. Your password alone never lets you set up an authenticator.</p>
+      <p className="muted small" style={{ marginTop: 12 }}>No link, or it expired? Ask an administrator to send you a new one (People, Reset authenticator). The link works once, for an hour; a password alone cannot set up an authenticator.</p>
       <div className="row" style={{ marginTop: 8 }}><ThemeBtn /></div>
     </div>
   );

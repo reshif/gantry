@@ -6,7 +6,8 @@
 import { useState } from "react";
 import type { SecuritySettings } from "@gantry/domain";
 import { setSecurity } from "./commands";
-import { useEgressHosts, usePeople } from "../../api/queries";
+import { usePeople } from "../../api/queries";
+import { useEgressHosts } from "../../api/queries/egress";
 import { Async } from "../../ui/async";
 import { Btn, Field, Panel, Select, TextInput, Toggle, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";

@@ -46,8 +46,5 @@ export function useMe(): Me | null {
 export const useSessions = (o: { all?: boolean } = {}) =>
   useQuery({ queryKey: o.all ? qk.sessionsAll() : qk.sessions(), queryFn: () => get<Session[]>(api("sessions"), o.all ? { all: "1" } : undefined) });
 export const useSecurity = () => useQuery({ queryKey: qk.security(), queryFn: () => readIfAllowed(SECURITY, () => get<SecuritySettings>(api("security"))) });
-/** Every host on the run and worker egress lists, with where it came from (S-67). */
-export interface EgressHost { host: string; list: "run" | "worker"; kind: string; source: string }
-export const useEgressHosts = () => useQuery({ queryKey: qk.securityEgress(), queryFn: () => readIfAllowed(SECURITY, () => get<{ hosts: EgressHost[] }>(api("security/egress-hosts"))) });
 export const useSignins = (q: { cursor?: string; limit?: number; all?: "1" } = {}) =>
   useQuery({ queryKey: qk.signinsList(q), queryFn: () => get<SignIn[] | Page<SignIn>>(api("signins"), q) });
