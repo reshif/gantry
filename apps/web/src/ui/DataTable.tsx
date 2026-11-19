@@ -18,6 +18,8 @@ export interface Col<R> {
   sort?: boolean | ((r: R) => number | string);
   align?: "end";
   hideSmall?: boolean;
+  /** Stacked card layout: print no caption before the value (its content says what it is). */
+  noCap?: boolean;
   width?: string;
   render?: (r: R) => ReactNode;
 }
@@ -200,7 +202,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                     const first = i === 0 && action && !hasOwn;
                     const lid = `${uid}-${key}`.replace(/[^\w-]/g, "_");
                     return (
-                      <td key={c.key} data-label={c.label} data-l={c.label} className={`${c.align === "end" ? "is-end r" : ""}${i === 0 ? " pri-cell" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined}>
+                      <td key={c.key} data-label={c.label} data-l={c.noCap ? "" : c.label} className={`${c.align === "end" ? "is-end r" : ""}${i === 0 ? " pri-cell" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined}>
                         {i === 0 && action ? <span className="cell-content" id={first ? lid : undefined}>{content}</span> : content}
                         {first ? (
                           rowHref ? <a className="row-link" href={rowHref(r)} aria-labelledby={rowLabel ? undefined : lid} {...(rowLabel ? { "aria-label": rowLabel(r) } : {})}>{rowLabel ? <span className="sr-only">{rowLabel(r)}</span> : null}</a>

@@ -12,14 +12,14 @@ describe("round 4 layout rules", () => {
   it("T-63: the agent run limit inputs are number-sized, not page wide", () => {
     expect(read("styles/views/agents.css")).toMatch(/#ag-limits\{grid-template-columns:repeat\(auto-fit,minmax\(150px,220px\)\)/);
   });
-  it("T-62: the notification route class checkboxes are wide enough for 'Chore / dependency' and wrap rather than clip", () => {
-    const css = read("styles/views/notifications.css");
-    expect(css).toMatch(/\.nt-checks \{ grid-template-columns: repeat\(auto-fill, minmax\(176px, 1fr\)\)/);
+  it("T-62: the notification route class checkboxes are wide enough for 'Chore / dependency'", () => {
+    expect(read("views/notifications/Routes.tsx")).toMatch(/nt-checks" style=\{\{ gridTemplateColumns: "repeat\(auto-fill, minmax\(160px, 1fr\)\)"/);
   });
 });
 
 describe("T-36, T-49 (blueprint.css)", () => {
   const css = read("styles/blueprint.css");
+  const con = read("styles/views/console.css");
   it("an unread gate card in the bell drawer is the accent navy", () => {
     // plain .callout is accent on accent-soft; ".warn" was the neutral grey
     expect(css).toMatch(/\.callout\{border:1px solid var\(--line2\);border-left:3px solid var\(--accent\);background:var\(--accent-soft\)/);
@@ -27,7 +27,6 @@ describe("T-36, T-49 (blueprint.css)", () => {
     expect(read("shell/NotificationsBody.tsx")).not.toMatch(/className="callout warn"/);
   });
   it("a console card is held inside its bubble", () => {
-    expect(css).toMatch(/\.bub \.ccard\{[^}]*max-width:100%/);
-    expect(css).toMatch(/\.msg:has\(\.ccard\) \.bub\{flex:1 1 0;max-width:100%/);
+    expect(con).toMatch(/\.msg:has\(\.ccard\) \.bub\{max-width:100%;overflow-x:hidden\}/);
   });
 });

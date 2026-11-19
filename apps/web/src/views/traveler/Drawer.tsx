@@ -2,6 +2,7 @@
  * Traveler: the routing sheet that rides with every work order (right-hand drawer), ported from legacy/js/views/traveler.js.
  * Open it with useOpenTraveler(). Position, gates with progress, approve and reject, moves, send back, park, reassign, retry, history.
  */
+import { COL } from "../drawerCol";
 import { Fragment, useEffect } from "react";
 import { fmt } from "@gantry/domain";
 import { Btn, Empty, StateChip, Tabs } from "../../ui/primitives";
@@ -72,7 +73,7 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
             <button type="button" className="icon-btn drawer-close" id="trv-close" aria-label="Close traveler" onClick={close}><Icon name="x" /></button>
           </div>
         </div>
-        <div className="drawer-scroll">
+        <div className="drawer-scroll" style={COL}>
           {!(q.isError && (q.error as { status?: number } | null)?.status === 404) && (q.isError || q.isPending) ? <Async query={q} what={`work order ${woId}`} id="trv">{() => null}</Async> : <Empty title={`No work order ${woId}`} text="It may have been removed, or it belongs to a project you cannot see." />}
         </div>
       </div>
@@ -118,7 +119,7 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
           </button>
         </div>
       </div>
-      <div className="drawer-scroll">
+      <div className="drawer-scroll" style={COL}>
         {wo.killed ? (
           <div className="trv-killed" role="alert">
             <Icon name="st-kill" />
