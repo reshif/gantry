@@ -178,7 +178,7 @@ export function SignInExtras({ perm, sec }: { perm: Decision; sec: SecuritySetti
   );
 }
 
-const LAN_RE = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)\d{1,3}\.\d{1,3}(\/(\d|[12]\d|3[0-2]))?$/;
+const LAN_RE = /^(10\.|192\.168\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)\d{1,3}\.\d{1,3}(\/(\d|[12]\d|3[0-2]))?$/;
 
 /** The LAN ranges an on-prem vendor endpoint may be in (S-68). Empty: vendor endpoints must be public addresses. Saving needs a fresh sign-in (the step-up prompt handles it). */
 export function VendorLanPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
@@ -189,7 +189,7 @@ export function VendorLanPanel({ perm, sec }: { perm: Decision; sec: SecuritySet
   const submit = async () => {
     if (!perm.allowed) return;
     const c = val.trim();
-    if (!LAN_RE.test(c)) return setErr("Enter a private IPv4 range such as 192.168.50.0/24 (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 or 100.64.0.0/10).");
+    if (!LAN_RE.test(c)) return setErr("Enter a private IPv4 range such as 192.168.50.0/24 (inside 10.0.0.0/8, 192.168.0.0/16 or 100.64.0.0/10).");
     if (list.includes(c)) return setErr(`${c} is already on the list.`);
     setErr("");
     setVal("");
@@ -198,7 +198,7 @@ export function VendorLanPanel({ perm, sec }: { perm: Decision; sec: SecuritySet
   return (
     <Panel title="On-prem vendor ranges">
       <div className="form-grid" id="sec-lan">
-        <p className="small muted">A vendor endpoint must be a public address. An on-prem model server on your network is let through only when its address is inside a range listed here. Loopback, link-local (cloud metadata) and Gantry&apos;s own control network are never allowed. Keep each range as narrow as the model host. Changing it needs a fresh sign-in and is audited.</p>
+        <p className="small muted">A vendor endpoint must be a public address. An on-prem model server on your network is let through only when its address is inside a range listed here. Loopback, link-local (cloud metadata), Gantry&apos;s own networks (10.89.17.0/24 and Docker&apos;s 172.16.0.0/12) and Gantry&apos;s service names are never allowed, and a range that overlaps them is refused. Keep each range as narrow as the model host. Changing it needs a fresh sign-in and is audited.</p>
         {list.length ? (
           <ul className="sec-list">
             {list.map((c) => (
