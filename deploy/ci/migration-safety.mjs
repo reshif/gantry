@@ -7,6 +7,8 @@
 //   contract  removes or reshapes something the old code may still use: drop or rename a table or column, change a column's type,
 //             SET NOT NULL, a NOT NULL column without default, a new CHECK / UNIQUE / FOREIGN KEY, drop a constraint, truncate, delete rows. It declares itself with a line `-- gantry:contract after <sha>`: <sha> is the commit, already on main, from which no code uses what
 //             the migration removes or tightens. The host refuses the migration unless the RUNNING release contains <sha>.
+// `after <sha>` is a REVIEWER-CHECKED ASSERTION: CI checks that the commit exists and is on the base, and the host checks that the running release
+// contains it, but only a person can check that the code at that commit really stopped using what is dropped. CODEOWNERS requires a review.
 // Rules (a new migration is one the base does not have):
 //   1. A migration that does something a contract does, but does not say `-- gantry:contract`, fails: say it or make it an expand.
 //   2. A contract migration lives alone in its file: it does not also create or add things (split it, so a rollback target exists).
@@ -118,7 +120,7 @@ export function check(before, after) {
   const fresh = names.filter((n) => !(n in before));
   for (const n of fresh) {
     const c = classify(after[n]);
-    if (c.destructive && !c.declared) problems.push(`${n}: ${c.reasons.join("; ")}. A migration like this is a contract migration: add the line "-- gantry:contract after <sha>" (the commit on main from which no code uses what it removes or tightens) and ship it one release after that commit. Otherwise make it an expand.`);
+    if (c.destructive && !c.declared) problems.push(`${n}: ${c.reasons.join("; ")}. A migration like this is a contract migration: add the line "-- gantry:contract after <sha>" (the commit on main from which no code uses what it removes or tightens) and ship it one release after that commit. Otherwise make it an expand. NOTE: "after <sha>" is an assertion a reviewer must check (this tool cannot tell whether the code really stopped using it); the review of packages/db/migrations/** is required (CODEOWNERS).`);
     if (c.declared && !CONTRACT_AFTER.test(after[n])) problems.push(`${n}: "-- gantry:contract" must name the commit: "-- gantry:contract after <sha>" (the host refuses the migration unless the running release contains that commit)`);
     if (c.declared && !c.destructive) problems.push(`${n}: declared "-- gantry:contract" but removes nothing; delete the line (a contract mark stops automatic rollback past this release)`);
     if (c.declared && c.additive) problems.push(`${n}: a contract migration must not also create or add things; split it into two files (the expand one ships first)`);

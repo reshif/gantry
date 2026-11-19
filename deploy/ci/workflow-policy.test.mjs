@@ -61,3 +61,15 @@ test("a workflow_run workflow's entry job must be gated on a successful push to 
   const gate = ["github.event.workflow_run.conclusion == 'success'", "github.event.workflow_run.event == 'push'", "github.event.workflow_run.head_branch == 'main'", "github.event.workflow_run.head_repository.full_name == github.repository"].join(" && ");
   assert.deepEqual(W({ on: "workflow_run", job: `    if: ${gate}\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo\n` }), []);
 });
+
+test("YAML anchors, aliases and merge keys are refused outright", () => {
+  const base = "name: t\non:\n  push:\npermissions:\n  contents: read\njobs:\n";
+  assert.match(check("w.yml", `${base}  a: &job\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo\n  b: *job\n`).join(), /anchor|alias/);
+  assert.match(check("w.yml", `${base}  a:\n    runs-on: ubuntu-24.04\n    env: &e\n      A: "1"\n    steps:\n      - run: echo\n`).join(), /not allowed in workflow files/);
+  assert.match(check("w.yml", `${base}  a:\n    <<: {runs-on: ubuntu-24.04}\n    steps:\n      - run: echo\n`).join(), /merge key/);
+});
+test("a whole-context dump in a shell is refused: toJSON(github), toJSON(github.event), toJSON(inputs), toJSON(secrets)", () => {
+  for (const e of ["toJSON(github)", "toJSON(github.event)", "toJSON(inputs)", "toJSON(secrets)", "toJSON(env)", "format('{0}', toJSON(needs))", "github.event"])
+    assert.match(W({ job: step(`      - run: |\n          echo '\${{ ${e} }}'\n`) }).join(), /untrusted/, e);
+  assert.deepEqual(W({ job: step("      - run: echo ${{ toJSON(matrix) }}\n") }), []);
+});

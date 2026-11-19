@@ -10,6 +10,10 @@
 - [ ] Agents author and propose; code only gathers facts, enforces a safety rail, and asks a person to approve. No safety rail weakened.
 - [ ] No hard-coded agent-voice copy (suggested prompts, advice, coaching keyed by role).
 
+### Database migrations (packages/db/migrations)
+
+- [ ] Expand only, or a `-- gantry:contract after <sha>` migration alone in its file, and I checked that the code at `<sha>` no longer uses what it drops or tightens (CI cannot check this).
+
 ### Frontend changes (apps/web)
 
 - [ ] No raw table, button, input, textarea or select in views; no react-query, api client or ops import in views; no literal query keys; no role-name literals.

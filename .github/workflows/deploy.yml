@@ -305,9 +305,10 @@ jobs:
       VERDICT: ${{ needs.deploy.outputs.verdict }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       PAGER_WEBHOOK_URL: ${{ secrets.PAGER_WEBHOOK_URL }}
+    # An empty verdict means the deploy job never got to say (cancelled, runner lost): that is the worst case, so it pages too.
     steps:
       - name: Call the pager (if one is configured)
-        if: always() && env.PAGER_WEBHOOK_URL != '' && (needs.deploy.outputs.verdict == 'needs-a-person' || needs.deploy.outputs.verdict == 'failed')
+        if: always() && env.PAGER_WEBHOOK_URL != '' && (needs.deploy.outputs.verdict == 'needs-a-person' || needs.deploy.outputs.verdict == 'failed' || needs.deploy.outputs.verdict == '')
         run: |
           curl -fsS --max-time 20 -X POST -H 'content-type: application/json' \
             --data "$(jq -n --arg t "Gantry production needs a person: ${SHA:0:12}" --arg u "$RUN_URL" '{text: $t, url: $u}')" "$PAGER_WEBHOOK_URL" >/dev/null

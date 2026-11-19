@@ -10,13 +10,14 @@
 //                   pull request's own tree, so it is a guard against mistakes, not a boundary against someone who can push a branch:
 //                   the boundary is the owner's setting "runner group restricted to deploy.yml@refs/heads/main" (CICD.md, go/no-go)
 //                   and the production-deploy Environment's branch rule (deploy/ci/github-settings.sh)
+//   6 YAML       no anchors, aliases or merge keys (a block that silently stands in for another)
 //   5 injection     no attacker-controlled expression (branch or tag name, PR title/body, review/comment text, commit message,
 //                   workflow_run branch, workflow inputs) inside a `run:` block or an actions/github-script `script:`; pass it through env:
 // Usage: node deploy/ci/workflow-policy.mjs [DIR]   (default .github/workflows); exit 1 and one line per violation.
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse } from "yaml";
+import { isScalar, parse, parseDocument, visit } from "yaml";
 
 const PINNED = /^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$|^docker:\/\/\S+@sha256:[0-9a-f]{64}$|^\.\//;
 const UNTRUSTED = [
@@ -24,12 +25,14 @@ const UNTRUSTED = [
   /\bgithub\.event\.(pull_request\.(title|body|head\.|user\.|labels)|issue\.(title|body)|comment\.|review\.|review_comment\.|discussion\.|head_commit\.|commits\b|pages\b|workflow_run\.(head_branch|head_commit|display_title|head_repository|pull_requests)|inputs\b|client_payload\b)/,
   /(^|[^\w.])inputs\./,
 ];
+// Whole-context dumps put every attacker-controlled field into the shell at once.
+const WHOLE_CONTEXT = /\b(toJSON|format|join|fromJSON)\(\s*(github|inputs|secrets|env|vars|needs|steps)\b|^\s*(github|github\.event|inputs|secrets|env|vars|needs|steps)\s*$/;
 const WORKFLOW_RUN_GATE = ["github.event.workflow_run.conclusion == 'success'", "github.event.workflow_run.event == 'push'", "github.event.workflow_run.head_branch == 'main'", "github.event.workflow_run.head_repository.full_name == github.repository"];
 
 const arr = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
 const triggersOf = (on) => new Set(typeof on === "string" ? [on] : Array.isArray(on) ? on : Object.keys(on ?? {}));
 const labelsOf = (r) => (r == null ? [] : typeof r === "string" ? [r] : Array.isArray(r) ? r.map(String) : [...arr(r.labels), r.group].filter(Boolean).map(String));
-const untrusted = (s) => [...String(s ?? "").matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((m) => m[1]).filter((e) => UNTRUSTED.some((re) => re.test(e)));
+const untrusted = (s) => [...String(s ?? "").matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((m) => m[1]).filter((e) => UNTRUSTED.some((re) => re.test(e)) || WHOLE_CONTEXT.test(e));
 
 /** Violations (strings) for one workflow file's text; `file` is the path relative to the repository root. */
 export function check(file, text) {
@@ -37,6 +40,15 @@ export function check(file, text) {
   const add = (where, msg) => bad.push(`${file}${where ? ` ${where}` : ""}: ${msg}`);
   let doc;
   try { doc = parse(text); } catch (e) { return [`${file}: not valid YAML (${e.message.split("\n")[0]})`]; }
+  // Anchors, aliases and merge keys (<<) let one block silently stand in for another, which a line-by-line review cannot follow: refused.
+  const pd = parseDocument(text);
+  let tricks = "";
+  visit(pd, {
+    Alias() { tricks ||= "an alias (*name)"; },
+    Node(_k, n) { if (n.anchor) tricks ||= `an anchor (&${n.anchor})`; },
+    Pair(_k, pair) { if (isScalar(pair.key) && pair.key.value === "<<") tricks ||= "a merge key (<<)"; },
+  });
+  if (tricks) return [`${file}: uses ${tricks}. YAML anchors, aliases and merge keys are not allowed in workflow files: write the block out, so a reviewer and this policy see what runs`];
   if (!doc || typeof doc !== "object" || !doc.jobs) return [`${file}: no jobs`];
   const triggers = triggersOf(doc.on ?? doc[true]);
   const forkReachable = ["pull_request", "merge_group", "pull_request_target"].some((t) => triggers.has(t));

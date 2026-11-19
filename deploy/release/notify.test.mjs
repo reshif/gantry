@@ -20,6 +20,7 @@ test("the pager step runs whatever happened before it, and for a failed or needs
   const p = step(/pager/i);
   assert.match(p.if, /^always\(\)/);
   assert.match(p.if, /needs-a-person/); assert.match(p.if, /failed/);
+  assert.match(p.if, /verdict == ''/, "no verdict (cancelled, runner lost) must page too");
 });
 test("the pager is called before the issue is opened, and the issue step does not depend on the pager's success", () => {
   assert.ok(notify.steps.indexOf(step(/pager/i)) < notify.steps.indexOf(step(/issue/i)));

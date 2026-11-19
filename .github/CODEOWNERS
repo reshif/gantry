@@ -21,3 +21,6 @@
 # Shared domain contract and security-sensitive policy.
 /packages/domain/                   @reshif
 /deploy/                            @reshif
+
+# Migrations: the reviewer checks that a `-- gantry:contract after <sha>` commit really stopped using what is dropped (CI cannot).
+/packages/db/migrations/            @reshif
