@@ -209,9 +209,27 @@ export interface FlowOverrideMark {
   /** For a mode override: the mode before. */
   from?: GateKind;
 }
+/** A safety rail on one agent run. Every field is optional; what is unset is inherited (station override, then the agent version, then the defaults: 40 turns, 60 minutes). */
+export interface RunLimits {
+  turns?: number;
+  wallClockSeconds?: number;
+  costUsd?: number;
+}
+/** What a run that stopped on a limit reports: which limit and the numbers (used 40 of 40 turns). */
+export interface LimitStop {
+  limit: "turns" | "time" | "cost";
+  used: number;
+  max: number;
+  unit: "turns" | "seconds" | "usd";
+  text: string;
+  station: string;
+  attempt: string;
+}
 export interface StationConfig {
   enabled: boolean;
   wip: number;
+  /** Overrides the agent's run limits for runs at this station in this project, per field. */
+  runLimits?: RunLimits;
   absent?: boolean;
   /** Set while the station is off by a Factory Admin override of a lock it carries. */
   override?: { off?: FlowOverrideMark };
@@ -780,6 +798,8 @@ export interface WorkOrder {
   pr: PullRequest | null;
   blockReason: string | null;
   failReason: string | null;
+  /** Set while the work order's station stopped on a run limit: which one and the numbers. */
+  limitStop?: LimitStop | null;
   /** Why the work order sits in the Needs a person bay: "failed" when the station failed or lost its run repeatedly, "merge" when the approved merge could not happen (so Retry or Retry merge applies). */
   bayCause?: string;
   /** "start" when the failed run never started (workspace seeding, the launcher, no model). */
@@ -854,6 +874,8 @@ export interface Agent {
   projects: "all" | Id[];
   budget: number;
   guardrails: { paths: string[]; maxDiff: number };
+  /** Run limits a person set on the working copy (versioned with the agent). Empty: the defaults apply. */
+  limits?: RunLimits;
   suite: Id;
   instructions: string;
   overrides: Record<string, { model?: string; autonomy?: Autonomy; budget?: number }>;

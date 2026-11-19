@@ -30,7 +30,7 @@ function useBar(wo: TWo) {
   const why = specs.find((s) => s.why);
   const actions = (
     <div className="row dz-actions" role="toolbar" aria-label="Work order actions">
-      {specs.filter((s) => s.group === "decide" || s.key === "retry").map(btn)}
+      {specs.filter((s) => s.group === "decide" || s.key === "retry" || s.key === "retry-limit").map(btn)}
       <WoActions wo={wo.id} project={wo.project} repo={wo.repo} idPrefix="rec" omit={["primary", "record"]} small={false} />
       <Btn label="Traveler" icon="list" id="rec-traveler" onClick={() => navigate("traveler", wo.id, wo.project)} />
       <Btn label="Changes" icon="branch" id="rec-changes" onClick={() => navigate("changes", wo.id, wo.project)} />

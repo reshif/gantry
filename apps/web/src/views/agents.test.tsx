@@ -197,7 +197,7 @@ describe("Agents screen", () => {
     expect(document.getElementById("ag-evals")).toBeNull();
     expect(document.querySelector(".trust-strip")).toBeNull();
     // Identity (kv) and Tools side by side, then guardrail paths
-    expect([...document.querySelectorAll("#agent-detail .panel-title")].map((t) => t.textContent)).toEqual(["Identity", "Tools", "Guardrail paths"]);
+    expect([...document.querySelectorAll("#agent-detail .panel-title")].map((t) => t.textContent)).toEqual(["Identity", "Tools", "Run limits", "Guardrail paths"]);
     expect([...document.querySelectorAll("#agent-detail dl.kv dt")].map((t) => t.textContent)).toEqual(["Station", "Model", "Fallbacks", "Autonomy", "Budget / run", "Max diff", "Eval suite"]);
     cleanup();
     mountAgent("ag-nope");
@@ -530,5 +530,60 @@ describe("Reachability: agent Talk, draft against live, skill page", () => {
     await byId("sk-proj-all");
     fireEvent.click(await byId("sk-tab-versions"));
     await byId("sk-vers");
+  });
+});
+
+describe("Run limits panel", () => {
+  const input = (id: string) => document.getElementById(id) as HTMLInputElement;
+  const type = (id: string, v: string) => fireEvent.change(input(id), { target: { value: v } });
+
+  it("shows the defaults as placeholders when nothing is set, and Save is off until something changes", async () => {
+    setup();
+    mountAgent();
+    await byId("ag-limits");
+    expect(input("ag-lim-turns").placeholder).toBe("40");
+    expect(input("ag-lim-min").placeholder).toBe("60");
+    expect(input("ag-lim-cost").placeholder).toBe("12");
+    expect(input("ag-lim-turns").value).toBe("");
+    expect((document.getElementById("ag-lim-save") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("refuses an out of range value before sending anything, and shows what the agent has set", async () => {
+    const calls = setup();
+    window.location.hash = "#agents/ag-build";
+    setup({ "GET /api/v1/agents": () => ({ body: [{ ...BUILD, limits: { turns: 90, wallClockSeconds: 7200 } }, REVIEW] }) });
+    mount(<AgentsView />);
+    await byId("ag-limits");
+    expect(input("ag-lim-turns").value).toBe("90");
+    expect(input("ag-lim-min").value).toBe("120");
+    type("ag-lim-turns", "501");
+    expect(await screen.findByText(/Whole number from 1 to 500/)).toBeTruthy();
+    expect((document.getElementById("ag-lim-save") as HTMLButtonElement).disabled).toBe(true);
+    type("ag-lim-min", "0.5");
+    expect(await screen.findByText(/From 1 to 240 minutes/)).toBeTruthy();
+    expect(writes(calls, "PATCH")).toHaveLength(0);
+  });
+
+  it("Save writes the limits to the agent (If-Match the revision shown) and cuts a new version, so the change goes through promote and evals", async () => {
+    const calls = setup({ "PATCH /api/v1/agents/ag-build": () => ok(), "POST /api/v1/agents/ag-build/versions": () => ok() });
+    mountAgent();
+    await byId("ag-limits");
+    type("ag-lim-turns", "120");
+    type("ag-lim-min", "90");
+    type("ag-lim-cost", "6.5");
+    fireEvent.click(document.getElementById("ag-lim-save")!);
+    await waitFor(() => expect(writes(calls, "POST")).toHaveLength(1));
+    const patch = writes(calls, "PATCH")[0]!;
+    expect(patch.path).toBe("/api/v1/agents/ag-build");
+    expect(patch.body.patch).toEqual({ limits: { turns: 120, wallClockSeconds: 5400, costUsd: 6.5 } });
+    expect(patch.headers["if-match"]).toBe("7");
+    expect(writes(calls, "POST")[0]!.path).toBe("/api/v1/agents/ag-build/versions");
+  });
+
+  it("is read-only for someone without the agent edit right", async () => {
+    setup({}, ["agent.edit"]);
+    mountAgent();
+    await byId("ag-limits");
+    await waitFor(() => expect(input("ag-lim-turns").disabled).toBe(true));
   });
 });

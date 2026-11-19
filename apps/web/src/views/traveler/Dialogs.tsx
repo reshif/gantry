@@ -3,7 +3,8 @@ import { useState } from "react";
 import { ops } from "../../api/ops";
 import { useAgents } from "../../api/queries";
 import { Dialog } from "../../ui/Overlay";
-import { Field, LockNote, Select, TextArea } from "../../ui/primitives";
+import { Field, Input, LockNote, Select, TextArea } from "../../ui/primitives";
+import { parseLimits, type LimitText } from "../../lib/runLimits";
 import { useUI } from "../../ui/overlay-context";
 import { useCatalog } from "../projects/kit";
 import { navigate } from "../../lib/router";
@@ -116,6 +117,55 @@ export function RedoDialog({ woId, onClose }: { woId: string; onClose: () => voi
         </div>
       }
       actions={[{ label: "Cancel" }, { label: `Redo ${name}`, kind: "primary", submit: true, id: "redo-submit", guard: d, onClick: () => void submit() }]}
+    />
+  );
+}
+
+/**
+ * Retry with a higher limit: the next attempt (only) runs with the limits given here. The agent and the project keep theirs; the raise is recorded on the attempt and in the
+ * audit with the reason. The server decides who may (the right to change limits; a Factory Admin's reason overrides a freeze) and checks the ranges.
+ */
+export function RetryLimitDialog({ woId, onClose, decision }: { woId: string; onClose: () => void; decision: TDecision }) {
+  const ui = useUI();
+  const cat = useCatalog();
+  const wo = useTravelerWo(woId).data;
+  const [t, setT] = useState<LimitText>({ turns: "", minutes: "", costUsd: "" });
+  const [reason, setReason] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!wo || !cat) return null;
+  const stop = wo.limitStop;
+  const { value, errors } = parseLimits(t);
+  const set = (k: keyof LimitText) => (e: React.ChangeEvent<HTMLInputElement>) => setT((x) => ({ ...x, [k]: e.target.value }));
+  const submit = async () => {
+    if (busy) return;
+    if (Object.keys(errors).length) { setErr("Fix the limits marked above."); return; }
+    if (!Object.keys(value).length) { setErr("Give at least one higher limit for the next attempt."); return; }
+    setBusy(true);
+    const r = await ops.retryWithLimits(wo.id, value, reason.trim() || undefined, { ifMatch: wo.version });
+    setBusy(false);
+    if (!r.ok) { setErr(r.msg); return; }
+    ui.toast(r.msg, "ok");
+    onClose();
+  };
+  const at = stop ? `${stName(cat, stop.station)}: ${stop.text}` : wo.stop?.reason ?? "";
+  return (
+    <Dialog
+      title="Retry with a higher limit"
+      sub="The next attempt runs with these limits. It does not change the agent or the project."
+      onClose={onClose}
+      body={
+        <div className="form-grid">
+          <LockNote decision={decision} what="Changing a run limit" />
+          {at ? <div className="small" id="rl-stopped">{at}</div> : null}
+          <Field label="Max turns" htmlFor="rl-turns" error={errors.turns}><Input id="rl-turns" type="number" className="mono" min={1} max={500} placeholder={stop?.limit === "turns" ? `More than ${stop.max}` : "Leave as is"} value={t.turns} onChange={set("turns")} /></Field>
+          <Field label="Max time (minutes)" htmlFor="rl-min" error={errors.minutes}><Input id="rl-min" type="number" className="mono" min={1} max={240} placeholder={stop?.limit === "time" ? `More than ${Math.round((stop.max / 60) * 10) / 10}` : "Leave as is"} value={t.minutes} onChange={set("minutes")} /></Field>
+          <Field label="Max cost per run" htmlFor="rl-cost" error={errors.costUsd}><Input id="rl-cost" type="number" className="mono" min={0.01} step="0.01" placeholder="Leave as is" value={t.costUsd} onChange={set("costUsd")} /></Field>
+          <Field label="Reason (recorded in the audit)" htmlFor="rl-reason"><TextArea id="rl-reason" rows={2} placeholder="Why does this run need more?" value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
+          <Err text={err} />
+        </div>
+      }
+      actions={[{ label: "Cancel" }, { label: "Retry with higher limit", kind: "primary", submit: true, id: "rl-submit", guard: decision, onClick: () => void submit() }]}
     />
   );
 }

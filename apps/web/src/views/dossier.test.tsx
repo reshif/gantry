@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RecordView from "./record";
 import ChangesView from "./changes";
 import { mockApi, mount, resetApp } from "./floor/testkit";
-import { readsFor, waitingWo } from "./traveler/testkit";
+import { readsFor, travelerOf, waitingWo } from "./traveler/testkit";
 
 beforeEach(() => resetApp());
 afterEach(() => {
@@ -240,5 +240,46 @@ describe("Changes page", () => {
     expect(await screen.findByText(/^1–1 of 1$/)).toBeTruthy();
     expect(await screen.findByText(W.id)).toBeTruthy();
     for (const c of ["Work order", "Repo", "PR", "Checks", "Diff", "Files"]) expect(screen.getAllByText(c).length).toBeGreaterThan(0);
+  });
+});
+
+const byIdDz = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
+
+describe("Retry with a higher limit", () => {
+  const stopped = { limit: "turns", used: 40, max: 40, unit: "turns", text: "Stopped at the turn limit: used 40 of 40 turns.", station: "spec", attempt: "ATT-1" };
+  const failedWo = () => travelerOf(W, { state: "failed", failReason: stopped.text, limitStop: stopped } as never);
+  const open = async (o: { denied?: string[] } = {}, wo = failedWo()) => {
+    const calls = mockApi({ ...readsFor(W, wo), [`POST /api/v1/work-orders/${W.id}/retry-with-limits`]: () => ({ body: { ok: true, msg: `${W.id} is running again.` } }) }, o);
+    window.location.hash = `#record/${W.id}`;
+    mount(<RecordView />);
+    await screen.findByRole("toolbar", { name: "Work order actions" }, { timeout: 4000 });
+    return calls;
+  };
+
+  it("is offered beside Retry when the run stopped on a limit, and sends a one-off raise with the reason", async () => {
+    const calls = await open();
+    const btn = (await screen.findByRole("button", { name: "Retry with a higher limit" }, { timeout: 4000 })) as HTMLButtonElement;
+    fireEvent.click(btn);
+    expect((await byIdDz("rl-stopped")).textContent).toContain("used 40 of 40 turns");
+    expect(screen.getByText(/does not change the agent or the project/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry with higher limit" }));
+    expect(await screen.findByText(/Give at least one higher limit/)).toBeTruthy();
+    fireEvent.change(document.getElementById("rl-turns")!, { target: { value: "80" } });
+    fireEvent.change(document.getElementById("rl-reason")!, { target: { value: "Big refactor" } });
+    fireEvent.click(screen.getByRole("button", { name: "Retry with higher limit" }));
+    await waitFor(() => expect(calls.some((c) => c.path === `/api/v1/work-orders/${W.id}/retry-with-limits`)).toBe(true));
+    const post = calls.find((c) => c.path === `/api/v1/work-orders/${W.id}/retry-with-limits`)!;
+    expect(post.body).toEqual({ limits: { turns: 80 }, reason: "Big refactor" });
+    expect(post.headers["if-match"]).toBe("7");
+  });
+
+  it("is not offered when the work order did not stop on a limit, and is locked for someone who may not change limits", async () => {
+    await open({}, travelerOf(W, { state: "failed", failReason: "Tests failed." }));
+    expect(screen.queryByRole("button", { name: "Retry with a higher limit" })).toBeNull();
+    cleanup();
+    resetApp();
+    await open({ denied: ["project.config"] });
+    const btn = (await screen.findByRole("button", { name: "Retry with a higher limit" }, { timeout: 4000 })) as HTMLButtonElement;
+    await waitFor(() => expect(btn.getAttribute("aria-disabled") === "true" || btn.disabled).toBe(true));
   });
 });

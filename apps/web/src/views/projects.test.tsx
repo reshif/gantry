@@ -447,6 +447,35 @@ describe("Project config", () => {
     await waitFor(() => expect(calls.find((c) => c.path === "/api/v1/projects/payments/flow/stations/spec")?.body).toEqual({ move: 1 }));
   });
 
+  it("flow tab: a station's Advanced section has Run limits (override) with the agent's values as placeholders; it joins the draft and saves one runLimits write with blanks cleared", async () => {
+    const calls = withPayments({
+      "GET /api/v1/agents": () => ({ body: [{ id: "ag-spec", name: "Spec writer", station: "spec", stations: ["spec"], projects: "all", budget: 3, limits: { turns: 90, wallClockSeconds: 7200 }, versions: [], skills: [], mcp: [], tools: {}, overrides: {}, guardrails: { paths: [], maxDiff: 0 }, rev: 1 }] }),
+      "PATCH /api/v1/projects/payments/config": () => ok(),
+    });
+    tab("flow");
+    mount(<ProjectConfigView />);
+    await byId("pcf-wip-spec");
+    expect(document.getElementById("pcf-rl-spec")).toBeNull(); // inside the row's details, closed
+    fireEvent.click(await byId("flw-x-s-spec"));
+    const fs = await byId("pcf-rl-spec");
+    expect(fs.textContent).toContain("Run limits (override)");
+    const turns = (await byId("pcf-rl-turns-spec")) as HTMLInputElement;
+    await waitFor(() => expect(turns.placeholder).toBe("90"));
+    expect((document.getElementById("pcf-rl-min-spec") as HTMLInputElement).placeholder).toBe("120");
+    expect((document.getElementById("pcf-rl-cost-spec") as HTMLInputElement).placeholder).toBe("3");
+    // a bad value is said at the field and blocks Save
+    fireEvent.change(turns, { target: { value: "900" } });
+    expect(await screen.findByText(/Whole number from 1 to 500/)).toBeTruthy();
+    fireEvent.change(turns, { target: { value: "150" } });
+    await waitFor(() => expect(document.getElementById("flw-count")!.textContent).toMatch(/1 unsaved change/));
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    fireEvent.click(await byId("flw-save"));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH").length).toBe(1));
+    const patch = calls.find((c) => c.method === "PATCH")!;
+    expect(patch.body).toEqual({ path: "flow.stations.spec.runLimits", value: { turns: 150, wallClockSeconds: null, costUsd: null } });
+    expect(patch.headers["if-match"]).toBe("7");
+  });
+
   it("flow tab: a save that is refused halfway says what was saved and what was not, and reloads (S-29)", async () => {
     let n = 0;
     const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => (++n === 1 ? ok() : { status: 409, body: { ok: false, msg: "This changed since you loaded it." } }) });
