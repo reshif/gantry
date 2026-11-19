@@ -4,11 +4,13 @@
  */
 import { rolesIn, type Person } from "@gantry/domain";
 
-export function asksMe(askOf: string, me: Person | undefined, w: { project: string; requestedBy: string | null }, can: (action: string) => boolean): boolean {
+export function asksMe(askOf: string, me: Person | undefined, w: { project: string; requestedBy: string | null; requesterActive?: boolean }, can: (action: string) => boolean): boolean {
   if (!me) return false;
-  if (askOf === "requester") return w.requestedBy === me.id;
+  // A question for the requester, who has since been deactivated, is for nobody otherwise (S-31): it goes to the project admins, the line leads and the Factory Admins.
+  const standIn = w.requesterActive === false && rolesIn(me, w.project).some((r) => r === "project_admin" || r === "line_lead" || r === "factory_admin");
+  if (askOf === "requester") return w.requestedBy === me.id || standIn;
   if (askOf === "approvers") return can("gate.approve");
-  if (askOf === "anyone") return w.requestedBy === me.id || can("wo.answer");
+  if (askOf === "anyone") return w.requestedBy === me.id || can("wo.answer") || standIn;
   if (askOf.startsWith("role:")) return rolesIn(me, w.project).includes(askOf.slice(5));
   return false;
 }
@@ -31,3 +33,13 @@ export function askOfLabel(askOf: string, roleName: (id: string) => string = (id
   if (askOf.startsWith("role:")) return `a ${roleName(askOf.slice(5))}`;
   return "a person";
 }
+
+/** Whether the requester can still be asked: a person who is not active (deactivated, suspended) or no longer exists cannot answer. */
+export const requesterActive = (people: ReadonlyArray<Pick<Person, "id" | "status">>, requestedBy: string | null): boolean => !requestedBy || people.find((p) => p.id === requestedBy)?.status === "active";
+
+/** "Asked of Tomas (deactivated)" for a question whose addressee (the requester) is no longer active. */
+export const askedOfGone = (people: ReadonlyArray<Pick<Person, "id" | "name" | "status">>, requestedBy: string | null): string | null => {
+  if (!requestedBy) return null;
+  const p = people.find((x) => x.id === requestedBy);
+  return p && p.status !== "active" ? `Asked of ${p.name} (${p.status})` : null;
+};

@@ -57,7 +57,7 @@ export const PatchBody = z.object({
 });
 
 export const IdParam = z.object({ id: Id });
-export const GrantBody = z.object({ wo: Id, tools: z.array(z.string().regex(/^[^/\s]+\/(\*|[^\s]+)$/, "Use server/tool or server/*.")).min(1).max(50), via: z.string().optional() });
+export const GrantBody = z.object({ wo: Id, tools: z.array(z.string().regex(/^[^/\s]+\/(\*|[^\s]+)$/, "Use server/tool or server/*.")).min(1).max(50), via: z.string().optional(), reason: z.string().trim().max(1000).optional() });
 
 export const CheckQuery = z.object({
   server: Id,

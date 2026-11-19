@@ -9,6 +9,7 @@ import { hasSecondFactor } from "../oidc.js";
 import { BOOTSTRAP_EMAIL_DOMAIN } from "./bootstrap-admin.js";
 import { holdsFactoryAdmin, MFA_REQUIRED_MSG } from "./mfa.js";
 import { createSession, refreshAuthTime } from "./sessions.js";
+import { bindRecoveryWindow, consumeRecoveryWindow } from "./ip-recovery.js";
 
 export interface SignInRequest {
   ip: string;
@@ -99,7 +100,14 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
       person = byEmail;
     }
 
-    if (!ipAllowed(r.ip, sec.ipAllow)) return deny("ip_not_allowed", person?.id ?? null);
+    // Outside the allow-list: only the named admin's open, unexpired recovery window (opened on the server host by the operator) lets this one sign-in
+    // through. It is consumed below, after every other refusal, so a sign-in that is refused for another reason does not burn it.
+    let recoveryCandidate = false;
+    if (!ipAllowed(r.ip, sec.ipAllow)) {
+      const open = person ? (await tx.query(`select 1 from allowlist_recovery where org_id = $1 and person_id = $2 and status = 'open' and expires_at > now() limit 1`, [orgId, person.id])).rowCount : 0;
+      if (!person || !open || !(await holdsFactoryAdmin(tx, orgId, person.id))) return deny("ip_not_allowed", person?.id ?? null);
+      recoveryCandidate = true;
+    }
 
     let provisioned = false;
     if (person && person.idp_subject && person.idp_subject !== claims.sub) return deny("identity_mismatch", person.id);
@@ -144,16 +152,23 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
       }
     }
 
+    let recoveryWindow: string | null = null;
+    if (recoveryCandidate) {
+      recoveryWindow = await consumeRecoveryWindow(tx, orgId, person.id, r.ip);
+      if (!recoveryWindow) return deny("ip_not_allowed", person.id);
+    }
     const authTime = claims.authTime ? new Date(claims.authTime * 1000) : new Date();
     const ex = r.existingSession;
     if (ex && ex.personId === person.id) {
       await refreshAuthTime(tx, orgId, ex.id, authTime, secondFactor);
+      if (recoveryWindow) await bindRecoveryWindow(tx, orgId, recoveryWindow, person.id, ex.id, r.ip, r.requestId);
       await record("ok", null, person.id, ex.id, "auth.stepup", { authTime: authTime.toISOString() });
       return { ok: true, personId: person.id, sessionId: ex.id, token: null, expiresAt: null, stepUp: true, provisioned };
     }
     const s = await createSession(tx, g.config.secrets.sessionKey, {
       orgId, personId: person.id, method: r.method, ip: r.ip || null, userAgent: r.userAgent, absoluteHours: sec.sessionHours, authTime, idpSid: claims.sid ?? null, acr: claims.acr ?? null, secondFactor,
     });
+    if (recoveryWindow) await bindRecoveryWindow(tx, orgId, recoveryWindow, person.id, s.id, r.ip, r.requestId);
     await record("ok", null, person.id, s.id, "auth.signin", { authTime: authTime.toISOString() });
     return { ok: true, personId: person.id, sessionId: s.id, token: s.token, expiresAt: s.expiresAt, stepUp: false, provisioned };
   });

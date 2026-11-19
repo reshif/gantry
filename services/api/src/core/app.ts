@@ -12,6 +12,7 @@ import { authenticateApiKey } from "./auth/apikeys.js";
 import { authenticateService } from "./auth/service.js";
 import { holdsFactoryAdmin, mfaRefusal } from "./auth/mfa.js";
 import { csrfFor, findSession, revokeSessions, touchSession } from "./auth/sessions.js";
+import { sessionMayPassAllowList } from "./auth/ip-recovery.js";
 import type { Config } from "./config.js";
 import type { Gantry, Principal } from "./context.js";
 import { safeEqual } from "./crypto.js";
@@ -200,6 +201,15 @@ async function authInternal(req: FastifyRequest, reply: import("fastify").Fastif
   req.gx.channel = "system";
 }
 
+/** A session made by the operator's one-time recovery sign-in passes the allow-list from that same address for a short time, so the admin can confirm the address. */
+async function recoverySessionPasses(app: FastifyInstance, req: FastifyRequest, idleMin: number): Promise<boolean> {
+  const g = app.gantry;
+  const token = req.cookies[g.config.sessionCookie];
+  if (!token) return false;
+  const s = await findSession(g.pool, g.config.secrets.sessionKey, g.orgId, token, idleMin).catch(() => null);
+  return !!s && (await sessionMayPassAllowList(g.pool, g.orgId, s.id, req.ip).catch(() => false));
+}
+
 async function authApi(app: FastifyInstance, req: FastifyRequest, reply: import("fastify").FastifyReply): Promise<void> {
   const g = app.gantry;
   const unauth = async (msg = "Sign in to continue.", clear = false): Promise<void> => {
@@ -207,8 +217,8 @@ async function authApi(app: FastifyInstance, req: FastifyRequest, reply: import(
     await reply.code(401).send({ ok: false, msg, config: await publicConfig(app).catch(() => ({ demoAccounts: g.config.demoAccounts, githubLogin: false })) });
   };
   const sec = (await g.security.get()).value;
-  if (!ipAllowed(req.ip, sec.ipAllow)) {
-    await reply.code(403).send({ ok: false, msg: "This network address is not on the allow-list.", rule: { kind: "invariant", id: "IP-ALLOW", name: "IP allow-list" } });
+  if (!ipAllowed(req.ip, sec.ipAllow) && !(await recoverySessionPasses(app, req, sec.idleMin))) {
+    await reply.code(403).send({ ok: false, msg: "This network address is not on the allow-list. Ask a Factory Admin; if every admin is locked out, the operator can open a one-time recovery on the server (deploy/README.md, Operations).", rule: { kind: "invariant", id: "IP-ALLOW", name: "IP allow-list" } });
     return;
   }
   const auth = String(req.headers.authorization ?? "");

@@ -42,6 +42,7 @@ const SELF_AUTHORIZING: Record<string, Probe> = {
   // Known gap: org-wide API limits are readable by any signed-in person (no secrets in it). Tighten to a role and move this to "refuse".
   "/api/v1/api-config": { why: "org-wide API settings; visibleToPerson only requires a person, holds no secrets", expect: "open-settings" },
   "/api/v1/security": { why: "decide() on security.manage in the handler", expect: "refuse" },
+  "/api/v1/security/recovery": { why: "only the caller's own session: the address its recovery sign-in came from, if one waits for confirmation", expect: "own", check: (b) => expect(b).toEqual({ pending: false }) },
   "/api/v1/audit": { why: "decide() on audit.view, else filtered to own actions and visible projects", expect: "own", check: (b, { me }) => { for (const e of b.items) expect(JSON.stringify(e.actor ?? e)).toContain(me); } },
   "/api/v1/audit/:seq": { why: "same visibility filter as the list; an entry outside it is a 404", expect: "refuse", params: { seq: "1" } },
   "/api/v1/audit/verify": { why: "requireVerifier: Auditor or Factory Admin only", expect: "refuse" },

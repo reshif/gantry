@@ -156,6 +156,27 @@ d("station documents and dialogue", () => {
     expect(msgs[0]!.body).toContain("Found the retry module.");
     expect(msgs[0]!.data.cards).toContainEqual({ kind: "assumptions", station: "research", attempt: att.id, count: 2 });
   });
+  it("S-30: a station parked with only an assumption says what it waits for, and confirming the last assumption resumes it", async () => {
+    const id = await w.atStation("research", "Assumption only");
+    const att = (await w.liveAttempt(id))!;
+    await w.apply(att, { status: "needs_person", summary: "Need a call", output: { dialogue: { questions: [], assumptions: [{ statement: "Only EU customers are affected", because: "The ticket mentions SEPA." }, { statement: "The job runs nightly", because: "The cron file says so." }] } } });
+    const parked = await w.get(id);
+    expect(parked.bay).toBe("person");
+    expect(String(parked.bayReason)).toBe("Waiting for you to confirm 2 assumptions at Research");
+    expect(String(parked.bayReason)).not.toMatch(/0 answers/);
+    const dl = (await w.call("p-tomas", "GET", `/api/v1/work-orders/${id}/dialogue`)).body;
+    const first = await w.call("p-tomas", "POST", `/api/v1/work-orders/${id}/assumptions/${dl.assumptions[0].id}`, { status: "confirmed" });
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    expect(first.body.resumed).toBe(false);
+    expect((await w.get(id)).bay).toBe("person");
+    const last = await w.call("p-tomas", "POST", `/api/v1/work-orders/${id}/assumptions/${dl.assumptions[1].id}`, { status: "corrected", note: "It runs weekly." });
+    expect(last.status, JSON.stringify(last.body)).toBe(200);
+    expect(last.body.resumed).toBe(true);
+    expect((await w.get(id)).bay).toBeNull();
+    const again = (await w.liveAttempt(id))!;
+    expect(again.id).not.toBe(att.id);
+    expect(again.station).toBe("research");
+  });
   it("'waiting for you' is shown to the person the question asks, and everyone else sees whom it waits on", async () => {
     const id = await w.atStation("research", "Who is asked");
     const att = (await w.liveAttempt(id))!;
@@ -170,6 +191,36 @@ d("station documents and dialogue", () => {
     const list = async (who: string) => ((await w.call(who, "GET", "/api/v1/work-order-sessions?project=payments")).body.items as Array<{ id: string; waitingOn: string }>).find((x) => x.id === id)?.waitingOn;
     expect(await list("p-tomas")).toBe("you");
     expect(await list("p-meera")).toBe("person");
+  });
+
+  it("S-31: a blocking question for a requester who was deactivated goes to the project admins, line leads and Factory Admins, named as asked of them, and offboarding lists it", async () => {
+    const id = await w.atStation("research", "Asked of a leaver");
+    const att = (await w.liveAttempt(id))!;
+    await w.apply(att, { status: "needs_person", output: { dialogue: { questions: [{ question: "Which tenant goes first?", why: "Order.", blocking: true, askOf: "requester" }] } } });
+    const wo = (await w.q<{ submitter: string }>(`select submitter from work_orders where id = $1`, [id]))[0]!.submitter;
+    const waitingFor = async (who: string) => {
+      const s = await t.session(who);
+      const r = (await t.app.inject({ method: "GET", url: "/api/v1/home", headers: s.headers })).json() as Record<string, any>;
+      return JSON.stringify(r.sections.conversations ?? r.sections.waiting ?? []);
+    };
+    const { openWorkOf } = await import("../src/areas/people/offboard.js");
+    expect((await w.tx((tx) => openWorkOf(tx, t.orgId, wo, Date.now()))).find((x) => x.id === id)).toMatchObject({ roles: expect.arrayContaining(["requester", "asked"]), questions: 1 });
+    await w.q(`update people set status = 'deactivated' where id = $1`, [wo]);
+    try {
+      const name = (await w.q<{ name: string }>(`select name from people where id = $1`, [wo]))[0]!.name;
+      for (const who of ["p-meera", "p-asha"]) {
+        const text = await waitingFor(who);
+        expect(text, who).toContain(id);
+        expect(text, who).toContain(`Asked of ${name} (deactivated)`);
+      }
+      expect(await waitingFor("p-kenji")).not.toContain(id);
+      const list = async (who: string) => ((await w.call(who, "GET", "/api/v1/work-order-sessions?project=payments")).body.items as Array<{ id: string; waitingOn: string; askedOf?: string }>).find((x) => x.id === id);
+      expect(await list("p-meera")).toMatchObject({ waitingOn: "you", askedOf: `Asked of ${name} (deactivated)` });
+      const ses = (await w.call("p-meera", "GET", `/api/v1/work-orders/${id}/session`)).body;
+      expect(ses.dialogue.askedMe).toBe(true);
+    } finally {
+      await w.q(`update people set status = 'active' where id = $1`, [wo]);
+    }
   });
 
   it("research: a proposed plan parks the station; an approver decides; unlisted hosts need security; the run reads only approved hosts", async () => {
