@@ -21,10 +21,10 @@ const shas = [];
 for (const i of [1, 2, 3]) { writeFileSync(join(repo, "f"), String(i)); git("add", "f"); git("commit", "-q", "-m", `c${i}`); shas.push(git("rev-parse", "HEAD")); }
 const [c1, c2, c3] = shas;
 
-const manifest = (sha, latest, lastContract) => ({
+const manifest = (sha, latest, lastContract, after = c1) => ({
   schema: 1, sha, repository: "acme/gantry", run: { id: "1" },
   images: Object.fromEntries(["api", "worker", "migrate", "launcher", "edge", "github", "web", "runner", "keycloak", "backup"].map((n) => [n, { ref: `ghcr.io/acme/gantry-${n}`, digest: `sha256:${"a".repeat(64)}` }])),
-  migrations: { latest, lastContract },
+  migrations: { latest, lastContract, contracts: lastContract ? [{ n: lastContract, after }] : [] },
 });
 const write = (name, m) => { const p = join(dir, name); writeFileSync(p, JSON.stringify(m)); return p; };
 const bundle = write("bundle.json", {});
@@ -39,7 +39,7 @@ function sh(sd, ...args) {
   const r = spawnSync("bash", [join(here, "gantry-release.sh"), ...args], { encoding: "utf8", env: { ...process.env, DRY_RUN: "1", GANTRY_STATE_DIR: sd, GANTRY_REPOSITORY: "acme/gantry", GANTRY_REPO_DIR: repo, GANTRY_ENV_FILE: join(dir, "prod.env") } });
   return { code: r.status, out: r.stdout + r.stderr };
 }
-const live = (sha, latest = 0) => ({ sha, manifest: write(`m-${sha.slice(0, 6)}-${latest}.json`, manifest(sha, latest, 0)), migrations: { latest, lastContract: 0 } });
+const live = (sha, latest = 0) => ({ sha, manifest: write(`m-${sha.slice(0, 6)}-${latest}.json`, manifest(sha, latest, 0)), migrations: { latest, lastContract: 0, contracts: [] } });
 
 test("a newer commit deploys: backup, migrate, up, gate; the state records it", { skip }, () => {
   const sd = host({ live: live(c1, 1), highestStarted: c1, applied: { latest: 1, lastContract: 0 } });
@@ -59,10 +59,10 @@ test("the commit that is live, or that already started and rolled back, is not d
   assert.match(sh(host({ live: live(c2, 2), highestStarted: c2 }), "deploy", write("l.json", manifest(c2, 2, 0)), bundle).out, /already live/);
   assert.match(sh(host({ live: live(c1, 1), highestStarted: c2 }), "deploy", write("l2.json", manifest(c2, 2, 0)), bundle).out, /fix forward/);
 });
-test("a contract migration needs the running release to be one step behind it, else it is refused", { skip }, () => {
-  const refused = sh(host({ live: live(c1, 1), highestStarted: c1, applied: { latest: 1, lastContract: 0 } }), "deploy", write("c1.json", manifest(c3, 5, 5)), bundle);
-  assert.equal(refused.code, 30); assert.match(refused.out, /stops using it first/);
-  const ok = sh(host({ live: live(c1, 4), highestStarted: c1, applied: { latest: 4, lastContract: 0 } }), "deploy", write("c2.json", manifest(c3, 5, 5)), bundle);
+test("a contract migration needs the running release to contain the commit that stopped using what it drops", { skip }, () => {
+  const refused = sh(host({ live: live(c1, 4), highestStarted: c1, applied: { latest: 4, lastContract: 0 } }), "deploy", write("c1.json", manifest(c3, 5, 5, c2)), bundle);
+  assert.equal(refused.code, 30); assert.match(refused.out, /safe only once a release containing/);
+  const ok = sh(host({ live: live(c2, 4), highestStarted: c2, applied: { latest: 4, lastContract: 0 } }), "deploy", write("c2.json", manifest(c3, 5, 5, c1)), bundle);
   assert.equal(ok.code, 0, ok.out); assert.match(ok.out, /no automatic rollback past it/);
 });
 test("a step only a person can do blocks the release until it is acknowledged on the host", { skip }, () => {

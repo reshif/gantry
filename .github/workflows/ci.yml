@@ -127,6 +127,12 @@ jobs:
       # The pipeline's own rules (supply chain, forks, deploy order): actions pinned by commit, persist-credentials: false, least
       # privilege, no pull_request_target, self-hosted only behind an Environment, no untrusted text in a shell. Then the release
       # tooling's tests (manifest, host deploy script decisions in a dry run).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # The workflow policy parses YAML with the `yaml` package (a dev dependency); scripts are off, nothing is built.
+      - run: npm ci --ignore-scripts
       - name: Workflow syntax (actionlint, pinned release, checksum verified)
         run: |
           curl -fsSL -o actionlint.tgz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
@@ -136,7 +142,7 @@ jobs:
       - name: Workflow policy and release tooling
         run: |
           node deploy/ci/workflow-policy.mjs
-          node --test deploy/ci/workflow-policy.test.mjs deploy/release/release-manifest.test.mjs deploy/release/release-notes.test.mjs deploy/release/gantry-release.test.mjs
+          node --test deploy/ci/workflow-policy.test.mjs deploy/release/release-manifest.test.mjs deploy/release/release-notes.test.mjs deploy/release/gantry-release.test.mjs deploy/release/gantry-release.replay.test.mjs deploy/release/notify.test.mjs
       - name: Caddyfile (development and production)
         run: |
           img=caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
@@ -189,6 +195,81 @@ jobs:
   images:
     name: Image ${{ matrix.name }}
     needs: [checks, deploy-config]
+    # Pull requests, the merge queue and the schedule only build and scan: read-only token, no registry login, nothing pushed.
+    # (A push to main publishes in the job below.)
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: api, dockerfile: services/api/Dockerfile }
+          - { name: worker, dockerfile: services/worker/Dockerfile }
+          - { name: migrate, dockerfile: packages/db/Dockerfile }
+          - { name: launcher, dockerfile: services/launcher/Dockerfile }
+          - { name: edge, dockerfile: services/edge/Dockerfile }
+          - { name: github, dockerfile: services/github/Dockerfile }
+          - { name: web, dockerfile: apps/web/Dockerfile }
+          - { name: runner, dockerfile: runner/Dockerfile }
+          - { name: keycloak, dockerfile: deploy/keycloak/Dockerfile }
+          - { name: backup, dockerfile: deploy/backup/Dockerfile }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/gantry-${{ matrix.name }}" >>"$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+            type=sha,format=long
+          labels: |
+            org.opencontainers.image.title=gantry-${{ matrix.name }}
+            org.opencontainers.image.licenses=UNLICENSED
+      # Build, scan and SBOM a local image.
+      - name: Build (for the scan)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          push: false
+          tags: gantry-${{ matrix.name }}:scan
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: HARNESS_LOCK=require
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: Vulnerability scan (fails on a fixable high or critical)
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          grype-version: v0.122.1
+          image: gantry-${{ matrix.name }}:scan
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table
+      - name: SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: gantry-${{ matrix.name }}:scan
+          format: spdx-json
+          output-file: sbom-${{ matrix.name }}.spdx.json
+          upload-artifact: true
+
+  publish:
+    name: Publish image ${{ matrix.name }}
+    needs: [checks, deploy-config]
+    # Only a push to main of this repository publishes (never a pull request, the queue, the schedule or a fork).
+    if: github.event_name == 'push' && !github.event.repository.fork
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     permissions:
@@ -209,9 +290,6 @@ jobs:
           - { name: runner, dockerfile: runner/Dockerfile }
           - { name: keycloak, dockerfile: deploy/keycloak/Dockerfile }
           - { name: backup, dockerfile: deploy/backup/Dockerfile }
-    env:
-      # Only pushes to this repository publish (never forks, never pull requests).
-      PUBLISH: ${{ github.event_name == 'push' && !github.event.repository.fork }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -231,48 +309,15 @@ jobs:
           labels: |
             org.opencontainers.image.title=gantry-${{ matrix.name }}
             org.opencontainers.image.licenses=UNLICENSED
-      # Pull requests (and merge-queue runs): build, scan and SBOM a local image; nothing is pushed.
-      - name: Build (for the scan)
-        if: env.PUBLISH != 'true'
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          load: true
-          push: false
-          tags: gantry-${{ matrix.name }}:scan
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: HARNESS_LOCK=require
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
-      - name: Vulnerability scan (fails on a fixable high or critical)
-        if: env.PUBLISH != 'true'
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
-        with:
-          image: gantry-${{ matrix.name }}:scan
-          fail-build: true
-          severity-cutoff: high
-          only-fixed: true
-          output-format: table
-      - name: SBOM
-        if: env.PUBLISH != 'true'
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          image: gantry-${{ matrix.name }}:scan
-          format: spdx-json
-          output-file: sbom-${{ matrix.name }}.spdx.json
-          upload-artifact: true
       # A push to main: build ONCE, push by commit only, then scan, SBOM and sign THAT pushed digest. (Scanning a loaded image and
       # then pushing a second build would sign bytes that were never scanned.) The branch and version tags are added after the
       # signature, so a tag never points at an unscanned or unsigned image.
-      - if: env.PUBLISH == 'true'
-        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - if: env.PUBLISH == 'true'
-        id: push
+      - id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -285,26 +330,25 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
           provenance: mode=max
       - name: Vulnerability scan of the pushed digest (fails on a fixable high or critical)
-        if: env.PUBLISH == 'true'
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
+          grype-version: v0.122.1
           image: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
           fail-build: true
           severity-cutoff: high
           only-fixed: true
           output-format: table
       - name: SBOM of the pushed digest
-        if: env.PUBLISH == 'true'
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           image: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
           format: spdx-json
           output-file: sbom-${{ matrix.name }}.spdx.json
           upload-artifact: true
-      - if: env.PUBLISH == 'true'
-        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.4
       - name: Sign, attest the SBOM, then add the branch tag
-        if: env.PUBLISH == 'true'
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
@@ -319,7 +363,7 @@ jobs:
   # and what a rollback goes back to (deploy/release/release-manifest.mjs). Built only after every gate above has passed.
   release-manifest:
     name: Signed release manifest
-    needs: [checks, audit, deploy-config, migrations, images]
+    needs: [checks, audit, deploy-config, migrations, publish]
     if: github.event_name == 'push' && !github.event.repository.fork
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -340,6 +384,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.4
       - name: Resolve and verify every digest, write the manifest, sign it
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
@@ -378,11 +424,13 @@ jobs:
         run: docker compose -f deploy/compose.yml --profile runner-image build gantry-runner
       - name: Smoke and isolation checks
         run: |
-          export DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          export DOCKER_GID
           deploy/smoke.sh
       - name: Backup and restore drill
         run: |
-          export DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          export DOCKER_GID
           docker compose -f deploy/compose.yml --profile backup run --rm gantry-backup now
           docker compose -f deploy/compose.yml --profile backup run --rm gantry-backup drill
       - name: Logs on failure

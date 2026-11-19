@@ -4,6 +4,7 @@
 # edited or removed (the runner refuses) or when a new migration fails on a database the old ones built.
 #   GANTRY_TEST_DATABASE_URL=postgres://postgres:pw@127.0.0.1:5432/postgres deploy/ci/migration-upgrade.sh [BASE]
 # Needs: npm ci and npm run build (for the runner and pg), and BASE fetched (actions/checkout with fetch-depth: 0).
+# shellcheck disable=SC2154  # host, port, user and pass are assigned by an eval below
 set -euo pipefail
 
 base="${1:-origin/main}"

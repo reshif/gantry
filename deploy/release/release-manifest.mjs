@@ -8,8 +8,11 @@
 //   release-manifest.mjs get release.json KEY                    print one value (images.api.digest, migrations.lastContract, ...)
 //
 // migrations.latest       the highest migration number this release applies (its schema level)
+// migrations.contracts    every contract migration in the tree: its number and `after`, the commit (full sha) from which no code uses
+//   what it removes. The host applies a contract migration only when the RUNNING release contains that commit.
 // migrations.lastContract the highest migration number in this tree that is a contract (deploy/ci/migration-safety.mjs); 0 = none.
 //   A release can be rolled back TO a release R only if no contract migration above R.migrations.latest has been applied.
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,6 +53,15 @@ export function validate(m, { sha } = {}) {
   const mg = m.migrations;
   if (!Number.isInteger(mg?.latest) || mg.latest < 0) bad.push("migrations.latest must be an integer");
   if (!Number.isInteger(mg?.lastContract) || mg.lastContract < 0 || mg.lastContract > mg.latest) bad.push("migrations.lastContract must be an integer between 0 and latest");
+  if (!Array.isArray(mg?.contracts)) bad.push("migrations.contracts must be a list of {n, after}");
+  else {
+    for (const c of mg.contracts) {
+      if (!Number.isInteger(c?.n) || c.n < 1 || c.n > mg.latest) bad.push("a contract's n must be a migration number up to latest");
+      if (!SHA.test(c?.after ?? "")) bad.push(`contract ${c?.n}: after must be the 40-hex commit that stopped using what it removes`);
+    }
+    const top = mg.contracts.length ? Math.max(...mg.contracts.map((c) => c.n)) : 0;
+    if (top !== mg.lastContract) bad.push("migrations.lastContract must equal the highest contract number");
+  }
   return bad;
 }
 
@@ -67,7 +79,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const f = flags(rest);
     const images = Object.fromEntries(f.image.map((s) => s.split("=")));
     const files = Object.fromEntries(readdirSync(join(root, DIR)).filter((n) => n.endsWith(".sql")).map((n) => [n, readFileSync(join(root, DIR, n), "utf8")]));
-    const m = build({ sha: f.sha, repository: f.repository, runId: f["run-id"], images, migrations: (({ latest, lastContract }) => ({ latest, lastContract }))(info(files)) });
+    const inf = info(files);
+    const full = (x) => { try { return execFileSync("git", ["-C", root, "rev-parse", "--verify", `${x}^{commit}`], { encoding: "utf8" }).trim(); } catch { console.error(`contract after ${x}: not a commit in this repository (fetch full history)`); process.exit(1); } };
+    const migrations = { latest: inf.latest, lastContract: inf.lastContract, contracts: inf.contracts.map((c) => ({ n: c.n, after: full(c.after) })) };
+    const m = build({ sha: f.sha, repository: f.repository, runId: f["run-id"], images, migrations });
     const bad = validate(m, { sha: f.sha });
     if (bad.length) { console.error(bad.join("\n")); process.exit(1); }
     console.log(JSON.stringify(m, null, 2));

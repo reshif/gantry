@@ -5,7 +5,8 @@
 # out of order. One deploy at a time (flock), forward-only migrations, a backup before them, and a rollback that knows what the
 # schema allows (expand/contract, deploy/ci/migration-safety.mjs).
 #
-#   gantry-release.sh init [--applied-latest N]            once, on the host: record what is applied today (default: ask the database)
+#   gantry-release.sh init [--applied-latest N] [--running-sha C]  once, on the host: record the schema applied today (default: ask the database)
+#                                                          and the commit that is running (default: the install checkout's HEAD)
 #   gantry-release.sh deploy MANIFEST BUNDLE [--no-soak]   verify, preflight, back up, migrate, start, health gate; roll back or page
 #   gantry-release.sh rollback [--reason TEXT]             put the previous release back when the schema allows it, else page
 #   gantry-release.sh stage MANIFEST BUNDLE                staging rehearsal: verify and pull by digest, start nothing (GitHub-hosted runner)
@@ -79,33 +80,42 @@ pull_and_tag() { # by digest; the tag is local only, so what compose starts is e
   local m="$1" n ref dg t; t="$(tag_of "$m")"
   for n in $(jq -r '.images | keys[]' "$m"); do
     ref="$(mget "$m" ".images.$n.ref")"; dg="$(mget "$m" ".images.$n.digest")"
-    run docker pull --quiet "$ref@$dg" >/dev/null
-    run docker tag "$ref@$dg" "$ref:$t"
+    run docker pull --quiet "$ref@$dg" >/dev/null || die "docker pull of gantry-$n failed" 1
+    run docker tag "$ref@$dg" "$ref:$t" || die "docker tag of gantry-$n failed" 1
   done
 }
 
 fetch_source() { # bring the release's commit (and the history the order check needs) into the install checkout from the job's workspace
   [ -n "${GANTRY_SOURCE_DIR:-}" ] || return 0
-  run git -C "$repo_dir" fetch --quiet "$GANTRY_SOURCE_DIR" "$1"
+  run git -C "$repo_dir" fetch --quiet "$GANTRY_SOURCE_DIR" "$1" || die "fetching $1 into $repo_dir failed" 1
 }
-checkout_release() { run git -C "$repo_dir" checkout --quiet --detach "$1"; } # the compose files, Caddyfile and realm of the release
+checkout_release() { run git -C "$repo_dir" checkout --quiet --detach "$1" || die "checking out $1 in $repo_dir failed" 1; } # the compose files, Caddyfile and realm of the release
 
 ordered() { # ordered NEW_SHA : the commit must be newer than everything this host ever started
   local new="$1" hs live; hs="$(sget '.highestStarted // empty')"; live="$(sget '.live.sha // empty')"
   [ "$new" != "$live" ] || die "$new is already live" 30
-  [ -n "$hs" ] || return 0
+  if [ -z "$hs" ]; then
+    # A host that was adopted (init) but whose running commit was never recorded cannot be order-checked: refuse rather than guess.
+    [ "$(sget '.applied.latest')" = 0 ] || die "this host has applied migrations but no recorded running commit: run init --running-sha <commit> once, so the order of releases can be checked" 30
+    return 0
+  fi
   [ "$new" != "$hs" ] || die "$new was already started on this host and did not stay live (rolled back or paged): fix forward with a new commit" 30
   git -C "$repo_dir" cat-file -e "$hs^{commit}" 2>/dev/null || die "the checkout does not have $hs; fetch full history (fetch-depth: 0) so the order can be checked" 30
   git -C "$repo_dir" merge-base --is-ancestor "$hs" "$new" || die "$new is not a descendant of $hs, which this host already started: it is superseded, nothing is changed" 30
 }
 
-contract_ok() { # a contract migration is applied only while the image that is running already stopped using what it removes
-  local m="$1" lc latest live_latest app_latest
-  lc="$(mget "$m" '.migrations.lastContract')"; app_latest="$(sget '.applied.latest')"
-  [ "$lc" -gt "$app_latest" ] || return 0
-  live_latest="$(sget '.live.migrations.latest // 0')"
-  [ "$live_latest" -ge $((lc - 1)) ] || die "release carries contract migration $lc but the running release is at schema $live_latest: deploy a release that stops using it first (expand, then contract)" 30
-  latest="$(mget "$m" '.migrations.latest')"; log "contract migration $lc is applied by this release (schema $app_latest -> $latest): no automatic rollback past it"
+contract_ok() { # a contract migration is applied only while the RUNNING release already contains the commit that stopped using what it removes
+  local m="$1" app_latest latest live_sha n after
+  app_latest="$(sget '.applied.latest')"; latest="$(mget "$m" '.migrations.latest')"; live_sha="$(sget '.live.sha // empty')"
+  while IFS=$'\t' read -r n after; do
+    [ -n "$n" ] || continue
+    [ -n "$live_sha" ] || die "this release applies contract migration $n but no running release is recorded on this host, so it cannot be shown that the running code stopped using what it removes: a person must decide (init --running-sha)" 30
+    git -C "$repo_dir" cat-file -e "$after^{commit}" 2>/dev/null || die "contract migration $n names commit $after, which the checkout does not have (fetch full history)" 30
+    git -C "$repo_dir" cat-file -e "$live_sha^{commit}" 2>/dev/null || die "the running release's commit $live_sha is not in the checkout" 30
+    git -C "$repo_dir" merge-base --is-ancestor "$after" "$live_sha" \
+      || die "contract migration $n drops or tightens something the running release ($live_sha) may still use: it is safe only once a release containing ${after:0:12} is live. Deploy that release first (expand, then contract)" 30
+    log "contract migration $n: the running release contains ${after:0:12}; applying it (schema $app_latest -> $latest) means no automatic rollback past it"
+  done < <(jq -r --argjson a "$app_latest" --argjson l "$latest" '.migrations.contracts[] | select(.n > $a and .n <= $l) | [.n, .after] | @tsv' "$m")
 }
 
 preconditions() { # person-only steps (preconditions.json) that this release newly requires
@@ -131,11 +141,12 @@ preflight() { # the compose files are valid for this release, the pinned network
   fi
 }
 
-backup_now() {
+backup_now() { # a migration never runs unless THIS run made a backup set: lastBackup is cleared first and set only from this run's backup
   local set
-  run dc exec -T gantry-backup gantry-backup.sh now
-  if [ "$dry" = 1 ]; then set="dry-run"; else set="$(dc exec -T gantry-backup gantry-backup.sh list | head -n1 | awk '{print $1}')"; fi
-  [ -n "$set" ] || die "no backup set exists after the backup" 1
+  sset '.lastBackup = null'
+  run dc exec -T gantry-backup gantry-backup.sh now || die "the backup failed: nothing was migrated and the old release is still serving" 1
+  if [ "$dry" = 1 ]; then set="dry-run"; else set="$(dc exec -T gantry-backup gantry-backup.sh list | head -n1 | awk '{print $1}')" || set=""; fi
+  [ -n "$set" ] || die "no backup set is listed after the backup: nothing was migrated" 1
   sset --arg s "$set" '.lastBackup = $s'; log "backup set: $set"
 }
 
@@ -164,13 +175,13 @@ cmd_rollback() {
     log "cannot roll back to $prev: contract migration $applied_c is applied and that release only knows schema $need. The new release stays up. Backup set $(sget '.lastBackup // "none"') was taken before the migration."
     return 20
   fi
-  checkout_release "$prev"
+  ( checkout_release "$prev" ) || return 20
   log "rolling back to $prev ($reason); migrations are not reverted, the old release runs on the schema it was built for plus additions"
-  [ "$dry" = 1 ] || { docker image inspect "$(mget "$pm" '.images.api.ref'):$(tag_of "$pm")" >/dev/null 2>&1 || pull_and_tag "$pm"; }
+  [ "$dry" = 1 ] || { docker image inspect "$(mget "$pm" '.images.api.ref'):$(tag_of "$pm")" >/dev/null 2>&1 || ( pull_and_tag "$pm" ) || return 20; }
   # No gantry-migrate: the old runner refuses a database that has migrations it does not know.
   local svcs=()
   if [ "$dry" = 1 ]; then svcs=(every-service-except-the-migration-job); else mapfile -t svcs < <(services_without_migrate "$pm"); fi
-  with_release "$pm" run dc up -d --no-deps "${svcs[@]}"
+  with_release "$pm" run dc up -d --no-deps "${svcs[@]}" || { log "starting the previous release failed"; return 20; }
   gate "$pm" || { log "the previous release is not healthy either"; return 20; }
   sset '.live = .previous | .previous = null'
   return 10
@@ -191,18 +202,32 @@ cmd_deploy() {
   backup_now
   # From here the host may change: record that this commit was started, so nothing older ever starts after it.
   sset --arg s "$sha" '.highestStarted = $s'
-  if [ "$dry" = 1 ]; then log "+ (dry run) gantry-migrate, up -d"; else
-    with_release "$m" dc run --rm gantry-migrate || die "gantry-migrate failed; the old release is still serving; backup set $(sget '.lastBackup')" 1
+  if [ "$dry" = 1 ]; then log "+ (dry run) gantry-migrate, up -d"; elif ! with_release "$m" dc run --rm gantry-migrate; then
+    migrate_failed "$m"
+    die "gantry-migrate failed; the old release is still serving; backup set $(sget '.lastBackup')" 1
   fi
   # The migrations are in: the schema moved even if the app then fails, so record it before anything else can fail.
   sset --slurpfile mg <(mget "$m" '.migrations' | jq -c .) '.applied.latest = ([.applied.latest, $mg[0].latest] | max) | .applied.lastContract = ([.applied.lastContract, $mg[0].lastContract] | max)'
   sset '.previous = .live'
-  with_release "$m" run dc up -d
   sset --arg s "$sha" --arg r "$rel" --slurpfile mg <(mget "$m" '.migrations' | jq -c .) '.live = {sha: $s, manifest: $r, migrations: $mg[0]}'
-  if gate "$m"; then log "release $sha is healthy"; prune; return 0; fi
+  # A failed `up` is an unhealthy release like any other: it ends in a rollback or a page.
+  if with_release "$m" run dc up -d && gate "$m"; then log "release $sha is healthy"; prune; return 0; fi
   log "release $sha is NOT healthy"
   local rc=0; cmd_rollback "health gate failed after $sha" || rc=$?
   return "$rc"
+}
+
+migrate_failed() { # a failed migrate may have applied some files (each file is its own transaction): record what the database says
+  local m="$1" db
+  db="$(dc exec -T postgres psql -U gantry_owner -d gantry -Atc "select coalesce(max(left(name,4)::int),0) from schema_migrations" 2>/dev/null)" || db=""
+  if [[ "$db" =~ ^[0-9]+$ ]]; then
+    sset --argjson lat "$db" --slurpfile mg <(mget "$m" '.migrations' | jq -c .) '.applied.latest = ([.applied.latest, $lat] | max) | .applied.lastContract = ([.applied.lastContract] + [$mg[0].contracts[] | select(.n <= $lat) | .n] | max)'
+    log "the database says schema $db is applied"
+  else
+    # Cannot ask: assume the worst, so a rollback past a contract migration that may have applied is never allowed.
+    sset --slurpfile mg <(mget "$m" '.migrations' | jq -c .) '.applied.latest = ([.applied.latest, $mg[0].latest] | max) | .applied.lastContract = ([.applied.lastContract, $mg[0].lastContract] | max)'
+    log "could not read schema_migrations: assuming every migration of this release applied"
+  fi
 }
 
 cmd_stage() { # staging rehearsal (a GitHub-hosted runner): verify, pull by digest, tag locally. Starts nothing.
@@ -213,21 +238,34 @@ cmd_stage() { # staging rehearsal (a GitHub-hosted runner): verify, pull by dige
   log "staged $(mget "$m" '.sha' | cut -c1-12) as tag $(tag_of "$m")"
 }
 
-cmd_init() {
-  local n=""
-  [ "${1:-}" = --applied-latest ] && n="${2:?a number}"
+cmd_init() { # init [--applied-latest N] [--running-sha SHA] : adopt the running stack. Records the schema and the commit that is running.
+  local n="" sha=""
+  while [ $# -gt 0 ]; do
+    case "$1" in --applied-latest) n="${2:?a number}"; shift 2;; --running-sha) sha="${2:?a commit}"; shift 2;; *) die "usage: init [--applied-latest N] [--running-sha SHA]" 2;; esac
+  done
   if [ -z "$n" ]; then
     if [ "$dry" = 1 ]; then n=0; else n="$(dc exec -T postgres psql -U gantry_owner -d gantry -Atc "select coalesce(max(left(name,4)::int),0) from schema_migrations")"; fi
   fi
-  sset --argjson n "$n" '.applied.latest = $n | .applied.lastContract = 0'
-  log "recorded: schema $n applied; no contract migrations before this pipeline (none carried the mark)"
+  [[ "$n" =~ ^[0-9]+$ ]] || die "the applied schema level is not a number: $n" 2
+  [ -n "$sha" ] || sha="$(git -C "$repo_dir" rev-parse HEAD)"
+  sha="$(git -C "$repo_dir" rev-parse --verify "$sha^{commit}")" || die "$sha is not a commit in $repo_dir" 2
+  sset --argjson n "$n" --arg s "$sha" '.applied.latest = $n | .applied.lastContract = 0 | .highestStarted = $s'
+  log "recorded: schema $n applied, commit $sha is what runs now (releases older than it are refused); no contract migrations before this pipeline (none carried the mark)"
+}
+
+require_install() { # fail closed when the host is not set up: a missing variable must not fall back to a default checkout
+  [ "$dry" = 1 ] && return 0
+  [ -n "${GANTRY_REPO_DIR:-}" ] || die "GANTRY_REPO_DIR is not set (the install checkout, for example /opt/gantry)" 2
+  [ -f "$env_file" ] || die "$env_file does not exist" 2
+  [ -n "${GANTRY_STATE_DIR:-}" ] || die "GANTRY_STATE_DIR is not set" 2
 }
 
 case "${1:-}" in
   init) shift; cmd_init "$@";;
   stage) shift; cmd_stage "$@";;
-  deploy) shift; rc=0; cmd_deploy "$@" || rc=$?; echo "{\"exit\":$rc,\"at\":\"$(date -u +%FT%TZ)\"}" >"$state_dir/last-result.json"; exit "$rc";;
-  rollback) shift; [ "${1:-}" = --reason ] && shift; exec 9>"$state_dir/lock"; flock -n 9 || die "another deploy holds the lock" 75; rc=0; cmd_rollback "${1:-manual}" || rc=$?; exit "$rc";;
+  # `set -e` is off inside a function that is the left side of `||` or an `if`: run the whole deploy in a subshell with it on, take its code.
+  deploy) shift; require_install; set +e; ( set -e; cmd_deploy "$@" ); rc=$?; set -e; echo "{\"exit\":$rc,\"at\":\"$(date -u +%FT%TZ)\"}" >"$state_dir/last-result.json"; exit "$rc";;
+  rollback) shift; [ "${1:-}" = --reason ] && shift; require_install; exec 9>"$state_dir/lock"; flock -n 9 || die "another deploy holds the lock" 75; set +e; ( set -e; cmd_rollback "${1:-manual}" ); rc=$?; set -e; exit "$rc";;
   ack) [ -n "${2:-}" ] || die "usage: ack ID" 2; sset --arg i "$2" '.acks = ((.acks + [$i]) | unique)'; log "acknowledged: $2";;
   status) jq . "$state";;
   *) sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2;;

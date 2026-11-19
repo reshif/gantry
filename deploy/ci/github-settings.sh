@@ -3,11 +3,15 @@
 # branch rules, the main ruleset with the merge queue, and the immutable version tags. It PRINTS the gh commands by default and
 # changes nothing; read them, then run with --apply as a repository admin (gh signed in). Safe to run again.
 #
-#   deploy/ci/github-settings.sh OWNER/REPO REVIEWER[,REVIEWER...]            # print
-#   deploy/ci/github-settings.sh OWNER/REPO REVIEWER[,REVIEWER...] --apply    # do it
-# REVIEWER is a GitHub login: the people who may promote to production (at least one who is not the author, if you can).
+#   deploy/ci/github-settings.sh OWNER/REPO REVIEWER[,REVIEWER...] [--solo] [--apply]
+# REVIEWER is a GitHub login: the people who may promote to production. By default the author of a commit may NOT approve it for
+# production (prevent_self_review: true), so list at least two people. --solo is for a repository with one person: it lets the
+# author approve their own release (prevent_self_review: false). Choose it knowingly; it removes the second pair of eyes.
 set -euo pipefail
-repo="${1:?usage: github-settings.sh OWNER/REPO REVIEWERS [--apply]}"; reviewers="${2:?comma-separated reviewer logins}"; apply="${3:-}"
+repo="${1:?usage: github-settings.sh OWNER/REPO REVIEWERS [--solo] [--apply]}"; reviewers="${2:?comma-separated reviewer logins}"; shift 2
+apply=""; solo=false
+for a in "$@"; do case "$a" in --apply) apply=--apply;; --solo) solo=true;; *) echo "unknown option $a" >&2; exit 2;; esac; done
+if [ "$solo" = false ] && [ "$(printf '%s' "$reviewers" | tr ',' '\n' | grep -c .)" -lt 2 ]; then echo "one reviewer: the author could not approve their own release. Add a second reviewer, or pass --solo knowingly." >&2; exit 2; fi
 [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "OWNER/REPO expected" >&2; exit 2; }
 go() { if [ "$apply" = --apply ]; then "$@"; else printf '+'; printf ' %q' "$@"; printf '\n'; fi; }
 api() { local method="$1" path="$2"; shift 2; go gh api -X "$method" "repos/$repo/$path" "$@"; }
@@ -24,8 +28,8 @@ else ids='[{"type":"User","id":"<id of each reviewer>"}]'; fi
 
 echo "# Environments: staging (no reviewers), production (the approval), production-deploy (secrets and variables; main only)"
 for env in staging production production-deploy; do
-  body="$(jq -n --argjson ids "$ids" --arg env "$env" '{deployment_branch_policy:{protected_branches:false,custom_branch_policies:true}}
-    + (if $env == "production" then {reviewers:$ids, prevent_self_review:false, wait_timer:0} else {} end)')"
+  body="$(jq -n --argjson ids "$ids" --arg env "$env" --argjson solo "$solo" '{deployment_branch_policy:{protected_branches:false,custom_branch_policies:true}}
+    + (if $env == "production" then {reviewers:$ids, prevent_self_review:($solo | not), wait_timer:0} else {} end)')"
   go bash -c "printf '%s' '$body' | gh api -X PUT repos/$repo/environments/$env --input -"
   go gh api -X POST "repos/$repo/environments/$env/deployment-branch-policies" -f name=main -f type=branch
 done
@@ -52,4 +56,10 @@ echo "# Actions: forks need approval to run workflows, and the default token is 
 go gh api -X PUT "repos/$repo/actions/permissions/workflow" -f default_workflow_permissions=read -F can_approve_pull_request_reviews=false
 go gh api -X PUT "repos/$repo/actions/permissions" -F enabled=true -f allowed_actions=selected
 go gh api -X PUT "repos/$repo/actions/permissions/selected-actions" -F github_owned_allowed=true -F verified_allowed=false -f 'patterns_allowed[]=docker/*' -f 'patterns_allowed[]=anchore/*' -f 'patterns_allowed[]=sigstore/*' -f 'patterns_allowed[]=hadolint/*'
-echo "# Not scriptable here: Settings > Actions > General > 'Require approval for all outside collaborators' (fork pull requests), and the runner group (CICD.md)."
+echo "# NOT scriptable here, and required before the first production deploy (a go/no-go, CICD.md section 5):"
+echo "# [ ] Settings > Actions > Runners: the production host's runner is in a runner group limited to THIS repository and to the workflow"
+echo "#     .github/workflows/deploy.yml@refs/heads/main (organisation repositories). A repository-level runner on a personal repository"
+echo "#     cannot be restricted to a workflow: every workflow here could then use it. In that case bind the host to an organisation first."
+echo "#     deploy/ci/workflow-policy.mjs only checks the files in a pull request's own tree; it is not the boundary, this setting is."
+echo "# [ ] Settings > Actions > General > 'Require approval for all outside collaborators' (fork pull requests)."
+echo "# [ ] Environment production-deploy: deployment branches = main only (set above), so a branch copy of deploy.yml cannot reach the host job."

@@ -63,6 +63,8 @@ jobs:
         with:
           node-version-file: .nvmrc
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.4
       - id: plan
         run: |
           sha="${RUN_SHA}"; run_id="${RUN_ID}"
@@ -113,6 +115,8 @@ jobs:
         with:
           node-version-file: .nvmrc
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.4
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
@@ -129,17 +133,20 @@ jobs:
       - name: Bring the whole stack up from those digests
         run: |
           deploy/secrets/generate.sh >/dev/null
-          export DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          export DOCKER_GID
           # The release's local tags (rel-<sha12>) are what compose starts: the images are the verified digests, not a rebuild.
           export GANTRY_IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/" GANTRY_VERSION="rel-${SHA:0:12}"
           docker compose -f deploy/compose.yml up -d --no-build
       - name: Smoke and isolation checks (deploy/smoke.sh)
         run: |
-          export DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          export DOCKER_GID
           SMOKE_NO_UP=1 deploy/smoke.sh
       - name: Backup and restore drill on the staged stack
         run: |
-          export DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          export DOCKER_GID
           export GANTRY_IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/" GANTRY_VERSION="rel-${SHA:0:12}"
           docker compose -f deploy/compose.yml --profile backup run --rm gantry-backup now
           docker compose -f deploy/compose.yml --profile backup run --rm gantry-backup drill
@@ -225,11 +232,21 @@ jobs:
         with:
           node-version-file: .nvmrc
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.4
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Require the host configuration (fail closed)
+        env:
+          GANTRY_HOME: ${{ vars.GANTRY_HOME }}
+          GANTRY_STATE_DIR: ${{ vars.GANTRY_STATE_DIR }}
+        run: |
+          [ -n "$GANTRY_HOME" ] || { echo "::error::the variable GANTRY_HOME is not set on the production-deploy Environment"; exit 1; }
+          [ -n "$GANTRY_STATE_DIR" ] || { echo "::error::the variable GANTRY_STATE_DIR is not set on the production-deploy Environment"; exit 1; }
+          [ -f "$GANTRY_HOME/deploy/prod.env" ] || { echo "::error::$GANTRY_HOME is not the Gantry install (no deploy/prod.env)"; exit 1; }
       - name: Deploy (verify, back up, migrate, start, health gate, roll back)
         id: deploy
         env:
@@ -244,6 +261,14 @@ jobs:
           rc=$?
           echo "rc=$rc" >>"$GITHUB_OUTPUT"
           exit "$rc"
+      # What production runs now, for the daily rescan (rescan.yml): the manifest of the last deploy that ended healthy.
+      - name: Record the live release
+        if: steps.deploy.outputs.rc == '0'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: live-release
+          path: manifest/release.json
+          retention-days: 90
       - name: Verdict
         id: verdict
         if: always()
@@ -274,12 +299,20 @@ jobs:
       issues: write
     env:
       GH_TOKEN: ${{ github.token }}
+      # This job has no checkout: without a repository `gh issue create` cannot work.
+      GH_REPO: ${{ github.repository }}
       SHA: ${{ needs.plan.outputs.sha }}
       VERDICT: ${{ needs.deploy.outputs.verdict }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       PAGER_WEBHOOK_URL: ${{ secrets.PAGER_WEBHOOK_URL }}
     steps:
+      - name: Call the pager (if one is configured)
+        if: always() && env.PAGER_WEBHOOK_URL != '' && (needs.deploy.outputs.verdict == 'needs-a-person' || needs.deploy.outputs.verdict == 'failed')
+        run: |
+          curl -fsS --max-time 20 -X POST -H 'content-type: application/json' \
+            --data "$(jq -n --arg t "Gantry production needs a person: ${SHA:0:12}" --arg u "$RUN_URL" '{text: $t, url: $u}')" "$PAGER_WEBHOOK_URL" >/dev/null
       - name: Open an issue
+        if: always()
         run: |
           case "$VERDICT" in
             rolled-back)    title="Production was rolled back: ${SHA:0:12} was unhealthy"; body="The release failed its health gate and the previous release is serving again. Nothing else is needed unless you want to fix forward." ;;
@@ -289,8 +322,3 @@ jobs:
             *)              title="Production deploy failed: ${SHA:0:12}"; body="The deploy ended without a verdict. Check the host before anything else." ;;
           esac
           gh issue create --title "$title" --body "$body"$'\n\n'"Run: $RUN_URL"
-      - name: Call the pager (if one is configured)
-        if: env.PAGER_WEBHOOK_URL != '' && needs.deploy.outputs.verdict == 'needs-a-person'
-        run: |
-          curl -fsS --max-time 20 -X POST -H 'content-type: application/json' \
-            --data "$(jq -n --arg t "Gantry production needs a person: ${SHA:0:12}" --arg u "$RUN_URL" '{text: $t, url: $u}')" "$PAGER_WEBHOOK_URL" >/dev/null

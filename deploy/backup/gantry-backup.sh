@@ -33,7 +33,8 @@ export PGHOST="${DATABASE_HOST:-postgres}" PGUSER="${PGUSER:-gantry_owner}" PGCO
 PGPASSWORD="$(cat /run/secrets/db_owner_password)"; export PGPASSWORD
 S3="${S3_ENDPOINT:-http://minio:9000}"
 export MC_CONFIG_DIR=/tmp/mc
-export MC_HOST_src="${S3%%://*}://${S3_ACCESS_KEY:-gantry}:$(cat /run/secrets/minio_root_password)@${S3#*://}"
+MC_HOST_src="${S3%%://*}://${S3_ACCESS_KEY:-gantry}:$(cat /run/secrets/minio_root_password)@${S3#*://}"
+export MC_HOST_src
 # Off-host copy: the file holds an mc host URL, https://ACCESS_KEY:SECRET@s3.example.com; GANTRY_BACKUP_REMOTE is the
 # bucket/prefix there. Without both, sets stay on the backup volume (copy them off the host yourself).
 if [ -s /run/secrets/backup_remote ] && [ -n "${GANTRY_BACKUP_REMOTE:-}" ]; then MC_HOST_remote="$(tr -d '\n' </run/secrets/backup_remote)"; export MC_HOST_remote; fi
