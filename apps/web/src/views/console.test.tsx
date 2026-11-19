@@ -321,20 +321,102 @@ describe("Console (legacy console.js on the real API)", () => {
       expect(calls.find((c) => c.path === "/api/v1/console/explain")!.body).toEqual({ action: "line.halt", project: "payments" });
     });
 
-    it("a proposal from the model's answer is saved on its message when confirmed or dismissed", async () => {
-      const calls = setup({
-        ...ON,
-        "POST /api/v1/console/messages": () => ({ sse: sse(["thread", { threadId: "ct-1", messageId: "cm-1", created: true }], ["text", { delta: "Proposed." }], ["proposal", { messageId: "cm-2", proposal: proposal() }], ["done", { messageId: "cm-2", text: "Proposed.", mode: "model", model: "claude-test-1", cited: [], proposals: [proposal()] }]) }),
-        "GET /api/v1/console/threads/ct-1": () => ({ body: { id: "ct-1", title: "x", pinned: [], createdAt: 0, updatedAt: 0, expiresAt: 0, retentionDays: 90, messages: [{ id: "cm-1", threadId: "ct-1", role: "user", text: "halt payments", at: 1, data: {} }, { id: "cm-2", threadId: "ct-1", role: "assistant", text: "Proposed.", at: 2, data: { mode: "model", proposals: [proposal()] } }] } }),
-        "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Halted." } }),
-        "PUT /api/v1/console/messages/cm-2/proposals/PROP-1": () => ({ body: { ok: true, msg: "Saved." } }),
-      });
+    /** A card the model proposed in its answer: it is saved on message cm-2, so the server runs it (POST .../confirm) and records the outcome. */
+    let threadReads = (): number => 0;
+    let after: object = {}; // what the server recorded on the card: the thread read after a confirm returns it
+    const saved = (extra: Record<string, () => object>, p: object = proposal(), recorded: object | null = null) => { const c = savedSetup(extra, p, recorded); threadReads = () => c.filter((x) => x.path === "/api/v1/console/threads/ct-1").length; return c; };
+    const savedSetup = (extra: Record<string, () => object>, p: object, recorded: object | null) => setup({
+      ...ON,
+      "POST /api/v1/console/messages": () => ({ sse: sse(["thread", { threadId: "ct-1", messageId: "cm-1", created: true }], ["text", { delta: "Proposed." }], ["proposal", { messageId: "cm-2", proposal: p }], ["done", { messageId: "cm-2", text: "Proposed.", mode: "model", model: "claude-test-1", cited: [], proposals: [p] }]) }),
+      "GET /api/v1/console/threads/ct-1": () => ({ body: { id: "ct-1", title: "x", pinned: [], createdAt: 0, updatedAt: 0, expiresAt: 0, retentionDays: 90, messages: [{ id: "cm-1", threadId: "ct-1", role: "user", text: "halt payments", at: 1, data: {} }, { id: "cm-2", threadId: "ct-1", role: "assistant", text: "Proposed.", at: 2, data: { mode: "model", proposals: [{ ...p, ...after }] } }] } }),
+      ...Object.fromEntries(Object.entries(extra).map(([k, f]) => [k, () => { const r = f(); if (k.endsWith("/confirm") && recorded) after = recorded; return r; }])),
+    });
+    beforeEach(() => { after = {}; });
+    const CONFIRM = "POST /api/v1/console/messages/cm-2/proposals/PROP-1/confirm";
+    // The saved thread is read once the answer ends and rebuilds the cards from it; confirm after that, or the click lands on a card about to be replaced.
+    const confirmCard = async () => {
+      await firstOf("[id^='con-cf-ok-']");
+      await waitFor(() => expect(threadReads()).toBeGreaterThan(0));
+      await new Promise((r) => setTimeout(r, 50));
+      fireEvent.click(await firstOf("[id^='con-cf-ok-']"));
+    };
+
+    it("confirming a saved card POSTs to /confirm, never runs the endpoint or PUTs done, and shows the server's outcome", async () => {
+      const calls = saved({ [CONFIRM]: () => ({ body: { ok: true, recorded: true, status: "done", httpStatus: 200, msg: "Halted by the server.", result: { ok: true } } }) }, proposal(), { status: "done", result: "Halted by the server." });
       mount("/settings");
       await ask("halt payments, duplicate refunds");
-      const ok = await waitFor(() => { const e = document.querySelector<HTMLElement>("[id^='con-cf-ok-']"); if (!e) throw new Error("no card"); return e; });
-      fireEvent.click(ok);
-      await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.path === "/api/v1/console/messages/cm-2/proposals/PROP-1")).toBe(true));
-      expect(calls.find((c) => c.method === "PUT" && c.path.endsWith("/PROP-1"))!.body).toEqual({ status: "done", result: "Halted." });
+      await confirmCard();
+      await waitFor(() => expect(document.querySelector(".ccard-confirm.is-done")).toBeTruthy());
+      expect(text()).toContain("Halted by the server.");
+      const post = calls.find((c) => c.path.endsWith("/confirm"))!;
+      expect(post.method).toBe("POST");
+      expect(post.body).toEqual({ reason: "duplicate refunds", confirmText: "", inFlight: "hold" });
+      expect(calls.some((c) => c.path === "/api/v1/stops")).toBe(false);
+      expect(calls.some((c) => c.method === "PUT" && c.path.endsWith("/PROP-1"))).toBe(false);
+    });
+
+    it("a kill sends the typed phrase and the in-flight choice to /confirm", async () => {
+      const k = proposal({ kind: "kill", title: "Kill Payments Platform", phrase: "Payments Platform", danger: true, call: { method: "POST", path: "/api/v1/stops", body: { scope: "project", id: "payments", mode: "kill", reason: "bad deploy", inFlight: "hold", confirmText: "", via: "console" }, idempotent: true } });
+      const calls = saved({ [CONFIRM]: () => ({ body: { ok: true, recorded: true, status: "done", msg: "Killed.", result: {} } }) }, k, { status: "done", result: "Killed." });
+      mount("/settings");
+      await ask("kill payments");
+      await firstOf(".ccard-confirm.is-danger");
+      await waitFor(() => expect(threadReads()).toBeGreaterThan(0));
+      await new Promise((r) => setTimeout(r, 50));
+      const card = document.querySelector<HTMLElement>(".ccard-confirm.is-danger")!;
+      fireEvent.click(card.querySelector("input[value='cancel']")!);
+      type(card.querySelector<HTMLInputElement>("[id^='con-cf-confirm-']")!, "Payments Platform");
+      fireEvent.click(card.querySelector<HTMLElement>("[id^='con-cf-ok-']")!);
+      await waitFor(() => expect(document.querySelector(".ccard-confirm.is-done")).toBeTruthy());
+      expect(calls.find((c) => c.path.endsWith("/confirm"))!.body).toEqual({ reason: "bad deploy", confirmText: "Payments Platform", inFlight: "cancel" });
+    });
+
+    it("a refusal the server recorded shows its text and needs line and offers Try again (S-18)", async () => {
+      saved({ [CONFIRM]: () => ({ body: { ok: false, recorded: true, status: "failed", httpStatus: 403, msg: "Payments Platform is halted already.", needs: "Resume the line first", refusal: { code: 403, rule: { id: "MATRIX" } } } }) }, proposal(), { status: "failed", result: "Payments Platform is halted already.", needs: "Resume the line first", refusal: { code: 403 } });
+      mount("/settings");
+      await ask("halt payments, duplicate refunds");
+      await confirmCard();
+      await waitFor(() => expect(document.querySelector(".ccard-confirm.is-failed")).toBeTruthy());
+      expect(text()).toContain("Payments Platform is halted already.");
+      expect(document.querySelector("[id^='con-cf-needs-']")!.textContent).toContain("Resume the line first");
+      expect(document.querySelector("[id^='con-cf-open-']")).toBeTruthy();
+      fireEvent.click(document.querySelector<HTMLElement>("[id^='con-cf-retry-']")!);
+      await waitFor(() => expect(document.querySelector("[id^='con-cf-ok-']")).toBeTruthy());
+    });
+
+    it("a transient outcome keeps the card pending, and Try again calls /confirm again", async () => {
+      let n = 0;
+      const calls = saved({ [CONFIRM]: () => (++n === 1 ? { status: 429, body: { ok: false, recorded: false, status: "pending", httpStatus: 429, msg: "Too many requests.", retry: true } } : { body: { ok: true, recorded: true, status: "done", msg: "Halted.", result: {} } }) });
+      mount("/settings");
+      await ask("halt payments, duplicate refunds");
+      await confirmCard();
+      await waitFor(() => expect(text()).toContain("Too many requests."));
+      expect(document.querySelector(".ccard-confirm.is-failed")).toBeNull();
+      await confirmCard();
+      await waitFor(() => expect(document.querySelector(".ccard-confirm.is-done")).toBeTruthy());
+      expect(calls.filter((c) => c.path.endsWith("/confirm"))).toHaveLength(2);
+    });
+
+    it("a stale brief is a normal failure with a way forward: a link to the work order's brief", async () => {
+      const g = proposal({ kind: "approve", title: "Approve the brief of WO-1042", needsReason: null, entities: [{ type: "wo", id: "WO-1042", project: "payments" }], call: { method: "POST", path: "/api/v1/gate-instances/WO-1042%3AG0G1%3A1/approve", body: { via: "console", briefBase: "abc" }, idempotent: false } });
+      saved({ [CONFIRM]: () => ({ body: { ok: false, recorded: true, status: "failed", httpStatus: 409, msg: "The brief changed since you read it. Read it again, then confirm.", refusal: { code: 409 } } }) }, g, { status: "failed", result: "The brief changed since you read it. Read it again, then confirm.", refusal: { code: 409 } });
+      mount("/settings");
+      await ask("approve WO-1042");
+      await confirmCard();
+      await waitFor(() => expect(document.querySelector(".ccard-confirm.is-failed")).toBeTruthy());
+      expect(text()).toContain("The brief changed since you read it. Read it again, then confirm.");
+      expect(document.querySelector("[id^='con-cf-brief-']")!.textContent).toBe("Open the brief of WO-1042");
+      expect(document.querySelector("[id^='con-cf-retry-']")).toBeTruthy();
+    });
+
+    it("dismissing a saved card still PUTs dismissed", async () => {
+      const calls = saved({ "PUT /api/v1/console/messages/cm-2/proposals/PROP-1": () => ({ body: { ok: true, msg: "Saved." } }) });
+      mount("/settings");
+      await ask("halt payments, duplicate refunds");
+      fireEvent.click(await firstOf("[id^='con-cf-no-']"));
+      await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.path.endsWith("/PROP-1"))).toBe(true));
+      expect(calls.find((c) => c.method === "PUT" && c.path.endsWith("/PROP-1"))!.body).toEqual({ status: "dismissed" });
+      expect(calls.some((c) => c.path.endsWith("/confirm"))).toBe(false);
     });
 
     it("a refusal from the endpoint ends the card as failed and says why", async () => {

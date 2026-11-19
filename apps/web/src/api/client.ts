@@ -56,6 +56,8 @@ export interface CommandRefusal {
   needs?: string;
   /** 409/428: what is true now (for a gate decision, the open instance), so the screen can refresh and say what changed. */
   current?: Record<string, unknown>;
+  /** The whole response body, for the few commands whose refusal carries more than the fields above (a console card's recorded outcome). */
+  body?: Record<string, unknown>;
 }
 /** `{ ok, msg, ...extra }`: the result shape of every command, as the legacy G.ops returned. */
 export type ApiResult<T extends object = Record<string, unknown>> = (CommandOk & T) | CommandRefusal;
@@ -182,6 +184,7 @@ function refusalFrom(status: number, body: unknown, fallback: string): CommandRe
   if (b.rule && typeof b.rule === "object") out.rule = b.rule as RuleRef;
   if (typeof b.needs === "string" && b.needs) out.needs = b.needs;
   if (b.current && typeof b.current === "object") out.current = b.current as Record<string, unknown>;
+  if (Object.keys(b).length) out.body = b;
   return out;
 }
 

@@ -17,6 +17,9 @@ export interface Proposal {
   entities: Cited[];
   status: "pending" | "done" | "failed" | "dismissed";
   result?: string;
+  /** What the server said would let a failed card through, and the refusal it recorded (set when the server ran the card). */
+  needs?: string;
+  refusal?: { code: number; rule?: unknown; overrideKind?: string };
 }
 
 export interface ConsoleModel { id: string; name: string; vendor: string; vendorName: string; tier: string; canonical: string; inPrice: number; outPrice: number; context: number }
