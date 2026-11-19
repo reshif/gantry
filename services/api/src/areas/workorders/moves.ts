@@ -1,10 +1,10 @@
 /** Board and traveler moves: move (one step along the route), send back, park, unpark, reassign, retry and the record summary (spec 9.4, 9.6). */
-import { bayDef, can, gateForWO, moveCheck, nextStationId, route, routeGates, stationDef, type MoveCheck, type Project } from "@gantry/domain";
+import { OVERRIDE_REASON_MIN, bayDef, can, gateForWO, moveCheck, nextStationId, route, routeGates, stationDef, type MoveCheck, type Project } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
 import type { Actor } from "../../core/command.js";
 import { conflict, invalid, refuse } from "../../core/errors.js";
 import {
-  acquireSlot, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, closeOpenQuestions, dispatchQueued, enterStation, ev, leaveBay, note, openGate, pinned, advance, projectOf, resetGatesFrom, stationIdOf, type Fx,
+  acquireSlot, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, closeOpenQuestions, dispatchQueued, enterStation, overrideWip, ev, leaveBay, note, openGate, pinned, advance, projectOf, resetGatesFrom, stationIdOf, type Fx,
 } from "./engine.js";
 import { begin, done, flowFor, person, type CmdResult } from "./ctx.js";
 import { approveInner } from "./gates.js";
@@ -185,6 +185,21 @@ export async function reassign(tx: Tx, actor: Actor, woId: string, agentId: stri
   ev(fx, w, "wo.reassign", { station: sid, text: ag.name }, { before: { agent: old } });
   await saveWo(fx.tx, fx.orgId, w);
   return done(fx, `${w.id} now staffed by ${ag.name}. It applies from the next run of the station.`, w.project, { version: w.version, agent: agentId });
+}
+
+/**
+ * A Factory Admin moves a work order that waits for a full station in anyway, with a reason (owner decision 2026-11-19: admin can override everything, audited).
+ * The limit is a flow rule, not a safety rail, so it is overridable; stops still apply (a halt needs the usual override, a kill never).
+ */
+export async function wipOverride(tx: Tx, actor: Actor, woId: string, reason: string): Promise<CmdResult> {
+  const adminNow = !!actor.personId && (await tx.query(`select 1 from effective_role_assignments where org_id = $1 and person_id = $2 and role_id = 'factory_admin' and project_id is null and revoked_at is null and (expires_at is null or expires_at > now()) limit 1`, [actor.orgId, actor.personId])).rows.length > 0;
+  const { fx, w } = await begin(tx, actor, woId, "wo.move");
+  const by = person(actor, "Moving past a station limit is");
+  if (!adminNow) throw refuse("denied", "Only a Factory Admin can move a work order past a station's WIP limit.", { rule: { kind: "matrix", id: "wip.override", name: "WIP limit override" } });
+  const why = (reason ?? "").trim();
+  if (why.length < OVERRIDE_REASON_MIN) throw refuse("denied", `${w.id} waits for a full station. As Factory Admin you can move it in anyway. Give a reason of at least ${OVERRIDE_REASON_MIN} characters; it is recorded in the audit.`, { needs: "override_reason", overrideKind: "wip_limit", rule: { kind: "limit", id: "WIP-LIMIT", name: "Station WIP limit" } });
+  const { station } = await overrideWip(fx, w, by, why);
+  return done(fx, `${w.id} moved into ${stationDef(fx.catalog, station)?.name ?? station} past its WIP limit.`, w.project, { version: w.version, station });
 }
 
 /** Retry a failed or blocked work order: the station runs again as a fresh attempt. */

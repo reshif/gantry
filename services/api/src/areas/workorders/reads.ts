@@ -1,14 +1,15 @@
 /** Work-order reads (spec 8.4): the list, the traveler, conversations, the floor with replay, the record and its export, and the changes. All rows are mapped to the legacy shapes the web already reads. */
 import { createHash } from "node:crypto";
 import {
-  can, completeness, criteriaFor, type Verification, effectiveStop, gateDecision, gateProgress, moveCheck, route, routeGates, stateAt, summaryText, woTotals,
+  can, completeness, isFactoryAdmin, criteriaFor, type Verification, effectiveStop, gateDecision, gateProgress, moveCheck, route, wipLimit, routeGates, stateAt, summaryText, woTotals,
   type Decision, type EventEntry, type FlowState, type MoveCheck, type Project, type WorkOrder,
 } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { loadFlowState } from "../../core/read/state.js";
 import { ms, obj } from "../../core/read/rows.js";
 import { projectEvents } from "../audit/read.js";
-import { coveringStop, type CoveringStop } from "./engine.js";
+import { countWip, coveringStop, type CoveringStop } from "./engine.js";
+import { readProject } from "../projects/store.js";
 import { buildWorkOrders, loadFlow, readWoRow, stateWithPinned, type Data } from "./model.js";
 
 /* ------------------------------------------------------------------------- list */
@@ -63,7 +64,7 @@ export async function listWorkOrders(db: Queryable, orgId: string, projectId: st
 export interface Traveler {
   wo: WorkOrder & { version: number };
   progress: Record<string, ReturnType<typeof gateProgress>>;
-  allowed: { approve: (Decision & { gate: string; instance: string }) | null; moves: Record<string, MoveCheck>; can: Record<string, Decision> };
+  allowed: { approve: (Decision & { gate: string; instance: string }) | null; moves: Record<string, MoveCheck>; can: Record<string, Decision>; wipOverride: { allowed: boolean; reason: string } };
   stop: CoveringStop | null;
   route: string[];
 }
@@ -94,7 +95,12 @@ export async function readTraveler(db: Queryable, orgId: string, viewer: string 
     const d = gateDecision(st, viewer, wo, waiting[0], now);
     approve = { ...d, gate: waiting[0], instance: inst?.id ?? `${woId}:${waiting[0]}` };
   }
-  return { wo: { ...wo, version: row.version }, progress, allowed: { approve, moves, can: cans }, stop, route: route(st.catalog, project, wo.cls) };
+  // Pushing a waiting order past a full station is the Factory Admin's override (the server decides, the browser only shows the button).
+  // The counts shown are today's, not those from when it began to wait.
+  if (wo.wipWait && wo.state === "waiting") wo.wipWait = { ...wo.wipWait, live: await countWip(db, orgId, wo.project, wo.wipWait.station), limit: wipLimit(await readProject(db, orgId, wo.project), wo.wipWait.station) };
+  const wipOverride = !wo.wipWait ? { allowed: false, reason: "This work order is not waiting for a full station." } : stop ? { allowed: false, reason: `${stop.reason || "Stopped"} (${stop.scope} ${stop.mode === "halt" ? "halted" : "killed"})` }
+    : !viewer || !isFactoryAdmin(st, viewer) ? { allowed: false, reason: "Only a Factory Admin can move a work order past a station's WIP limit." } : { allowed: true, reason: "As Factory Admin you can move it in anyway, with a reason." };
+  return { wo: { ...wo, version: row.version }, progress, allowed: { approve, moves, can: cans, wipOverride }, stop, route: route(st.catalog, project, wo.cls) };
 }
 
 /* ------------------------------------------------------------------------- conversations */

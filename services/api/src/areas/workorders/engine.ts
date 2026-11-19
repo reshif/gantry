@@ -21,6 +21,7 @@ import { ms } from "../../core/read/rows.js";
 import { readProject } from "../projects/store.js";
 import { afterFinish as trustAfterFinish, demoteForBreach, trustDecision, trustInForce } from "../trust/record.js";
 import { editedByPeople } from "./documents.js";
+import { conflict } from "../../core/errors.js";
 import { bayOf, buildWorkOrders, loadFlowDocs, pinnedProject, saveWo, stationIdOf, type Data, type Wo } from "./model.js";
 
 export interface Fx {
@@ -125,6 +126,8 @@ export async function acquireSlot(fx: Fx, w: Wo, project: Project): Promise<numb
   if (held.rows[0]) return Number(held.rows[0].id.split(":").pop());
   const limit = Math.max(0, Number(project.flow.slots) || 0);
   // The limit counts live holders, not slot numbers: after the limit is lowered, holders on numbers above it still count (S-33). The project's slot table is serialised so two dispatches cannot both see room for one.
+  // Lock order is always the WIP lock, then the slot lock, so a station entry and a slot dispatch can never wait on each other.
+  await lockWip(fx, project.id);
   await fx.tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [`slots:${fx.orgId}:${project.id}`]);
   const holders = Number((await fx.tx.query<{ n: string }>(`select count(*) n from slots where org_id = $1 and project_id = $2 and state = 'held'`, [fx.orgId, project.id])).rows[0]?.n ?? 0);
   if (holders >= limit) return null;
@@ -150,6 +153,14 @@ const PRIORITY_SQL = `case priority when 'P0' then 0 when 'P1' then 1 when 'P2' 
 
 /** Moves work waiting in the Queue bay onto free slots, in the deterministic order of spec 9.6 (priority, then age in the bay). Skips stopped scopes and rows another command holds. */
 export async function dispatchQueued(fx: Fx, projectId: string): Promise<string[]> {
+  await lockWip(fx, projectId);
+  const started = await dispatchSlots(fx, projectId);
+  // A place that freed (an order left, was parked, killed or declined, or the limit went up) lets the next order waiting for a full station in, under the same lock.
+  await promoteWip(fx, projectId);
+  return started;
+}
+
+async function dispatchSlots(fx: Fx, projectId: string): Promise<string[]> {
   const started: string[] = [];
   const project = await projectOf(fx, projectId);
   for (let guard = 0; guard < 50; guard++) {
@@ -185,6 +196,154 @@ export async function dispatchQueued(fx: Fx, projectId: string): Promise<string[
     if (!moved) break;
   }
   return started;
+}
+
+/* ----------------------------------------------------------------------------------- station WIP limits */
+
+/** The project's WIP limit for a station: 0 or unset means no limit. */
+export const wipLimitOf = (project: Pick<Project, "flow">, stationId: string): number => {
+  const n = Number(project.flow.stations[stationId]?.wip);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+};
+
+/** One lock per project for every decision about places: entering a station, a place freeing, a coding slot. Always taken before the slot lock. */
+export async function lockWip(fx: Pick<Fx, "tx" | "orgId">, projectId: string): Promise<void> {
+  await fx.tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [`wip:${fx.orgId}:${projectId}`]);
+}
+
+/**
+ * Live orders at a station: running or waiting there (on its gate, or finished and waiting for the next station to have room), not parked, declined, done or killed.
+ * Work waiting in the Queue bay for a coding slot has been let into Build, so it counts there. The order asking is never counted against itself.
+ */
+export async function wipLive(fx: Pick<Fx, "tx" | "orgId">, projectId: string, stationId: string, exceptId = ""): Promise<number> {
+  return countWip(fx.tx, fx.orgId, projectId, stationId, exceptId);
+}
+
+export async function countWip(db: Pick<Tx, "query">, orgId: string, projectId: string, stationId: string, exceptId = ""): Promise<number> {
+  const { rows } = await db.query<{ n: string }>(
+    `select count(*) n from work_orders where org_id = $1 and project_id = $2 and id <> $4
+       and ((position = $3 and state in ('running','waiting')) or ($3 = 'build' and position = 'queue' and state = 'parked' and data->>'bayFrom' = 'build'))`,
+    [orgId, projectId, stationId, exceptId],
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+/** Whether the order may enter the station now (the caller holds the WIP lock): null when it may, else how full the station is. */
+async function wipFull(fx: Fx, w: Wo, project: Project, stationId: string): Promise<{ live: number; limit: number } | null> {
+  const limit = wipLimitOf(project, stationId);
+  if (!limit) return null;
+  const live = await wipLive(fx, w.project, stationId, w.id);
+  return live >= limit ? { live, limit } : null;
+}
+
+const stationName = (fx: Fx, id: string): string => stationDef(fx.catalog, id)?.name ?? id;
+
+/** The order finished its station but the next one is full: it waits where it is, holding no coding slot, and goes in when a place frees. */
+async function holdForWip(fx: Fx, w: Wo, next: string, full: { live: number; limit: number }): Promise<void> {
+  const from = stationIdOf(fx.catalog, w);
+  const text = `Waiting: ${stationName(fx, next)} is full (${full.live}/${full.limit})`;
+  closeEntry(w, fx, `waiting for ${stationName(fx, next)}`);
+  w.state = "waiting";
+  w.data.wipWait = { station: next, since: fx.now.getTime(), live: full.live, limit: full.limit };
+  w.data.blockReason = text;
+  await releaseSlot(fx, w);
+  note(w, fx, "system", `${text}. ${w.id} waits at ${stationName(fx, from)} until a place frees.`);
+  ev(fx, w, "wo.wip.wait", { station: from, to: next, live: full.live, limit: full.limit, text });
+  fx.changes.add("floor");
+}
+
+/** Lets a waiting order into the station it was waiting for (a place freed, or a person overrode the limit). The caller saves the order. */
+async function enterFromWip(fx: Fx, w: Wo, next: string, how: { override?: { by: string; reason: string } }): Promise<void> {
+  const from = stationIdOf(fx.catalog, w);
+  const waited = fx.now.getTime() - Number((w.data.wipWait as { since?: number } | undefined)?.since ?? fx.now.getTime());
+  const project = await pinned(fx, w);
+  delete w.data.wipWait;
+  closeEntry(w, fx, "moved on");
+  await enterStation(fx, w, next, { project });
+  const live = await wipLive(fx, w.project, next);
+  const limit = wipLimitOf(await projectOf(fx, w.project), next);
+  if (how.override) {
+    note(w, fx, how.override.by, `Moved into ${stationName(fx, next)} past its WIP limit (${live}/${limit || "no limit"}): ${how.override.reason}`);
+    ev(fx, w, "wo.wip.override", { station: next, from, live, limit, by: how.override.by, text: how.override.reason, waitedMs: waited }, { category: "approvals" });
+  } else {
+    note(w, fx, "system", `A place freed at ${stationName(fx, next)} (${live}/${limit}); ${w.id} moved in after waiting ${Math.max(0, Math.round(waited / 1000))} s.`);
+    ev(fx, w, "wo.wip.enter", { station: next, from, live, limit, waitedMs: waited, text: `Entered ${stationName(fx, next)}` });
+  }
+  fx.changes.add("floor");
+}
+
+/** Where the order goes next on its own route, the way `advance` works it out. */
+async function nextOf(fx: Fx, w: Wo): Promise<string | null> {
+  const p = await pinned(fx, w);
+  return nextStationId(fx.catalog, p, { cls: w.cls, station: fx.catalog.stations.findIndex((s) => s.id === stationIdOf(fx.catalog, w)) });
+}
+
+/**
+ * Moves orders waiting for a full station in as places free: highest priority first, then the one that has waited longest. Runs under the project's WIP lock, so two
+ * orders cannot take the last place. Nobody is ever evicted: a lowered limit only stops new entries. Skips stopped scopes and rows another command holds.
+ */
+const promoting = new WeakSet<Fx>();
+export async function promoteWip(fx: Fx, projectId: string): Promise<string[]> {
+  const entered: string[] = [];
+  if (promoting.has(fx)) return entered; // a promotion that re-judges an order is already looping; it sees every place that frees
+  promoting.add(fx);
+  try {
+    return await promoteLoop(fx, projectId, entered);
+  } finally {
+    promoting.delete(fx);
+  }
+}
+
+async function promoteLoop(fx: Fx, projectId: string, entered: string[]): Promise<string[]> {
+  const any = await fx.tx.query(`select 1 from work_orders where org_id = $1 and project_id = $2 and state = 'waiting' and data ? 'wipWait' limit 1`, [fx.orgId, projectId]);
+  if (!any.rowCount) return entered;
+  await lockWip(fx, projectId);
+  const { toWo, WO_COLS } = await import("./model.js");
+  for (let guard = 0; guard < 100; guard++) {
+    const project = await projectOf(fx, projectId);
+    const { rows } = await fx.tx.query<{ id: string }>(
+      `select id from work_orders where org_id = $1 and project_id = $2 and state = 'waiting' and data ? 'wipWait' and coalesce(data->>'heldByKill', '') = ''
+       order by ${PRIORITY_SQL}, coalesce((data->'wipWait'->>'since')::bigint, 0), created_at, id for update skip locked`,
+      [fx.orgId, projectId],
+    );
+    let moved = false;
+    for (const c of rows) {
+      const { rows: [r] } = await fx.tx.query(`select ${WO_COLS} from work_orders where org_id = $1 and id = $2`, [fx.orgId, c.id]);
+      const w = toWo(r);
+      if (await coveringStop(fx.tx, fx.orgId, w)) continue;
+      const target = String((w.data.wipWait as { station?: string } | undefined)?.station ?? "");
+      const next = await nextOf(fx, w);
+      if (next !== target) {
+        // The route changed while it waited (a station was switched off): the order is re-judged from where it is.
+        delete w.data.wipWait;
+        w.data.blockReason = null;
+        await advance(fx, w, "system");
+        await saveWo(fx.tx, fx.orgId, w);
+        if (w.data.wipWait === undefined) entered.push(w.id);
+        moved = true;
+        break;
+      }
+      if (await wipFull(fx, w, project, target)) continue;
+      await enterFromWip(fx, w, target, {});
+      await saveWo(fx.tx, fx.orgId, w);
+      entered.push(w.id);
+      moved = true;
+      break;
+    }
+    if (!moved) break;
+  }
+  return entered;
+}
+
+/** A Factory Admin pushes one waiting order into its station past the limit (audited with the reason). */
+export async function overrideWip(fx: Fx, w: Wo, by: string, reason: string): Promise<{ station: string }> {
+  const wait = w.data.wipWait as { station?: string } | undefined;
+  if (w.state !== "waiting" || !wait?.station) throw conflict(`${w.id} is not waiting for a station to have room.`);
+  await lockWip(fx, w.project);
+  await enterFromWip(fx, w, wait.station, { override: { by, reason } });
+  await saveWo(fx.tx, fx.orgId, w);
+  await dispatchQueued(fx, w.project);
+  return { station: wait.station };
 }
 
 /* ----------------------------------------------------------------------------------- attempts (F3) */
@@ -322,6 +481,7 @@ export async function enterStation(fx: Fx, w: Wo, stationId: string, o: { projec
   delete w.data.bayAt;
   delete w.data.bayCause;
   delete w.data.failPhase;
+  delete w.data.wipWait;
   w.data.blockReason = null;
   w.data.failReason = null;
   if (stationId === "intake") {
@@ -407,7 +567,21 @@ export async function advance(fx: Fx, w: Wo, by: string, project?: Project): Pro
     }
     return finish(fx, w, by);
   }
+  // A full station keeps the order where it is (the places are counted under the project's WIP lock, so two orders cannot take the last one).
+  if (wipLimitOf(await projectOf(fx, w.project), next)) {
+    await lockWip(fx, w.project);
+    const full = await wipFull(fx, w, await projectOf(fx, w.project), next);
+    if (full) {
+      await holdForWip(fx, w, next, full);
+      await saveWo(fx.tx, fx.orgId, w); // the places are counted from the rows, so the move is written before the next order is let in
+      await dispatchQueued(fx, w.project);
+      return;
+    }
+  }
   await enterStation(fx, w, next, { project: p });
+  // The station it left has a place now (written first: the places are counted from the rows).
+  await saveWo(fx.tx, fx.orgId, w);
+  await promoteWip(fx, w.project);
 }
 
 export type GateCheck = { name: string; ok: boolean; warn?: boolean; note?: string };

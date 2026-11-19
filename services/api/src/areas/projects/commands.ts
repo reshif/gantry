@@ -292,13 +292,15 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
   }
   const flowVersion = await persistDraft(tx, org, draft, a.id, path);
   const saved = await done("project.config", before, after, `Saved ${path}.`, "config", flowVersion);
-  if (edit.kind !== "slots" || !(Number(after) > Number(before))) return saved;
-  // Raising the coding slots: queued work takes the free slots now, in priority then age order (S-32).
+  // Raising the coding slots, or raising or lifting a station's WIP limit: waiting work moves in now, in priority then age order (S-32).
+  const freed = edit.kind === "slots" ? Number(after) > Number(before) : edit.kind === "station-wip" ? Number(after) === 0 || Number(after) > Number(before) : false;
+  if (!freed) return saved;
   const fx = await newFx(tx, org, a.id, a.now);
   const started = await dispatchQueued(fx, projectId);
-  if (!started.length) return saved;
+  const entered = edit.kind === "station-wip" ? fx.events.filter((e) => e.type === "wo.wip.enter").map((e) => e.woId) : [];
+  if (!started.length && !entered.length) return saved;
   return {
-    ...saved, msg: `Saved ${path}. ${started.join(", ")} left the Queue for the new slot${started.length > 1 ? "s" : ""}.`,
+    ...saved, msg: edit.kind === "station-wip" ? `Saved ${path}. ${entered.join(", ")} moved in.` : `Saved ${path}. ${started.join(", ")} left the Queue for the new slot${started.length > 1 ? "s" : ""}.`,
     events: [...saved.events, ...fx.events], jobs: [...(saved.jobs ?? []), ...fx.jobs], changes: [...new Set([...(saved.changes ?? []), "workOrders", "floor", "home"])],
   };
 }

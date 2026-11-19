@@ -162,6 +162,7 @@ export async function parkInto(fx: Fx, w: Wo, bay: string, reason: string): Prom
   w.data.bayFrom = from;
   w.data.bayReason = reason;
   delete w.data.bayCause;
+  delete w.data.wipWait;
   w.data.bayAt = fx.now.getTime();
   // S-60: a person's decline, park or hold is a later word than the approval: the pending merge is dropped and its queued job cancelled, so nothing merges from a bay.
   const merging = w.data.merging as { prNumber?: number } | undefined;

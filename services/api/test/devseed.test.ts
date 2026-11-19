@@ -17,7 +17,7 @@ d("dev seed loader and read mappers (rows -> legacy shapes)", () => {
   const raw = seed.state as unknown as Record<string, Array<Record<string, any>>>;
   const S = { people: raw.people!, projects: raw.projects!, teams: raw.teams!, templates: raw.templates!, policies: raw.policies!, freezes: raw.freezes!, repos: raw.repos! };
   beforeAll(async () => {
-    t = await startApp({ seedNow: NOW, build: { routes: async () => undefined } });
+    t = await startApp({ keepWip: true, seedNow: NOW, build: { routes: async () => undefined } });
   });
   afterAll(() => t.close());
 

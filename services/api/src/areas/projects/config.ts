@@ -38,7 +38,7 @@ export function parseConfigEdit(path: string, value: unknown): ConfigEdit {
   if (a === "flow" && p.length === 2 && b === "classes") return { kind: "classes", value: parse(z.array(ClassSchema).min(1).max(100), value, "Classes") as WorkClass[] };
   if (a === "flow" && b === "stations" && c && p.length === 4) {
     if (d === "enabled") return { kind: "station-enabled", id: c, value: parse(z.boolean(), value, "On or off") };
-    if (d === "wip") return { kind: "station-wip", id: c, value: parse(z.number().int().min(1).max(30), value, "WIP limit") };
+    if (d === "wip") return { kind: "station-wip", id: c, value: parse(z.number().int().min(0).max(30), value, "WIP limit (0 is no limit)") };
   }
   if (a === "flow" && b === "gates" && c && p.length === 4 && d === "enabled") return { kind: "gate-enabled", id: c, value: parse(z.boolean(), value, "On or off") };
   if (a === "budget" && p.length === 2 && b === "monthly") return { kind: "budget-monthly", value: parse(z.number().min(0).max(10_000_000).nullable(), value, "Monthly budget") };

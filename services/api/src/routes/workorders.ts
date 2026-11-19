@@ -19,7 +19,7 @@ import { command, decide, policyState, refuse, type CommandSpec } from "../core/
 import { loadFlow, stateWithPinned } from "../areas/workorders/model.js";
 import { actionForGate, approveGate, parseGateId, rejectGate, requireGatePin } from "../areas/workorders/gates.js";
 import { addFollowup, decline, editBrief, postMessage, reclassify, submitWO } from "../areas/workorders/intake.js";
-import { dryRunMove, moveWO, park, reassign, retry, sendBack, setRecordSummary, unpark } from "../areas/workorders/moves.js";
+import { dryRunMove, moveWO, park, reassign, retry, sendBack, setRecordSummary, unpark, wipOverride } from "../areas/workorders/moves.js";
 import { setWoCap } from "../areas/workorders/budget.js";
 import { keyCreator } from "../areas/apikeys/store.js";
 import { woVersion, readWoRow } from "../areas/workorders/model.js";
@@ -413,6 +413,11 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     const { id } = Id.parse(req.params);
     const b = ReassignBody.parse(req.body);
     return command(req, spec(id, "wo.reassign", await scopeOf(req, id)), (tx, a) => reassign(tx, a, id, b.agent));
+  });
+  app.post("/api/v1/work-orders/:id/wip-override", async (req) => {
+    const { id } = Id.parse(req.params);
+    const b = z.object({ reason: z.string().max(1000).default("") }).parse(req.body ?? {});
+    return command(req, spec(id, "wo.move", await scopeOf(req, id)), (tx, a) => wipOverride(tx, a, id, b.reason));
   });
   app.post("/api/v1/work-orders/:id/retry", async (req) => {
     const { id } = Id.parse(req.params);
