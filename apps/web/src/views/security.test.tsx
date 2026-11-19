@@ -16,7 +16,7 @@ const ME = { person: { ...PEOPLE[0], email: "asha@acme.dev" }, session: { id: "s
 
 const SEC = {
   sso: { provider: "Okta", domain: "acme.dev", enforced: true, entity: "https://acme.okta.com/metadata" },
-  mfa: { policy: "admins", methods: ["totp"] }, sessionHours: 12, idleMin: 30, domains: ["acme.dev", "partner.example"], ipAllow: ["10.0.0.0/8"],
+  mfa: { policy: "everyone", methods: ["totp", "webauthn", "recovery"], required: true, waived: false }, sessionHours: 12, idleMin: 30, domains: ["acme.dev", "partner.example"], ipAllow: ["10.0.0.0/8"],
   restoreFactoryNeedsTwo: true, githubLogin: false, researchHosts: ["docs.example.com"], chatCapUsdPerDay: null, version: 3,
 };
 const NOW = Date.now();
@@ -107,7 +107,8 @@ describe("Security screen", () => {
     mount();
     expect(((await byId("sec-sso-domain")) as HTMLInputElement).value).toBe("acme.dev");
     expect((await byId("sec-sso-enforced") as HTMLInputElement).checked).toBe(true);
-    expect((await byId("sec-gh") as HTMLInputElement).checked).toBe(false);
+    expect((await byId("sec-gh-note")).textContent).toMatch(/GitHub sign-in is not offered/); // G-M9: no switch that can only produce a refusal
+    expect(document.getElementById("sec-gh")).toBeNull();
     expect(((await byId("sec-idle")) as HTMLInputElement).value).toBe("30");
     await waitFor(() => expect(text()).toContain("SSOEnforcedOkta"));
     expect(text()).toContain("30 min idle");
@@ -116,11 +117,22 @@ describe("Security screen", () => {
     expect(locked(await byId("sec-sso-domain"))).toBe(false);
   });
 
-  it("shows the MFA policy as recorded, with the methods, and keeps the not-enforced note as a tooltip", async () => {
+  it("S-127: shows the real MFA rule (required for everyone, TOTP, security key, recovery codes) with no dead choices, and the real enrolment count", async () => {
     setup();
     mount();
-    await waitFor(() => expect(text()).toContain("MFAadminstotp"));
-    expect(((await byId("sec-mfa-policy")) as HTMLSelectElement).title).toContain("Recorded only");
+    await waitFor(() => expect(text()).toContain("MFARequired for everyone"));
+    expect((await byId("sec-mfa-policy")).textContent).toBe("MFA required for everyone");
+    expect(document.querySelector("select#sec-mfa-policy")).toBeNull(); // the Nobody / Admins / Everyone radios did nothing: gone
+    expect(document.getElementById("sec-mfa-m-sms")).toBeNull(); // SMS was never a factor
+    expect((await byId("sec-mfa-methods")).textContent).toMatch(/Authenticator app.*Security key or passkey.*Recovery codes/);
+    expect((await byId("sec-mfa-status")).textContent).toMatch(/Required at every sign-in.*\d+ of \d+ people are known to hold a second factor/);
+  });
+
+  it("S-120: when the dev waiver is on the page says so instead of claiming MFA is required", async () => {
+    setup({ "GET /api/v1/security": () => ({ body: { ...SEC, mfa: { policy: "everyone", methods: ["totp"], required: true, waived: true }, version: 3 } }) });
+    mount();
+    await waitFor(() => expect(text()).toContain("MFAWaived (dev)"));
+    expect((await byId("sec-mfa-policy")).textContent).toBe("Waived on this development stack");
   });
 
   it("has the three prototype tabs, in the URL, and no Network, History or Emergency stop tabs", async () => {
@@ -150,10 +162,11 @@ describe("Security screen", () => {
     const calls = setup({ "PATCH /api/v1/security": () => ({ body: { ok: true, msg: "Saved.", version: ++v } }) });
     mount();
     fireEvent.change(await byId("sec-hours"), { target: { value: "8" } });
-    fireEvent.change(await byId("sec-mfa-policy"), { target: { value: "all" } });
+    fireEvent.change(await byId("sec-idle"), { target: { value: "20" } });
     fireEvent.click(await byId("sec-save"));
     await waitFor(() => expect(writes(calls)).toHaveLength(2));
-    expect(writes(calls).map((c) => [c.body.path, c.body.value])).toEqual([["mfa.policy", "all"], ["sessionHours", 8]]);
+    expect(writes(calls).map((c) => [c.body.path, c.body.value])).toEqual([["sessionHours", 8], ["idleMin", 20]]);
+    expect(writes(calls).every((c) => c.body.path !== "mfa.policy")).toBe(true); // MFA is not a setting
     expect(writes(calls).map((c) => c.ifMatch)).toEqual(["3", "4"]);
   });
 
@@ -257,7 +270,7 @@ describe("Security screen", () => {
     await waitFor(() => expect(document.querySelector(".sec-lock .lock-note")).toBeTruthy());
     expect(document.querySelector(".lock-note")?.textContent).toContain("Read-only for you");
     expect(locked(save)).toBe(true);
-    for (const id of ["sec-sso-provider", "sec-sso-domain", "sec-sso-enforced", "sec-gh", "sec-hours", "sec-idle", "sec-ip", "sec-two", "sec-kill-stepup"]) {
+    for (const id of ["sec-sso-provider", "sec-sso-domain", "sec-sso-enforced", "sec-hours", "sec-idle", "sec-ip", "sec-two", "sec-kill-stepup"]) {
       expect(locked(await byId(id))).toBe(true);
     }
     fireEvent.click(await byId("sec-sso-enforced"));
@@ -272,9 +285,9 @@ describe("Security screen", () => {
   it("lets a manager toggle a setting with the version they read, and guards the domain they signed in with", async () => {
     const calls = setup({ "PATCH /api/v1/security": () => ({ body: { ok: true, msg: "Saved.", version: 4 } }) });
     mount();
-    fireEvent.click(await byId("sec-gh"));
+    fireEvent.click(await byId("sec-kill-stepup"));
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]).toMatchObject({ method: "PATCH", path: "/api/v1/security", body: { path: "githubLogin", value: true } });
+    expect(writes(calls)[0]).toMatchObject({ method: "PATCH", path: "/api/v1/security", body: { path: "killNeedsStepUp", value: false } });
     const own = await byId("sec-dom-rm-acme_dev");
     expect(locked(own)).toBe(true);
     expect(own.getAttribute("data-reason")).toMatch(/lock you out/);
@@ -284,7 +297,7 @@ describe("Security screen", () => {
   it("sends the version it read with a setting change", async () => {
     const calls = setup({ "PATCH /api/v1/security": () => ({ body: { ok: true, msg: "Saved.", version: 4 } }) });
     mount();
-    fireEvent.click(await byId("sec-gh"));
+    fireEvent.click(await byId("sec-kill-stepup"));
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]!.ifMatch).toBe("3");
   });

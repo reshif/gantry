@@ -50,7 +50,7 @@ export default function PeopleView() {
   if (!me) return null;
   // Default deny: the directory is itself a right. The server refuses the reads too; this shows why instead of an empty screen.
   if (!view.allowed) return <div className="view view-people"><ViewHead title="People & teams" sub="" kicker="All lines" /><Empty id="people-no-access" icon="lock" title="No access to this sheet" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></div>;
-  const noMfa = people.filter((p) => !p.mfa).length;
+  const noMfa = people.filter((p) => p.mfa === false).length;
   const active = tab === "teams" ? "teams" : "people";
 
   return (
@@ -178,7 +178,7 @@ function PeopleTable({ people, teams, roles }: { people: Person[]; teams: Team[]
           ) },
           { key: "roles", label: "Roles", render: (p) => <div className="row">{p.roles.length ? roleChips(p.roles, roleName) : <Chip text="No roles" cls="warn" />}</div> },
           { key: "teams", label: "Teams", render: (p) => (p.teams ?? []).map((t) => teams.find((x) => x.id === t)?.name ?? t).join(", ") || "\u2014" },
-          { key: "mfa", label: "MFA", render: (p) => <Chip text={p.mfa ? "on" : "off"} cls={p.mfa ? "ok" : "warn"} /> },
+          { key: "mfa", label: "MFA", render: (p) => <Chip text={p.mfa === true ? "on" : p.mfa === false ? "off" : "unknown"} cls={p.mfa === true ? "ok" : "warn"} /> },
           { key: "oncall", label: "On call", render: (p) => (p.oncall ? <Chip text="on call" cls="info" /> : "\u2014") },
           { key: "status", label: "Status", sort: (p) => p.status, render: (p) => <Chip text={p.status} cls={p.status === "active" ? "ok" : p.status === "invited" ? "info" : "plain"} /> },
         ]}

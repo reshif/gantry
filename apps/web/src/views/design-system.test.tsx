@@ -15,7 +15,7 @@ describe("Sign-in card", () => {
     expect(container.querySelector(".auth-wrap, .auth-brand")).toBeNull();
     expect(screen.getByText("SOFTWARE FACTORY · SIGN-IN SHEET")).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Gantry");
-    expect(screen.getByText(/MFA is required for admins\./)).toBeTruthy();
+    expect(screen.getByText(/MFA is required for everyone\./)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Theme" })).toBeTruthy();
     expect(container.querySelector('a.skip[href="#main"]')).toBeTruthy();
   });
@@ -33,7 +33,8 @@ describe("Sign-in card", () => {
     unmount();
     const { container } = render(<SignIn config={null} needs="mfa_setup" />);
     expect(container.querySelector("main.signin > form.panel svg.brand-mark")).toBeTruthy();
-    expect(screen.getByText("Set up two-step sign-in")).toBeTruthy();
+    expect(screen.getByText("Two-step sign-in is required")).toBeTruthy();
+    expect(screen.queryByText(/Set up and sign in/)).toBeNull(); // no self-service enrolment from a password: only the one-time link
   });
   it("shows a sign-in failure as a bad callout", () => {
     render(<SignIn config={null} error="denied" />);

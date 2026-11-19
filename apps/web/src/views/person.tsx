@@ -138,11 +138,16 @@ function MemberDetail({ p, teams, projects, roles, perm, viewerId, roleName }: {
         sub={<>{`${p.title || "No title yet"} \u00b7 `}<span className="mono">{p.email}</span></>}
         actions={off
           ? <Btn label="Reactivate" id="ppl-reactivate" guard={perm} onClick={() => offboard.reactivate(p)} />
-          : <Btn label="Deactivate" kind="danger" id="ppl-deactivate" guard={offGuard} onClick={() => offboard.deactivate(p, offGuard)} />}
+          : (
+            <>
+              <Btn label="Reset authenticator" id="ppl-reset-mfa" guard={p.id === viewerId && perm.allowed ? lockd("Ask another administrator to reset your authenticator.") : perm} onClick={() => offboard.resetMfa(p, perm)} />
+              <Btn label="Deactivate" kind="danger" id="ppl-deactivate" guard={offGuard} onClick={() => offboard.deactivate(p, offGuard)} />
+            </>
+          )}
       />
       <StatRow id="ppl-stats">
         <Stat label="Status" value={p.status} tone={p.status === "active" ? "done" : "wait"} />
-        <Stat label="MFA" value={p.mfa ? "On" : "Off"} tone={p.mfa ? "done" : "wait"} />
+        <Stat label="MFA" value={p.mfa === true ? "Two-step on" : p.mfa === false ? "Not enrolled" : "Unknown"} sub={p.mfa === true ? "holds a second factor" : p.mfa === false ? "needs an enrolment link" : "until their next sign-in"} tone={p.mfa === true ? "done" : "wait"} />
         <Stat label="Open work orders" value={wos.pending ? "\u2026" : wos.failed && !held.length ? "n/a" : String(held.length)} sub="requested" />
         <Stat label="On call" value={p.oncall ? "Yes" : "No"} />
       </StatRow>

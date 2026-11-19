@@ -437,10 +437,10 @@ describe("Security", () => {
   it("toggles a setting with PATCH {path, value} and the settings version", async () => {
     const calls = setup({ "PATCH /api/v1/security": () => ({ body: { ok: true, msg: "Saved.", version: 8 } }) });
     mount(<SecurityView />);
-    fireEvent.click(await screen.findByLabelText("Allow GitHub sign-in", { selector: "input" }).catch(() => document.getElementById("sec-gh") as HTMLElement));
+    fireEvent.click(await byId("sec-kill-stepup"));
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
     const c = calls.find((x) => x.method === "PATCH")!;
-    expect(c.body).toEqual({ path: "githubLogin", value: false });
+    expect(c.body).toEqual({ path: "killNeedsStepUp", value: false });
     expect(c.headers["if-match"]).toBe("7");
   });
 

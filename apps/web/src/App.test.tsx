@@ -72,10 +72,10 @@ describe("signed out", () => {
     expect(screen.getByLabelText("Work email")).toBeTruthy();
   });
 
-  it("shows the guided two-step setup screen when the server says a Factory Admin needs a second factor", async () => {
-    mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "Factory Admins sign in with two steps.", needs: "mfa_setup", config: { demoAccounts: false } } }) });
+  it("shows the guided two-step screen when the server says a person has no second factor (MFA is for everyone)", async () => {
+    mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "Everyone signs in with two steps.", needs: "mfa_setup", config: { demoAccounts: false } } }) });
     render(<App />);
-    await screen.findByText("Set up two-step sign-in");
+    await screen.findByText("Two-step sign-in is required");
     expect(document.getElementById("auth-mfa-go")).toBeTruthy();
     expect(screen.queryByText("Continue with GitHub")).toBeNull();
   });

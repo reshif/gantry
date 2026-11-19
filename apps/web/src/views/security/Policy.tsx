@@ -13,9 +13,8 @@ import { inCidr, parseCidr } from "./cidr";
 import { useSet } from "./More";
 
 const PROVIDERS = ["Okta", "Azure AD", "OpenID Connect", "Google"];
-const MFA = [{ value: "off", label: "Off" }, { value: "admins", label: "Admins only" }, { value: "all", label: "Everyone" }];
 
-interface Vals { provider: string; domain: string; enforced: boolean; mfa: string; hours: string; idle: string; ip: string }
+interface Vals { provider: string; domain: string; enforced: boolean; hours: string; idle: string; ip: string }
 const lines = (t: string): string[] => t.split("\n").map((x) => x.trim()).filter(Boolean);
 
 export function PolicyPanels({ perm, sec, thisIp }: { perm: Decision; sec: SecuritySettings; thisIp: string }) {
@@ -23,7 +22,7 @@ export function PolicyPanels({ perm, sec, thisIp }: { perm: Decision; sec: Secur
   const ui = useUI();
   const set = useSet(sec);
   const form = useRef<HTMLFormElement>(null);
-  const base: Vals = { provider: sec.sso.provider, domain: sec.sso.domain, enforced: sec.sso.enforced, mfa: sec.mfa.policy, hours: String(sec.sessionHours), idle: String(sec.idleMin), ip: sec.ipAllow.join("\n") };
+  const base: Vals = { provider: sec.sso.provider, domain: sec.sso.domain, enforced: sec.sso.enforced, hours: String(sec.sessionHours), idle: String(sec.idleMin), ip: sec.ipAllow.join("\n") };
   const [d, setD] = useState<Vals | null>(null);
   const [err, setErr] = useState<Partial<Record<keyof Vals, string>>>({});
   const [busy, setBusy] = useState(false);
@@ -67,7 +66,6 @@ export function PolicyPanels({ perm, sec, thisIp }: { perm: Decision; sec: Secur
     if (cur.provider !== sec.sso.provider) todo.push(["sso.provider", cur.provider]);
     if (cur.domain.trim().toLowerCase() !== sec.sso.domain) todo.push(["sso.domain", cur.domain.trim().toLowerCase()]);
     if (cur.enforced !== sec.sso.enforced) todo.push(["sso.enforced", cur.enforced]);
-    if (cur.mfa !== sec.mfa.policy) todo.push(["mfa.policy", cur.mfa]);
     if (Number(cur.hours) !== sec.sessionHours) todo.push(["sessionHours", Number(cur.hours)]);
     if (Number(cur.idle) !== sec.idleMin) todo.push(["idleMin", Number(cur.idle)]);
     const ips = lines(cur.ip).map((x) => parseCidr(x)!.text);
@@ -101,7 +99,9 @@ export function PolicyPanels({ perm, sec, thisIp }: { perm: Decision; sec: Secur
               </div>
             </div>
             <div>
-              <Field label="MFA policy" htmlFor="sec-mfa-policy"><Select id="sec-mfa-policy" title="Recorded only: Gantry does not check it at sign-in, so enforce it in your identity provider." options={MFA} value={cur.mfa} disabled={!perm.allowed} onChange={(v) => upd({ mfa: v })} /></Field>
+              <Field label="MFA policy" htmlFor="sec-mfa-policy" hint="Not a setting: the server refuses any sign-in without a second factor, for every person.">
+                <div id="sec-mfa-policy" className="strong">{sec.mfa.waived ? "Waived on this development stack" : "MFA required for everyone"}</div>
+              </Field>
               <Field label={<>Session length (hours) <span className="muted">(required)</span></>} htmlFor="sec-hours" error={err.hours}><input id="sec-hours" aria-required="true" className="input" type="number" min={1} value={cur.hours} disabled={!perm.allowed} onChange={(e) => upd({ hours: e.target.value })} /></Field>
               <Field label={<>Idle timeout (minutes) <span className="muted">(required)</span></>} htmlFor="sec-idle" error={err.idle}><input id="sec-idle" aria-required="true" className="input" type="number" min={5} value={cur.idle} disabled={!perm.allowed} onChange={(e) => upd({ idle: e.target.value })} /></Field>
             </div>

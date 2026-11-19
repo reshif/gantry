@@ -133,35 +133,24 @@ export function ChatCapPanel({ perm, sec }: { perm: Decision; sec: SecuritySetti
 }
 
 
-/** GitHub sign-in, MFA methods, the fresh sign-in window and the kill step-up: the settings that save on change. */
+/** GitHub sign-in, the second factors in use (read-only), the fresh sign-in window and the kill step-up: the settings that save on change. */
 export function SignInExtras({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
   const set = useSet(sec);
   const peopleQ = usePeople();
   const people = peopleQ.data ? peopleQ.data : [];
-  const methods: Array<[string, string]> = [["totp", "Authenticator app (TOTP)"], ["webauthn", "Security key or passkey (WebAuthn)"], ["sms", "SMS code"]];
-  const enrolled = people.filter((p) => p.mfa).length;
+  const enrolled = people.filter((p) => p.mfa === true).length;
   return (
     <Panel title="More sign-in controls">
       <div className="form-grid" id="sec-extras">
-        <div className="toggle-row">
-          <label htmlFor="sec-gh"><span className="strong">Allow GitHub sign-in</span><span className="muted small">People can sign in with their linked GitHub account.</span></label>
-          <Toggle id="sec-gh" checked={sec.githubLogin} decision={perm} onChange={(v) => void set("githubLogin", v, v ? "GitHub sign-in allowed." : "GitHub sign-in turned off.")} />
-        </div>
-        <div className="field">
-          <div className="field-label">Allowed MFA methods</div>
-          <div className="check-grid">
-            {methods.map((m) => {
-              const on = sec.mfa.methods.includes(m[0]);
-              const last = on && sec.mfa.methods.length === 1;
-              return (
-                <label key={m[0]} className="check" htmlFor={`sec-mfa-m-${m[0]}`} title={last ? "Keep at least one method." : undefined}>
-                  <input type="checkbox" id={`sec-mfa-m-${m[0]}`} checked={on} disabled={!perm.allowed || last} onChange={(e) => void set("mfa.methods", e.target.checked ? [...sec.mfa.methods, m[0]] : sec.mfa.methods.filter((x) => x !== m[0]), `${m[1]}${e.target.checked ? " allowed." : " no longer allowed."}`)} />
-                  {m[1]}
-                </label>
-              );
-            })}
-          </div>
-          <div className="field-hint">{`SMS is weaker than an app or a key. At least one method stays on. ${enrolled} of ${people.length} people enrolled. The MFA policy above is recorded; Gantry does not check it at sign-in, so enforce it in your identity provider.`}</div>
+        <p className="small muted" id="sec-gh-note">GitHub sign-in is not offered: a login through GitHub carries no second factor in this setup, so Gantry would refuse it. Everyone signs in with single sign-on and a second factor.</p>
+        <div className="field" id="sec-mfa-methods">
+          <div className="field-label">Second factors accepted</div>
+          <ul className="small" style={{ margin: "4px 0" }}>
+            <li>Authenticator app (TOTP)</li>
+            <li>Security key or passkey (WebAuthn)</li>
+            <li>Recovery codes (single use)</li>
+          </ul>
+          <div className="field-hint" id="sec-mfa-status">{`${sec.mfa.waived ? "Waived on this development stack. " : "Required at every sign-in and every fresh sign-in. "}${peopleQ.data ? `${enrolled} of ${people.length} people are known to hold a second factor (the rest are unknown until their next sign-in, or not enrolled).` : ""} A first authenticator is set up only from a one-time link an administrator issues (People, Reset authenticator).`}</div>
         </div>
         <Field label="Fresh sign-in window" htmlFor="sec-stepup-window" hint="Kill, restore, policy, role, security and key changes need a sign-in within this time. Changing it needs a fresh sign-in and is audited.">
           <Select id="sec-stepup-window" value={String(sec.stepUpWindowMinutes ?? 15)} disabled={!perm.allowed} options={[5, 10, 15, 30, 60].map((x) => ({ value: String(x), label: `${x} minutes` }))} onChange={(v) => void set("stepUpWindowMinutes", Number(v), `A sign-in now counts as fresh for ${v} minutes.`)} />

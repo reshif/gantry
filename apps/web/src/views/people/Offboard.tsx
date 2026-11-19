@@ -172,6 +172,20 @@ export function useOffboard(args: { perm: Decision; projects: Project[]; roleNam
         actions: [{ label: "Cancel" }, { label: "Deactivate", kind: "danger", submit: true, id: "ppl-off-submit", guard, onClick: () => submit() }],
       });
     },
+    /** S-124: reset a person's authenticator. They are signed out everywhere and emailed a one-time link to set up a new one. */
+    resetMfa(p: Person, guard: Decision) {
+      ui.reasonDialog({
+        title: `Reset ${p.name}'s authenticator`,
+        sub: `${p.name} is signed out everywhere and emailed a one-time link (valid one hour) to set a password and a new authenticator. A second factor is never reset by the person it protects.`,
+        label: "Reason", placeholder: "Why is it being reset? For example: lost phone, identity checked by video call.", ok: "Reset and send link", min: 5, guard,
+        onOk: async (reason) => {
+          const r = await ops.resetMfa(p.id, reason);
+          if (!r.ok) return r;
+          ui.toast(`${p.name}'s authenticator was reset. A one-time link was emailed.`, "ok");
+          return { ok: true };
+        },
+      });
+    },
     reactivate(p: Person) {
       ui.reasonDialog({
         title: `Reactivate ${p.name}`,
