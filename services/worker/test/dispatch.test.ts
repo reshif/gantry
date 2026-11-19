@@ -44,7 +44,8 @@ d("attempt.dispatch and run.result", () => {
     const { runId } = await w.workOrderAt("WO-9040", { agent: "ag-build" });
     await w.drain();
     const data = (await w.q(`select data from runs where id = $1`, [runId]))[0].data;
-    expect(data.limits).toMatchObject({ turns: 150, wallClockSeconds: 7200 });
+    // frozen with the agent's per-run budget as the cost limit (G-R4), so the spec and the meter read this and nothing live
+    expect(data.limits).toMatchObject({ turns: 150, wallClockSeconds: 7200, costUsd: expect.any(Number) });
     expect(data.wallClockSeconds).toBe(7200);
     // a one-off raise recorded on the attempt wins for that attempt only
     const { runId: r2, attemptId, fencing } = await w.workOrderAt("WO-9041", { agent: "ag-build", dispatch: false });
@@ -52,6 +53,17 @@ d("attempt.dispatch and run.result", () => {
     await w.enqueue("attempt.dispatch", { woId: "WO-9041", station: "build", attemptId, fencing }, { dedupeKey: `attempt:${attemptId}` });
     await w.drain();
     expect((await w.q(`select data from runs where id = $1`, [r2]))[0].data).toMatchObject({ wallClockSeconds: 10800, limits: { turns: 150, wallClockSeconds: 10800 } });
+  });
+
+  it("G-R4: a run with no agent still records the station override (turns, time, cost) at dispatch", async () => {
+    await w.q(`insert into repo_config (org_id, repo_id, data) values ($1,'payments-api','{"baseSha":"${"1".repeat(40)}"}') on conflict (org_id, repo_id) do update set data = excluded.data`, [w.orgId]);
+    await w.q(`insert into flow_versions (org_id, project_id, version, doc, note, published_at, published_by) select org_id, project_id, version + 100, jsonb_set(doc, '{stations,build,runLimits}', '{"turns":150,"wallClockSeconds":5400,"costUsd":7.5}'), 'test', now(), 'test' from flow_versions where org_id = $1 and project_id = 'payments' and version = (select current_flow_version from projects where org_id = $1 and id = 'payments')`, [w.orgId]);
+    await w.q(`update projects set current_flow_version = current_flow_version + 100 where org_id = $1 and id = 'payments'`, [w.orgId]);
+    const { runId } = await w.workOrderAt("WO-9050", { agent: "" });
+    await w.drain();
+    const data = (await w.q(`select data from runs where id = $1`, [runId]))[0].data;
+    expect(data.limits).toEqual({ turns: 150, wallClockSeconds: 5400, costUsd: 7.5 });
+    expect(data.wallClockSeconds).toBe(5400);
   });
 
   it("seeds the pull request's head together with the target branch head, and records both on the run so the agents can diff offline", async () => {

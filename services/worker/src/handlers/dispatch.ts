@@ -25,18 +25,23 @@ interface Pinned {
 /** Pins the agent version that will run (spec 13.1: agent version, skill versions, instruction hash, harness, model) and records it on the attempt. */
 async function pinTuple(tx: Tx, a: AttemptInfo): Promise<Pinned> {
   const agentId = typeof a.attemptData.agent === "string" ? a.attemptData.agent : "";
-  const none: Pinned = { tupleId: null, model: null, adapter: "stub", wallClockSeconds: 3600, limits: { turns: 40, wallClockSeconds: 3600 }, record: null };
-  if (!agentId) return none;
-  const found = (await tx.query<{ live_version: number | null; data: Record<string, unknown> }>(`select live_version, data from agents where org_id = $1 and id = $2`, [a.orgId, agentId])).rows[0];
+  const found = agentId ? (await tx.query<{ live_version: number | null; data: Record<string, unknown> }>(`select live_version, data from agents where org_id = $1 and id = $2`, [a.orgId, agentId])).rows[0] : undefined;
+  // The run's limits are frozen here (runs.data.limits): the spec, the meter and the watchdog all read what is written now. A run with no agent or no agent version still honours the station override.
+  const limitsFor = async (body: Record<string, unknown>, data: Record<string, unknown>): Promise<Pick<Pinned, "wallClockSeconds" | "limits">> => {
+    const r = await loadRunLimits(tx, { orgId: a.orgId, projectId: a.projectId, station: a.station, attemptData: a.attemptData }, { body, data, budgetUsd: body.budget ?? data.budget });
+    return { wallClockSeconds: r.wallClockSeconds, limits: { turns: r.turns, wallClockSeconds: r.wallClockSeconds, ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) } };
+  };
+  const none = async (): Promise<Pinned> => ({ tupleId: null, model: null, adapter: "stub", ...(await limitsFor({}, found?.data ?? {})), record: null });
+  if (!agentId) return none();
   // An eval case runs the version (and model) the person picked for the run, which need not be the live one (spec 13.2); real work always runs the live version.
   const evalVersion = a.attemptData.eval && Number.isInteger(a.attemptData.agentVersion) ? Number(a.attemptData.agentVersion) : null;
   const evalModel = a.attemptData.eval && typeof a.attemptData.model === "string" && a.attemptData.model !== "" ? a.attemptData.model : null;
   const ag = found ? { ...found, live_version: evalVersion ?? found.live_version } : found;
-  if (!ag || ag.live_version === null) return none;
+  if (!ag || ag.live_version === null) return none();
   const v = (await tx.query<{ body: Record<string, unknown>; harness_version: string; instruction_hash: string | null; model_id: string | null }>(
     `select body, harness_version, instruction_hash, model_id from agent_versions where org_id = $1 and agent_id = $2 and version = $3`, [a.orgId, agentId, ag.live_version],
   )).rows[0];
-  if (!v) return none;
+  if (!v) return none();
   // Spec 10.2: the four-layer composition (factory base, project overlay, this agent version, the repository's guidelines at the pinned commit) and the
   // skills bundle are composed now and pinned, so the version tuple's instruction hash names the whole text the run is given.
   const commit = a.repoId ? await resolveSeedCommit(tx, a.orgId, a.woId, a.repoId).catch(() => null) : null;
@@ -59,11 +64,9 @@ async function pinTuple(tx: Tx, a: AttemptInfo): Promise<Pinned> {
     [a.orgId, id, agentId, ag.live_version, JSON.stringify(skillVersions), instruction, v.harness_version, model ?? ""],
   );
   await tx.query(`update attempts set tuple_id = $3, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, a.attemptId, id]);
-  // The watchdog enforces the same wall clock the run is told: attempt one-off raise, station override, agent version, default.
-  const resolved = await loadRunLimits(tx, { orgId: a.orgId, projectId: a.projectId, station: a.station, attemptData: a.attemptData }, { body: v.body, data: ag.data });
-  const wall = resolved.wallClockSeconds;
+  const frozen = await limitsFor(v.body, ag.data);
   const record = run ? { instructionPin: run.pin, promptManifest: run.manifest, composed: { hash: run.composed.hash, layers: run.composed.layers.map((l) => ({ name: l.name, version: l.version, hash: l.hash })), skills: run.skills.map((x) => ({ id: x.id, version: x.version })), agentVersion: ag.live_version, tupleId: id } } : null;
-  return { tupleId: id, model: model && model !== "" ? model : null, adapter: model ? "claude" : "stub", wallClockSeconds: wall, limits: { turns: resolved.turns, wallClockSeconds: resolved.wallClockSeconds, ...(resolved.costUsd !== undefined ? { costUsd: resolved.costUsd } : {}) }, record };
+  return { tupleId: id, model: model && model !== "" ? model : null, adapter: model ? "claude" : "stub", ...frozen, record };
 }
 
 /** Records the run, pins the tuple and issues a fresh per-run token (any earlier token of the run is revoked). All in one transaction. */

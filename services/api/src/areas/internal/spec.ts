@@ -2,7 +2,7 @@ import type { Queryable } from "@gantry/db";
 import { REPO_CONTEXT_LAYER_NAME, RepoContext, checkMatches, renderRepoContext } from "@gantry/domain";
 import { compactPrevious, type StationResultRow } from "./previous.js";
 import { agentConfig } from "./metering.js";
-import { loadRunLimits } from "../agents/run-limits.js";
+import { runLimitsOf } from "../agents/run-limits.js";
 import { testCommandRules } from "../onboarding/testcmd.js";
 import { dialogueHandoff, latestDocuments } from "../workorders/documents.js";
 import { commentsHandoff } from "../workorders/doccollab.js";
@@ -153,7 +153,7 @@ export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string):
   // A run's rails come from the agent version it was pinned to. The agent's working copy (a draft) is only read for a run with no version at all, so an unpromoted edit never widens a live run.
   const draft = Object.keys(agent.body).length ? {} : agent.data;
   // Each limit resolves on its own: the attempt's one-off raise, the project's station override, the agent version, then the default. Cost: the agent's per-run budget when nothing sets one.
-  const lim = await loadRunLimits(db, c, agent);
+  const lim = await runLimitsOf(db, c, agent);
   // An approved research plan's budget caps the run too (the lower of the two wins).
   const planBudget = planOf(c.woData)?.status === "approved" ? (planOf(c.woData)?.budgetUsd ?? undefined) : undefined;
   const costUsd = lim.costUsd !== undefined && planBudget ? Math.min(lim.costUsd, planBudget) : (planBudget ?? lim.costUsd);

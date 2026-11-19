@@ -327,6 +327,8 @@ export async function enterStation(fx: Fx, w: Wo, stationId: string, o: { projec
   delete w.data.bayCause;
   delete w.data.failPhase;
   delete w.data.limitStop;
+  // A pending raise is for the next attempt at its own station only.
+  if (w.data.limitRaise && (w.data.limitRaise as { station?: string }).station !== stationId) w.data.limitRaise = undefined;
   w.data.blockReason = null;
   w.data.failReason = null;
   if (stationId === "intake") {
@@ -671,7 +673,9 @@ export { bayOf, stationIdOf };
 /* ----------------------------------------------------------------------------------- shared helpers for the commands */
 
 /** Cancels the work order's live attempts (send-back, park, decline, stop). The run tokens are revoked in the same transaction, so the edge refuses the run on its next call and the reaper removes the sandbox. */
-export async function cancelAttempts(fx: Fx, w: Pick<Wo, "id">, reason: string): Promise<number> {
+export async function cancelAttempts(fx: Fx, w: Pick<Wo, "id"> & { data?: Record<string, unknown> }, reason: string): Promise<number> {
+  // A pending one-off limit raise belongs to the attempt the person's retry starts; a send-back, redo, park, decline or any other cancel drops it.
+  if (w.data) w.data.limitRaise = undefined;
   const r = await fx.tx.query(
     `update attempts set state = 'cancelled', outcome = $4, ended_at = $3, updated_at = now(), version = version + 1 where org_id = $1 and wo_id = $2 and state in ('queued','running')`,
     [fx.orgId, w.id, fx.now, reason],

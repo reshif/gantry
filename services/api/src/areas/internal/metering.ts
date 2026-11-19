@@ -1,7 +1,7 @@
 import { planOf } from "../workorders/research.js";
 import type { Queryable } from "@gantry/db";
 import type { RunCtx } from "./context.js";
-import { loadRunLimits } from "../agents/run-limits.js";
+import { runLimitsOf } from "../agents/run-limits.js";
 
 import { costMicros, priceBookAt, type Price, type PriceBook, type Usage } from "../models/prices.js";
 
@@ -38,7 +38,7 @@ export async function loadLimits(db: Queryable, c: RunCtx): Promise<Limits> {
   const woMicros = toMicros(c.woData.budgetUsd) ?? projectWoMicros ?? toMicros(extra.woBudgetUsd);
   // The per-run cap is the run's resolved cost limit (one-off raise, station override, agent limits, else the agent's budget).
   const agent = await agentConfig(db, c);
-  const runMicros = toMicros((await loadRunLimits(db, c, agent)).costUsd);
+  const runMicros = toMicros((await runLimitsOf(db, c, agent)).costUsd);
   return { projectMicros, woMicros, runMicros };
 }
 

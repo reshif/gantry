@@ -2,6 +2,7 @@ import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { loadRunLimits, resolveRunLimits } from "../src/areas/agents/run-limits.js";
 import { loadRunCtx } from "../src/areas/internal/context.js";
 import { composeRunSpec } from "../src/areas/internal/spec.js";
+import { loadLimits } from "../src/areas/internal/metering.js";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 import { world } from "./flow-helpers.js";
 
@@ -171,5 +172,111 @@ d("run limits: agent version, station override, one-off retry raise", () => {
     const a3 = (await w.liveAttempt(id))!;
     expect((await q(`select data from attempts where id = $1`, [a3.id]))[0].data.limitRaise).toBeUndefined();
     expect((await q(`select data from work_orders where id = $1`, [id]))[0].data.limitRaise).toBeUndefined();
+  });
+
+  /** The work order's live attempt fails and the run it had is on record with the limits it was dispatched with. */
+  async function failWith(id: string, error: { code: string; msg: string }, limits = '{"limits":{"turns":40,"wallClockSeconds":3600}}') {
+    const att = (await w.liveAttempt(id))!;
+    await q(`insert into runs (org_id, id, attempt_id, wo_id, data) values ($1,$2,$3,$4,$5::jsonb)`, [t.orgId, `run-${att.id}`, att.id, id, limits]);
+    await w.apply(att, { status: "failed", error });
+    return att;
+  }
+  const retryWith = (id: string, limits: object, who = ADMIN) => w.call(who, "POST", `/api/v1/work-orders/${id}/retry-with-limits`, { limits });
+  const raiseOnWo = async (id: string) => (await q(`select data->'limitRaise' as r from work_orders where id = $1`, [id]))[0].r;
+  const runCapHalt = (id: string, n = 1) => q(`insert into stops (org_id, id, scope_type, wo_id, mode, reason, cause, set_by) values ($1,$2,'wo',$3,'halt','Budget reached: the run has spent $2.00 of $2.00 (the run cost limit).','budget','system')`, [t.orgId, `wo:${id}:${n}`, id]);
+
+  it("G-R1: a raise never lowers any field, whether or not a limit stopped the run", async () => {
+    const id = await w.atStation("research", "lower");
+    await failWith(id, { code: "tests", msg: "boom" });
+    const r = await retryWith(id, { turns: 5, wallClockSeconds: 60 });
+    expect(r.status, JSON.stringify(r.body)).toBe(422);
+    expect(JSON.stringify(r.body)).toMatch(/can only raise|down from/);
+    expect((await w.get(id)).state).toBe("failed");
+    expect((await retryWith(id, { turns: 40 })).status).toBe(422); // equal to what applies: nothing is higher
+    // one limit stopped it: raising that one does not license lowering another
+    const id2 = await w.atStation("research", "lower2");
+    await failWith(id2, { code: "max_turns", msg: "turn limit 40 reached" });
+    const r2 = await retryWith(id2, { turns: 80, wallClockSeconds: 60 });
+    expect(r2.status, JSON.stringify(r2.body)).toBe(422);
+    expect(await q(`select 1 from attempts where wo_id = $1 and data ? 'limitRaise'`, [id2])).toHaveLength(0);
+    // a higher value in every field it names is fine
+    expect((await retryWith(id2, { turns: 80, wallClockSeconds: 7200 })).status).toBe(200);
+  });
+
+  it("G-R2: a cost raise keeps the halt while the work order is still over its own cap, and says so", async () => {
+    const id = await w.atStation("research", "cost over wo cap");
+    const att = (await w.liveAttempt(id))!;
+    await q(`insert into runs (org_id, id, attempt_id, wo_id, data) values ($1,$2,$3,$4,'{}')`, [t.orgId, `run-${att.id}`, att.id, id]);
+    await q(`insert into run_usage (org_id, run_id, attempt_id, wo_id, model_id, cost_micros) values ($1,$2,$3,$4,'m',3000000)`, [t.orgId, `run-${att.id}`, att.id, id]);
+    await q(`update work_orders set data = data || '{"budgetUsd":2}'::jsonb where id = $1`, [id]);
+    await runCapHalt(id);
+    const r = await retryWith(id, { costUsd: 60 });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.running).toBe(false);
+    expect(r.body.msg).toMatch(/stays halted/);
+    expect(r.body.msg).not.toMatch(/running again/);
+    expect((await q(`select lifted_at from stops where wo_id = $1`, [id]))[0].lifted_at).toBeNull();
+  });
+
+  it("a raise beside an active kill does not claim the work order is running", async () => {
+    const id = await w.atStation("research", "kill and run cap");
+    await runCapHalt(id);
+    await q(`insert into stops (org_id, id, scope_type, wo_id, mode, reason, cause, set_by) values ($1,$2,'wo',$3,'kill','manual kill','manual','p-asha')`, [t.orgId, `wo:${id}:2`, id]);
+    const r = await retryWith(id, { costUsd: 60 });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.running).toBe(false);
+    expect(r.body.msg).toMatch(/stays stopped/);
+    expect(r.body.msg).not.toMatch(/running again/);
+    expect((await q(`select lifted_at from stops where id = $1`, [`wo:${id}:2`]))[0].lifted_at).toBeNull();
+  });
+
+  it("G-R3: a pending raise is dropped by a send-back, never lands on a later attempt, and a merge retry refuses a raise", async () => {
+    const id = await w.atStation("research", "stale raise");
+    await runCapHalt(id);
+    const ok = await retryWith(id, { costUsd: 60 });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(await raiseOnWo(id)).toMatchObject({ station: "research", limits: { costUsd: 60 } });
+    expect((await w.events("wo.limit.raise")).at(-1)!.after).toMatchObject({ boundTo: { station: "research", nextAttemptOnly: true } });
+    expect((await w.call(ADMIN, "POST", `/api/v1/work-orders/${id}/send-back`, { toStation: "intake", note: "redo" })).status).toBe(200);
+    expect(await raiseOnWo(id)).toBeNull();
+    await q(`update work_orders set position = 'research', state = 'failed' where id = $1`, [id]);
+    expect((await w.call("p-meera", "POST", `/api/v1/work-orders/${id}/retry`, {})).status).toBe(200);
+    const a = (await w.liveAttempt(id))!;
+    expect((await q(`select data->'limitRaise' as r from attempts where id = $1`, [a.id]))[0].r).toBeNull();
+    // a raise is bound to its own station: entering another one drops it
+    const id2 = await w.atStation("research", "other station");
+    await q(`update work_orders set data = data || '{"limitRaise":{"station":"build","limits":{"turns":90}}}'::jsonb where id = $1`, [id2]);
+    await w.call(ADMIN, "POST", `/api/v1/work-orders/${id2}/send-back`, { toStation: "research", note: "again" });
+    expect((await q(`select data->'limitRaise' as r from attempts where wo_id = $1 order by created_at desc limit 1`, [id2]))[0].r).toBeNull();
+    // a merge retry starts no run: it refuses the raise rather than answering 200 and dropping it
+    const id3 = await w.atStation("research", "merge bay");
+    await q(`update work_orders set position = 'person', state = 'parked', data = data || '{"bayCause":"merge","bayFrom":"review","bayReason":"merge blocked","bayAt":1}'::jsonb where id = $1`, [id3]);
+    const m = await retryWith(id3, { turns: 90 });
+    expect(m.status, JSON.stringify(m.body)).toBe(422);
+    expect(JSON.stringify(m.body)).toMatch(/no agent run/);
+  });
+
+  it("G-R4: a run's limits are frozen at dispatch; a later station edit changes neither the spec nor the meter's cap", async () => {
+    const id = await w.atStation("research", "mid-run");
+    const att = (await w.liveAttempt(id))!;
+    const run = `run-${att.id}`;
+    await q(`insert into runs (org_id, id, attempt_id, wo_id, model_id, data) values ($1,$2,$3,$4,'claude-opus-5-5',$5::jsonb)`, [t.orgId, run, att.id, id, JSON.stringify({ adapter: "stub", wallClockSeconds: 3600, limits: { turns: 40, wallClockSeconds: 3600, costUsd: 2 } })]);
+    const ctx = async () => (await loadRunCtx(t.db.admin, t.orgId, run))!;
+    const before: any = await composeRunSpec(t.db.admin, await ctx(), "http://127.0.0.1:1");
+    expect(before.limits).toEqual({ turns: 40, wallClockSeconds: 3600, costUsd: 2 });
+    expect((await loadLimits(t.db.admin, await ctx())).runMicros).toBe(2_000_000);
+    const e = await setStation("flow.stations.research.runLimits", { turns: 200, wallClockSeconds: 14400, costUsd: 50 });
+    expect(e.status, JSON.stringify(e.body)).toBe(200);
+    const after: any = await composeRunSpec(t.db.admin, await ctx(), "http://127.0.0.1:1");
+    expect(after.limits).toEqual({ turns: 40, wallClockSeconds: 3600, costUsd: 2 });
+    expect((await loadLimits(t.db.admin, await ctx())).runMicros).toBe(2_000_000);
+    await setStation("flow.stations.research.runLimits", { turns: null, wallClockSeconds: null, costUsd: null });
+  });
+
+  it("G-R5: the agent read carries the limits of the version on the floor next to the working copy's", async () => {
+    await save("ag-research", { limits: { turns: 77 } });
+    const ag = (await w.call(ADMIN, "GET", "/api/v1/agents")).body.find((a: any) => a.id === "ag-research");
+    expect(ag.limits).toEqual({ turns: 77 });
+    expect(ag.liveLimits).toEqual({});
   });
 });

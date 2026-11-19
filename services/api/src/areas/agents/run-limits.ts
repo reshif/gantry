@@ -80,3 +80,15 @@ export async function loadRunLimits(db: Queryable, c: { orgId: string; projectId
   const oneOff = (c.attemptData.limitRaise as { limits?: unknown } | undefined)?.limits;
   return resolveRunLimits({ oneOff, station: await stationRunLimits(db, c.orgId, c.projectId, c.station), agent: agent.body.limits ?? draft.limits, agentBudget: agent.budgetUsd });
 }
+
+/** The limits written on the run when it was dispatched (runs.data.limits), or null for a run that has none. A run is bound by these for its whole life: a later edit of the station or the agent changes the next run, never this one. */
+export function frozenRunLimits(runData: Record<string, unknown>): { turns: number; wallClockSeconds: number; costUsd?: number } | null {
+  const l = runData.limits as Record<string, unknown> | undefined;
+  const turns = int(l?.turns), wallClockSeconds = int(l?.wallClockSeconds), costUsd = usd(l?.costUsd);
+  return turns && wallClockSeconds ? { turns, wallClockSeconds, ...(costUsd ? { costUsd } : {}) } : null;
+}
+
+/** What the spec and the meter read: the run's frozen limits, else (a run dispatched before they were recorded) the live resolution. */
+export async function runLimitsOf(db: Queryable, c: { orgId: string; projectId: string; station: string; attemptData: Record<string, unknown>; runData: Record<string, unknown> }, agent: { body: Record<string, unknown>; data: Record<string, unknown>; budgetUsd?: unknown }): Promise<{ turns: number; wallClockSeconds: number; costUsd?: number }> {
+  return frozenRunLimits(c.runData) ?? (await loadRunLimits(db, c, agent));
+}
