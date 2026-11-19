@@ -134,4 +134,16 @@ d("sandbox teardown order", () => {
     // the workspace survives the sweep that just ran (evidence), unlike an ordinary orphan
     expect(w.launcher.calls.filter((c) => c.op === "stop" && c.runId === a.runId && c.keepWorkspace === "false").length).toBe(0);
   });
+
+  it("R1: an evidence run whose container is still running loses the container, not the workspace", async () => {
+    const a = await w.workOrderAt("WO-9321", { station: "research", repo: null });
+    await w.drain();
+    await w.q(`update runs set state = 'stopped', data = data || '{"blocker":{"code":"host_disk_critical"}}'::jsonb where id = $1`, [a.runId]);
+    await w.q(`update attempts set state = 'failed' where id = $1`, [a.attemptId]);
+    await w.enqueue("reaper.sweep", {}, { dedupeKey: "sbx-ev" });
+    await w.drain();
+    const stops = w.launcher.calls.filter((c) => c.op === "stop" && c.runId === a.runId);
+    expect(stops.length).toBeGreaterThan(0);
+    expect(stops.every((c) => c.keepWorkspace === "true")).toBe(true);
+  });
 });

@@ -62,11 +62,20 @@ d("flow reads: list, traveler, floor and replay, record, home", () => {
     home = (await w.call("p-asha", "GET", "/api/v1/home")).body.sections.attention;
     expect(home.map((a) => a.id)).toContain(`hm-att-wait-${ids.run}`);
     await q(`update runs set data = jsonb_set(jsonb_set(data, '{dispatchWait,label}', '"Waiting: host disk low"'), '{dispatchWait,since}', to_jsonb($1::text)) where id = 'run-r1-wait'`, [new Date().toISOString()]);
-    expect((await w.call("p-asha", "GET", `/api/v1/work-orders/${ids.run}`)).body.wait).toMatchObject({ label: "Waiting: host disk low", kind: "disk" });
+    await q(`update runs set data = jsonb_set(data, '{dispatchWait,reason}', '"host free disk is 3.0 GB, under the 20.0 GB floor"') where id = 'run-r1-wait'`);
+    const diskWo = (await w.call("p-asha", "GET", `/api/v1/work-orders/${ids.run}`)).body;
+    expect(diskWo.wait).toMatchObject({ label: "Waiting: host disk low", kind: "disk", reason: null });
+    expect(JSON.stringify(diskWo.wait)).not.toMatch(/\d GB/);
     home = (await w.call("p-asha", "GET", "/api/v1/home")).body.sections.attention;
-    expect(home.find((a) => a.id === `hm-att-wait-${ids.run}`)).toMatchObject({ title: expect.stringContaining("host disk low") });
+    expect(home.find((a: any) => a.id === `hm-att-wait-${ids.run}`)).toMatchObject({ title: expect.stringContaining("host disk low"), sub: expect.stringContaining("3.0 GB") });
     await q(`update runs set data = '{"blocker":{"code":"host_disk_critical","label":"Host disk critically low"}}'::jsonb, ended_at = now() where id = 'run-r1-wait'`);
     expect((await w.call("p-asha", "GET", `/api/v1/work-orders/${ids.run}`)).body.wait).toMatchObject({ label: "Host disk critically low", kind: "disk_critical" });
+    // the list and the floor card carry the label only
+    await q(`update runs set ended_at = null, data = '{"dispatchWait":{"label":"Waiting for a run slot (1 queued)","reason":"x","since":"2020-01-01T00:00:00Z"}}'::jsonb where id = 'run-r1-wait'`);
+    const listed = (await w.call("p-asha", "GET", "/api/v1/projects/payments/work-orders")).body.items.find((x: any) => x.id === ids.run);
+    expect(listed.wait).toEqual({ label: "Waiting for a run slot (1 queued)", kind: "slot" });
+    const floor = (await w.call("p-asha", "GET", "/api/v1/projects/payments/floor")).body;
+    expect(floor.workOrders.find((x: any) => x.id === ids.run).wait.kind).toBe("slot");
     await q(`delete from runs where id = 'run-r1-wait'`);
   });
 

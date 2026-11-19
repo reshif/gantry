@@ -55,7 +55,7 @@ export async function listWorkOrders(db: Queryable, orgId: string, projectId: st
   const built = await buildWorkOrders(db, orgId, st.catalog, st.projects, { ids, light: true });
   const order = new Map(ids.map((id, i) => [id, i]));
   built.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-  return { items: built, next: rows.length > limit ? Buffer.from(String(offset + limit)).toString("base64url") : null, total };
+  return { items: await attachWaits(db, orgId, built), next: rows.length > limit ? Buffer.from(String(offset + limit)).toString("base64url") : null, total };
 }
 
 /* ------------------------------------------------------------------------- traveler */
@@ -72,6 +72,21 @@ export interface Traveler {
 
 export interface RunWait { label: string; reason: string | null; since: string | null; kind: "slot" | "disk" | "disk_critical" }
 
+/** The wait label of each listed work order whose latest run is waiting or was stopped for host disk (label and kind only: the card shows it, the figures stay off it). */
+export async function attachWaits<T extends { id: string }>(db: Queryable, orgId: string, wos: T[]): Promise<Array<T & { wait?: { label: string; kind: RunWait["kind"] } }>> {
+  if (!wos.length) return wos;
+  const { rows } = await db.query<{ wo_id: string; label: string | null; blocker: string | null; ended: boolean }>(
+    `select distinct on (wo_id) wo_id, data->'dispatchWait'->>'label' as label, data->'blocker'->>'code' as blocker, ended_at is not null as ended from runs where org_id = $1 and wo_id = any($2::text[]) order by wo_id, created_at desc`,
+    [orgId, wos.map((w) => w.id)],
+  );
+  const by = new Map<string, { label: string; kind: RunWait["kind"] }>();
+  for (const r of rows) {
+    if (r.blocker === "host_disk_critical") by.set(r.wo_id, { label: "Host disk critically low", kind: "disk_critical" });
+    else if (r.label && !r.ended) by.set(r.wo_id, { label: r.label, kind: /disk/i.test(r.label) ? "disk" : "slot" });
+  }
+  return wos.map((w) => (by.has(w.id) ? { ...w, wait: by.get(w.id)! } : w));
+}
+
 /** The work order's latest run that is waiting for the launcher, or was stopped for a critically low host disk. */
 export async function readRunWait(db: Queryable, orgId: string, woId: string): Promise<RunWait | null> {
   const r = (await db.query<{ wait: { label?: string; reason?: string; since?: string } | null; blocker: { code?: string; label?: string } | null; ended: boolean }>(
@@ -81,7 +96,9 @@ export async function readRunWait(db: Queryable, orgId: string, woId: string): P
   if (r.blocker?.code === "host_disk_critical") return { label: r.blocker.label ?? "Host disk critically low", reason: null, since: null, kind: "disk_critical" };
   if (!r.wait || r.ended) return null;
   const label = r.wait.label ?? "Waiting to start";
-  return { label, reason: r.wait.reason ?? null, since: r.wait.since ?? null, kind: /disk/i.test(label) ? "disk" : "slot" };
+  const disk = /disk/i.test(label);
+  // The reason of a disk wait carries the host's free-disk figures: those stay in the Home item for audit.view holders, not on the order.
+  return { label, reason: disk ? null : (r.wait.reason ?? null), since: r.wait.since ?? null, kind: disk ? "disk" : "slot" };
 }
 
 const ACTIONS = { answer: "wo.answer", classify: "wo.classify", decline: "wo.decline", park: "wo.park", sendback: "wo.sendback", reassign: "wo.reassign", move: "wo.move", confirm: "brief.confirm", summary: "wo.answer" } as const;
@@ -163,7 +180,7 @@ export async function readFloor(db: Queryable, orgId: string, projectId: string,
   const slots = { used, total: project.flow.slots, holders: slotRows.filter((s) => s.state === "held").map((s) => ({ slot: Number(s.id.split(":").pop()), wo: s.wo_id })) };
   const queue = wos.filter((w) => w.bay === "queue" && !w.heldByKill).sort((a, b) => (a.priority < b.priority ? -1 : a.priority > b.priority ? 1 : (a.bayAt ?? 0) - (b.bayAt ?? 0))).map((w) => w.id);
   const top = stops.slice().sort((a, b) => (a.mode === b.mode ? 0 : a.mode === "kill" ? -1 : 1))[0] ?? null;
-  const live = { project, workOrders: wos, flowVersion, slots, gates, queue, stop: top, stops, at: null as number | null };
+  const live = { project, workOrders: await attachWaits(db, orgId, wos), flowVersion, slots, gates, queue, stop: top, stops, at: null as number | null };
   if (!at || at >= now) return live;
 
   // Replay: positions from the traveler history and the event log (domain `stateAt`), the rest as it was recorded.

@@ -56,7 +56,12 @@ export async function reapOrphans(deps: Deps, orgId: string): Promise<string[]> 
     else orphan = row.lease_until !== null && row.lease_until.getTime() + graceMs < now;
     // Another organisation's run is not ours to remove: a run row that exists in no org at all is.
     if (!row && (await deps.pool.query(`select 1 from runs where id = $1 and org_id <> $2 limit 1`, [r.runId, orgId])).rowCount) continue;
-    if (!orphan || row?.evidence) continue;
+    if (!orphan) continue;
+    // A run stopped for a critically low host disk keeps its workspace for an hour as evidence, but a container still running goes now.
+    if (row?.evidence) {
+      if (r.container) await deps.launcher.stop(r.runId, { keepWorkspace: true }).then(() => void removed.push(r.runId), (e) => deps.log.warn({ run: r.runId, err: errMsg(e) }, "reaper could not remove the container of an evidence run"));
+      continue;
+    }
     try {
       await deps.launcher.stop(r.runId, { keepWorkspace: false });
       removed.push(r.runId);
