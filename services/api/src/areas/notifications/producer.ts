@@ -7,8 +7,8 @@
 import { addEventObserver, enqueueOutbox, onObserverError, type AppendedEvent, type EventInput, type Queryable, type Tx } from "@gantry/db";
 import { obj } from "../../core/read/rows.js";
 import { loadSample, slackBlocks, type CardSample } from "./cards.js";
-import { emitOne } from "./emit.js";
-import { notifyEventFor, type EventLike } from "./events.js";
+import { emitOne, newDeliveryId, recordDelivery } from "./emit.js";
+import { isMandatoryEvent, notifyEventFor, type EventLike } from "./events.js";
 import { condOf, hoursOk, loadInstances, type Dest, type InstInfo } from "./routing.js";
 import { defaultTarget } from "../integrations/connectors.js";
 
@@ -48,23 +48,36 @@ export async function produceNotifications(tx: Tx, e: EventInput, ap: AppendedEv
   // A failed delivery of a delivery-failure notice must not notify again, or a dead endpoint would loop.
   if (m.event === "delivery.failed" && after.origEvent === "delivery.failed") return;
   const orgId = e.orgId;
+  // A kill or restore notice that ran out of attempts is tried on every other channel, then the Factory Admins (S-37); the usual failure notice still goes through the routes below.
+  if (m.event === "delivery.failed" && typeof after.origEvent === "string" && isMandatoryEvent(after.origEvent)) await retryDeadMandatory(tx, e, ap, publicUrl, after);
   // A mention of someone who cannot read the project carries nothing about the work order: only a plain notice to their own address (an admin decides on access).
   if (m.event === "mention" && after.access === false) return void (await mentionNotice(tx, e, ap, publicUrl, after));
   const projects = e.projectId
     ? [e.projectId]
     : (await tx.query<{ project_id: string }>(`select distinct project_id from notification_routes where org_id = $1 and event = $2 and project_id is not null`, [orgId, m.event])).rows.map((r) => r.project_id);
-  if (!projects.length) return;
+  if (!projects.length && !m.mandatory) return;
   const wo = e.woId ? (await tx.query<WoFacts>(`select class as cls, priority, repo_id as repo, risk, position from work_orders where org_id = $1 and id = $2`, [orgId, e.woId])).rows[0] ?? null : null;
   const repoId = wo?.repo ?? (typeof after.repo === "string" ? after.repo : null);
   const insts = await loadInstances(tx, orgId);
   const tz = (await tx.query<{ tz: string | null }>(`select tz from orgs where id = $1`, [orgId])).rows[0]?.tz ?? "UTC";
   const overrides = repoId ? await repoOverrides(tx, orgId, repoId, m.event) : [];
+  // What reached a connection (not a failed row): a kill that reaches nobody falls back to the Factory Admins (S-35).
+  let delivered = 0;
+  if (!projects.length) {
+    // A factory kill with no kill route in any project: every connection open to the factory gets it, else the Factory Admins.
+    const sample = await loadSample(tx, { orgId, publicUrl, event: m.event, projectId: null, woId: e.woId ?? null, source: like, at: ap.recordedAt });
+    const base = { orgId, eventId: ap.id, event: m.event, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo };
+    delivered += await fallbackMandatory(tx, { ...base, project: null });
+    if (!delivered) await fallbackAdmins(tx, { ...base, project: e.projectId ?? null });
+    return;
+  }
   for (const project of projects) {
     const routes = (
       await tx.query<RouteRow>(`select id, project_id, destinations, template, conditions, fields, enabled from notification_routes where org_id = $1 and project_id = $2 and event = $3 order by created_at, id`, [orgId, project, m.event])
     ).rows;
     const sample = await loadSample(tx, { orgId, publicUrl, event: m.event, projectId: project, woId: e.woId ?? null, source: like, at: ap.recordedAt });
     let produced = 0;
+    let carried = 0;
     const seen = new Set<string>();
     for (const r of routes) {
       if (!m.mandatory) {
@@ -81,27 +94,78 @@ export async function produceNotifications(tx: Tx, e: EventInput, ap: AppendedEv
         const k = `${d.integration ?? d.channel}|${d.target}`;
         if (seen.has(k)) continue;
         seen.add(k);
-        await emitOne(tx, {
+        const em = await emitOne(tx, {
           orgId, eventId: ap.id, event: m.event, mandatory: m.mandatory, project, route: { id: r.id.slice(project.length + 1) || r.id, template: r.template || sample.template, fields: r.fields }, dest: d,
           repo: repoId, wo: e.woId ?? null, sample: { ...sample, template: r.template || sample.template }, insts, woFacts: wo, mentioned: typeof after.person === "string" ? after.person : null,
         });
         produced++;
+        if (em.status === "pending") carried++;
       }
     }
     if (m.event === "mention" && produced === 0) await mentionNotice(tx, e, ap, publicUrl, after);
-    if (m.mandatory && produced === 0) await fallbackMandatory(tx, { orgId, eventId: ap.id, event: m.event, project, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo });
+    if (m.mandatory && carried === 0) carried += await fallbackMandatory(tx, { orgId, eventId: ap.id, event: m.event, project, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo });
+    delivered += carried;
+    if (m.mandatory && !delivered && project === projects[projects.length - 1]) await fallbackAdmins(tx, { orgId, eventId: ap.id, event: m.event, project: e.projectId ?? null, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo });
   }
 }
 
-/** Kill and restore cannot be switched off: with no route to carry them, every connection open to the project that can notify gets them at its default target. */
-async function fallbackMandatory(tx: Tx, c: { orgId: string; eventId: string; event: string; project: string; repoId: string | null; woId: string | null; sample: CardSample; insts: InstInfo[]; woFacts: WoFacts | null }): Promise<void> {
+interface FallbackCtx { orgId: string; eventId: string; event: string; project: string | null; repoId: string | null; woId: string | null; sample: CardSample; insts: InstInfo[]; woFacts: WoFacts | null; exclude?: ReadonlySet<string> }
+
+/** Kill and restore cannot be switched off: with no route to carry them, every connection open to the project that can notify gets them at its default target. Returns how many were queued. */
+async function fallbackMandatory(tx: Tx, c: FallbackCtx): Promise<number> {
+  let n = 0;
   for (const inst of c.insts) {
-    if (!inst.destination || !inst.available) continue;
-    if (inst.projects !== "all" && !inst.projects.includes(c.project)) continue;
+    if (!inst.destination || !inst.available || c.exclude?.has(inst.id)) continue;
+    if (c.project && inst.projects !== "all" && !inst.projects.includes(c.project)) continue;
     const target = defaultTarget(inst.typeId, inst.config) || (inst.typeId === "webhook" ? inst.targetId ?? "" : "");
     if (!target && inst.typeId !== "webhook") continue;
-    await emitOne(tx, { orgId: c.orgId, eventId: c.eventId, event: c.event, mandatory: true, project: c.project, route: null, dest: { channel: inst.typeId, target, integration: inst.id }, repo: c.repoId, wo: c.woId, sample: c.sample, insts: c.insts, woFacts: c.woFacts });
+    const r = await emitOne(tx, { orgId: c.orgId, eventId: c.eventId, event: c.event, mandatory: true, project: c.project, route: null, dest: { channel: inst.typeId, target, integration: inst.id }, repo: c.repoId, wo: c.woId, sample: c.sample, insts: c.insts, woFacts: c.woFacts });
+    if (r.status === "pending") n++;
   }
+  return n;
+}
+
+/**
+ * The last line for a kill or restore: when no route and no connection default carried it, the Factory Admins are told by email through any connection that can send
+ * it (a switched-off one included: this cannot be switched off). When nothing can carry it, a failed delivery is logged, so the delivery log and the audit trail show
+ * that nobody could be told instead of staying silent (S-35, S-37).
+ */
+async function fallbackAdmins(tx: Tx, c: FallbackCtx): Promise<number> {
+  const admins = (
+    await tx.query<{ email: string }>(
+      `select distinct p.email from people p join effective_role_assignments ra on ra.org_id = p.org_id and ra.person_id = p.id
+       where p.org_id = $1 and p.status = 'active' and p.email <> '' and ra.role_id = 'factory_admin' and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now()) order by p.email`,
+      [c.orgId],
+    )
+  ).rows.map((r) => r.email);
+  let n = 0;
+  if (admins.length) {
+    for (const inst of c.insts) {
+      if (inst.typeId !== "email" || !inst.destination || !inst.available || c.exclude?.has(inst.id)) continue;
+      const r = await emitOne(tx, { orgId: c.orgId, eventId: c.eventId, event: c.event, mandatory: true, project: c.project, route: null, dest: { channel: "email", target: admins.join(","), integration: inst.id }, repo: c.repoId, wo: c.woId, sample: c.sample, insts: c.insts, woFacts: c.woFacts });
+      if (r.status === "pending") n++;
+    }
+  }
+  if (!n) {
+    const ctx = { orgId: c.orgId, eventId: c.eventId, deliveryId: await newDeliveryId(tx), event: c.event, mandatory: true, project: c.project, route: null, dest: { channel: "email", target: "factory admins", integration: null }, repo: c.repoId, wo: c.woId, sample: c.sample, insts: c.insts } as const;
+    await recordDelivery(tx, ctx, { ok: false, error: admins.length ? "no route or connection could carry this notice and no email connection can reach the Factory Admins" : "no route or connection could carry this notice and no Factory Admin has an email address", resolvedInst: null }, null);
+  }
+  return n;
+}
+
+/** The notice of a dead kill or restore delivery: the original card again, through every other connection, then the Factory Admins. */
+async function retryDeadMandatory(tx: Tx, e: EventInput, ap: AppendedEvent, publicUrl: string, after: Record<string, unknown>): Promise<void> {
+  const orgId = e.orgId;
+  const origEvent = String(after.origEvent);
+  const d = typeof after.delivery === "string"
+    ? (await tx.query<{ integration_id: string | null; event_id: string | null; project_id: string | null; wo_id: string | null; repo_id: string | null; is_test: boolean }>(`select integration_id, event_id, project_id, wo_id, repo_id, is_test from deliveries where org_id = $1 and id = $2`, [orgId, after.delivery])).rows[0]
+    : undefined;
+  if (!d?.event_id || d.is_test) return;
+  const src = (await tx.query<{ type: string; category: string; outcome: string; project_id: string | null; wo_id: string | null; subject: { type: string; id: string } | null; after: unknown; before: unknown; recorded_at: Date }>(`select type, category, outcome, project_id, wo_id, subject, after, before, recorded_at from events where id = $1`, [d.event_id])).rows[0];
+  const sample = await loadSample(tx, { orgId, publicUrl, event: origEvent, projectId: d.project_id, woId: d.wo_id, ...(src ? { source: { type: src.type, category: src.category, outcome: src.outcome, projectId: src.project_id, woId: src.wo_id, subject: src.subject, after: src.after, before: src.before }, at: src.recorded_at } : {}) });
+  const ctx: FallbackCtx = { orgId, eventId: d.event_id, event: origEvent, project: d.project_id, repoId: d.repo_id, woId: d.wo_id, sample, insts: await loadInstances(tx, orgId), woFacts: null, exclude: new Set(d.integration_id ? [d.integration_id] : []) };
+  void ap;
+  if (!(await fallbackMandatory(tx, ctx))) await fallbackAdmins(tx, ctx);
 }
 
 /**

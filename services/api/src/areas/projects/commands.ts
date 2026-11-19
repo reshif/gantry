@@ -5,6 +5,7 @@ import type { z } from "zod";
 import type { Actor, CommandResult, EventSpec } from "../../core/command.js";
 import { capOfReason, overBudget, overText } from "../workorders/budget-state.js";
 import { liftBudgetHalt } from "../workorders/budget.js";
+import { isMandatoryEvent } from "../notifications/events.js";
 import { dispatchQueued, newFx } from "../workorders/engine.js";
 import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
 import { readCatalog, readPeople, readRoles, readTemplates } from "../../core/read/index.js";
@@ -170,6 +171,15 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
     }
     case "notifications": {
       const old = (await readProject(tx, org, projectId))!.notifications;
+      // The kill and restore routes are locked as they are on the single-route path (S-35): none may be dropped, switched off or narrowed by a bulk save.
+      const next = new Map(edit.value.map((r, i) => [r.id || `NR-${i + 1}`, r]));
+      for (const o of old.filter((r) => isMandatoryEvent(r.event))) {
+        const n = next.get(o.id);
+        if (!n || n.event !== o.event) throw conflict("Kill and restore routes cannot be removed. Change where they go instead.");
+      }
+      for (const r of edit.value) {
+        if (isMandatoryEvent(r.event) && (!r.enabled || r.cond.classes.length || r.cond.priority.length || r.cond.hours !== "any")) throw invalid("Kill and restore notifications cannot be switched off or narrowed.");
+      }
       await tx.query(`delete from notification_routes where org_id = $1 and project_id = $2`, [org, projectId]);
       const ids = new Set<string>();
       for (const [i, r] of edit.value.entries()) {
