@@ -9,7 +9,7 @@
  */
 import { gateAfter, type Catalog } from "@gantry/domain";
 import type { Queryable, Tx } from "@gantry/db";
-import { cancelAttempts, closeEntry, completeParentIfDone, closeInstance, dispatchQueued, enterStation, wipHoldCheck, ev, flushFx, note, openGate, releaseSlot, stationIdOf, type Fx } from "../workorders/engine.js";
+import { cancelAttempts, closeEntry, completeParentIfDone, closeInstance, dispatchQueued, enterStation, wipHoldCheck, wipLimitOf, wipLive, projectOf, ev, flushFx, note, openGate, releaseSlot, stationIdOf, type Fx } from "../workorders/engine.js";
 import { lockWo, saveWo, toWo, WO_COLS, type Wo } from "../workorders/model.js";
 import { readCatalog, readOrg } from "../../core/read/index.js";
 import { job } from "../../core/jobs-contract.js";
@@ -159,6 +159,13 @@ async function restoreOne(fx: Fx, w: Wo, s: StopDb, catalog: Catalog): Promise<v
     if (w.data.wipWait) {
       w.state = (prev.state as Wo["state"]) ?? w.state;
       w.position = prev.position;
+      // A forward or back waiter that was waiting held a counted seat at its own station. The kill freed it and another order may have taken it, so it comes back
+      // waiting only if that station has room; otherwise parked and uncounted, with its original wait, and the promotion moves it on when its target has a place.
+      const wk = (w.data.wipWait as { kind?: string }).kind;
+      if (w.state === "waiting" && (wk === "forward" || wk === "back") && !catalog.bays.some((b) => b.id === w.position)) {
+        const lim = wipLimitOf(await projectOf(fx, w.project), prev.station);
+        if (lim && (await wipLive(fx, w.project, prev.station, w.id)) >= lim) w.state = "parked";
+      }
       delete w.data.stopClosedGates;
       ev(fx, w, "wo.state", { from: "killed", to: w.state, station: prev.station, text: "restored, still waiting for a place" }, { category: "kill" });
       return;

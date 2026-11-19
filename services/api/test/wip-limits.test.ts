@@ -620,9 +620,9 @@ d("station WIP limits", () => {
       await w.insertWo("WO-9800", { position: "build", state: "running" });
       await w.insertWo("WO-9801", { position: "verify", state: "running" });
       const wait = (station: string, kind: string) => ({ wipWait: { station, since: 1000, live: 1, limit: 1, kind }, history: [], log: [] });
-      const cases: Array<{ id: string; kind: string; target: string; position: string; state: string; extra?: object }> = [
+      const cases: Array<{ id: string; kind: string; target: string; position: string; state: string; extra?: object; after?: string }> = [
         { id: "WO-9810", kind: "back", target: "build", position: "intake", state: "parked" }, // an epic child
-        { id: "WO-9811", kind: "forward", target: "verify", position: "build", state: "waiting" },
+        { id: "WO-9811", kind: "forward", target: "verify", position: "build", state: "waiting", after: "parked" }, // its Build seat was taken while it was killed, so it comes back parked (G-W13)
         { id: "WO-9812", kind: "back", target: "build", position: "review", state: "waiting" },
         { id: "WO-9813", kind: "retry", target: "verify", position: "verify", state: "failed" },
         { id: "WO-9814", kind: "unpark", target: "verify", position: "hold", state: "parked", extra: { bayFrom: "verify", bayReason: "Waiting for a part" } },
@@ -638,15 +638,63 @@ d("station WIP limits", () => {
         expect((await w.call("p-asha", "POST", `/api/v1/stops/${encodeURIComponent(`workorder:${c.id}`)}/restore`, { reason: "The incident is over" })).status, c.id).toBe(200);
         await rec();
         const b = await pos(c.id);
-        expect([c.id, b.position, b.state, b.data.wipWait?.station, b.data.wipWait?.kind]).toEqual([c.id, c.position, c.state, c.target, c.kind]);
+        expect([c.id, b.position, b.state, b.data.wipWait?.station, b.data.wipWait?.kind]).toEqual([c.id, c.position, c.after ?? c.state, c.target, c.kind]);
         expect((await w.q(`select 1 from gate_instances where wo_id = $1 and status = 'open'`, [c.id])).length, `${c.id} opened a gate`).toBe(0);
       }
       // nothing was pushed past a limit while they were killed and restored
-      expect([await liveAt("build"), await liveAt("verify"), await liveAt("review")]).toEqual(before);
+      expect([await liveAt("build"), await liveAt("verify"), await liveAt("review")]).toEqual([before[0]! - 1, before[1], before[2]]); // only WO-9811 left a counted seat (it is parked now)
       // and the child still enters Build when its place frees
       await w.q(`update work_orders set state = 'done' where id = 'WO-9811'`); // it waits at Build, where it counts
       expect((await park("WO-9800")).status).toBe(200);
       expect([(await pos("WO-9810")).position, (await pos("WO-9810")).state]).toEqual(["build", "running"]);
+      await setWip(0, "build");
+      await setWip(0, "verify");
+    });
+
+    it("G-W13: a forward or back waiter that was killed comes back parked when its own seat was taken, and waiting when there is room", async () => {
+      await reset();
+      const { reconcileStop } = await import("../src/areas/stops/enforce.js");
+      const rec = async () => { const row = (await w.q<{ id: string }>(`select id from stops order by set_at desc limit 1`))[0]!.id; await w.tx((tx) => reconcileStop(tx, row)); };
+      const killRestore = async (id: string, between: () => Promise<void> = async () => {}) => {
+        expect((await w.call("p-asha", "POST", "/api/v1/stops", { scope: "wo", id, mode: "kill", reason: "Bad output seen", inFlight: "cancel", confirmText: id })).status, id).toBeLessThan(300);
+        await rec();
+        await between();
+        expect((await w.call("p-asha", "POST", `/api/v1/stops/${encodeURIComponent(`workorder:${id}`)}/restore`, { reason: "The incident is over" })).status, id).toBe(200);
+        await rec();
+      };
+      const wait = (station: string, kind: string) => ({ wipWait: { station, since: 1000, live: 1, limit: 1, kind }, history: [], log: [] });
+      // T8: forward. A waits at Build for a full Verify; its Build seat is taken while it is killed.
+      await setWip(1, "build");
+      await setWip(1, "verify");
+      await w.insertWo("WO-9901", { position: "verify", state: "running" });
+      await w.insertWo("WO-9902", { position: "build", state: "waiting", data: wait("verify", "forward") });
+      await killRestore("WO-9902", () => w.insertWo("WO-9903", { position: "build", state: "running" }));
+      let a = await pos("WO-9902");
+      expect([a.position, a.state, a.data.wipWait?.station, a.data.wipWait?.kind]).toEqual(["build", "parked", "verify", "forward"]);
+      expect(await liveAt("build")).toBe(1);
+      expect((await park("WO-9901")).status).toBe(200); // Verify frees: the parked waiter goes on to Verify
+      a = await pos("WO-9902");
+      expect([a.position, a.state, a.data.wipWait]).toEqual(["verify", "running", undefined]);
+      // T9: back. C waits at Verify to go back to a full Build; its Verify seat is taken while it is killed.
+      await reset();
+      await setWip(1, "build");
+      await setWip(1, "verify");
+      await w.insertWo("WO-9911", { position: "build", state: "running" });
+      await w.insertWo("WO-9912", { position: "verify", state: "waiting", data: wait("build", "back") });
+      await killRestore("WO-9912", () => w.insertWo("WO-9913", { position: "verify", state: "running" }));
+      a = await pos("WO-9912");
+      expect([a.position, a.state, a.data.wipWait?.kind]).toEqual(["verify", "parked", "back"]);
+      expect(await liveAt("verify")).toBe(1);
+      expect((await park("WO-9911")).status).toBe(200);
+      expect([(await pos("WO-9912")).position, (await pos("WO-9912")).state]).toEqual(["build", "running"]);
+      // with room at its own station it stays waiting
+      await reset();
+      await setWip(1, "build");
+      await setWip(2, "verify");
+      await w.insertWo("WO-9921", { position: "build", state: "running" });
+      await w.insertWo("WO-9922", { position: "verify", state: "waiting", data: wait("build", "back") });
+      await killRestore("WO-9922");
+      expect([(await pos("WO-9922")).state, (await pos("WO-9922")).data.wipWait?.kind]).toEqual(["waiting", "back"]);
       await setWip(0, "build");
       await setWip(0, "verify");
     });
