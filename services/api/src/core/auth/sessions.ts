@@ -28,7 +28,8 @@ export interface NewSession {
   ip: string | null;
   userAgent: string;
   absoluteHours: number;
-  authTime: Date;
+  /** When the person signed in at the provider; null when the token did not say (satisfies no step-up). */
+  authTime: Date | null;
   idpSid?: string | null;
   acr?: string | null;
   secondFactor?: boolean;

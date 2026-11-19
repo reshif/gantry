@@ -14,6 +14,7 @@ const realm = JSON.parse(readFileSync(fileURLToPath(new URL("../../../deploy/key
   users: Array<{ username: string; email: string; enabled: boolean; emailVerified: boolean; requiredActions?: string[]; attributes: Record<string, string[]>; credentials: Array<{ type: string; temporary: boolean }> }>;
   [k: string]: unknown;
 };
+const demoUsers = realm.users.filter((u) => !u.username.startsWith("service-account-")); // the realm also carries the scoped gantry-admin service account (S-125)
 const seed = devSeed().state;
 const IDS = ["p-asha", "p-daniel", "p-meera", "p-tomas", "p-fatima", "p-kenji", "p-sam", "p-priya", "p-lena", "p-omar"];
 
@@ -40,7 +41,7 @@ describe("demo cards, Keycloak realm and seed agree", () => {
     }
   });
   it("realm users that are not in the cards still map to real seed people (no orphan identity)", () => {
-    for (const u of realm.users) expect(seed.people.some((p) => p.id === u.attributes.gantry_id?.[0] && p.email === u.email), u.username).toBe(true);
+    for (const u of demoUsers) expect(seed.people.some((p) => p.id === u.attributes.gantry_id?.[0] && p.email === u.email), u.username).toBe(true);
   });
   it("the realm has a TOTP step-up flow, but no demo user has an authenticator: the demo cards stay password-only", () => {
     expect(realm.otpPolicyType).toBe("totp");
@@ -48,11 +49,11 @@ describe("demo cards, Keycloak realm and seed agree", () => {
     // the custom browser flow replaces Keycloak's default, so it must keep the provider redirector (GitHub sign-in uses kc_idp_hint) and the SSO cookie
     const top = (realm as unknown as { authenticationFlows: { alias: string; authenticationExecutions: { authenticator?: string }[] }[] }).authenticationFlows.find((f) => f.alias === "gantry-browser")!;
     expect(top.authenticationExecutions.map((e) => e.authenticator)).toEqual(expect.arrayContaining(["auth-cookie", "identity-provider-redirector"]));
-    for (const u of realm.users) {
+    for (const u of demoUsers) {
       expect(u.requiredActions ?? [], u.username).toEqual([]);
       expect(u.credentials.map((c) => c.type), u.username).toEqual(["password"]);
     }
-    // so no card may promise an MFA step, and the dev stack waives the Factory Admin factor (GANTRY_DEV_ADMIN_MFA_OPTIONAL) for the demo admin
+    // so no card may promise an MFA step; every demo person enrols through the one-time link (a People action, mail in the dev mail catcher) unless the stack opts in to the dev waiver (GANTRY_DEV_ADMIN_MFA_OPTIONAL=true)
     expect(DEMO_ACCOUNTS.filter((a) => /MFA/i.test(a.note + a.role)).map((a) => a.id)).toEqual([]);
     for (const id of ["p-asha", "p-daniel", "p-lena", "p-omar"]) expect((seed.people.find((p) => p.id === id) as { mfa?: boolean }).mfa).toBe(true);
   });

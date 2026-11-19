@@ -37,6 +37,7 @@ const DENY = {
   different_person: "That sign-in was a different person, so the change was cancelled. Sign in again as yourself.",
   identity_mismatch: "This account is linked to a different identity at the provider.",
   mfa_required: MFA_REQUIRED_MSG,
+  stale_auth: "That sign-in was not fresh enough to confirm the change, so it was cancelled. Sign in again and complete both steps.",
   invite_required: "This account has not been linked to your sign-in yet. Open the invite link from your email to join (it is valid for 14 days), or ask an administrator to invite you again.",
 } as const;
 
@@ -47,6 +48,10 @@ const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").
  * A refusal is recorded (signins row and an `auth.signin` event with outcome denied) and committed; it is not rolled back.
  */
 export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Promise<SignInResult> {
+  // The second factors the person holds at the provider (their ids), read before the transaction so a slow provider never holds it open. Best effort:
+  // the token's acr/amr decides the sign-in; this only feeds the per-person status and the "reset behind our back" audit (S-124, S-127).
+  const secondFactor = hasSecondFactor(claims, g.config.oidc.mfaAcrValues);
+  const idpFactors = secondFactor && g.idpAdmin ? await Promise.race([g.idpAdmin.secondFactors(claims.sub), new Promise<null>((res) => setTimeout(() => res(null), 3000).unref())]).catch(() => null) : null;
   return withTx(g.pool, async (tx) => {
     const orgId = g.orgId;
     const sec = (await readSecurity(tx, orgId)).value;
@@ -113,14 +118,15 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
     if (person && person.idp_subject && person.idp_subject !== claims.sub) return deny("identity_mismatch", person.id);
     // A step-up never switches the held session to another person, and a refusal must leave nothing behind: decide before any write below.
     if (r.stepUpOnly && r.existingSession && (!person || r.existingSession.personId !== person.id)) return deny("different_person", person?.id ?? null);
-    // Factory Admins need a second factor, decided here by the server from the provider's token (acr/amr), not by the provider's flow alone.
-    // Includes the person the bootstrap rule below is about to make Factory Admin. A step-up keeps the factor the session already has.
-    const secondFactor = hasSecondFactor(claims, g.config.oidc.mfaAcrValues);
-    if (!g.config.adminMfaOptional && !secondFactor && !(person && (person.status === "deactivated" || person.status === "suspended"))) {
-      const bootstrap = bootUser || (!!g.config.bootstrapAdminEmail && email === g.config.bootstrapAdminEmail.toLowerCase() && claims.emailVerified === true);
-      const admin = person ? await holdsFactoryAdmin(tx, orgId, person.id) : false;
-      const willBootstrap = !admin && bootstrap && !(await tx.query(`select 1 from role_assignments where org_id = $1 and role_id = 'factory_admin' and scope_type = 'factory' and revoked_at is null limit 1`, [orgId])).rowCount;
-      if (admin || willBootstrap) return deny("mfa_required", person?.id ?? null);
+    // Everyone needs a second factor (S-121), decided here by the server from the provider's token (acr/amr), not by the provider's flow alone.
+    // A step-up keeps asking for it: the same check refuses a step-up whose token lost the factor, and the session is left as it was.
+    // Only the dev waiver (GANTRY_DEV_ADMIN_MFA_OPTIONAL, never the default, refused off localhost) lets a password-only sign-in through.
+    if (!g.config.adminMfaOptional && !secondFactor && !(person && (person.status === "deactivated" || person.status === "suspended"))) return deny("mfa_required", person?.id ?? null);
+    // A step-up must be a sign-in that happened now (S-129): a token with no auth_time, or one older than the step-up window, is not a confirmation
+    // (the provider is asked for max_age=0 but is not trusted to have honoured it).
+    if (r.stepUpOnly) {
+      const window = (sec.stepUpWindowMinutes ?? 15) * 60;
+      if (!claims.authTime || Date.now() / 1000 - claims.authTime > window) return deny("stale_auth", person?.id ?? null);
     }
     if (!person) {
       const id = await freePersonId(tx, orgId, claims.gantryId, claims.preferredUsername ?? email.split("@")[0]!);
@@ -157,21 +163,46 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
       recoveryWindow = await consumeRecoveryWindow(tx, orgId, person.id, r.ip);
       if (!recoveryWindow) return deny("ip_not_allowed", person.id);
     }
-    const authTime = claims.authTime ? new Date(claims.authTime * 1000) : new Date();
+    // A token that does not say when the person signed in gives a session with an unknown sign-in time, which satisfies no step-up (S-129).
+    const authTime = claims.authTime ? new Date(claims.authTime * 1000) : null;
+    if (secondFactor) await recordMfa(tx, orgId, person.id, idpFactors, r);
     const ex = r.existingSession;
     if (ex && ex.personId === person.id) {
-      await refreshAuthTime(tx, orgId, ex.id, authTime, secondFactor);
+      await refreshAuthTime(tx, orgId, ex.id, authTime!, secondFactor); // a step-up always has an auth_time (checked above)
       if (recoveryWindow) await bindRecoveryWindow(tx, orgId, recoveryWindow, person.id, ex.id, r.ip, r.requestId);
-      await record("ok", null, person.id, ex.id, "auth.stepup", { authTime: authTime.toISOString() });
+      await record("ok", null, person.id, ex.id, "auth.stepup", { authTime: authTime!.toISOString() });
       return { ok: true, personId: person.id, sessionId: ex.id, token: null, expiresAt: null, stepUp: true, provisioned };
     }
     const s = await createSession(tx, g.config.secrets.sessionKey, {
       orgId, personId: person.id, method: r.method, ip: r.ip || null, userAgent: r.userAgent, absoluteHours: sec.sessionHours, authTime, idpSid: claims.sid ?? null, acr: claims.acr ?? null, secondFactor,
     });
     if (recoveryWindow) await bindRecoveryWindow(tx, orgId, recoveryWindow, person.id, s.id, r.ip, r.requestId);
-    await record("ok", null, person.id, s.id, "auth.signin", { authTime: authTime.toISOString() });
+    await record("ok", null, person.id, s.id, "auth.signin", authTime ? { authTime: authTime.toISOString() } : { authTime: null });
     return { ok: true, personId: person.id, sessionId: s.id, token: s.token, expiresAt: s.expiresAt, stepUp: false, provisioned };
   });
+}
+
+/**
+ * Records that the person signed in with a second factor (the per-person status the People list and the Security page show, S-127) and, when the
+ * provider told us which factors they hold, notices a change since the last sign-in: the ids of their authenticators differ because an operator
+ * reset or replaced one in the provider's own console, behind Gantry (S-124). The first recording is not a change. Never refuses a sign-in.
+ */
+async function recordMfa(tx: Tx, orgId: string, personId: string, factors: Array<{ id: string; type: string }> | null, r: SignInRequest): Promise<void> {
+  if (!factors) {
+    await tx.query(`update people set mfa = true, mfa_checked_at = now() where org_id = $1 and id = $2`, [orgId, personId]);
+    return;
+  }
+  const fp = createHash("sha256").update(factors.map((f) => `${f.type}:${f.id}`).sort().join("\n")).digest("hex");
+  const types = [...new Set(factors.map((f) => f.type))].sort();
+  const prev = (await tx.query<{ mfa_fingerprint: string | null; mfa_types: string[] }>(`select mfa_fingerprint, mfa_types from people where org_id = $1 and id = $2 for update`, [orgId, personId])).rows[0];
+  await tx.query(`update people set mfa = true, mfa_checked_at = now(), mfa_fingerprint = $3, mfa_types = $4 where org_id = $1 and id = $2`, [orgId, personId, fp, types]);
+  if (prev?.mfa_fingerprint && prev.mfa_fingerprint !== fp) {
+    await appendEvent(tx, {
+      orgId, type: "auth.mfa_changed", category: "auth", actor: "system", channel: "system", subject: { type: "person", id: personId },
+      before: { types: prev.mfa_types }, after: { types, note: "The second factors held at the identity provider changed since this person's last sign-in, outside Gantry (a reset or a new authenticator in the provider's console)." },
+      sourceIp: r.ip || null, requestId: r.requestId,
+    });
+  }
 }
 
 async function freePersonId(tx: Tx, orgId: string, claimed: string | undefined, hint: string): Promise<string> {

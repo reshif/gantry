@@ -1408,7 +1408,8 @@ export interface SsoSettings {
 }
 export interface SecuritySettings {
   sso: SsoSettings;
-  mfa: { policy: string; methods: string[] };
+  /** What the server enforces (read-only, S-127): a second factor for everyone. `waived` only on a local dev stack that opted in. */
+  mfa: { policy: string; methods: string[]; required?: boolean; waived?: boolean };
   sessionHours: number;
   idleMin: number;
   domains: string[];

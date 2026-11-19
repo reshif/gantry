@@ -102,6 +102,7 @@ export const WRITE_GATES: Readonly<Record<string, WriteGate>> = {
   [`POST ${P}/teams/:id/roles`]: A("people.manage"), [`DELETE ${P}/teams/:id/roles/:grant`]: A("people.manage"),
   [`POST ${P}/invites`]: A("people.manage"), [`POST ${P}/invites/:id/accept`]: A("people.manage"), [`POST ${P}/invites/:id/resend`]: A("people.manage"),
   [`PUT ${P}/people/:id/factory-roles/:role`]: A("people.manage"), [`DELETE ${P}/people/:id/factory-roles/:role`]: A("people.manage"),
+  [`POST ${P}/people/:id/mfa-reset`]: A("people.manage"),
   [`POST ${P}/people/:id/deactivate`]: A("people.manage"), [`POST ${P}/people/:id/reactivate`]: A("people.manage"), [`PUT ${P}/people/:id/teams`]: A("people.manage"),
   [`PUT ${P}/people/:id/oncall`]: SELF("retired; always answers 410"), [`PUT ${P}/people/:id/away`]: SELF("a person sets their own away status; for someone else the handler needs people.manage or approvers.edit"),
   // projects

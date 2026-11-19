@@ -6,6 +6,7 @@
  *   POST /api/v1/invites, POST /api/v1/invites/{id}/resend, POST /api/v1/invites/{id}/accept       (the invite id is the invited person's id)
  *   PUT/DELETE /api/v1/people/{id}/factory-roles/{role}
  *   POST /api/v1/people/{id}/deactivate, POST /api/v1/people/{id}/reactivate   (offboarding)
+ *   POST /api/v1/people/{id}/mfa-reset   (reset a person's authenticator and send a one-time enrolment link; people.manage with step-up and a reason)
  *   PUT /api/v1/people/{id}/teams, PUT /api/v1/people/{id}/oncall, PUT /api/v1/people/{id}/away
  *
  * Every state-changing handler goes through command() (docs/BUILD.md, spec 15.4). Project role grants
@@ -17,6 +18,7 @@ import { command, decide, policyState, refuse, readPeople, readTeams } from "../
 import { effectivePermissions } from "../areas/access/simulate.js";
 import { deactivatePerson, reactivatePerson } from "../areas/people/offboard.js";
 import { AwayBody, CreateTeamBody, DeactivateBody, ReactivateBody, FactoryRoleBody, InviteBody, RevokeBody, TeamGrantBody, TeamsBody, UpdateTeamBody } from "../areas/people/schemas.js";
+import { inviteEnrolment, resetMfa, type PersonRow } from "../areas/people/mfa.js";
 import { acceptInvite, invitePerson, resendInvite, personVersion, setAway, setFactoryRole, setTeams } from "../areas/people/people.js";
 import { createTeam, deleteTeam, grantTeamRole, revokeTeamRole, updateTeam } from "../areas/people/teams.js";
 import { directoryPeople, directoryScope, directoryTeams } from "../core/directory.js";
@@ -101,14 +103,23 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
     return effectivePermissions(st, viewer, id, at ?? Date.now());
   });
 
+  /** The invite goes out through Gantry; the first authenticator only through the provider's one-time link (S-122): send it with the invite. Never fails the invite. */
+  const withEnrolment = async <T extends object>(out: T): Promise<T & { enrolment?: { sent: boolean; reason?: string } }> => {
+    const person = (out as { person?: { id: string } }).person;
+    const row = person ? (await g.pool.query<PersonRow>(`select id, name, email, status, idp_subject from people where org_id = $1 and id = $2`, [g.orgId, person.id])).rows[0] : undefined;
+    return row ? { ...out, enrolment: await inviteEnrolment(g, row) } : out;
+  };
+
   app.post("/api/v1/invites", async (req) => {
     const body = InviteBody.parse(req.body);
-    return command(req, { action: "people.manage", idempotent: true }, (tx, a) => invitePerson(tx, a.orgId, g.config.publicUrl, a.id, body));
+    const out = await command(req, { action: "people.manage", idempotent: true }, (tx, a) => invitePerson(tx, a.orgId, g.config.publicUrl, a.id, body));
+    return withEnrolment(out);
   });
 
   app.post("/api/v1/invites/:id/resend", async (req) => {
     const { id } = Id.parse(req.params);
-    return command(req, { action: "people.manage", idempotent: true }, (tx, a) => resendInvite(tx, a.orgId, g.config.publicUrl, a.id, id));
+    const out = await command(req, { action: "people.manage", idempotent: true }, (tx, a) => resendInvite(tx, a.orgId, g.config.publicUrl, a.id, id));
+    return withEnrolment(out);
   });
 
   app.post("/api/v1/invites/:id/accept", async (req) => {
@@ -140,6 +151,13 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
     const { id } = Id.parse(req.params);
     const body = ReactivateBody.parse(req.body ?? {});
     return command(req, { action: "people.manage", stepUp: true, ifMatchRequired: true, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => reactivatePerson(tx, a, id, body, g.config.publicUrl));
+  });
+
+  // An authenticator reset (S-124): another administrator, a fresh two-factor sign-in, a reason; it ends the person's sessions and emails a one-time link.
+  app.post("/api/v1/people/:id/mfa-reset", async (req) => {
+    const { id } = Id.parse(req.params);
+    const { reason } = z.object({ reason: z.string().trim().min(5).max(500) }).parse(req.body ?? {});
+    return command(req, { action: "people.manage", stepUp: true }, (tx, a) => resetMfa(tx, g, a.id, id, reason));
   });
 
   app.put("/api/v1/people/:id/teams", async (req) => {

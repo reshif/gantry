@@ -246,7 +246,7 @@ export async function readSecurity(db: Queryable, orgId: string): Promise<Versio
 
 export const DEFAULT_SECURITY: SecuritySettings = {
   sso: { provider: "OpenID Connect", domain: "", enforced: false, entity: "" },
-  mfa: { policy: "admins", methods: [] },
+  mfa: { policy: "everyone", methods: ["totp", "webauthn", "recovery"] },
   sessionHours: 12,
   idleMin: 30,
   domains: [],

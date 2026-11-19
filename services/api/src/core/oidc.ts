@@ -8,8 +8,6 @@ export interface LoginParams {
   codeVerifier: string;
   loginHint?: string | null;
   stepUp?: boolean;
-  /** Ask the provider for its second-factor level (acr_values), so a Factory Admin signs in with a one-time code. */
-  secondFactor?: boolean;
   idpHint?: string | null;
 }
 
@@ -102,14 +100,14 @@ export function createOidcAdapter(cfg: Config["oidc"], opts: { allowInsecure?: b
         nonce: p.nonce,
       };
       if (p.loginHint) params.login_hint = p.loginHint;
-      // A named account (demo card, invite link) must not be satisfied by whoever already holds the identity provider's SSO session:
-      // without prompt=login, Keycloak ignores login_hint and silently signs the previous person back in.
-      if (p.stepUp || p.loginHint) params.prompt = "login";
-      // Step-up asks for a sign-in that happened now (max_age=0). It proves a fresh sign-in; whether a second factor was part of it is checked
-      // separately from acr/amr (hasSecondFactor), for Factory Admins.
+      // Every sign-in is a fresh one (S-130): without prompt=login the provider would sign the previous person back in from its own SSO session, with the
+      // old authentication level and no credentials, after Gantry's session had ended (idle, absolute end, an admin revoking it). It also makes a named
+      // account (demo card, invite link) get its own login instead of whoever holds the provider session.
+      params.prompt = "login";
+      // A step-up asks for a sign-in that happened now (max_age=0); the callback checks the token's auth_time is recent (S-129).
       if (p.stepUp) params.max_age = "0";
-      // Second factor: Keycloak's step-up flow runs the OTP subflow when a level-2 authentication is requested.
-      if (p.secondFactor) params.acr_values = cfg.mfaAcrValues?.[0] ?? DEFAULT_MFA_ACR[0]!;
+      // Everyone needs a second factor (S-121), at every sign-in and every step-up: always ask for the provider's second-factor level.
+      params.acr_values = cfg.mfaAcrValues?.[0] ?? DEFAULT_MFA_ACR[0]!;
       if (p.idpHint) params.kc_idp_hint = p.idpHint;
       return client.buildAuthorizationUrl(c, params);
     },
@@ -129,6 +127,7 @@ export function createOidcAdapter(cfg: Config["oidc"], opts: { allowInsecure?: b
     async endSessionUrl(p) {
       const c = await load();
       if (!c.serverMetadata().end_session_endpoint) return null;
+      // Without an id_token_hint the provider asks the person to confirm the sign-out, but still ends its session: the client_id names who is leaving.
       const params: Record<string, string> = { client_id: cfg.clientId, post_logout_redirect_uri: p.postLogoutRedirectUri };
       if (p.idTokenHint) params.id_token_hint = p.idTokenHint;
       return client.buildEndSessionUrl(c, params);

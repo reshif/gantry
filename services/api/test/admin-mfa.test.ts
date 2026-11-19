@@ -30,7 +30,7 @@ describe("second-factor evidence in an ID token", () => {
 
 const d = TEST_URL ? describe : describe.skip;
 
-d("Factory Admins need a second factor (server-enforced)", () => {
+d("everyone needs a second factor (server-enforced)", () => {
   let issuer: Issuer;
   let t: TestApp;
   beforeAll(async () => {
@@ -53,24 +53,24 @@ d("Factory Admins need a second factor (server-enforced)", () => {
     return { login, r, session: r.cookies.find((c) => c.name === "__Host-gantry_session") };
   }
 
-  it("asks the provider for the second-factor level only on an mfa sign-in", async () => {
+  it("asks the provider for the second-factor level on every sign-in", async () => {
     const plain = await t.app.inject("/auth/login");
-    expect(new URL(String(plain.headers.location)).searchParams.get("acr_values")).toBeNull();
+    expect(new URL(String(plain.headers.location)).searchParams.get("acr_values")).toBe("2");
     const mfa = await t.app.inject("/auth/login?mfa=1");
     expect(new URL(String(mfa.headers.location)).searchParams.get("acr_values")).toBe("2");
   });
 
-  it("refuses an admin whose token shows only a password, with a clear answer, and records it; a non-admin is unaffected", async () => {
+  it("refuses anyone whose token shows only a password, with a clear answer, and records it", async () => {
     const x = await flow({ ...asha, auth_time: now(), acr: "1" });
     expect(x.session).toBeUndefined();
     const loc = String(x.r.headers.location);
     expect(loc).toContain("auth_needs=mfa_setup");
-    expect(decodeURIComponent(loc)).toContain("two-step sign-in");
+    expect(decodeURIComponent(loc)).toContain("two steps");
     expect((await t.db.admin.query(`select outcome, reason from signins order by id desc limit 1`)).rows[0]).toEqual({ outcome: "denied", reason: "mfa_required" });
     expect((await t.db.admin.query(`select 1 from sessions where person_id = 'p-asha'`)).rowCount).toBe(0);
 
     const plainUser = await flow({ ...tomas, auth_time: now(), acr: "1" });
-    expect(plainUser.session).toBeTruthy();
+    expect(plainUser.session).toBeUndefined(); // S-121: not only Factory Admins
   });
 
   it("admits an admin with acr 2 or an otp amr, and the step-up (max_age=0) keeps working on that session", async () => {
@@ -99,18 +99,14 @@ d("Factory Admins need a second factor (server-enforced)", () => {
     expect((await t.app.inject({ url: "/api/v1/me", headers: { cookie } })).statusCode).toBe(200);
   });
 
-  it("refuses requests on a session without the factor once the person holds Factory Admin, and lets them back after a proper sign-in", async () => {
-    const x = await flow({ ...tomas, auth_time: now(), acr: "1" });
-    const cookie = `__Host-gantry_session=${x.session!.value}`;
-    expect((await t.app.inject({ url: "/api/v1/me", headers: { cookie } })).statusCode).toBe(200);
-    await t.db.admin.query(`insert into role_assignments (org_id, id, person_id, role_id, scope_type) select org_id, 'ra-mfa-tomas', id, 'factory_admin', 'factory' from people where id = 'p-tomas'`);
-    const r = await t.app.inject({ url: "/api/v1/me", headers: { cookie } });
+  it("refuses requests on a session without the factor, for any person, and lets them in after a proper sign-in", async () => {
+    const weak = await t.session("p-tomas"); // a session made without a second factor
+    const r = await t.app.inject({ url: "/api/v1/me", headers: { cookie: weak.cookie } });
     expect(r.statusCode).toBe(401);
-    expect(r.json()).toMatchObject({ ok: false, needs: "mfa_setup", rule: { id: "ADMIN-MFA" } });
-    expect(r.json().msg).toMatch(/two-step sign-in/i);
-    // a team grant counts too, and revoking the grant lifts the refusal
-    await t.db.admin.query(`update role_assignments set revoked_at = now() where id = 'ra-mfa-tomas'`);
-    expect((await t.app.inject({ url: "/api/v1/me", headers: { cookie } })).statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ ok: false, needs: "mfa_setup", rule: { id: "MFA" } });
+    expect(r.json().msg).toMatch(/two steps/i);
+    const x = await flow({ ...tomas, auth_time: now(), acr: "2" });
+    expect((await t.app.inject({ url: "/api/v1/me", headers: { cookie: `__Host-gantry_session=${x.session!.value}` } })).statusCode).toBe(200);
   });
 
   it("API keys and other non-session callers are not affected", async () => {
