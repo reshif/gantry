@@ -18,7 +18,7 @@ import { readSecretOptional } from "@gantry/db";
  */
 export interface IdpCredential { id: string; type: string; /** When the provider created it (ms); a re-planted factor with a reused id differs here. */ createdDate?: number }
 /** One admin-API change at the provider (admin events), as far as Gantry reads it. */
-export interface IdpAdminEvent { time: number; operation: string; resourceType: string; resourcePath: string; /** The client that made the change (`gantry-admin`), or null for a person in a console. */ clientId: string | null; userId: string | null; realmId: string | null; /** The submitted user representation when the provider recorded one (it omits credentials). */ representation?: string | null }
+export interface IdpAdminEvent { /** The provider's event id, used to avoid handling an event twice. */ id?: string; time: number; operation: string; resourceType: string; resourcePath: string; /** The client that made the change (`gantry-admin`), or null for a person in a console. */ clientId: string | null; userId: string | null; realmId: string | null; /** The submitted user representation when the provider recorded one (it omits credentials). */ representation?: string | null }
 export interface IdpUser { id: string; username: string; email: string | null }
 
 export interface KeycloakAdminApi {
@@ -169,10 +169,10 @@ export function keycloakAdminClient(o: KeycloakAdminOptions): IdpAdmin {
         q.append("resourceTypes", "USER"); // credential deletes and password resets are USER events too (there is no CREDENTIAL resource type)
         const res = await call("GET", `/admin-events?${q}`);
         if (!res.ok) throw new Error(`identity provider admin events could not be read (HTTP ${res.status})`);
-        const rows = (await res.json()) as Array<{ time: number; operationType: string; resourceType: string; resourcePath?: string; representation?: string; authDetails?: { clientId?: string; userId?: string; realmId?: string } }>;
+        const rows = (await res.json()) as Array<{ id?: string; time: number; operationType: string; resourceType: string; resourcePath?: string; representation?: string; authDetails?: { clientId?: string; userId?: string; realmId?: string } }>;
         for (const e of rows) {
           if (e.time <= sinceMs) continue;
-          out.push({ time: e.time, operation: e.operationType, resourceType: e.resourceType, resourcePath: e.resourcePath ?? "", clientId: e.authDetails?.clientId ?? null, userId: e.authDetails?.userId ?? null, realmId: e.authDetails?.realmId ?? null, representation: e.representation ?? null });
+          out.push({ ...(e.id ? { id: e.id } : {}), time: e.time, operation: e.operationType, resourceType: e.resourceType, resourcePath: e.resourcePath ?? "", clientId: e.authDetails?.clientId ?? null, userId: e.authDetails?.userId ?? null, realmId: e.authDetails?.realmId ?? null, representation: e.representation ?? null });
         }
         // newest first: once a page reaches back to the high-water mark (or is short) everything newer has been read
         if (rows.length < PAGE || rows.some((e) => e.time <= sinceMs)) return { events: out, complete: true };

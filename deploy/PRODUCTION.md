@@ -127,7 +127,7 @@ admin it lets in still signs in with both factors.
   the Factory Admins, for every event that is not explained. An event is explained only if it was made by Gantry's own service-account
   user (events carry its user id; the client id in an event is an internal UUID) AND matches a not-yet-used log row by operation and path
   within eight seconds, each row explaining one event. So a console change, a master-admin change, an `UPDATE` of a user (how a factor is
-  planted through PUT) or a second reset nobody logged are all alarms; if the events cannot be read to the end that is an alarm too. Each
+  planted through PUT) or a second reset nobody logged are all alarms; if the events cannot be read to the end that is an alarm too. There is one alarm per person per check (the ledger event carries the count, the operations and every change) and one digest mail per check, so a flood is one alarm, not hundreds. The check trails "now" by ten seconds so a late-committed event is not skipped. If the events cannot be read for three checks in a row (the service account lost `view-events`, or the provider is down) the Factory Admins are told once (`auth.mfa_watch_unreadable`), again only after a day, and when it reads again (`auth.mfa_watch_recovered`). Each
   sign-in also compares the person's authenticators (type, id and creation time) with the last sighting, and the API start does the same
   from the provider (it fills only a missing baseline; a difference is raised, never overwritten). A factor first seen with no Gantry
   enrolment link is audited the same way. **What remains, honestly:** these are alarms, not walls, and they are best-effort against a

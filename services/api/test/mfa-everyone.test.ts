@@ -17,18 +17,18 @@ const SVC_USER = "6e206e9b-0fcb-491b-8071-1a2d0d54d827";
 const SVC_CLIENT_UUID = "acb40f19-f82f-4c53-9210-8f34af3d3329";
 
 /** An identity provider the API can administer: records what Gantry asks of it. */
-function fakeIdp(): IdpAdmin & { calls: string[]; creds: Map<string, IdpCredential[]>; failLink: boolean; failReset: boolean; events: IdpAdminEvent[]; incomplete: boolean } {
+function fakeIdp(): IdpAdmin & { calls: string[]; creds: Map<string, IdpCredential[]>; failLink: boolean; failReset: boolean; events: IdpAdminEvent[]; incomplete: boolean; failEvents: boolean } {
   const calls: string[] = [];
   const creds = new Map<string, IdpCredential[]>();
   const users = new Map<string, { id: string; username: string; email: string | null }>();
   const fake = {
-    calls, creds, failLink: false, failReset: false, incomplete: false, events: [] as IdpAdminEvent[],
+    calls, creds, failLink: false, failReset: false, incomplete: false, failEvents: false, events: [] as IdpAdminEvent[],
     async findUser(q: { username?: string; email?: string }) { return [...users.values()].find((u) => (q.username && u.username === q.username) || (q.email && u.email === q.email)) ?? null; },
     async findUserId(username: string) { return (await fake.findUser({ username }))?.id ?? null; },
     async createUser(u: { username: string; email?: string }) { const id = `kc-${u.username}`; users.set(id, { id, username: u.username, email: u.email ?? null }); calls.push(`create:${u.username}`); return id; },
     async secondFactors(id: string) { return creds.get(id) ?? []; },
     async resetSecondFactors(id: string, only?: string[]) { if (fake.failReset) throw new Error("provider refused"); const held = (creds.get(id) ?? []).filter((c) => !only || only.includes(c.id)); creds.set(id, (creds.get(id) ?? []).filter((c) => !held.includes(c))); calls.push(`reset:${id}`, `logout:${id}`); return held.length; }, // the real client also ends the provider sessions
-    async credentialEvents(since: number) { return { events: fake.events.filter((e) => e.time > since), complete: !fake.incomplete }; },
+    async credentialEvents(since: number) { if (fake.failEvents) throw new Error("view-events missing"); return { events: fake.events.filter((e) => e.time > since), complete: !fake.incomplete }; },
     async serviceAccountUserId() { return SVC_USER; },
     async sendEnrolmentLink(id: string, o?: { lifespanSec?: number }) { if (fake.failLink) throw new Error("smtp down"); calls.push(`link:${id}:${o?.lifespanSec}`); },
     async endSessions(id: string) { calls.push(`logout:${id}`); },
@@ -290,7 +290,7 @@ d("MFA for everyone (S-120..S-130)", () => {
     expect(ev[0].after).toMatchObject({ why: "first_seen_without_enrolment" });
   });
 
-  const real = (o: Partial<IdpAdminEvent>): IdpAdminEvent => ({ time: Date.now(), operation: "ACTION", resourceType: "USER", resourcePath: "users/u1/reset-password", clientId: SVC_CLIENT_UUID, userId: SVC_USER, realmId: "74d1ab8c", ...o });
+  const real = (o: Partial<IdpAdminEvent>): IdpAdminEvent => ({ id: `ev-${Math.random()}`, time: Date.now(), operation: "ACTION", resourceType: "USER", resourcePath: "users/u1/reset-password", clientId: SVC_CLIENT_UUID, userId: SVC_USER, realmId: "74d1ab8c", ...o });
   const outsideCount = async () => (await t.db.admin.query(`select count(*)::int n from events where type = 'auth.mfa_changed_outside'`)).rows[0].n as number;
   const logCall = (method: string, path: string, at = new Date()) => t.db.admin.query(`insert into idp_admin_log (org_id, method, path, at) values ($1,$2,$3,$4)`, [t.orgId, method, path, at]);
 
@@ -324,7 +324,9 @@ d("MFA for everyone (S-120..S-130)", () => {
       real({ time: t0 + 60_000, resourcePath: "users/ok/reset-password" }), // a minute later: outside the few-second window
     ];
     const r = await checkIdpAdminEvents(t.app.gantry, t0 + 70_000);
-    expect(r.flagged).toBe(3);
+    expect(r.flagged).toBe(2); // one alarm per person: victim (1 change) and ok (2 changes)
+    const lastOk = (await t.db.admin.query(`select after from events where type = 'auth.mfa_changed_outside' and after->>'why' = 'provider_admin_event' order by seq desc limit 2`)).rows.map((x) => x.after.count).sort();
+    expect(lastOk).toEqual([1, 2]);
   });
 
   it("G-N2: an UPDATE of a user (how a factor is planted through PUT) is an alarm unless a logged PUT explains it, and so is a console change", async () => {
@@ -335,8 +337,9 @@ d("MFA for everyone (S-120..S-130)", () => {
       real({ time: t0, operation: "UPDATE", resourcePath: "users/victim", representation: "{\"id\":\"victim\",\"totp\":false}" }),
       real({ time: t0 + 1, operation: "UPDATE", resourcePath: "users/victim", userId: "admin-console-user", clientId: "security-admin-console-uuid", realmId: "master" }),
     ];
-    expect((await checkIdpAdminEvents(t.app.gantry, t0 + 10)).flagged).toBe(2);
-    expect(await outsideCount()).toBe(n0 + 2);
+    expect((await checkIdpAdminEvents(t.app.gantry, t0 + 10)).flagged).toBe(1); // two events on one user: one alarm that lists both
+    expect(await outsideCount()).toBe(n0 + 1);
+    expect((await t.db.admin.query(`select after from events where type = 'auth.mfa_changed_outside' order by seq desc limit 1`)).rows[0].after).toMatchObject({ count: 2, operations: ["UPDATE"] });
   });
 
   it("G-N2: if the events cannot be read to the end (a flood), that is itself an alarm and the check says so", async () => {
@@ -350,9 +353,65 @@ d("MFA for everyone (S-120..S-130)", () => {
     expect(await outsideCount()).toBe(n0 + 1);
   });
 
+  it("G-O1: a flood of 450 changes to one user is ONE alarm (count, operations, every change listed in the ledger) and ONE digest mail", async () => {
+    const { checkIdpAdminEvents } = await import("../src/core/auth/idp-watch.js");
+    const t0 = Date.now() + 500_000;
+    const mails = async () => (await t.db.admin.query(`select count(*)::int n from outbox where destination = 'smtp'`)).rows[0].n as number;
+    const m0 = await mails();
+    const n0 = await outsideCount();
+    idp.events = Array.from({ length: 450 }, (_, i) => real({ time: t0 + i, operation: i % 2 ? "UPDATE" : "ACTION", resourcePath: i % 2 ? "users/flooded" : "users/flooded/reset-password" }));
+    const r = await checkIdpAdminEvents(t.app.gantry, t0 + 1000);
+    expect(r).toMatchObject({ checked: 450, flagged: 1 });
+    expect(await outsideCount()).toBe(n0 + 1);
+    expect(await mails()).toBe(m0 + 1);
+    const a = (await t.db.admin.query(`select after from events where type = 'auth.mfa_changed_outside' order by seq desc limit 1`)).rows[0].after;
+    expect(a).toMatchObject({ count: 450, operations: ["ACTION", "UPDATE"] });
+    expect(a.changes).toHaveLength(450); // the ledger keeps every one
+    const mail = (await t.db.admin.query(`select payload from outbox where destination = 'smtp' order by created_at desc limit 1`)).rows[0].payload;
+    expect(mail.text).toMatch(/450 changes \(ACTION, UPDATE\)/);
+  });
+
+  it("G-O2: the cursor trails now, so an event committed late is read next time, and an event read twice is handled once", async () => {
+    const { checkIdpAdminEvents } = await import("../src/core/auth/idp-watch.js");
+    const t0 = Date.now() + 700_000;
+    const early = real({ time: t0, resourcePath: "users/early/reset-password" });
+    idp.events = [early];
+    expect((await checkIdpAdminEvents(t.app.gantry, t0 + 2000)).flagged).toBe(1);
+    // an event with an EARLIER timestamp than the last poll's "now" committed after that poll: the cursor (now minus a few seconds) still covers it
+    const late = real({ time: t0 + 1500, resourcePath: "users/late/reset-password" });
+    idp.events = [early, late];
+    const r = await checkIdpAdminEvents(t.app.gantry, t0 + 4000);
+    expect(r.flagged).toBe(1); // only the late one: `early` was handled and is remembered, not alarmed again
+    expect((await t.db.admin.query(`select after from events where type = 'auth.mfa_changed_outside' order by seq desc limit 1`)).rows[0].after.changes[0].resource).toBe("users/late/reset-password");
+    expect((await checkIdpAdminEvents(t.app.gantry, t0 + 6000)).flagged).toBe(0);
+  });
+
+  it("G-O2: three failed polls raise events_unreadable once, not again for a day, and a recovery notice when it reads again", async () => {
+    const { checkIdpAdminEvents } = await import("../src/core/auth/idp-watch.js");
+    const count = async (type: string) => (await t.db.admin.query(`select count(*)::int n from events where type = $1`, [type])).rows[0].n as number;
+    const u0 = await count("auth.mfa_watch_unreadable");
+    const r0 = await count("auth.mfa_watch_recovered");
+    idp.events = [];
+    idp.failEvents = true;
+    const t0 = Date.now() + 900_000;
+    await checkIdpAdminEvents(t.app.gantry, t0); await checkIdpAdminEvents(t.app.gantry, t0 + 1);
+    expect(await count("auth.mfa_watch_unreadable")).toBe(u0); // two failures: not yet
+    await checkIdpAdminEvents(t.app.gantry, t0 + 2);
+    expect(await count("auth.mfa_watch_unreadable")).toBe(u0 + 1);
+    await checkIdpAdminEvents(t.app.gantry, t0 + 3); await checkIdpAdminEvents(t.app.gantry, t0 + 4);
+    expect(await count("auth.mfa_watch_unreadable")).toBe(u0 + 1); // still down: no repeat
+    await checkIdpAdminEvents(t.app.gantry, t0 + 25 * 3_600_000);
+    expect(await count("auth.mfa_watch_unreadable")).toBe(u0 + 2); // after a day, again
+    idp.failEvents = false;
+    await checkIdpAdminEvents(t.app.gantry, t0 + 25 * 3_600_000 + 10);
+    expect(await count("auth.mfa_watch_recovered")).toBe(r0 + 1);
+    await checkIdpAdminEvents(t.app.gantry, t0 + 25 * 3_600_000 + 20);
+    expect(await count("auth.mfa_watch_recovered")).toBe(r0 + 1); // once
+  });
+
   it("G-N4: the apply script's test-mail probe user (made by the master admin) raises no alarm; the same event made by the service account does", async () => {
     const { checkIdpAdminEvents } = await import("../src/core/auth/idp-watch.js");
-    const t0 = Date.now() + 400_000;
+    const t0 = Date.now() + 200_000_000;
     const probe = { operation: "CREATE", resourcePath: "users/probe1", representation: "{\"username\":\"gantry-smtp-test-123\",\"email\":\"ops@x.dev\"}" };
     idp.events = [real({ time: t0, ...probe, userId: "master-admin", clientId: "admin-cli-uuid", realmId: "master" }), real({ time: t0 + 1, operation: "DELETE", resourcePath: "users/probe1", userId: "master-admin", clientId: "admin-cli-uuid" })];
     expect((await checkIdpAdminEvents(t.app.gantry, t0 + 10)).flagged).toBe(0);
