@@ -108,6 +108,14 @@ describe("Home: one page", () => {
     expect(calls.filter((c) => c.path === "/api/v1/home")).toHaveLength(1);
   });
 
+  it("T-57: the Spend tile says no cap set when nothing is capped, not of $0 budget", async () => {
+    setup(ASHA, adminHome({}, { health: { ...HEALTH, spend: { spent: 16632, budget: 0, projects: [] } } }));
+    mount();
+    await screen.findByText("Nautobot-Jobs onboarding needs you: verification failed");
+    expect(document.getElementById("hm-stat-spend")?.textContent).toContain("no cap set");
+    expect(document.getElementById("hm-stat-spend")?.textContent).not.toMatch(/\$0 budget/);
+  });
+
   it("has none of the removed duplicates: sentence, signed-in box, KPI tiles, control panel, portfolio toolbar, mode toggle", async () => {
     setup(ASHA, adminHome());
     mount();

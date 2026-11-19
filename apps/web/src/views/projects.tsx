@@ -7,6 +7,7 @@ import { Btn, Segmented, Stat, StatRow, ViewHead } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { Async, qState } from "../ui/async";
 import { registerCommand } from "../lib/commands";
+import { monthlyCap } from "../lib/budget";
 import { usePrefs } from "../lib/prefs";
 import { ProjectGrid, ProjectTable } from "./projects/gallery";
 import { NewProjectDialog } from "./projects/newproject";
@@ -37,7 +38,7 @@ export default function ProjectsView() {
   if (!me) return null;
   const wip = projects.reduce((n, p) => n + (p.metrics?.wip ?? 0), 0);
   const spent = projects.reduce((n, p) => n + p.budget.mtd, 0);
-  const cap = projects.reduce((n, p) => n + p.budget.monthly, 0);
+  const cap = projects.reduce((n, p) => n + (monthlyCap(p.budget) ?? 0), 0);
   const regulated = projects.filter((p) => p.regulated).length;
   const activeN = projects.filter((p) => p.status === "active").length;
   return (
@@ -52,7 +53,7 @@ export default function ProjectsView() {
       <StatRow id="prj-stats">
         <Stat label="Projects" value={qState(projectsQ, () => String(projects.length))} sub={qState(projectsQ, () => `${activeN} active`)} tone="info" />
         <Stat label="In flight" value={qState(projectsQ, () => String(wip))} sub="work orders" />
-        <Stat label="Spend MTD" value={qState(projectsQ, () => fmt.money0(spent))} sub={`of ${fmt.money0(cap)}`} />
+        <Stat label="Spend MTD" value={qState(projectsQ, () => fmt.money0(spent))} sub={cap > 0 ? `of ${fmt.money0(cap)}` : "no cap"} />
         <Stat label="Regulated" value={qState(projectsQ, () => String(regulated))} sub="extra gates" {...(regulated ? { tone: "wait" as const } : {})} />
       </StatRow>
       {view === "templates" ? (

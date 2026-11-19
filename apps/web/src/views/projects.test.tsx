@@ -130,6 +130,20 @@ describe("Projects: portfolio", () => {
     expect(document.getElementById(`prj-card-${RISK.id}`)!.textContent).not.toMatch(/\$0 cap/);
   });
 
+  it("T-55, T-56: the Table says No cap (not 0%) and a missing monthly budget is no cap, never $NaN", async () => {
+    window.location.hash = "#/projects?view=table";
+    window.history.replaceState(null, "", "/?view=table");
+    setup({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, budget: { monthly: 0, mtd: 40, alertAt: 0.8 } }, { ...RISK, budget: { mtd: 12, alertAt: 0.8 } }] }) });
+    mount(<ProjectsView />);
+    expect(await screen.findByText("Payments Platform")).toBeTruthy();
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/NaN/);
+    expect(text).not.toMatch(/\b0%/);
+    expect(text).toMatch(/No cap/);
+    window.history.replaceState(null, "", "/");
+    window.location.hash = "#/projects";
+  });
+
   it("is the Blueprint's page: key in the eyebrow, Cards / Table switch, four tiles over all projects, cards with only Open Floor and Config", async () => {
     window.location.hash = "#/projects";
     setup();

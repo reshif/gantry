@@ -251,6 +251,16 @@ describe("Reachability: every dialog and panel is a click away", () => {
     await waitFor(() => expect(writes(calls).find((c) => c.path === "/api/v1/prices")?.body.prices).toMatchObject({ "claude-opus-5-5": { in: 6, out: 30 }, "claude-sonnet-5-5": { in: 4, out: 16 } }));
   });
 
+  it("T-56: Prices shows a project with no monthly budget as no cap, never / $0 or NaN", async () => {
+    setup({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, budget: { mtd: 4310, alertAt: 0.8 } }, RISK] }) });
+    window.location.hash = "#models?tab=prices";
+    mount();
+    await waitFor(() => expect(document.getElementById("pv-table")?.textContent).toContain("Price cut"));
+    const t = document.body.textContent ?? "";
+    expect(t).toMatch(/\$4,?310[^/]*no cap/);
+    expect(t).not.toMatch(/NaN|\/ \$0\b/);
+  });
+
   it("Routing: the project policy panel is mounted and saves a project's allowed vendors", async () => {
     const calls = setup({ "PUT /api/v1/routing": () => ok({ version: 5 }) });
     window.location.hash = "#models?tab=routing";

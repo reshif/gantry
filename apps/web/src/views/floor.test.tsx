@@ -18,6 +18,15 @@ afterEach(() => {
 const bodyOf = (calls: Call[], method: string, path: string) => calls.filter((c) => c.method === method && c.path === path);
 const live = WOS.filter((w) => w.state !== "done" && w.state !== "killed" && w.bay !== "declined");
 
+describe("Floor: spend strip (T-55)", () => {
+  it("shows No cap in the strip for an uncapped project", async () => {
+    mockApi({ "GET /api/v1/projects/payments/floor": () => ({ body: floorRead({ project: { ...PAYMENTS, budget: { monthly: 0, mtd: 4310, alertAt: 0.8 } } }) }) });
+    mount(<FloorView />);
+    await screen.findByRole("heading", { name: "Floor" });
+    await waitFor(() => expect(document.getElementById("floor-spend")?.textContent).toMatch(/\$4,310No cap/));
+  });
+});
+
 describe("Floor: belt", () => {
   it("says the floor is not visible on a 403", async () => {
     mockApi({ "GET /api/v1/projects/payments/floor": () => ({ status: 403, body: { ok: false, msg: "Needs a role on this project." } }) });
@@ -41,11 +50,12 @@ describe("Floor: belt", () => {
     expect(document.getElementById("floor-out")?.textContent).toMatch(/RELEASED/);
     // the ticker: on the line, bottleneck, oldest at the gate, released
     const cells = Array.from(document.querySelectorAll("#floor-kpis .tk .k")).map((k) => k.textContent);
-    expect(cells).toHaveLength(4);
+    expect(cells).toHaveLength(5);
     expect(cells[0]).toBe("ON THE LINE");
     expect(cells[1]).toBe("BOTTLENECK");
     expect(cells[2]).toMatch(/^OLDEST AT /);
     expect(cells[3]).toBe("RELEASED");
+    expect(cells[4]).toBe("SPEND MTD");
     expect(document.querySelector("#floor-kpis .tk .v")?.textContent).toMatch(new RegExp(`^${live.length}`));
     // no footer under the line; slots and spend ride on the On the line cell's tooltip
     expect(document.getElementById("floor-facts")).toBeNull();

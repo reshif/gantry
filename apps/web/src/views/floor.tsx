@@ -15,6 +15,7 @@ import { Btn, Empty, Panel, ViewHead, type Decision } from "../ui/primitives";
 import { Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
 import { pickProject } from "../lib/routes";
 import { hashFor } from "../lib/router";
+import { monthlyCap } from "../lib/budget";
 import { usePrefs } from "../lib/prefs";
 import { Belt } from "./floor/Belt";
 import { NeedBar } from "./floor/Need";
@@ -42,6 +43,8 @@ function useTick(ms: number): void {
 /** The ticker beside the title: how much is on the line, where it is jammed, the longest wait at a person's gate, and what shipped. */
 function Ticker({ model }: { model: FloorModel }) {
   const facts = useFacts();
+  const { project: pj } = useFloorCtx();
+  const cap = monthlyCap(pj.budget);
   const bn = model.bottleneck;
   const old = model.oldest;
   return (
@@ -62,6 +65,10 @@ function Ticker({ model }: { model: FloorModel }) {
         <span className="k">RELEASED</span>
         <span className="v">{model.done.length}<small>shipped</small></span>
       </div>
+      <div className="tk" id="floor-spend">
+        <span className="k">SPEND MTD</span>
+        <span className="v">{fmt.money0(pj.budget.mtd)}<small>{cap === null ? "No cap" : `of ${fmt.money0(cap)}`}</small></span>
+      </div>
     </div>
   );
 }
@@ -71,8 +78,8 @@ function useFacts(): string {
   const ctx = useFloorCtx();
   const { project: p, wos } = ctx;
   const slots = ctx.replay ? wos.filter((w) => !w.bay && w.state === "running" && ctx.cat.stations[w.station]?.id === "build").slice(0, p.flow.slots).length : ctx.floor.slots.used;
-  const spendPct = p.budget.monthly ? p.budget.mtd / p.budget.monthly : 0;
-  return `Coding slots ${slots}/${p.flow.slots} · Spend, month to date ${fmt.money0(p.budget.mtd)} (${p.budget.monthly <= 0 ? "no cap" : `${fmt.pct(spendPct)} of ${fmt.money0(p.budget.monthly)}`})${ctx.replay ? ", live figure" : ""}`;
+  const cap = monthlyCap(p.budget);
+  return `Coding slots ${slots}/${p.flow.slots} · Spend, month to date ${fmt.money0(p.budget.mtd)} (${cap === null ? "no cap" : `${fmt.pct(p.budget.mtd / cap)} of ${fmt.money0(cap)}`})${ctx.replay ? ", live figure" : ""}`;
 }
 
 /** Line control in the Floor header: halt or resume this project's line, and the factory emergency stop (each asks for step-up in its dialog). */

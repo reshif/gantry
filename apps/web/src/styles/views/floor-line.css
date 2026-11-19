@@ -203,7 +203,7 @@
 }
 @media (max-width: 640px) {
   .floorpg .fp-ticker { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
-  .fp-ticker .tk:nth-child(3) { border-left: 0; } .fp-ticker .tk:nth-child(n + 3) { border-top: 1px solid var(--fp-out); }
+  .fp-ticker .tk:nth-child(odd) { border-left: 0; } .fp-ticker .tk:nth-child(n + 3) { border-top: 1px solid var(--fp-out); }
   .fp-need { grid-template-columns: 1fr; }
   .fp-need .fp-ncard { border-left: 0; border-top: 1px solid var(--fp-hair); padding: 9px 12px; }
   .fp-ncard .t1 { white-space: normal; }
