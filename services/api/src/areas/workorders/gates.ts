@@ -1,7 +1,7 @@
 /** Gate votes and decisions (spec 9.5): approve, reject and the brief confirmation. Each approver counts once (F6) and a vote is judged by the rule in force at that moment. */
-import { briefGateOff, gateDef, gateProgress, gateDecision, route, stationDef, type Catalog } from "@gantry/domain";
+import { briefBase, briefGateOff, gateDef, gateProgress, gateDecision, route, stationDef, type Catalog } from "@gantry/domain";
 import type { Actor } from "../../core/command.js";
-import { invalid, refuse } from "../../core/errors.js";
+import { conflict, invalid, refuse } from "../../core/errors.js";
 import { coveringStop, pinned, closeEntry, closeInstance, advance, bayOf, enterStation, finish, note, openInstanceOf, recordDecision, ev, stationIdOf, cancelAttempts, type Fx } from "./engine.js";
 import { appendMessage, closeConversation } from "./conversation.js";
 import { recordBriefDocument } from "./station-docs.js";
@@ -75,10 +75,12 @@ function markLastEntry(w: Wo, outcome: string, text = ""): void {
  * Approve the open instance of a gate. G0+G1 is the brief confirmation: one confirmation passes it. Other gates pass when N of M is met by distinct approvers
  * under the rule in force now, and never below the number the instance was opened with (tightening applies at once, loosening never approves waiting work, spec 9.3).
  */
-export async function approveGate(tx: import("@gantry/db").Tx, actor: Actor, woId: string, gateId: string, n: number | null, o: { via?: string; reason?: string } = {}): Promise<CmdResult> {
+export async function approveGate(tx: import("@gantry/db").Tx, actor: Actor, woId: string, gateId: string, n: number | null, o: { via?: string; reason?: string; briefBase?: string } = {}): Promise<CmdResult> {
   // "Approve anyway": a Factory Admin who gives a reason is not stopped by the halt guard here; approveInner decides, records and audits it. A kill is never skipped.
   const adminWithReason = !!o.reason && o.reason.trim().length >= 5 && !!actor.personId && (await tx.query(`select 1 from effective_role_assignments where org_id = $1 and person_id = $2 and role_id = 'factory_admin' and project_id is null and revoked_at is null and (expires_at is null or expires_at > now()) limit 1`, [actor.orgId, actor.personId])).rows.length > 0;
   const { fx, w } = await begin(tx, actor, woId, "gate.approve", { haltOverride: adminWithReason });
+  // A confirm that names the brief the person read (the console card does) is refused when the brief moved since, so it never confirms text nobody saw.
+  if (gateId === "G0G1" && o.briefBase && briefBase(w.data.brief) !== o.briefBase) throw conflict("The brief changed since you read it. Read it again, then confirm.");
   return approveInner(fx, actor, w, gateId, n, o.via, o.reason);
 }
 

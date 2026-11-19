@@ -4,7 +4,7 @@
  */
 import type { Queryable } from "@gantry/db";
 import { flowOf, trust, trustAgentFor, trustCellId, type Trust, type TrustCell, type TrustCeiling, type TrustEvidence, type TrustMeets } from "@gantry/domain";
-import { MIN_RUNS, MAX_GRANTABLE } from "./config.js";
+import { MIN_RUNS, MAX_GRANTABLE, probationCap, probationOf } from "./config.js";
 import { ceilingFor } from "./record.js";
 import { loadInsight, toCell, type Insight } from "./store.js";
 
@@ -20,6 +20,8 @@ export interface CellOut extends TrustCell {
   /** What the cell actually runs at: the grant, capped by ceilings, and by L1 while levels above L1 are switched off. */
   effective: number;
   projection: number;
+  /** Set while the cell runs one level lower after an agent version change (spec 13.3 "Version change"). */
+  probation: { runsLeft: number; since: string; fromVersion: string | null; toVersion: string | null; kind: string } | null;
   /** The proposal waiting on this cell. */
   pending: string | null;
 }
@@ -53,9 +55,10 @@ export async function readTrust(db: Queryable, orgId: string, o: { visible: read
     const m = trust.meets(state, c, { strict: true, now: nowMs, soakDays: ins.doc.soakDays });
     const ev = m.evidence ?? trust.evidence(state, c, { strict: true, now: nowMs, soakDays: ins.doc.soakDays });
     const next = m.next;
+    const prob = probationOf(dbCell.get(c.id)?.data ?? {});
     return {
       ...c, cleanRuns: ev.cleanRuns, rev: dbCell.get(c.id)?.version ?? 0, ...(virtual ? { virtual: true } : {}), gate, evidence: ev, meets: m, ceiling: { max: ceil.max, ids: ceil.ceilings.map((x) => x.id) },
-      effective: Math.min(c.level, ceil.max, ins.switchOn ? MAX_GRANTABLE : 1),
+      effective: Math.min(c.level, ceil.max, ins.switchOn ? MAX_GRANTABLE : 1, prob ? probationCap(c.level) : 4), probation: prob,
       projection: next ? trust.projection(state, c, next, nowMs) : 0, pending: pendingOf.get(c.id) ?? null,
     };
   };

@@ -30,7 +30,7 @@ export const AgentPatch = z
   .partial()
   .strict();
 
-export const SaveBody = z.object({ patch: AgentPatch, note: z.string().trim().max(300).optional(), via: Via });
+export const SaveBody = z.object({ patch: AgentPatch, note: z.string().trim().max(300).optional(), overrideReason: z.string().trim().max(300).optional(), via: Via });
 
 export const CreateBody = z.object({
   name: z.string().trim().min(1, "Give the agent a name.").max(80),
@@ -54,7 +54,7 @@ export const NewVersionBody = z.object({
   note: z.string().trim().max(300).optional(),
   via: Via,
 });
-export const RollbackBody = z.object({ version: z.union([z.string().min(1).max(60), z.number().int().positive()]), via: Via });
+export const RollbackBody = z.object({ version: z.union([z.string().min(1).max(60), z.number().int().positive()]), overrideReason: z.string().trim().max(300).optional(), via: Via });
 export const IdParam = z.object({ id: id });
 export const VersionParam = z.object({ id: id, v: z.string().min(1).max(60) });
 export const SkillParam = z.object({ id: id, skill: id });

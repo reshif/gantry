@@ -11,6 +11,17 @@ export const MIN_RUNS = 5;
 /** The highest level a person can grant in this version. L4 (unattended including release) is built into the ladder's shape but not grantable. */
 export const MAX_GRANTABLE = 3;
 export const DEFAULT_SAMPLE_RATE = 5;
+/** Spec 13.3 "Version change": after a new agent version (or a rollback) a cell runs one level lower until this many finished runs pass cleanly. */
+export const PROBATION_RUNS = 5;
+
+/** The probation marker of a cell, if one is running. */
+export interface Probation { since: string; fromVersion: string | null; toVersion: string | null; kind: "promote" | "rollback"; runsLeft: number }
+export function probationOf(data: Record<string, unknown>): Probation | null {
+  const p = data.probation as Partial<Probation> | undefined;
+  return p && typeof p === "object" && typeof p.runsLeft === "number" && p.runsLeft > 0 ? (p as Probation) : null;
+}
+/** What a cell may run at while on probation: one level below what it was granted, never below L1. */
+export const probationCap = (granted: number): number => Math.max(1, granted - 1);
 export const DEFAULT_SOAK_DAYS = 14;
 /** A proposal declined for a cell is not made again for this long (legacy: 3 days). */
 export const REPROPOSE_MS = 3 * 86_400_000;
