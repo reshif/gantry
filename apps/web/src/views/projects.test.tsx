@@ -120,6 +120,15 @@ describe("Projects: portfolio", () => {
     expect(screen.queryByText("No projects yet")).toBeNull();
   });
 
+  it("S-43: a project card says no cap when uncapped, and a $0 cap as a cap, not as a plain $0", async () => {
+    window.location.hash = "#/projects";
+    setup({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, budget: { monthly: 0, capped: false, mtd: 40, alertAt: 0.8 } }, { ...RISK, budget: { monthly: 0, capped: true, mtd: 0, alertAt: 0.8 } }] }) });
+    mount(<ProjectsView />);
+    expect(await screen.findByText("Payments Platform")).toBeTruthy();
+    expect(document.getElementById("prj-card-payments")!.textContent).toMatch(/\$40 · no cap/);
+    expect(document.getElementById(`prj-card-${RISK.id}`)!.textContent).toMatch(/\$0 of \$0 cap/);
+  });
+
   it("is the Blueprint's page: key in the eyebrow, Cards / Table switch, four tiles over all projects, cards with only Open Floor and Config", async () => {
     window.location.hash = "#/projects";
     setup();
