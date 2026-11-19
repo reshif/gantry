@@ -65,6 +65,21 @@ describe("model fallback at the edge", () => {
     expect(second.calls).toHaveLength(1);
   });
 
+  it("rides out a short drop on the run path: the connection fails twice, then the one vendor answers once", async () => {
+    let n = 0;
+    const flaky: typeof fetch = (i, init) => (++n <= 2 ? Promise.reject(new TypeError("fetch failed")) : fetch(i, init));
+    const g2 = buildGateway({ cfg: baseConfig({ apiUrl: api.url, vendorKeys: { "fb-one": "key-one-0123456789" } }), logger: false, fetchImpl: flaky });
+    await g2.app.listen({ host: "127.0.0.1", port: 0 });
+    api.route = route() as typeof api.route;
+    const res = await fetch(`http://127.0.0.1:${(g2.app.server.address() as { port: number }).port}/model/v1/messages`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ model: "claude-test-1", messages: [] }) });
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(n).toBe(3);
+    expect(primary.calls).toHaveLength(1);
+    await g2.drain();
+    await g2.app.close();
+  }, 20_000);
+
   it("does not fall back on a request error: a 400 is passed through", async () => {
     api.route = route({ alternates: [alt()] }) as typeof api.route;
     primary.force.push({ status: 400, body: { type: "error", error: { type: "invalid_request_error", message: "bad" } } });

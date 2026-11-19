@@ -122,6 +122,23 @@ d("agent-led classification at Intake (G-01)", () => {
     expect((await w.q(`select class, data->>'classifyPending' p from work_orders where id = $1`, [id]))[0]).toMatchObject({ class: "bug", p: "pending" });
   });
 
+  it("a vendor drop during classification is retried once after a pause, then settles as failed", async () => {
+    const id = (await w.submit("p-tomas", { title: "Fix the rounding bug in refunds" })).body.id as string;
+    const down = { blocks: [], status: 502, error: { type: "api_error", message: "The model vendor could not be reached. This is usually temporary: try again." } };
+    edge.script = [down, down] as never;
+    const state = async () => (await w.q(`select data->>'classifyPending' p from work_orders where id = $1`, [id]))[0].p;
+    const due = () => w.q(`update work_orders set data = jsonb_set(data, '{classifyRetryAt}', '0') where id = $1`, [id]);
+    await woSessionJobs.classify();
+    expect(await state()).toBe("pending");
+    const calls = edge.calls.length;
+    await woSessionJobs.classify();
+    expect(edge.calls.length).toBe(calls); // not due: no tight loop
+    await due();
+    await woSessionJobs.classify();
+    expect(await state()).toBe("failed");
+    expect(edge.calls.length).toBe(calls + 1);
+  });
+
   it("an agent that finishes without calling set_class leaves the labelled rule-based class", async () => {
     const id = (await w.submit("p-tomas", { title: "Fix the rounding bug in refunds" })).body.id as string;
     edge.respond = () => ({ blocks: [{ type: "text" as const, text: "I looked but will not decide." }] });

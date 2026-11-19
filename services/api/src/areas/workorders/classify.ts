@@ -26,11 +26,20 @@ export async function claimClassifications(pool: pg.Pool, orgId: string, limit =
   const { rows } = await pool.query<{ id: string }>(
     `update work_orders set data = jsonb_set(jsonb_set(data, '{classifyPending}', '"running"'), '{classifyClaimedAt}', to_jsonb($4::bigint)) where org_id = $1 and id in (
        select id from work_orders where org_id = $1 and position = 'intake' and state not in ('done','killed','declined') and source <> all($5::text[])
-         and (data->>'classifyPending' = 'pending' or (data->>'classifyPending' = 'running' and coalesce((data->>'classifyClaimedAt')::bigint, 0) < $4::bigint - $3::bigint))
+         and ((data->>'classifyPending' = 'pending' and coalesce((data->>'classifyRetryAt')::bigint, 0) <= $4::bigint) or (data->>'classifyPending' = 'running' and coalesce((data->>'classifyClaimedAt')::bigint, 0) < $4::bigint - $3::bigint))
        order by created_at limit $2 for update skip locked) returning id`,
     [orgId, limit, CLASSIFY_STALE_MS, now.getTime(), NO_CLASSIFY_SOURCES],
   );
   return rows.map((r) => r.id);
+}
+
+/** After a vendor-unreachable failure: puts the claim back to pending for one more attempt at `at` (ms). Returns false when it was already retried once, so the caller settles it as failed. */
+export async function retryClassification(pool: pg.Pool, orgId: string, woId: string, at: number): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `update work_orders set data = jsonb_set(jsonb_set(jsonb_set(data, '{classifyPending}', '"pending"'), '{classifyRetried}', 'true'), '{classifyRetryAt}', to_jsonb($3::bigint)) where org_id = $1 and id = $2 and data->>'classifyPending' = 'running' and coalesce(data->>'classifyRetried', '') <> 'true'`,
+    [orgId, woId, at],
+  );
+  return (rowCount ?? 0) > 0;
 }
 
 /** Records how the classification ended when the agent did not set a class (no usable model, a failed call, a person got there first). */

@@ -57,6 +57,14 @@ export class ModelUnavailable extends Error {
   }
 }
 
+/** True when the model vendor (or the edge on its way to it) could not be reached at all: a network drop, not a refusal or a bad answer. Worth one more automatic attempt. */
+export function isVendorUnreachable(e: unknown): boolean {
+  return e instanceof ModelUnavailable && (e.code === "edge_unreachable" || /could not be reached/i.test(e.message));
+}
+
+/** How long an automatic Intake turn waits before its one more attempt after a vendor-unreachable failure. */
+export const VENDOR_RETRY_DELAY_MS = 30_000;
+
 type Block = { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: unknown } | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean };
 interface Msg { role: "user" | "assistant"; content: string | Block[] }
 export interface Usage { inputTokens: number; outputTokens: number; calls: number }

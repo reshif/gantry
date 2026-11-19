@@ -1,3 +1,4 @@
+import { fetchRiding, causeOf } from "./blip-retry.js";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiClient, Route } from "./api.js";
@@ -190,13 +191,8 @@ export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
     reply.hijack();
     try {
       const payload = JSON.stringify({ ...body, model: route.upstreamModel ?? route.modelId });
-      // One retry for a connection-level failure (nothing has reached the caller yet: headers are only written after a response arrives). Never after a timeout or abort.
-      const res = await f(url, { method: "POST", headers, body: payload, signal: ac.signal, lan: route.lan } as RequestInit).catch(async (e: unknown) => {
-        if (ac.signal.aborted) throw e;
-        req.log.warn({ purpose, err: e instanceof Error ? e.message : String(e) }, "service model call failed, retrying once");
-        await new Promise((r) => setTimeout(r, 400));
-        return f(url, { method: "POST", headers, body: payload, signal: ac.signal, lan: route.lan } as RequestInit);
-      });
+      // Connection-level failures are retried with backoff that rides out a short network drop (nothing has reached the caller yet: headers are only written after a response arrives). Never after a timeout or abort.
+      const res = await fetchRiding(() => f(url, { method: "POST", headers, body: payload, signal: ac.signal, lan: route.lan } as RequestInit), ac.signal, (i) => req.log.warn({ purpose, ...i }, "service model call failed, retrying"));
       if (res.status === 429 || res.status === 529 || res.status === 503) {
         const ra = Number(res.headers.get("retry-after"));
         limiter.pause(route.vendor, Number.isFinite(ra) && ra > 0 ? ra : res.status === 429 ? 5 : 2);
@@ -230,7 +226,7 @@ export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
       if (res.status >= 400) outcome = "error";
     } catch (e) {
       outcome = "error";
-      req.log.warn({ purpose, err: e instanceof Error ? e.message : String(e) }, "service model call failed");
+      req.log.warn({ purpose, ...causeOf(e) }, "service model call failed");
       if (!reply.raw.headersSent) {
         reply.raw.writeHead(502, { "content-type": "application/json", "cache-control": "no-store" });
         reply.raw.end(JSON.stringify({ type: "error", error: { type: "api_error", message: "The model vendor could not be reached. This is usually temporary: try again." } }));

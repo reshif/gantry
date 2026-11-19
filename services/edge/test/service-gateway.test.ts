@@ -77,20 +77,20 @@ describe("service model calls (console, spec 12.6)", () => {
     expect(JSON.parse(api.of("/usage")[0]!.body)).toMatchObject({ purpose: "explain", inputTokens: 11, outputTokens: 5 });
   });
 
-  it("retries a connection-level vendor failure once, then says the vendor is unreachable", async () => {
-    for (const failures of [1, 2]) {
-      let n = 0;
-      const flaky: typeof fetch = (i, init) => (++n <= failures ? Promise.reject(new TypeError("fetch failed")) : fetch(i, init));
-      const g2 = buildGateway({ cfg: baseConfig({ apiUrl: api.url }), logger: false, fetchImpl: flaky });
-      await g2.app.listen({ host: "127.0.0.1", port: 0 });
-      const b2 = `http://127.0.0.1:${(g2.app.server.address() as { port: number }).port}`;
-      const res = await fetch(`${b2}/service/v1/messages`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${EDGE}`, "x-gantry-purpose": "console" }, body: JSON.stringify({ max_tokens: 50, messages: [{ role: "user", content: "hi" }] }) });
-      if (failures === 1) { expect(res.status).toBe(200); expect(n).toBe(2); }
-      else { expect(res.status).toBe(502); expect(n).toBe(2); expect(JSON.stringify(await res.json())).toContain("could not be reached"); }
-      await g2.drain();
-      await g2.app.close();
-    }
-  });
+  it("rides out a short drop: a connection failure twice, then success, gives one 200 and the vendor sees one call", async () => {
+    let n = 0;
+    const flaky: typeof fetch = (i, init) => (++n <= 2 ? Promise.reject(Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("getaddrinfo ENOTFOUND api.anthropic.com"), { code: "ENOTFOUND" }) })) : fetch(i, init));
+    const g2 = buildGateway({ cfg: baseConfig({ apiUrl: api.url }), logger: false, fetchImpl: flaky });
+    await g2.app.listen({ host: "127.0.0.1", port: 0 });
+    const b2 = `http://127.0.0.1:${(g2.app.server.address() as { port: number }).port}`;
+    const before = vendor.calls.length;
+    const res = await fetch(`${b2}/service/v1/messages`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${EDGE}`, "x-gantry-purpose": "console" }, body: JSON.stringify({ max_tokens: 50, messages: [{ role: "user", content: "hi" }] }) });
+    expect(res.status).toBe(200);
+    expect(n).toBe(3);
+    expect(vendor.calls.length).toBe(before + 1);
+    await g2.drain();
+    await g2.app.close();
+  }, 20_000);
 
   it("says so when no model is configured, and calls no vendor", async () => {
     api.override = (r) => (r.url.endsWith("/service-calls/authorize") ? [200, { ok: true, allow: false, code: "route", reason: "No vendor is connected for the default model." }] : undefined);

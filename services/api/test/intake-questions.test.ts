@@ -169,4 +169,44 @@ d("intake questions: closing, replacing and verifying", () => {
     expect((await q(`select data->>'followUp' as f from workorder_messages where wo_id = $1 and data->>'event' = 'session.opened'`, [id]))[0].f).toBe("skipped");
     expect((await cards(id)).filter((c) => c.question === "Which screen or flow first?")).toHaveLength(1);
   });
+
+  describe("a vendor drop on an automatic Intake turn", () => {
+    const unreachable = { blocks: [], status: 502, error: { type: "api_error", message: "The model vendor could not be reached. This is usually temporary: try again." } };
+    const nudge = async () => {
+      await q(`delete from workorder_messages where id = 'wm-blip'`);
+      const id = await submit();
+      await q(`update work_orders set data = jsonb_set(data, '{classifyPending}', '"done"') where org_id = $1 and data->>'classifyPending' in ('pending','running')`, [t.orgId]);
+      await q(`delete from workorder_messages where wo_id = $1 and data->>'event' = 'session.opened'`, [id]);
+      await q(`insert into workorder_messages (org_id, id, wo_id, role, author, body, data, created_at, updated_at) values ($1, 'wm-blip', $2, 'system', 'system', 'The Intake conversation is open.', '{"kind":"update","event":"session.opened","followUp":"pending","cards":[]}'::jsonb, now(), now())`, [t.orgId, id]);
+      return id;
+    };
+    const state = async () => (await q(`select data->>'followUp' as f, data->>'followUpRetried' as r from workorder_messages where id = 'wm-blip'`))[0];
+    const due = () => q(`update workorder_messages set data = jsonb_set(data, '{followUpRetryAt}', '0') where id = 'wm-blip'`);
+
+    it("is retried once after a pause, and the person sees nothing when the second attempt works", async () => {
+      const id = await nudge();
+      edge.script = [unreachable, say("Hello, what do you need?")] as never;
+      await woSessionJobs.followUps();
+      expect(await state()).toMatchObject({ f: "pending", r: "true" });
+      const calls = edge.calls.length;
+      await woSessionJobs.followUps();
+      expect(edge.calls.length).toBe(calls); // not due yet: no tight loop
+      await due();
+      await woSessionJobs.followUps();
+      expect((await state()).f).toBe("done");
+      expect(((await call(tomas, "GET", url(id))).body.messages as any[]).some((m) => m.role === "assistant")).toBe(true);
+    });
+
+    it("is marked failed only when the second attempt fails too, and never a third time", async () => {
+      await nudge();
+      edge.script = [unreachable, unreachable, say("never")] as never;
+      await woSessionJobs.followUps();
+      await due();
+      await woSessionJobs.followUps();
+      expect((await state()).f).toBe("failed");
+      const calls = edge.calls.length;
+      await woSessionJobs.followUps();
+      expect(edge.calls.length).toBe(calls);
+    });
+  });
 });

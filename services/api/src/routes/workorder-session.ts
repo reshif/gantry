@@ -17,14 +17,14 @@ import { appendEvent, withTx, type Queryable } from "@gantry/db";
 import { briefGateOff, can, SESSION_BUDGET_DEFAULT_USD, WO_AGENT_LABEL, classOf, classesOf, route, stationDef, visibleProjects, type Catalog, type FlowState, type Project, type WoCard, type WorkOrder } from "@gantry/domain";
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { runConversation, ModelUnavailable, readiness } from "../areas/console/model.js";
+import { runConversation, ModelUnavailable, readiness, isVendorUnreachable, VENDOR_RETRY_DELAY_MS } from "../areas/console/model.js";
 import { UNTRUSTED_NOTE } from "../areas/console/mark.js";
 import { brokerInspect, brokerReadFile } from "../areas/onboarding/session/broker.js";
 import { readRepoRow } from "../areas/onboarding/state.js";
 import { composeSessionContext, recordTurnTuple } from "../areas/session/context.js";
 import { agentBudgetUsd, historyFrom, openSse, stationAgentGate, turnCostMicros } from "../areas/session/core.js";
 import { postMessage, reclassify, decline } from "../areas/workorders/intake.js";
-import { applyAgentClass, claimClassifications, settleClassification } from "../areas/workorders/classify.js";
+import { applyAgentClass, claimClassifications, retryClassification, settleClassification } from "../areas/workorders/classify.js";
 import { loadFlow, readWoRow, stateWithPinned, woVersion } from "../areas/workorders/model.js";
 import { autoConfirmProposedBrief, confirmAgentBrief } from "../areas/workorders/session/approve.js";
 import { addWoMessage, legacyMessages, listWoMessages, lockWoMessage, newWoMessageId, saveWoMessageData, supersedeWoPending, woSessionSpend, markWoSeen, type WoMessage } from "../areas/workorders/session/store.js";
@@ -304,9 +304,9 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
 
   /** Follow-ups: an update that asked for one (data.followUp = pending) gets an agent turn that says what it means and puts up the next proposal. Never writes anything about the work. */
   async function runFollowUps(): Promise<number> {
-    const { rows } = await g.pool.query<{ id: string; wo_id: string; body: string; ev: string | null }>(
-      `update workorder_messages set data = jsonb_set(data, '{followUp}', '"running"') where org_id = $1 and id in (select id from workorder_messages where org_id = $1 and data->>'followUp' = 'pending' order by created_at limit 3 for update skip locked) returning id, wo_id, body, data->>'event' as ev`,
-      [g.orgId],
+    const { rows } = await g.pool.query<{ id: string; wo_id: string; body: string; ev: string | null; retried: string | null }>(
+      `update workorder_messages set data = jsonb_set(data, '{followUp}', '"running"') where org_id = $1 and id in (select id from workorder_messages where org_id = $1 and data->>'followUp' = 'pending' and coalesce((data->>'followUpRetryAt')::bigint, 0) <= $2::bigint order by created_at limit 3 for update skip locked) returning id, wo_id, body, data->>'event' as ev, data->>'followUpRetried' as retried`,
+      [g.orgId, Date.now()],
     );
     const done = (id: string, status: string) => g.pool.query(`update workorder_messages set data = jsonb_set(data, '{followUp}', to_jsonb($3::text)) where org_id = $1 and id = $2`, [g.orgId, id, status]);
     let n = 0;
@@ -331,7 +331,10 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
         n++;
       } catch (e) {
         app.log.error({ err: e }, "work-order session follow-up failed");
-        await done(m.id, "failed");
+        // A network drop (the vendor could not be reached) gets one more automatic attempt after a pause; the person sees the failure only if that one fails too.
+        if (isVendorUnreachable(e) && m.retried !== "true") {
+          await g.pool.query(`update workorder_messages set data = jsonb_set(jsonb_set(jsonb_set(data, '{followUp}', '"pending"'), '{followUpRetried}', 'true'), '{followUpRetryAt}', to_jsonb($3::bigint)) where org_id = $1 and id = $2`, [g.orgId, m.id, Date.now() + VENDOR_RETRY_DELAY_MS]);
+        } else await done(m.id, "failed");
       } finally {
         active.delete(row.id);
       }
@@ -399,6 +402,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
         else if (out.applied.applied) n++;
       } catch (e) {
         app.log.error({ err: e }, "intake classification failed");
+        if (isVendorUnreachable(e) && (await retryClassification(g.pool, g.orgId, id, Date.now() + VENDOR_RETRY_DELAY_MS).catch(() => false))) continue;
         await settleClassification(g.pool, g.orgId, id, "failed", e instanceof ModelUnavailable ? e.message : "The classification call failed.").catch(() => undefined);
       }
     }

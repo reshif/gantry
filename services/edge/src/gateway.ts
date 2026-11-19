@@ -1,3 +1,4 @@
+import { fetchRiding } from "./blip-retry.js";
 import { randomUUID } from "node:crypto";
 import { upstreamFetch, type UpstreamInit } from "./upstream-guard.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
@@ -232,7 +233,8 @@ export function buildGateway(deps: GatewayDeps): Gateway {
       let failure: unknown;
       try {
         const c = callTo(route, key, ac.signal);
-        res = await f(c.url, c.init);
+        // With a fallback vendor configured, one short retry only: the fallback is the better way through a longer outage.
+        res = await fetchRiding(() => f(c.url, c.init), ac.signal, (i) => req.log.warn({ runId, vendor: route.vendor, ...i }, "model call failed, retrying"), alternates.length ? [500] : undefined);
         pause(route.vendor, res);
       } catch (e) {
         failure = e;
