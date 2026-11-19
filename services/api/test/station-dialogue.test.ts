@@ -156,6 +156,27 @@ d("station documents and dialogue", () => {
     expect(msgs[0]!.body).toContain("Found the retry module.");
     expect(msgs[0]!.data.cards).toContainEqual({ kind: "assumptions", station: "research", attempt: att.id, count: 2 });
   });
+  it("S-30: a station parked with only an assumption says what it waits for, and confirming the last assumption resumes it", async () => {
+    const id = await w.atStation("research", "Assumption only");
+    const att = (await w.liveAttempt(id))!;
+    await w.apply(att, { status: "needs_person", summary: "Need a call", output: { dialogue: { questions: [], assumptions: [{ statement: "Only EU customers are affected", because: "The ticket mentions SEPA." }, { statement: "The job runs nightly", because: "The cron file says so." }] } } });
+    const parked = await w.get(id);
+    expect(parked.bay).toBe("person");
+    expect(String(parked.bayReason)).toBe("Waiting for you to confirm 2 assumptions at Research");
+    expect(String(parked.bayReason)).not.toMatch(/0 answers/);
+    const dl = (await w.call("p-tomas", "GET", `/api/v1/work-orders/${id}/dialogue`)).body;
+    const first = await w.call("p-tomas", "POST", `/api/v1/work-orders/${id}/assumptions/${dl.assumptions[0].id}`, { status: "confirmed" });
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    expect(first.body.resumed).toBe(false);
+    expect((await w.get(id)).bay).toBe("person");
+    const last = await w.call("p-tomas", "POST", `/api/v1/work-orders/${id}/assumptions/${dl.assumptions[1].id}`, { status: "corrected", note: "It runs weekly." });
+    expect(last.status, JSON.stringify(last.body)).toBe(200);
+    expect(last.body.resumed).toBe(true);
+    expect((await w.get(id)).bay).toBeNull();
+    const again = (await w.liveAttempt(id))!;
+    expect(again.id).not.toBe(att.id);
+    expect(again.station).toBe("research");
+  });
   it("'waiting for you' is shown to the person the question asks, and everyone else sees whom it waits on", async () => {
     const id = await w.atStation("research", "Who is asked");
     const att = (await w.liveAttempt(id))!;

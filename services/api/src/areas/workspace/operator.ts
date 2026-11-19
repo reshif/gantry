@@ -69,8 +69,10 @@ export async function operatorView(db: Queryable, orgId: string, o: { projects: 
 
   const waiting: OpItem[] = [];
   for (const r of bayRows.rows) {
-    const w = (r.data.waitingOn ?? null) as { station?: string; questions?: number; plan?: boolean; since?: number } | null;
-    const why = r.position === "person" ? (w?.plan ? "Waiting for a research plan to be decided." : w?.questions ? `Waiting for ${w.questions} answer${w.questions === 1 ? "" : "s"}.` : "Waiting for a person to answer or take over.")
+    const w = (r.data.waitingOn ?? null) as { station?: string; questions?: number | string[]; assumptions?: string[]; plan?: boolean; since?: number } | null;
+    const nq = Array.isArray(w?.questions) ? w!.questions.length : Number(w?.questions) || 0;
+    const na = w?.assumptions?.length ?? 0;
+    const why = r.position === "person" ? (w?.plan ? "Waiting for a research plan to be decided." : nq ? `Waiting for ${nq} answer${nq === 1 ? "" : "s"}.` : na ? `Waiting for ${na} assumption${na === 1 ? "" : "s"} to be confirmed.` : "Waiting for a person to answer or take over.")
       : r.position === "queue" ? "Waiting for a free coding slot." : `Parked in the ${r.position} bay.`;
     waiting.push({ wo: r.id, project: r.project_id, title: r.title, station: String(w?.station ?? r.data.bayFrom ?? r.position), since: w?.since ?? r.updated_at.getTime(), why, key: `wo:${r.id}` });
   }
