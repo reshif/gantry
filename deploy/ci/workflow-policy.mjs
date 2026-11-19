@@ -57,6 +57,11 @@ export function check(file, text) {
   if (!doc.permissions) add("", "no top-level permissions: (least privilege: start from contents: read)");
   if (doc.permissions === "write-all") add("", "permissions: write-all");
   if (triggers.has("pull_request_target")) add("", "pull_request_target runs with secrets on code from a fork; do not use it");
+  for (const [jn, job] of Object.entries(doc.jobs ?? {})) {
+    for (const [sn, svc] of Object.entries(job?.services ?? {})) {
+      if (String(svc?.env?.POSTGRES_HOST_AUTH_METHOD ?? "").toLowerCase() === "trust") add(`job ${jn} service ${sn}`, "POSTGRES_HOST_AUTH_METHOD: trust accepts any password, so tests that prove a wrong password is refused pass or fail for the wrong reason; set POSTGRES_PASSWORD instead");
+    }
+  }
 
   for (const [jid, job] of Object.entries(doc.jobs)) {
     const w = `job ${jid}`;

@@ -73,3 +73,8 @@ test("a whole-context dump in a shell is refused: toJSON(github), toJSON(github.
     assert.match(W({ job: step(`      - run: |\n          echo '\${{ ${e} }}'\n`) }).join(), /untrusted/, e);
   assert.deepEqual(W({ job: step("      - run: echo ${{ toJSON(matrix) }}\n") }), []);
 });
+test("a Postgres service with trust auth is refused; a password passes", () => {
+  const svc = (env) => `    runs-on: ubuntu-24.04\n    services:\n      postgres:\n        image: postgres:17\n        env:\n          ${env}\n    steps:\n      - run: echo\n`;
+  assert.match(W({ job: svc("POSTGRES_HOST_AUTH_METHOD: trust") }).join(), /trust accepts any password/);
+  assert.deepEqual(W({ job: svc("POSTGRES_PASSWORD: pw") }), []);
+});
