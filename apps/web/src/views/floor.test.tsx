@@ -373,6 +373,14 @@ describe("Floor: prototype drawers and links", () => {
     expect(await screen.findByRole("dialog")).toBeTruthy();
   });
 
+  it("T-40: the Line control button names the killed state and is red", async () => {
+    const killed = { ...PAYMENTS, killed: { by: "p-asha", at: NOW, reason: "test", inFlight: "cancel" } };
+    mockApi({ "GET /api/v1/projects/payments/floor": () => ({ body: floorRead({ project: killed }) }) }, { me: { projects: [killed] } });
+    mount(<FloorView />);
+    const b = await screen.findByRole("button", { name: /Line control: killed/ });
+    expect(b.classList.contains("danger")).toBe(true);
+  });
+
   it("keeps the view in the URL only: Board does not survive a remount without ?view=board", async () => {
     mockApi();
     window.location.hash = "#/p/payments/floor";

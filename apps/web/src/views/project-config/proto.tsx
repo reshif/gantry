@@ -182,6 +182,10 @@ export function LineProto({ p }: PcProps) {
   const kd = useCan("kill.project", { project: p.id });
   const rd = useCan("restore.project", { project: p.id });
   const stop = me ? makeStopActions(ui, me) : null;
+  // T-38: the project list read can lag the session; either source saying killed means killed (as on the Floor)
+  const mine = me?.projects.find((x) => x.id === p.id);
+  const projKilled = !!(p.killed ?? mine?.killed);
+  const projHalted = !!(p.halted ?? mine?.halted);
   // the prototype's dialog: type the project key only. The server wants a reason for the audit trail, so it is written for the person.
   // the prototype toggles the halt at once with a toast; the audit reason is written for the person
   const halt = async () => {
@@ -212,8 +216,8 @@ export function LineProto({ p }: PcProps) {
       <div className="stack">
         <p>Halting lets running agents finish their current step. A kill stops them now.</p>
         <div className="row">
-          {p.halted ? <ActBtn icon="pause" id="pcf-resume" label="Resume project" guard={hd} onClick={() => void stop?.resume(p.id)} /> : <ActBtn icon="pause" id="pcf-halt" label="Halt project" guard={hd} onClick={() => void halt()} />}
-          {p.killed ? <ActBtn kind="primary" icon="power" id="pcf-restore" label="Restore project" guard={rd} onClick={() => stop?.restore("project", p.id)} /> : <ActBtn kind="danger" icon="stop" id="pcf-kill" label="Kill project" guard={kd} onClick={kill} />}
+          {projKilled ? null : projHalted ? <ActBtn icon="pause" id="pcf-resume" label="Resume project" guard={hd} onClick={() => void stop?.resume(p.id)} /> : <ActBtn icon="pause" id="pcf-halt" label="Halt project" guard={hd} onClick={() => void halt()} />}
+          {projKilled ? <ActBtn kind="primary" icon="power" id="pcf-restore" label="Restore project" guard={rd} onClick={() => stop?.restore("project", p.id)} /> : <ActBtn kind="danger" icon="stop" id="pcf-kill" label="Kill project" guard={kd} onClick={kill} />}
         </div>
       </div>
     </Panel>

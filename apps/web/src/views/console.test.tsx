@@ -140,7 +140,7 @@ describe("Console (legacy console.js on the real API)", () => {
           { id: "cm-2", threadId: "ct-1", role: "assistant", text: "WO-1042 is waiting at G2.", at: Date.now(), data: { mode: "model", cited: [{ type: "wo", id: "WO-1042", project: "payments" }], proposals: [], tools: ["get_work_order"] } }] } }),
       });
       mount("/settings");
-      await waitFor(() => expect(document.getElementById("con-mode")!.textContent).toBe("test-1")); // short chip; the full name is in the answer-mode line
+      await waitFor(() => expect(document.getElementById("con-mode")!.textContent).toBe("Test 1")); // display name chip (T-52); the full name is in the answer-mode line
       expect(document.getElementById("con-mode")!.getAttribute("aria-label")).toContain("claude-test-1");
       await waitFor(() => expect(document.querySelector(".footnote")?.textContent).toContain("audited as made via the console."));
       expect(document.body.textContent).not.toContain("audited with via console");
@@ -310,9 +310,12 @@ describe("Console (legacy console.js on the real API)", () => {
       await byId("con-access-link");
       await ask("/halt payments dup");
       const perm = await waitFor(() => { const e = document.querySelector(".perm.neg"); if (!e) throw new Error("no perm"); return e; });
-      expect(perm.textContent).toContain("You can't do this: Needs Line Lead. Only a Line Lead may halt this line.");
+      expect(perm.textContent).toContain("You can't do this. Only a Line Lead may halt this line. Needs: Needs Line Lead.");
       const ok = document.querySelector<HTMLElement>("[id^='con-cf-ok-']")!;
       expect(ok.getAttribute("aria-disabled")).toBe("true");
+      // T-49: a refused card shows a locked, quiet button (lock glyph, no primary or danger fill), not a normal one
+      expect(ok.classList.contains("con-cf-locked")).toBe(true);
+      expect(ok.classList.contains("primary") || ok.classList.contains("danger")).toBe(false);
       fireEvent.click(ok);
       expect(writes(calls).filter((c) => c.path === "/api/v1/stops")).toHaveLength(0);
       fireEvent.click(document.querySelector<HTMLElement>("[id^='con-cf-explain-']:not([id$='-out']):not([id$='-stop'])")!);

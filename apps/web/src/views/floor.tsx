@@ -92,8 +92,9 @@ function LineControl() {
   const guardOf = (i: number) => (ctx.replay ? REPLAY_LOCK : checks[i]?.pending ? undefined : checks[i]);
   return (
     <Btn
-      label="Line control"
-      icon="pause"
+      label={projKilled ? "Line control: killed" : halted ? "Line control: halted" : "Line control"}
+      icon={projKilled ? "stop" : "pause"}
+      kind={projKilled ? "danger" : undefined}
       id="floor-line-control"
       aria-haspopup="menu"
       onClick={(e) =>
