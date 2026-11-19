@@ -85,7 +85,7 @@ d("models, vendors, routing, prices and budgets (spec 8.7, 10.4, 10.5)", () => {
 
   describe("vendors (setVendor, addVendor)", () => {
     it("connects a vendor with a key: sealed with the data key, masked everywhere, never in an event", async () => {
-      const r = await w.call(ADMIN, "PATCH", "/api/v1/vendors/local", { patch: { key: FAKE_KEY, connected: true, endpoint: "http://gpu-pool.internal:8000/v1", budget: 0 }, action: "vendor.connect" });
+      const r = await w.call(ADMIN, "PATCH", "/api/v1/vendors/local", { patch: { key: FAKE_KEY, connected: true, endpoint: "http://gpu.example.org:8000/v1", budget: 0 }, action: "vendor.connect" });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
       expect(r.body.msg).toBe("Local models connected.");
       const v = await vendor("local");

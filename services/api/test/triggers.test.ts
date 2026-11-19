@@ -409,9 +409,12 @@ d("triggers (spec 8.8, 11.7, 12.5)", () => {
     expect((await q(`select * from events where type = 'trigger.hook.denied'`))[0]).toMatchObject({ outcome: "denied", category: "integrations" });
     expect((await post("jira-1", body, { sig: null })).status).toBe(401);
     expect((await post("jira-1", body, { ts: Math.floor(Date.now() / 1000) - 3600 })).status).toBe(401); // outside the window
-    expect((await post("gh-1", body)).status).toBe(404); // a built-in connection does not receive here
-    expect((await post("jira-off", body)).status).toBe(409);
-    expect((await post("nope", body)).status).toBe(404);
+    // S-70: a built-in, a switched-off and an unknown connection answer the same 401 as a bad signature, so an unsigned caller learns nothing about which exist.
+    const uniform = await Promise.all(["gh-1", "jira-off", "nope", "jira-1"].map((i) => post(i, body, { sig: null })));
+    for (const u of uniform) expect(u).toEqual({ status: 401, body: { ok: false, msg: "Invalid signature." } });
+    expect((await post("gh-1", body)).status).toBe(401);
+    expect((await post("jira-off", body)).status).toBe(401); // never learns the name, even with a signature that does not verify
+    expect((await post("nope", body)).status).toBe(401);
     expect((await post("jira-1", { id: "x" })).status).toBe(422);
     expect(await q(`select 1 from jobs where kind = 'trigger.evaluate' and payload ->> 'source' = 'jira-1'`)).toHaveLength(0);
     const ok = await post("jira-1", body);

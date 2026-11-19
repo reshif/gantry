@@ -567,13 +567,15 @@ d("internal runs API", () => {
   });
 
   describe("egress and vendor keys", () => {
-    it("builds the project allow-list: defaults, vendor endpoints, project extras, never MCP hosts (gateway only); refuses a bad token", async () => {
+    it("builds the project allow-list: defaults, project extras, never vendor hosts or MCP hosts (gateway only); refuses a bad token", async () => {
       await q(`update projects set config = jsonb_set(config, '{extra}', '{"allowedHosts":["packages.internal.example"]}') where id = 'payments'`);
       const r = await makeRun();
       const res = await call("POST", `/internal/v1/runs/${r.runId}/egress`, { token: r.token });
       const h: string[] = res.json().hosts;
-      for (const x of ["github.com", "registry.npmjs.org", "pypi.org", "api.anthropic.com", "gpu.example.org", "packages.internal.example"]) expect(h, x).toContain(x);
+      for (const x of ["github.com", "registry.npmjs.org", "pypi.org", "api.anthropic.com", "packages.internal.example"]) expect(h, x).toContain(x);
       expect(h).not.toContain("evil.example.com");
+      // S-67: a run reaches models only through the edge gateway, so a connected vendor's endpoint host is not on its list.
+      expect(h).not.toContain("gpu.example.org");
       // Spec 12.4: MCP servers are reached only through the edge's gateway (scope, definition hash, write pre-authorisation), never directly.
       expect(h).not.toContain("mcp.example.net");
       expect((await call("POST", `/internal/v1/runs/${r.runId}/egress`, { token: "grt.xx.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" })).statusCode).toBe(403);

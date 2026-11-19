@@ -20,7 +20,7 @@ Open https://localhost. Caddy signs a certificate from its local CA; either acce
 docker compose -f deploy/compose.yml cp ingress:/data/caddy/pki/authorities/local/root.crt ./gantry-local-root.crt
 ```
 
-Sign in with a seeded demo account, for example `asha` / `gantry-dev` (all 15 people from the legacy seed exist; the username is the email prefix and the `gantry_id` claim is the legacy id such as `p-asha`). **The demo accounts and the shared password are for local development only.** Mail sent by the stack appears at https://localhost/mail/ (development profile only, see below). Keycloak's admin console is at http://localhost:8081/idp/admin/ on the host itself (`admin`, password in `deploy/secrets/keycloak_admin_password`); it is not served on the public site.
+Sign in with a seeded demo account, for example `asha` / `gantry-dev` (all 15 people from the legacy seed exist; the username is the email prefix and the `gantry_id` claim is the legacy id such as `p-asha`). **The demo accounts and the shared password are for local development only.** Mail sent by the stack appears at https://localhost/mail/ (only with `GANTRY_INGRESS_PROFILE=dev`, see below). Keycloak's admin console is at http://localhost:8081/idp/admin/ on the host itself (`admin`, password in `deploy/secrets/keycloak_admin_password`); it is not served on the public site.
 
 Stop and wipe: `docker compose -f deploy/compose.yml down -v`.
 
@@ -36,7 +36,15 @@ Stop and wipe: `docker compose -f deploy/compose.yml down -v`.
 
 Ingress routes: `/api/*`, `/auth/*`, `/hooks/*` to `gantry-api:8000` (no buffering, so server-sent events stream); `/idp/realms/gantry/*` and `/idp/resources/*` to Keycloak `:8081`; any other `/idp/*` path (the admin console, the admin REST API, the `master` realm) answers 404; everything else to `gantry-web:8080`.
 
-`GANTRY_INGRESS_PROFILE` picks the development routes from `caddy/profiles/`. `dev` (the compose default for this local stack) adds `/mail/*` to Mailpit `:8025`. `prod` (the Caddyfile default) adds nothing, so set `GANTRY_INGRESS_PROFILE=prod` for any shared or production install.
+`GANTRY_INGRESS_PROFILE` picks the development routes from `caddy/profiles/`. The default is `prod`, which adds nothing: no `/mail`, no `/v3`. `dev` is an explicit opt-in that adds `/mail/*` (Mailpit `:8025`, which holds every invite link and notification mail) and the `/v3` design preview. **To keep Mailpit at `/mail/` and the preview at `/v3/` on a local or preview stack, set `GANTRY_INGRESS_PROFILE=dev`** in the environment `docker compose` runs with (an exported variable, or the compose env file you already use) before the next `up`; recreate only the `ingress` service for it to take effect (`docker compose -p gantry up -d ingress`). Never set it on a stack that binds beyond loopback. The demo accounts are separately tied to a localhost URL (`core/config.ts`).
+
+### Back-channel logout (sessions end with the identity)
+
+The API serves `POST /auth/backchannel-logout` (OIDC Back-Channel Logout 1.0). Keycloak posts a signed logout token there when a user signs out at Keycloak, is disabled, or has sessions revoked; the API verifies it (signature, issuer, audience, age, event) and revokes the matching Gantry sessions. The realm files set the client's `backchannel.logout.url` to `http://gantry-api:8000/auth/backchannel-logout` (container to container, never through the ingress) with session required. A realm that already exists is not re-imported, so on a running stack set it by hand once: Keycloak admin console, realm `gantry`, client `gantry-web`, Settings, Logout settings, "Backchannel logout URL" `http://gantry-api:8000/auth/backchannel-logout`, "Backchannel logout session required" on.
+
+### Vendor LAN ranges (on-prem models)
+
+The model gateway (edge) refuses vendor endpoints that are loopback, link-local (metadata), on the control network or private, resolving the name on every call. An on-prem vendor on a private address needs its range listed: Security setting `vendorLanRanges` (IPv4 CIDR inside 10/8, 172.16/12, 192.168/16 or 100.64/10), set by a Factory Admin with a fresh sign-in and audited. Keep it as narrow as the model host: the Docker bridge networks live in 172.16/12, and a wide range there reopens them. `EDGE_ALLOW_PRIVATE_UPSTREAMS=true` turns the edge guard off for a development stack.
 
 ### Keycloak admin console
 

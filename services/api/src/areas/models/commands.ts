@@ -2,15 +2,18 @@
  * Vendor, model, routing, price and budget commands (spec 8.7 Models, 10.4, 10.5). Each runs inside `command()`: decision point, state and
  * event in one transaction, a denial audited. Keys are sealed with the data key under AAD `vendor:<id>` and never returned or put in an event.
  */
+import { isIP } from "node:net";
+import { forbiddenVendorName, vendorAddressRefusal } from "@gantry/domain/netguard";
 import { encrypt, fingerprint, mask, type Tx } from "@gantry/db";
 import { vendorTemplate, type Routing } from "@gantry/domain";
 import type { z } from "zod";
 import type { Actor, CommandResult } from "../../core/command.js";
 import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
-import { readCatalog } from "../../core/read/index.js";
+import { readCatalog, readSecurity } from "../../core/read/index.js";
 import { liftBudgetHalt } from "../workorders/budget.js";
 import { capOfReason, overBudget, overText } from "../workorders/budget-state.js";
 import { slug } from "../agents/config.js";
+import { egressAdded, urlHosts } from "../internal/egress.js";
 import { ensureDefaultModel } from "./default.js";
 import { publishPriceVersion, type Price } from "./prices.js";
 import type { AddModelBody, AddVendorBody, BudgetBody, PricesBody, RoutingSchema, VendorPatch } from "./schemas.js";
@@ -23,7 +26,7 @@ const subject = (type: string, id: string) => ({ type, id });
 const usdToMicros = (n: number): string => String(Math.round(n * 1_000_000));
 
 /** A base URL a vendor call may go to: https only, no credentials in it. The on-prem local vendor may use http (it never leaves the network). */
-export function checkEndpoint(raw: string, opts: { allowHttp: boolean }): string {
+export function checkEndpoint(raw: string, opts: { allowHttp: boolean; lan?: readonly string[] }): string {
   let u: URL;
   try {
     u = new URL(raw);
@@ -33,8 +36,16 @@ export function checkEndpoint(raw: string, opts: { allowHttp: boolean }): string
   if (u.protocol !== "https:" && !(opts.allowHttp && u.protocol === "http:")) throw invalid(opts.allowHttp ? "Endpoint must start with http:// or https://." : "Endpoint must start with https://.");
   if (u.username || u.password) throw invalid("Put the key in the key field, not in the URL.");
   if (u.search || u.hash) throw invalid("The endpoint is a base URL: no query string or fragment.");
+  // S-68: never loopback, link-local, metadata, the control network or a service name; private ranges only when a Factory Admin listed the LAN range. The edge checks the resolved address again on every call.
+  const lan = opts.lan ?? [];
+  const host = u.hostname.replace(/^\[|\]$/g, "");
+  const refusal = isIP(host) ? vendorAddressRefusal(host, lan) : forbiddenVendorName(host, lan.length > 0) ? `${host} is not a public host name.` : null;
+  if (refusal) throw invalid(`${refusal} A vendor endpoint must be a public address${lan.length ? " or inside a listed LAN range" : ". An on-prem vendor needs its LAN range listed in Security first (Factory Admin, with a fresh sign-in)"}.`);
   return u.toString().replace(/\/+$/, "");
 }
+
+/** The LAN ranges a Factory Admin opened for on-prem vendors (Security, `vendorLanRanges`). */
+export const lanRangesOf = async (tx: Tx, orgId: string): Promise<string[]> => (await readSecurity(tx, orgId)).value.vendorLanRanges ?? [];
 
 const sealKey = (dataKey: Buffer | null, vendorId: string, key: string): string => {
   if (!dataKey) throw refuse("invalid", "No data key is configured, so a vendor key cannot be stored.");
@@ -90,7 +101,7 @@ export async function setVendor(tx: Tx, a: Actor, dataKey: Buffer | null, vendor
   let config: Record<string, unknown> = { ...v.config };
   const after: Record<string, unknown> = {};
 
-  const endpoint = patch.endpoint !== undefined ? (patch.endpoint === "" ? "" : checkEndpoint(patch.endpoint, { allowHttp: !custom })) : v.endpoint;
+  const endpoint = patch.endpoint !== undefined ? (patch.endpoint === "" ? "" : checkEndpoint(patch.endpoint, { allowHttp: !custom, lan: await lanRangesOf(tx, a.orgId) })) : v.endpoint;
   if (patch.endpoint !== undefined && !local) throw invalid(`${v.name} is a hosted vendor: its endpoint is fixed.`);
   if (patch.endpoint !== undefined) {
     set("endpoint", endpoint);
@@ -141,7 +152,7 @@ export async function setVendor(tx: Tx, a: Actor, dataKey: Buffer | null, vendor
   const msg = verb === "vendor.connect" ? `${v.name} connected.` : verb === "vendor.disconnect" ? `${v.name} disconnected.` : `${v.name} updated.`;
   return {
     msg,
-    events: [{ type: verb, category: cat, subject: subject("vendor", v.id), before: vendorBefore(v), after }],
+    events: [{ type: verb, category: cat, subject: subject("vendor", v.id), before: vendorBefore(v), after }, ...egressAdded(urlHosts(v.connected ? v.endpoint : ""), urlHosts(patch.connected === false ? "" : endpoint), { kind: "vendor", id: v.id, name: v.name })],
     changes: ["vendors", "routing"],
   };
 }
@@ -151,7 +162,7 @@ export async function addVendor(tx: Tx, a: Actor, dataKey: Buffer | null, b: z.i
   const id = slug(name, 40);
   if (!id) throw invalid("Name the vendor with letters or numbers.");
   if ((await vendorRows(tx, a.orgId, id))[0]) throw conflict(`${name} exists.`);
-  const endpoint = b.endpoint ? checkEndpoint(b.endpoint, { allowHttp: false }) : "";
+  const endpoint = b.endpoint ? checkEndpoint(b.endpoint, { allowHttp: false, lan: await lanRangesOf(tx, a.orgId) }) : "";
   const key = b.key?.trim() ?? "";
   if (key && key.length < 4) throw invalid("The key is too short.");
   const connected = Boolean(key && endpoint);
@@ -164,7 +175,7 @@ export async function addVendor(tx: Tx, a: Actor, dataKey: Buffer | null, b: z.i
   const msg = connected ? `${name} added and connected. It is not qualified for any station until its suite passes.` : key ? `${name} added. Add an endpoint to connect it.` : `${name} added. Add a key to connect it.`;
   return {
     msg,
-    events: [{ type: "vendor.add", category: cat, subject: subject("vendor", id), after: { name, endpoint, region: b.region ?? "", connected, retention: config.retention, custom: true, ...(key ? { keyMask: mask(key), keyFingerprint: fingerprint(key) } : {}) } }],
+    events: [{ type: "vendor.add", category: cat, subject: subject("vendor", id), after: { name, endpoint, region: b.region ?? "", connected, retention: config.retention, custom: true, ...(key ? { keyMask: mask(key), keyFingerprint: fingerprint(key) } : {}) } }, ...(connected ? egressAdded([], urlHosts(endpoint), { kind: "vendor", id, name }) : [])],
     extra: { vendor: { id, name, connected, custom: true } },
     changes: ["vendors"],
   };

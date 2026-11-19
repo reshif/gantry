@@ -37,6 +37,7 @@ const DENY = {
   different_person: "That sign-in was a different person, so the change was cancelled. Sign in again as yourself.",
   identity_mismatch: "This account is linked to a different identity at the provider.",
   mfa_required: MFA_REQUIRED_MSG,
+  pending_approval: "Your sign-in is recorded, but an administrator has to approve your account before you can use Gantry. Ask a Factory Admin to approve you.",
   invite_required: "This account has not been linked to your sign-in yet. Open the invite link from your email to join (it is valid for 14 days), or ask an administrator to invite you again.",
 } as const;
 
@@ -122,15 +123,21 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
       const willBootstrap = !admin && bootstrap && !(await tx.query(`select 1 from role_assignments where org_id = $1 and role_id = 'factory_admin' and scope_type = 'factory' and revoked_at is null limit 1`, [orgId])).rowCount;
       if (admin || willBootstrap) return deny("mfa_required", person?.id ?? null);
     }
+    // S-71: with no sign-in domain list, the organisation has not said who may join, so a first sign-in creates the person as "invited" (pending approval,
+    // already linked to this identity) and refuses the session until a Factory Admin approves (POST /invites/:id/accept). The bootstrap admin is exempt.
+    const isBootstrap = bootUser || (!!g.config.bootstrapAdminEmail && email === g.config.bootstrapAdminEmail.toLowerCase() && claims.emailVerified === true);
+    const pendingApproval = !sec.domains.length && !isBootstrap;
     if (!person) {
       const id = await freePersonId(tx, orgId, claims.gantryId, claims.preferredUsername ?? email.split("@")[0]!);
-      await tx.query(`insert into people (org_id, id, name, title, email, idp_subject, status, last_seen_at) values ($1,$2,$3,$4,$5,$6,'active', now())`, [orgId, id, claims.name ?? email.split("@")[0], claims.gantryTitle ?? "", email, claims.sub]);
-      person = { id, status: "active", idp_subject: claims.sub, email };
+      await tx.query(`insert into people (org_id, id, name, title, email, idp_subject, status, last_seen_at, data) values ($1,$2,$3,$4,$5,$6,$7, now(), $8::jsonb)`, [orgId, id, claims.name ?? email.split("@")[0], claims.gantryTitle ?? "", email, claims.sub, pendingApproval ? "invited" : "active", JSON.stringify(pendingApproval ? { pendingApproval: true, requestedAt: Date.now() } : {})]);
+      person = { id, status: pendingApproval ? "invited" : "active", idp_subject: claims.sub, email };
       provisioned = true;
       await appendEvent(tx, {
-        orgId, type: "people.provisioned", category: "access", actor: "system", channel: "system", subject: { type: "person", id }, after: { email, source: "first sign-in" }, sourceIp: r.ip || null, requestId: r.requestId,
+        orgId, type: "people.provisioned", category: "access", actor: "system", channel: "system", subject: { type: "person", id }, after: { email, source: pendingApproval ? "first sign-in, pending approval (no sign-in domain list)" : "first sign-in", status: person.status }, sourceIp: r.ip || null, requestId: r.requestId,
       });
     }
+    // Linked but still invited: provisioned above and not yet approved. (An invitee who claimed their invite is active, so this never catches them.)
+    if (person.status === "invited" && person.idp_subject === claims.sub && !inviteId) return deny("pending_approval", person.id);
     if (person.status === "deactivated" || person.status === "suspended") return deny("account_inactive", person.id);
 
     await tx.query(`update people set idp_subject = coalesce(idp_subject, $3), status = case when status = 'invited' then 'active' else status end, last_seen_at = now(), updated_at = now() where org_id = $1 and id = $2`, [orgId, person.id, claims.sub]);

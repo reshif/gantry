@@ -170,15 +170,10 @@ d("an empty organisation (no seed)", () => {
   afterAll(() => t.close());
   const req = { ip: "203.0.113.9", userAgent: "vitest", requestId: "r", method: "sso" as const };
   it("the first ordinary sign-in is an account with no access; only the configured bootstrap email becomes Factory Admin", async () => {
+    // S-71: with no sign-in domain list a stranger is created pending approval and gets no session at all.
     const plain = await signIn(t.app.gantry, { sub: "kc-a", email: "asha@acme.dev", emailVerified: true, name: "Asha Raman", gantryId: "p-asha" }, req);
-    expect(plain.ok).toBe(true);
-    if (!plain.ok) return;
-    const s = await t.session(plain.personId);
-    const me = await t.app.inject({ method: "GET", url: "/api/v1/me", headers: s.headers });
-    expect(me.statusCode).toBe(200);
-    expect(me.json().person.roles).toEqual([]);
-    const can = await t.app.inject({ method: "POST", url: "/api/v1/can", headers: s.headers, payload: { checks: ACTIONS.filter((a) => a.scope !== "project").map((a) => ({ action: a.id })) } });
-    expect(can.json().results.filter((x: { allowed: boolean }) => x.allowed)).toEqual([]);
+    expect(plain).toMatchObject({ ok: false, reason: "pending_approval" });
+    expect((await t.db.admin.query(`select status from people where email = 'asha@acme.dev'`)).rows[0].status).toBe("invited");
     const boss = await signIn(t.app.gantry, { sub: "kc-b", email: "boss@acme.dev", emailVerified: true, name: "The Boss" }, req);
     expect(boss.ok).toBe(true);
     if (!boss.ok) return;

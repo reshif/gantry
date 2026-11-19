@@ -1,3 +1,4 @@
+import { createPublicKey, verify as cryptoVerify, type JsonWebKey } from "node:crypto";
 import * as client from "openid-client";
 import type { Config } from "./config.js";
 
@@ -54,6 +55,11 @@ export interface OidcAdapter {
    * Null when the provider publishes no end-session endpoint.
    */
   endSessionUrl(p: { idTokenHint?: string | null; postLogoutRedirectUri: string }): Promise<URL | null>;
+  /**
+   * OIDC Back-Channel Logout 1.0: validates a logout token the provider posted (signature against the provider's keys, issuer, audience, age, the logout
+   * event, no nonce, and a subject or session id). Returns who and which provider session ended; throws when the token is not valid.
+   */
+  verifyLogoutToken(token: string): Promise<{ sub?: string; sid?: string; jti: string }>;
   /** Whether a federated GitHub identity provider is configured. */
   readonly githubIdp: string | null;
 }
@@ -91,6 +97,38 @@ export function createOidcAdapter(cfg: Config["oidc"], opts: { allowInsecure?: b
   };
   return {
     githubIdp: cfg.githubIdpAlias,
+    async verifyLogoutToken(token) {
+      const c = await load();
+      const md = c.serverMetadata();
+      const parts = token.split(".");
+      if (parts.length !== 3) throw new Error("not a JWT");
+      const [h, p, sig] = parts as [string, string, string];
+      const header = JSON.parse(Buffer.from(h, "base64url").toString("utf8")) as { alg?: string; kid?: string };
+      if (header.alg !== "RS256" && header.alg !== "ES256") throw new Error("unsupported signing algorithm");
+      if (!md.jwks_uri) throw new Error("the provider publishes no keys");
+      const res = await fetch(md.jwks_uri, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(5000) });
+      if (!res.ok) throw new Error(`keys unavailable: ${res.status}`);
+      const keys = ((await res.json()) as { keys?: Array<JsonWebKey & { kid?: string; use?: string }> }).keys ?? [];
+      const jwk = keys.find((k) => (!header.kid || k.kid === header.kid) && (!k.use || k.use === "sig") && k.kty === (header.alg === "RS256" ? "RSA" : "EC"));
+      if (!jwk) throw new Error("no key for this token");
+      const ok = cryptoVerify(header.alg === "RS256" ? "sha256" : "sha256", Buffer.from(`${h}.${p}`), header.alg === "ES256" ? { key: createPublicKey({ key: jwk, format: "jwk" }), dsaEncoding: "ieee-p1363" } : createPublicKey({ key: jwk, format: "jwk" }), Buffer.from(sig, "base64url"));
+      if (!ok) throw new Error("bad signature");
+      const k = JSON.parse(Buffer.from(p, "base64url").toString("utf8")) as Record<string, unknown>;
+      const aud = Array.isArray(k.aud) ? k.aud : [k.aud];
+      const events = k.events && typeof k.events === "object" ? (k.events as Record<string, unknown>) : {};
+      const now = Date.now() / 1000;
+      if (k.iss !== cfg.issuer) throw new Error("wrong issuer");
+      if (!aud.includes(cfg.clientId)) throw new Error("wrong audience");
+      if (typeof k.iat !== "number" || Math.abs(now - k.iat) > 300) throw new Error("token is not recent");
+      if (typeof k.exp === "number" && k.exp < now) throw new Error("token expired");
+      if (typeof k.jti !== "string" || !k.jti) throw new Error("no jti");
+      if (!("http://schemas.openid.net/event/backchannel-logout" in events)) throw new Error("not a logout token");
+      if ("nonce" in k) throw new Error("a logout token carries no nonce");
+      const sub = typeof k.sub === "string" && k.sub ? k.sub : undefined;
+      const sid = typeof k.sid === "string" && k.sid ? k.sid : undefined;
+      if (!sub && !sid) throw new Error("no subject or session id");
+      return { ...(sub ? { sub } : {}), ...(sid ? { sid } : {}), jti: k.jti };
+    },
     async authorizationUrl(p) {
       const c = await load();
       const params: Record<string, string> = {

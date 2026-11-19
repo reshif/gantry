@@ -15,6 +15,7 @@ import { readInstanceRow, readType } from "../integrations/store.js";
 
 const MAX_BODY = 256 * 1024;
 const WINDOW_S = 300;
+const DUMMY_SECRET = "gantry-hook-dummy-secret-for-uniform-timing";
 
 const Body = z.object({
   id: z.string().min(1).max(200),
@@ -52,21 +53,25 @@ export const triggerHookRoutes: FastifyPluginAsync = async (app) => {
         orgId: g.orgId, type, category: "integrations", actor: `hook:${id}`.slice(0, 100), channel: "api", subject: { type: "integration", id }, outcome: "denied", rule: "HOOK-SIG", after: { reason, ...(suppressed ? { suppressed } : {}) }, requestId: req.id, sourceIp: req.ip || null,
       })).catch((err: unknown) => req.log.error({ err }, "could not audit hook denial"));
 
+    // S-70: the signature is checked first, and everything an unsigned caller could learn about the connection (unknown id, switched off, no secret) answers the same 401.
+    // An unknown id is verified against a dummy secret so the answer takes the same time.
     const inst = await readInstanceRow(g.pool, g.orgId, id);
     const type = inst ? await readType(g.pool, g.orgId, inst.type_id) : null;
-    if (!inst || !type || !type.source || type.builtIn) return reply.code(404).send({ ok: false, msg: "No such webhook." });
-    if (!inst.enabled) return reply.code(409).send({ ok: false, msg: `${inst.name} is switched off.` });
-    const key = type.fields.find((f) => f.type === "secret")?.key ?? "secret";
+    const known = Boolean(inst && type && type.source && !type.builtIn);
+    const key = type?.fields.find((f) => f.type === "secret")?.key ?? "secret";
     let secret = "";
-    try { secret = open(g.config.secrets.dataKey, inst.id, inst.secret_enc, key)[key] ?? ""; } catch { /* reported below */ }
-    if (!secret) return reply.code(503).send({ ok: false, msg: "This connection has no signing secret." });
+    if (known && inst) try { secret = open(g.config.secrets.dataKey, inst.id, inst.secret_enc, key)[key] ?? ""; } catch { /* treated as unsigned */ }
     const sig = req.headers["x-gantry-signature"];
-    if (!verifySignature(raw, typeof sig === "string" ? sig : undefined, secret)) {
-      // Unauthenticated: sampled, so a flood of forged calls can't grow the ledger one row per request.
-      const smp = hookDenials.sample(`trigger:${id}`, req.ip);
-      if (smp.audit) await audit("trigger.hook.denied", sig ? "The signature does not match or is outside the five-minute window." : "The signature header is missing.", smp.suppressed);
+    const signed = verifySignature(raw, typeof sig === "string" ? sig : undefined, secret || DUMMY_SECRET) && secret !== "";
+    if (!signed || !inst) {
+      // Unauthenticated: sampled, so a flood of forged calls can't grow the ledger one row per request. Only a real connection is audited.
+      if (known) {
+        const smp = hookDenials.sample(`trigger:${id}`, req.ip);
+        if (smp.audit) await audit("trigger.hook.denied", !secret ? "The connection has no signing secret." : sig ? "The signature does not match or is outside the five-minute window." : "The signature header is missing.", smp.suppressed);
+      }
       return reply.code(401).send({ ok: false, msg: "Invalid signature." });
     }
+    if (!inst.enabled) return reply.code(409).send({ ok: false, msg: `${inst.name} is switched off.` });
     let parsed: z.infer<typeof Body>;
     try { parsed = Body.parse(JSON.parse(raw.toString("utf8"))); } catch (e) {
       return reply.code(422).send({ ok: false, msg: "The body must be JSON with id, repo and the event's fields.", ...(e instanceof z.ZodError ? { issues: e.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`) } : {}) });

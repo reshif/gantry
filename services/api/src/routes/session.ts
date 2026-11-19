@@ -17,6 +17,8 @@ import { appendEvent, withTx } from "@gantry/db";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { recordSignInFailure, signIn } from "../core/auth/signin.js";
+import { validLanCidr } from "@gantry/domain/netguard";
+import { egressHostSources } from "../areas/internal/egress.js";
 import { validIpEntry } from "../core/security.js";
 import { pendingRecovery } from "../core/auth/ip-recovery.js";
 import { csrfFor, findSession, listSessions, revokeSessions } from "../core/auth/sessions.js";
@@ -66,6 +68,7 @@ const SecuritySchema = z.object({
   stepUpWindowMinutes: z.number().int().min(5).max(60).optional(),
   githubLogin: z.boolean(),
   researchHosts: z.array(z.string().max(253).refine(isResearchHost, "A research host must be a DNS name, not an IP address.")).max(200).optional(),
+  vendorLanRanges: z.array(z.string().max(32).refine(validLanCidr, "A LAN range is an IPv4 CIDR inside 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 or 100.64.0.0/10.")).max(20).optional(),
   chatCapUsdPerDay: z.number().min(0).max(100_000).nullable().optional(),
 });
 
@@ -282,6 +285,13 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     if (!d.allowed && !(await decide(req, "policy.view")).allowed) throw refuse(d.rule.kind === "stop" ? "stopped" : "denied", d.reason, { rule: d.rule, needs: d.needs });
     const s = await readSecurity(g.pool, g.orgId);
     return { ...s.value, version: s.version };
+  });
+
+  /** Every host on the run and worker egress lists with where it came from (S-67), readable by whoever reads the security settings. */
+  app.get("/api/v1/security/egress-hosts", async (req) => {
+    const d = await decide(req, "security.manage");
+    if (!d.allowed && !(await decide(req, "policy.view")).allowed) throw refuse(d.rule.kind === "stop" ? "stopped" : "denied", d.reason, { rule: d.rule, needs: d.needs });
+    return { hosts: await egressHostSources(g.pool, g.orgId) };
   });
 
   app.patch("/api/v1/security", async (req) => {

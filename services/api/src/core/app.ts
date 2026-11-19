@@ -147,12 +147,17 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
   app.addHook("onRequest", async (req, reply) => {
     req.gx = { orgId, principal: null, session: null, ip: req.ip, requestId: req.id, channel: "web", reply };
     const path = canonicalPath(req.url);
-    if (path === null) return void (await reply.code(400).send({ ok: false, msg: "Malformed request path." }));
+    if (path === null || hasNul(req.url)) return void (await reply.code(400).send({ ok: false, msg: "Malformed request path." }));
     if (path.startsWith("/internal/v1/")) return authInternal(req, reply);
     if (path.startsWith("/api/v1/")) {
       await authApi(app, req, reply);
       if (!reply.sent) await enforceReadGate(req, reply);
     }
+  });
+
+  // S-69: Postgres refuses U+0000 in text, so a NUL in a JSON body would surface as a 500. Refuse it at the door, once, for every route.
+  app.addHook("preValidation", async (req, reply) => {
+    if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body) && bodyHasNul(req.body)) return void (await reply.code(400).send({ ok: false, msg: "Text cannot contain a NUL character." }));
   });
 
   // The audit channel comes from the transport: a client-sent `via` is pinned to what the caller may claim.
@@ -187,6 +192,25 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
   });
   await hub.start();
   return app;
+}
+
+/** A NUL in the raw or percent-decoded request target (path or query). */
+export function hasNul(url: string): boolean {
+  if (url.includes("\u0000")) return true;
+  if (/%00/i.test(url)) return true;
+  try {
+    return decodeURIComponent(url).includes("\u0000");
+  } catch {
+    return false;
+  }
+}
+
+/** A NUL in any string or key of a parsed JSON body (bounded depth: a deeper body is left to the schema's own limits). */
+export function bodyHasNul(v: unknown, depth = 0): boolean {
+  if (typeof v === "string") return v.includes("\u0000");
+  if (depth > 32 || !v || typeof v !== "object") return false;
+  for (const [k, x] of Array.isArray(v) ? v.entries() : Object.entries(v)) if ((typeof k === "string" && k.includes("\u0000")) || bodyHasNul(x, depth + 1)) return true;
+  return false;
 }
 
 async function authInternal(req: FastifyRequest, reply: import("fastify").FastifyReply): Promise<void> {

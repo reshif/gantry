@@ -23,6 +23,7 @@ import { workspaceRoutes } from "./workspace.js";
 import { promptTraceRoutes } from "./prompt-traces.js";
 import { peopleRoutes } from "./people.js";
 import { projectRoutes } from "./projects.js";
+import { backchannelRoutes } from "./backchannel.js";
 import { sessionRoutes } from "./session.js";
 import { skillRoutes } from "./skills.js";
 import { stopRoutes } from "./stops.js";
@@ -35,7 +36,7 @@ import { workOrderRoutes } from "./workorders.js";
 /** One module per area. Each is a self-contained Fastify plugin registered here, so area engineers add endpoints without touching each other's files. */
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   for (const plugin of [
-    sessionRoutes, catalogRoutes, homeRoutes, projectRoutes, peopleRoutes, accessRoutes, auditRoutes, floorRoutes, workOrderRoutes, stopRoutes, onboardingRoutes, onboardingSessionRoutes, workOrderSessionRoutes,
+    sessionRoutes, backchannelRoutes, catalogRoutes, homeRoutes, projectRoutes, peopleRoutes, accessRoutes, auditRoutes, floorRoutes, workOrderRoutes, stopRoutes, onboardingRoutes, onboardingSessionRoutes, workOrderSessionRoutes,
     agentRoutes, skillRoutes, modelRoutes, evalRoutes, trustRoutes, learningRoutes, integrationRoutes, notificationRoutes, mcpRoutes, apiKeyRoutes, triggerRoutes,
     workloadRoutes, systemRoutes, consoleRoutes, workspaceRoutes, promptTraceRoutes, hookRoutes, internalRoutes, internalGithubRoutes,
   ]) {

@@ -72,7 +72,7 @@ d("dev seed loader and read mappers (rows -> legacy shapes)", () => {
     expect(cat.actions).toEqual(seed.catalog.actions);
     expect((await readRoles(t.db.app, t.orgId)).map((x) => strip(x, "version"))).toEqual(seed.catalog.roles);
     const sec = await readSecurity(t.db.app, t.orgId);
-    expect(sec.value).toEqual({ killNeedsStepUp: true, stepUpWindowMinutes: 15, ...(seed.state.security as object), ipAllow: [], researchHosts: [], chatCapUsdPerDay: null });
+    expect(sec.value).toEqual({ killNeedsStepUp: true, stepUpWindowMinutes: 15, ...(seed.state.security as object), ipAllow: [], researchHosts: [], vendorLanRanges: [], chatCapUsdPerDay: null });
   });
 
   it("the loaded policy state decides exactly like the in-memory seed", async () => {

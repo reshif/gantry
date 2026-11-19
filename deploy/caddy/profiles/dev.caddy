@@ -1,4 +1,4 @@
-# Development ingress routes. Never imported when GANTRY_INGRESS_PROFILE=prod (the default).
+# Development ingress routes. Imported only when GANTRY_INGRESS_PROFILE=dev is set explicitly; the default and prod never import them.
 # Mail catcher UI (MP_WEBROOT=/mail): every invite and notification email sent by the stack lands here.
 handle /mail/* {
 	reverse_proxy mailpit:8025

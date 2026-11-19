@@ -50,8 +50,9 @@ services:
       - ./caddy/profiles:/etc/caddy/profiles:ro
       - caddydata:/data
     environment:
-      # dev serves the Mailpit inbox at /mail; prod (the Caddyfile default) serves no development routes.
-      GANTRY_INGRESS_PROFILE: ${GANTRY_INGRESS_PROFILE:-dev}
+      # prod (the default) serves no development routes. dev is an explicit opt-in: it serves the Mailpit inbox at /mail (every invite and
+      # notification mail, with tokens) and the /v3 preview. Set GANTRY_INGRESS_PROFILE=dev on a local stack only (deploy/README.md).
+      GANTRY_INGRESS_PROFILE: ${GANTRY_INGRESS_PROFILE:-prod}
       GANTRY_HOSTNAME: ${GANTRY_HOSTNAME:-localhost}
       GANTRY_TLS: ${GANTRY_TLS:-internal}
     # Caddy writes its local CA and config under XDG_*; both are on the writable volume or tmpfs.

@@ -45,7 +45,7 @@ https://{$GANTRY_HOSTNAME:localhost} {
 
 	# Headers every response gets. `?` keeps a header an upstream already set (Keycloak and Mailpit send their own).
 	header {
-		?Strict-Transport-Security "max-age=31536000"
+		?Strict-Transport-Security "max-age=63072000; includeSubDomains"
 		?X-Content-Type-Options "nosniff"
 		?Referrer-Policy "no-referrer"
 		?Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
@@ -62,7 +62,8 @@ https://{$GANTRY_HOSTNAME:localhost} {
 	@api path /api/* /auth/* /hooks/*
 	handle @api {
 		header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
-		header Cache-Control "no-store"
+		# The API sends its own Cache-Control (no-store; the event stream sends no-cache): `?` adds one only when it sent none, so the header is never doubled.
+		header ?Cache-Control "no-store"
 		reverse_proxy gantry-api:8000 {
 			flush_interval -1
 			transport http {
@@ -85,7 +86,7 @@ https://{$GANTRY_HOSTNAME:localhost} {
 		respond "Not found" 404
 	}
 
-	# Development-only routes (the Mailpit inbox). GANTRY_INGRESS_PROFILE=prod imports an empty file instead.
+	# Development-only routes (the Mailpit inbox, the /v3 preview). Opt-in: only GANTRY_INGRESS_PROFILE=dev imports them; the default (prod) imports an empty file.
 	import /etc/caddy/profiles/{$GANTRY_INGRESS_PROFILE:prod}.caddy
 
 	# Everything else is the single-page app.
