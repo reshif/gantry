@@ -16,7 +16,7 @@
  *  - stop id          = `${scope}:${targetId}`        (DELETE /stops/{id}, POST /stops/{id}/restore), scope in factory|project|repo|workorder
  */
 import { clearDrafts as clearStoredDrafts } from "./drafts";
-import { api, del, patch, post, put, type ApiResult, type RequestOptions } from "./client";
+import { api, command, del, patch, post, put, type ApiResult, type RequestOptions } from "./client";
 import { invalidateSlices } from "./keys";
 import { noteSignedOut } from "../lib/session/session";
 import { clearDrafts } from "../lib/useDraft";
@@ -89,6 +89,32 @@ export interface KillOptions {
   reason: string;
   mode?: "hold" | "cancel";
   confirmText?: string | null;
+}
+
+/** What the server saw when it ran a console card (POST /console/messages/:id/proposals/:pid/confirm). `pending` means it ran nothing final and the card can be tried again. */
+export interface ConfirmOutcome {
+  ok: boolean;
+  msg: string;
+  status: number;
+  outcome: "done" | "failed" | "pending";
+  needs: string;
+  refusal?: { code: number; rule?: unknown; overrideKind?: string };
+  retry: boolean;
+  /** The body the card's own endpoint answered with (a created work order's id is `result.id`). */
+  result: Obj;
+}
+
+/** Reads the confirm response, which says `status` itself, whatever HTTP code carried it. */
+function confirmOutcome(r: ApiResult): ConfirmOutcome {
+  const b: Obj = r.ok ? { ...r } : (r.body ?? {});
+  const result = b.result && typeof b.result === "object" ? (b.result as Obj) : {};
+  const needs = typeof b.needs === "string" ? b.needs : "";
+  const refusal = b.refusal && typeof b.refusal === "object" ? (b.refusal as ConfirmOutcome["refusal"]) : undefined;
+  const base = { msg: r.msg, status: r.status, needs, result, ...(refusal ? { refusal } : {}) };
+  if (r.ok) { invalidateSlices(["console"]); return { ...base, ok: true, outcome: "done", retry: false }; }
+  if (b.recorded === true) { invalidateSlices(["console"]); return { ...base, ok: false, outcome: "failed", retry: false }; }
+  // Nothing was recorded: a missing reason, a 429 or 5xx the server asked to retry, or a refusal of the confirm itself (already decided, not found).
+  return { ...base, ok: false, outcome: "pending", retry: b.retry === true || r.status === 0 };
 }
 
 export const ops = {
@@ -167,6 +193,11 @@ export const ops = {
     run(["projects", "workOrders", "factory"], post(api("stops"), { scope: "project", id: projectId, mode: "halt", reason, via })),
   resumeProject: (projectId: string, via?: Via) =>
     run(["projects", "workOrders", "factory"], del(api(`stops/${enc(stopId("project", projectId))}`), { via })),
+  /** Confirms a console card: the server runs the card's stored call as the person and records the outcome itself. */
+  confirmProposal: async (messageId: string, proposalId: string, edits: { reason?: string; confirmText?: string; inFlight?: string }): Promise<ConfirmOutcome> =>
+    confirmOutcome(await command(api(`console/messages/${enc(messageId)}/proposals/${enc(proposalId)}/confirm`), { body: edits })),
+  /** Dismisses a console card (the only outcome the browser may send). */
+  dismissProposal: (messageId: string, proposalId: string) => put(api(`console/messages/${enc(messageId)}/proposals/${enc(proposalId)}`), { status: "dismissed" }),
   kill: (scope: StopScope, id: string | null, o: KillOptions, via?: Via) =>
     run(["projects", "workOrders", "factory", "repos"], post(api("stops"), { scope, id, mode: "kill", reason: o.reason, inFlight: o.mode ?? "hold", confirmText: o.confirmText ?? null, via })),
   /** A restore may return `pending: true` when a second approver is needed. */
