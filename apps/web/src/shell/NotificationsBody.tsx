@@ -42,7 +42,7 @@ export function NotificationsBody({ close }: { close: () => void }) {
           {() => (
             <div>
               {gates.map((a) => (
-                <div key={`${a.wo}-${a.gate}`} className="callout warn" style={{ marginBottom: 8 }}>
+                <div key={`${a.wo}-${a.gate}`} className="callout nt-unread" style={{ marginBottom: 8 }}>
                   <b>{`${a.wo} needs your approval`}</b>
                   {`${a.title ?? ""} · ${gateLabelOf(a.gateLabel, a.gate)}`}
                   <div style={{ marginTop: 6 }}>

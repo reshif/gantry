@@ -113,3 +113,6 @@
   .view-console-page .con2 { flex: 1 1 0; height: auto; min-height: 0; }
 }
 .con2-log { scroll-padding-top: 12px; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12px); mask-image: linear-gradient(to bottom, transparent 0, #000 12px); }
+
+/* T-49: a card stays inside the bubble that holds it. */
+.msg:has(.ccard) .bub{max-width:100%;overflow-x:hidden}

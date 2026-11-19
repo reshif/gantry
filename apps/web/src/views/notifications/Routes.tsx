@@ -223,7 +223,7 @@ function Editor({ p, nt, perm, cur, draft, setDraft, onSaved }: { p: Project; nt
         <fieldset className="nt-fs">
           <legend className="field-label">Conditions (empty means every)</legend>
           <div className="nt-sub">Class</div>
-          <div className="check-grid nt-checks">
+          <div className="check-grid nt-checks" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
             {classes.map((c) => (
               <label className="check" htmlFor={`nt-cls-${c.id}`} key={c.id}>
                 <input type="checkbox" id={`nt-cls-${c.id}`} checked={d.cond.classes.includes(c.id)} disabled={ro || mandatory} onChange={(e) => upd({ cond: { ...d.cond, classes: toggleIn(d.cond.classes, c.id, e.target.checked) } })} />

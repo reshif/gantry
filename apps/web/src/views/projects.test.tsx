@@ -130,6 +130,20 @@ describe("Projects: portfolio", () => {
     expect(document.getElementById(`prj-card-${RISK.id}`)!.textContent).not.toMatch(/\$0 cap/);
   });
 
+  it("T-55, T-56: the Table says No cap (not 0%) and a missing monthly budget is no cap, never $NaN", async () => {
+    window.location.hash = "#/projects?view=table";
+    window.history.replaceState(null, "", "/?view=table");
+    setup({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, budget: { monthly: 0, mtd: 40, alertAt: 0.8 } }, { ...RISK, budget: { mtd: 12, alertAt: 0.8 } }] }) });
+    mount(<ProjectsView />);
+    expect(await screen.findByText("Payments Platform")).toBeTruthy();
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/NaN/);
+    expect(text).not.toMatch(/\b0%/);
+    expect(text).toMatch(/No cap/);
+    window.history.replaceState(null, "", "/");
+    window.location.hash = "#/projects";
+  });
+
   it("is the Blueprint's page: key in the eyebrow, Cards / Table switch, four tiles over all projects, cards with only Open Floor and Config", async () => {
     window.location.hash = "#/projects";
     setup();
@@ -183,7 +197,7 @@ describe("Projects: portfolio", () => {
     mount(<ProjectsView />);
     fireEvent.click(await byId("prj-new"));
     await screen.findByRole("dialog");
-    expect(Array.from(document.querySelectorAll("[role=dialog] .field-label")).map((l) => l.textContent?.replace(" (required)", ""))).toEqual(["Name", "Key (3 letters)", "What does it build?", "Template", "Owner"]);
+    expect(Array.from(document.querySelectorAll("[role=dialog] .field-label")).map((l) => l.textContent?.replace(" (required)", ""))).toEqual(["Name", "Key (3 letters)", "What does it build?", "Monthly budget (USD)", "Template", "Owner"]);
     expect(screen.queryByText(/Next:/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     expect(await screen.findByText("Name is required.")).toBeTruthy();
@@ -201,8 +215,22 @@ describe("Projects: portfolio", () => {
     fireEvent.change(document.getElementById("fd-key")!, { target: { value: "ORD" } });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     await waitFor(() => expect(calls.find((c) => c.path === "/api/v1/projects" && c.method === "POST")).toBeTruthy());
-    expect(calls.find((c) => c.path === "/api/v1/projects" && c.method === "POST")!.body).toMatchObject({ name: "Orders Hub", key: "ORD", templateId: "tpl-backend", owner: "p-asha", budget: 3000, teams: [] });
+    expect(calls.find((c) => c.path === "/api/v1/projects" && c.method === "POST")!.body).toMatchObject({ name: "Orders Hub", key: "ORD", templateId: "tpl-backend", owner: "p-asha", budget: null, teams: [] });
     expect(await screen.findByText("Orders Hub created")).toBeTruthy();
+  });
+
+  it("T-54: the New project dialog has a monthly budget field (empty or 0 = no cap) and sends what was typed", async () => {
+    const calls = setup();
+    mount(<ProjectsView />);
+    fireEvent.click(await screen.findByRole("button", { name: "New project" }));
+    await screen.findByRole("dialog");
+    expect(document.querySelector("[role=dialog]")!.textContent).toMatch(/Leave empty or 0 for no cap/);
+    fireEvent.change(document.getElementById("fd-name")!, { target: { value: "Orders Hub" } });
+    fireEvent.change(document.getElementById("fd-key")!, { target: { value: "ORD" } });
+    fireEvent.change(document.getElementById("fd-budget")!, { target: { value: "4500" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/v1/projects" && c.method === "POST")).toBeTruthy());
+    expect(calls.find((c) => c.path === "/api/v1/projects" && c.method === "POST")!.body).toMatchObject({ budget: 4500 });
   });
 
   it("disables New project with the reason when the right is missing", async () => {
@@ -648,6 +676,16 @@ describe("Project config", () => {
     await waitFor(() => expect((test as HTMLButtonElement).disabled).toBe(false));
     await waitFor(() => { fireEvent.click(test); expect(calls.some((c) => c.path === "/api/v1/projects/payments/routes/test")).toBe(true); });
     expect(calls.find((c) => c.path === "/api/v1/projects/payments/routes/test")?.body).toEqual({ dest: { channel: "email", target: "on-call", integration: null }, event: "andon" });
+  });
+
+  it("T-63: Send test page says it was sent even when the server answers without a message", async () => {
+    withPayments({ "POST /api/v1/projects/payments/routes/test": () => ({ body: { ok: true } }) });
+    tab("members");
+    mount(<ProjectConfigView />);
+    const test = (await byId("pcf-oncall-test")) as HTMLButtonElement;
+    await waitFor(() => expect(test.disabled).toBe(false));
+    fireEvent.click(test);
+    expect(await screen.findByText(/Test page sent to the people on call/)).toBeTruthy();
   });
 
   it("members tab: the default-page switch is bound to pageOnCall and PATCHes notifications.oncallPage; off lists only kill and restore", async () => {

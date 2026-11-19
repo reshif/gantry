@@ -90,7 +90,7 @@ export default function HomeView() {
           {m ? <Stat id="hm-stat-flight" label="In flight" value={String(inFlight)} sub="across the line" href="#floor" tone="info" /> : null}
           {m ? <Stat id="hm-stat-shipped" label="Released" value={String(m.shippedWeek)} sub="work orders closed" tone="done" /> : null}
           {success ? <Stat id="hm-stat-evals" label="Task success" value={fmt.pct(success.v)} sub={success.sub} href="#evals" tone="done" /> : null}
-          {hl ? <Stat id="hm-stat-spend" label="Spend MTD" value={fmt.money0(hl.spend.spent)} sub={`of ${fmt.money0(hl.spend.budget)} budget`} href="#models" {...(budgetPct > 0.8 ? { tone: "wait" as const } : {})} /> : null}
+          {hl ? <Stat id="hm-stat-spend" label="Spend MTD" value={fmt.money0(hl.spend.spent)} sub={hl.spend.budget > 0 ? `of ${fmt.money0(hl.spend.budget)} budget` : "no cap set"} href="#models" {...(budgetPct > 0.8 ? { tone: "wait" as const } : {})} /> : null}
         </StatRow>
       ) : null}
       {s.attention ? <AttentionStrip items={s.attention} /> : null}

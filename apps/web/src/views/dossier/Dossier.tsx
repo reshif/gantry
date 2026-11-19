@@ -100,7 +100,7 @@ export function Dossier({ id, tab: pathTab }: { id: string; tab: DossierTab }) {
   const timeline = (wo.log ?? []).slice().reverse();
   return (
     <div className="view rec-view dz" id="dz" ref={root}>
-      <DossierHead wo={wo} cat={cat} project={project} session={session} onActivity={() => toActivity()} />
+      <DossierHead wo={wo} cat={cat} project={project} session={session} wait={rec.wait ?? wo.wait ?? null} onActivity={() => toActivity()} />
       <Tabs idPrefix="dz-tab" items={[{ id: "document", label: "Document" }, { id: "activity", label: "Activity", count: wo.log?.length ?? 0 }, { id: "gates", label: "Gates", count: Object.keys(wo.gates ?? {}).length }, { id: "runs", label: "Runs", count: wo.history.length }]} active={tab} onChange={(t) => setTab(t as DossierTab)} />
       <div className="dz-pane" role="tabpanel" aria-labelledby={`dz-tab-${tab}`}>
         {tab === "document" ? (

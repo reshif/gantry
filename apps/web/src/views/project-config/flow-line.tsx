@@ -273,7 +273,7 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
                 <fieldset className="flw-limits" id={`pcf-rl-${s.id}`} disabled={!d.allowed}>
                   <legend className="small">Run limits (override)</legend>
                   <div className="small muted">Overrides the agent's limits for runs at this station in this project. Blank inherits.</div>
-                  <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+                  <div className="flw-limit-row" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
                     <Field label="Max turns" htmlFor={`pcf-rl-turns-${s.id}`} error={er.turns}><Input id={`pcf-rl-turns-${s.id}`} type="number" className="mono pcf-num" min={1} max={500} placeholder={ph.turns} value={e.turns} onChange={set("turns")} /></Field>
                     <Field label="Max time (minutes)" htmlFor={`pcf-rl-min-${s.id}`} error={er.minutes}><Input id={`pcf-rl-min-${s.id}`} type="number" className="mono pcf-num" min={1} max={240} placeholder={ph.minutes} value={e.minutes} onChange={set("minutes")} /></Field>
                     <Field label="Max cost per run" htmlFor={`pcf-rl-cost-${s.id}`} error={er.costUsd}><Input id={`pcf-rl-cost-${s.id}`} type="number" className="mono pcf-num" min={0.01} step="0.01" placeholder={ph.costUsd} value={e.costUsd} onChange={set("costUsd")} /></Field>

@@ -1,4 +1,5 @@
 /** Station and gate detail drawers of the floor (legacy floor.js openStation / openGate). They always show the live floor. */
+import { COL } from "../drawerCol";
 import { WoActions } from "../work/WoActions";
 import { RequestChangesBtn } from "../work/gate";
 import { GateDetail } from "../work/GateDetail";
@@ -40,7 +41,7 @@ const Frame = ({ kicker, title, sub, close, label, children, footer }: { kicker:
         <Icon name="x" />
       </button>
     </div>
-    <div className="drawer-scroll">{children}</div>
+    <div className="drawer-scroll" style={COL}>{children}</div>
     {footer ? <div className="drawer-foot fl-drawer-foot">{footer}</div> : null}
   </div>
 );

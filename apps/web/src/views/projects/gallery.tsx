@@ -1,4 +1,5 @@
 /** The portfolio as the Blueprint draws it: a card grid or a five-column table. Ported from the prototype's SCREENS.projects. */
+import { monthlyCap } from "../../lib/budget";
 import { fmt } from "@gantry/domain";
 import { useWorkOrders } from "../../api/queries";
 import { hashFor } from "../../lib/router";
@@ -35,8 +36,8 @@ function Card({ p, owner }: { p: PView; owner: string }) {
       <div className="small muted">{p.desc}</div>
       <div className="prj-card-foot">
       <div className="row small"><span className="num">{String(m.wip)}</span> in flight · <span className="num">{String(m.gates)}</span> at gates · <Done id={p.id} /></div>
-      <Meter value={p.budget.mtd} max={p.budget.monthly} label={`${p.name} spend`} warnAt={p.budget.alertAt} />
-      <div className="small muted">{`${fmt.money0(p.budget.mtd)} ${p.budget.monthly <= 0 ? "· no cap" : `of ${fmt.money0(p.budget.monthly)}`} · owner ${owner}`}</div>
+      <Meter value={p.budget.mtd} max={monthlyCap(p.budget) ?? 0} label={`${p.name} spend`} warnAt={p.budget.alertAt} />
+      <div className="small muted">{`${fmt.money0(p.budget.mtd)} ${monthlyCap(p.budget) === null ? "· no cap" : `of ${fmt.money0(monthlyCap(p.budget) ?? 0)}`} · owner ${owner}`}</div>
       <div className="row">
         <Btn small kind="primary" id={`prj-floor-${p.id}`} aria={`Open the floor for ${p.name}`} label="Open Floor" onClick={() => goProject(p.id, "floor")} />
         <Btn small id={`prj-cfg-${p.id}`} aria={`Configure ${p.name}`} label="Config" onClick={() => goProject(p.id, "project-config")} />
@@ -63,7 +64,7 @@ export function ProjectTable({ projects }: { projects: PView[] }) {
           { key: "n", label: "Project", sort: (p) => p.name, render: (p) => <div><a className="pri" href={configHref(p)} onClick={() => setProject(p.id)}>{p.name}</a><span className="sub">{`${p.key} · ${p.desc ?? ""}`}</span></div> },
           { key: "o", label: "Owner", sort: (p) => who(p.owner), render: (p) => who(p.owner) },
           { key: "l", label: "In flight", align: "end", sort: (p) => metricsOf(p).wip, render: (p) => String(metricsOf(p).wip) },
-          { key: "b", label: "Budget", align: "end", sort: (p) => (p.budget.monthly ? p.budget.mtd / p.budget.monthly : 0), render: (p) => <span className="num">{fmt.pct(p.budget.monthly ? p.budget.mtd / p.budget.monthly : 0)}</span> },
+          { key: "b", label: "Budget", align: "end", sort: (p) => { const c = monthlyCap(p.budget); return c ? p.budget.mtd / c : -1; }, render: (p) => { const c = monthlyCap(p.budget); return <span className="num">{c ? fmt.pct(p.budget.mtd / c) : "No cap"}</span>; } },
           { key: "s", label: "Status", render: (p) => <Chip text={p.status} cls={p.status === "active" ? "ok" : "plain"} /> },
         ]}
       />

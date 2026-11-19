@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RecordView from "./record";
 import ChangesView from "./changes";
 import { mockApi, mount, resetApp } from "./floor/testkit";
-import { readsFor, travelerOf, waitingWo } from "./traveler/testkit";
+import { readsFor, recordOf, travelerOf, waitingWo } from "./traveler/testkit";
 
 beforeEach(() => resetApp());
 afterEach(() => {
@@ -19,6 +19,15 @@ async function show(extra: Parameters<typeof mockApi>[0] = {}, hash = `#record/$
   await screen.findByRole("toolbar", { name: "Work order actions" }, { timeout: 4000 });
   return calls;
 }
+
+describe("Record shows why the run is not running (T-64)", () => {
+  it("renders the sandbox wait label from the record read on the page itself, not only in a section no tab shows", async () => {
+    const wait = { label: "Waiting: host disk low", reason: null, since: null, kind: "disk" as const };
+    await show({ [`GET /api/v1/work-orders/${W.id}/record`]: () => ({ body: recordOf(W, { wait }) }) });
+    await waitFor(() => expect(document.getElementById("trv-wait")?.textContent).toMatch(/Waiting: host disk low/));
+    expect(document.getElementById("wait-chip")?.textContent).toBe("Waiting: host disk low");
+  });
+});
 
 describe("Work order page", () => {
   it("puts the title, route and actions in the header and the document and activity in tabs", async () => {
@@ -271,6 +280,24 @@ describe("Retry with a higher limit", () => {
     const post = calls.find((c) => c.path === `/api/v1/work-orders/${W.id}/retry-with-limits`)!;
     expect(post.body).toEqual({ limits: { turns: 80 }, reason: "Big refactor" });
     expect(post.headers["if-match"]).toBe("7");
+  });
+
+  it("T-59: an equal or lower value for the limit that stopped the run is refused at the field, before anything is sent", async () => {
+    const calls = await open();
+    fireEvent.click(await screen.findByRole("button", { name: "Retry with a higher limit" }, { timeout: 4000 }));
+    await byIdDz("rl-turns");
+    for (const v of ["40", "30"]) {
+      fireEvent.change(document.getElementById("rl-turns")!, { target: { value: v } });
+      fireEvent.click(screen.getByRole("button", { name: "Retry with higher limit" }));
+      expect(await screen.findByText("Must be more than 40.")).toBeTruthy();
+    }
+    expect(calls.some((c) => c.method === "POST" && c.path === `/api/v1/work-orders/${W.id}/retry-with-limits`)).toBe(false);
+    // raising only another field does not lift the limit that stopped the run
+    fireEvent.change(document.getElementById("rl-turns")!, { target: { value: "" } });
+    fireEvent.change(document.getElementById("rl-min")!, { target: { value: "90" } });
+    fireEvent.click(screen.getByRole("button", { name: "Retry with higher limit" }));
+    expect(await screen.findByText(/raise that one for the next attempt/)).toBeTruthy();
+    expect(calls.some((c) => c.method === "POST" && c.path === `/api/v1/work-orders/${W.id}/retry-with-limits`)).toBe(false);
   });
 
   it("is not offered when the work order did not stop on a limit, and is locked for someone who may not change limits", async () => {

@@ -7,6 +7,7 @@ import { usePrices } from "../../api/queries";
 import { useActors } from "../../ui/actors";
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
+import { monthlyCap } from "../../lib/budget";
 import { hashFor, navigate } from "../../lib/router";
 import { Btn, Chip, Field, FilterBar, LockNote, Panel, SearchBox } from "../../ui/primitives";
 import { DataTable, type SortCol } from "../../ui/SortTable";
@@ -44,13 +45,14 @@ export function ProjectBudgets({ projects }: { projects: Project[] }) {
     <Panel title="Project budgets, this month">
       <div className="stack">
         {projects.map((p) => {
-          const r = p.budget.monthly ? p.budget.mtd / p.budget.monthly : 0;
+          const cap = monthlyCap(p.budget);
+          const r = cap ? p.budget.mtd / cap : 0;
           return (
             <div key={p.id}>
               <div className="row">
                 <a href={hashFor("project-config", null, p.id)} onClick={(e) => { e.preventDefault(); navigate("project-config", null, p.id); }}>{p.name}</a>
                 <span className="spacer" />
-                <span className="num small">{p.budget.monthly <= 0 ? `${usd(p.budget.mtd)} · no cap` : `${usd(p.budget.mtd)} / ${usd(p.budget.monthly)}`}</span>
+                <span className="num small">{cap === null ? `${usd(p.budget.mtd)} · no cap` : `${usd(p.budget.mtd)} / ${usd(cap)}`}</span>
               </div>
               <div className={`meter${r > p.budget.alertAt ? " warn" : ""}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(Math.min(1, r) * 100)} aria-label={`${p.name} spend vs budget`}><i style={{ width: `${Math.min(1, r) * 100}%` }} /></div>
             </div>

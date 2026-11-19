@@ -42,12 +42,26 @@ describe("Traveler drawer in the URL", () => {
 describe("Traveler drawer: why the run is not running (R1)", () => {
   it("says it is waiting for a run slot, or for host disk, and shows a stop for a critically low disk as an alert", async () => {
     await show({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ body: travelerOf(W, { wait: { label: "Waiting for a run slot (2 queued)", reason: "at the concurrent run limit (3)", since: null, kind: "slot" } }) }) });
-    const slot = await screen.findByText(/Waiting for a run slot \(2 queued\)/);
-    expect(slot.closest("#trv-wait")?.getAttribute("role")).toBe("status");
+    await waitFor(() => expect(document.getElementById("trv-wait")?.textContent).toMatch(/Waiting for a run slot \(2 queued\)/));
+    expect(document.getElementById("trv-wait")?.getAttribute("role")).toBe("status");
     cleanup();
     resetApp();
     await show({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ body: travelerOf(W, { wait: { label: "Host disk critically low", reason: null, since: null, kind: "disk_critical" } }) }) });
-    expect((await screen.findByText(/Host disk critically low/)).closest("#trv-wait")?.getAttribute("role")).toBe("alert");
+    await waitFor(() => expect(document.getElementById("trv-wait")?.textContent).toMatch(/Host disk critically low/));
+    expect(document.getElementById("trv-wait")?.getAttribute("role")).toBe("alert");
+  });
+
+  it("T-61: a work order stopped on a critical disk does not say RUNNING or that the agent is waiting for you", async () => {
+    const wait = { label: "Host disk critically low", reason: "Free space is under the limit", since: null, kind: "disk_critical" as const };
+    await show({
+      [`GET /api/v1/work-orders/${W.id}`]: () => ({ body: travelerOf(W, { state: "running", wait }) }),
+      "GET /api/v1/work-order-sessions": () => ({ body: { items: [{ id: W.id, waitingOn: "you", agentName: "Builder", closed: false, unread: false }] } }),
+    });
+    await waitFor(() => expect(document.getElementById("wait-chip")?.textContent).toBe("Host disk critically low"));
+    const head = document.querySelector(".trv-drawer .drawer-id")!.textContent ?? "";
+    expect(head).not.toMatch(/Running/i);
+    await waitFor(() => expect(document.getElementById("trv-conversation")?.textContent).toMatch(/Host disk critically low: Free space/));
+    expect(document.getElementById("trv-conversation")?.textContent).not.toMatch(/waiting for you/);
   });
 });
 

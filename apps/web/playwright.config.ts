@@ -66,7 +66,7 @@ export default defineConfig({
   projects: [
     ...matrix.map(({ name, testMatch, use }) => ({ name, testMatch, use })),
     ...(VISUAL === "only" ? [] : (["light", "dark"] as const).map((scheme) => ({ name: `layout-${scheme}`, testMatch: "overflow.spec.ts", use: { colorScheme: scheme } }))),
-    ...(VISUAL === "only" ? [] : [{ name: "behaviour", testMatch: ["failure-paths.spec.ts", "journeys.spec.ts", "canary.spec.ts", "nav-rail.spec.ts", "work-orders-layout.spec.ts"], use: { colorScheme: "light" as const, viewport: { width: 1366, height: 800 } } }]),
+    ...(VISUAL === "only" ? [] : [{ name: "behaviour", testMatch: ["failure-paths.spec.ts", "journeys.spec.ts", "canary.spec.ts", "nav-rail.spec.ts", "work-orders-layout.spec.ts", "drawer-fit.spec.ts"], use: { colorScheme: "light" as const, viewport: { width: 1366, height: 800 } } }]),
   ],
   webServer: {
     // The real production build, served as the nginx image serves it. Set E2E_SKIP_BUILD=1 to reuse apps/web/dist (it is then

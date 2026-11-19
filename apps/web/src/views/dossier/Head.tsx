@@ -17,6 +17,7 @@ import { classOf } from "../projects/kit";
 import { useActionSpecs, type ActionSpec } from "../traveler/Actions";
 import { EditTitleDialog, PriorityDialog } from "../record/GateDialogs";
 import { bayLabel, stName, stNo, wipWaitText, type TWo } from "../traveler/model";
+import { WaitBanner, WaitChip, type WaitRead } from "../traveler/WaitBanner";
 import type { WoSession } from "../conversations/session-api";
 
 /** The toolbar of a work order (prototype): the gate decision, Traveler, Changes and one Actions menu. Locked items say why, in their tooltip. */
@@ -61,7 +62,7 @@ export function statusLine(wo: TWo, cat: Catalog, s: WoSession | undefined): str
   return `At ${stNo(cat, st?.id)} ${stName(cat, st?.id)}`.trim();
 }
 
-export function DossierHead({ wo, cat, project }: { wo: TWo; cat: Catalog; project: Project; session: WoSession | undefined; onActivity?: () => void }) {
+export function DossierHead({ wo, cat, project, wait }: { wo: TWo; cat: Catalog; project: Project; session: WoSession | undefined; wait?: WaitRead | null; onActivity?: () => void }) {
   const actor = useActors();
   const repo = useRepoName(wo.project, wo.repo);
   const bar = useBar(wo);
@@ -86,7 +87,7 @@ export function DossierHead({ wo, cat, project }: { wo: TWo; cat: Catalog; proje
         actions={bar.actions}
       />
       <div className="row dz-chips" style={{ margin: "-6px 0 16px" }}>
-        <WoStatus state={wo.state} gate={gate} bay={wo.bay ? bayLabel(cat, wo.bay) : null} />
+        {wait ? <WaitChip wait={wait} /> : <WoStatus state={wo.state} gate={gate} bay={wo.bay ? bayLabel(cat, wo.bay) : null} />}
         <Chip text={cls.name} cls="ghost plain" />
         <Chip text={wo.priority} cls={wo.priority === "P0" || wo.priority === "P1" ? "bad" : wo.priority === "P2" ? "info" : "plain"} />
         {wo.state !== "done" && st ? <Chip text={`${st.no} ${st.name}`} cls="plain" /> : null}
@@ -111,6 +112,7 @@ export function DossierHead({ wo, cat, project }: { wo: TWo; cat: Catalog; proje
           <div><b>{wipWaitText(cat, wo)}</b>{` ${wo.wipWait?.kind === "back" ? "It was sent back and" : wo.wipWait?.kind === "merge" ? "The merge request" : wo.wipWait?.kind === "restore" ? "It was restored and" : wo.wipWait?.kind === "retry" ? "The retry" : wo.wipWait?.kind === "unpark" ? "It is in its bay and" : "It is done here and"} goes in when a place frees: a send-back first, then highest priority, then the one that has waited longest.`}</div>
         </div>
       ) : null}
+      {wait ? <WaitBanner wait={wait} /> : null}
       {wo.blockReason && !wo.wipWait ? <div className="callout callout-block"><Icon name="st-block" /><div><b>Blocked</b>{` ${wo.blockReason}`}</div></div> : null}
       {wo.failReason ? <div className="callout callout-fail"><Icon name="st-fail" /><div><b>Failed</b>{` ${wo.failReason}`}</div></div> : null}
       {wo.state === "parked" || wo.bay ? (

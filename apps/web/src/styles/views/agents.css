@@ -106,3 +106,5 @@
 
 /* a detail page is never wider than the screen: the tab bar scrolls inside it, long lines wrap */
 .ag-panel > .tabs { overflow-x: auto; }
+
+#ag-limits{grid-template-columns:repeat(auto-fit,minmax(150px,220px))}

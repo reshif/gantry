@@ -228,6 +228,7 @@ export default function WorkOrdersView() {
     {
       key: "needs",
       label: "Needs",
+      noCap: true,
       sort: (w) => needsRank(needs(w), lastAt(w)),
       render: (w) => { const n = needs(w); return n.kind === "none" ? <span className="muted">—</span> : <div className={`wo-needs${n.mine ? " is-mine" : ""}`} data-need={n.kind}><span className="wo-need-t">{n.text}</span>{n.askedOf ? <span className="sub"><Chip text={n.askedOf} cls="warn" /></span> : null}{n.sub ? <span className="sub">{n.sub}</span> : null}</div>; },
     },

@@ -34,3 +34,24 @@ for (const w of [1280, 1366, 1440]) {
     expect(lines, "a title wraps to more than 2 lines").toBeLessThanOrEqual(2);
   });
 }
+
+// T-42: at 390 a work order is a card without the NEEDS caption line (median about 180px, was about 220px), and Approve is whole.
+test("work order cards at 390 stay short", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await mockApi(page, {
+    persona: PERSONAS.admin,
+    overrides: {
+      "projects/payments": (r) => fulfillJson(r, { ...PAYMENTS, version: 1 }),
+      "projects/payments/repos": (r) => fulfillJson(r, REPOS),
+      "projects/payments/work-orders": (r) => fulfillJson(r, { items: WOS, next: null, total: WOS.length }),
+    },
+  });
+  await open(page, "/#/p/payments/work-orders");
+  const rows = page.locator("#wo-table-wrap tbody tr");
+  await rows.first().waitFor();
+  if (process.env.WO_SHOT) await page.screenshot({ path: process.env.WO_SHOT, fullPage: true });
+  const heights = await rows.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+  const sorted = [...heights].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)]!;
+  expect(median, `median row ${median}px (${heights.join(",")})`).toBeLessThanOrEqual(190);
+});
