@@ -757,6 +757,9 @@ export interface Guardrail {
 export type WorkOrderState = WoStateId;
 export type WoBayId = string;
 
+/** Why a work order waits before a full station (the counts are those when it began to wait; `wipStatus` has the live ones). */
+export interface WipWait { station: Id; since: Ms; live: number; limit: number; /** Why it waits: it advanced, was sent back, is retried, returns from a bay, or was restored. */ kind?: "forward" | "back" | "retry" | "unpark" | "restore" | "merge" }
+
 export interface WorkOrder {
   id: Id;
   project: Id;
@@ -794,6 +797,8 @@ export interface WorkOrder {
   failReason: string | null;
   /** Why the work order sits in the Needs a person bay: "failed" when the station failed or lost its run repeatedly, "merge" when the approved merge could not happen (so Retry or Retry merge applies). */
   bayCause?: string;
+  /** Set while the work order waits for a station at its WIP limit (after an advance, a send-back, a retry, a return from a bay or a restore). It stays where it is and goes in when a place frees. */
+  wipWait?: WipWait | null;
   /** "start" when the failed run never started (workspace seeding, the launcher, no model). */
   failPhase?: string;
   doneAt: Ms | null;

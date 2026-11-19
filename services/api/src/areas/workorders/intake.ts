@@ -7,7 +7,7 @@ import { loadFlowState } from "../../core/read/state.js";
 import { closeConversation, replaceConversation, saveConversation } from "./conversation.js";
 import { createWorkOrder, newWoId } from "./create.js";
 import {
-  bayOf, cancelAttempts, closeEntry, closeOpenQuestions, advance, closeOpenInstances, dispatchQueued, enterBay, enterStation, ev, leaveBay, loadOne, note, openInstanceOf, projectOf, releaseSlot, stationIdOf, type Fx,
+  bayOf, cancelAttempts, closeEntry, closeOpenQuestions, advance, closeOpenInstances, dispatchQueued, enterBay, enterStation, wipHoldCheck, ev, leaveBay, loadOne, note, openInstanceOf, projectOf, releaseSlot, stationIdOf, type Fx,
 } from "./engine.js";
 import { begin, done, flowFor, makeFx, person, type CmdResult } from "./ctx.js";
 import { saveWo, type Wo } from "./model.js";
@@ -143,7 +143,6 @@ export async function postMessage(tx: Tx, actor: Actor, woId: string, b: Message
   await saveConversation(fx, w.id, r.conv, prev, returned ? "open" : undefined);
   if (returned && w.position === "person") {
     const back = String(w.data.bayFrom ?? stationIdOf(fx.catalog, w));
-    await leaveBay(fx, w);
     note(w, fx, by, `Answered; returned to ${stationDef(fx.catalog, back)?.name ?? back}.`);
     await resumeAt(fx, w, back);
   } else note(w, fx, by, "Answered an intake question.");
@@ -162,6 +161,7 @@ export async function parkInto(fx: Fx, w: Wo, bay: string, reason: string): Prom
   w.data.bayFrom = from;
   w.data.bayReason = reason;
   delete w.data.bayCause;
+  delete w.data.wipWait;
   w.data.bayAt = fx.now.getTime();
   // S-60: a person's decline, park or hold is a later word than the approval: the pending merge is dropped and its queued job cancelled, so nothing merges from a bay.
   const merging = w.data.merging as { prNumber?: number } | undefined;
@@ -185,7 +185,12 @@ export async function parkInto(fx: Fx, w: Wo, bay: string, reason: string): Prom
 }
 
 /** Back to a station from a bay: a work order that was waiting at a gate goes back to waiting, anything else restarts the station with a new attempt. */
-export async function resumeAt(fx: Fx, w: Wo, stationId: string): Promise<void> {
+export async function resumeAt(fx: Fx, w: Wo, stationId: string): Promise<boolean> {
+  // Back from a bay into a station that is full: the order waits in its bay until a place frees (the one check every way back goes through).
+  if (bayOf(fx.catalog, w)) {
+    if (await wipHoldCheck(fx, w, stationId, "unpark", { by: fx.actor })) return false;
+    await leaveBay(fx, w);
+  }
   const open = await fx.tx.query<{ gate_id: string }>(`select gate_id from gate_instances where org_id = $1 and wo_id = $2 and status = 'open'`, [fx.orgId, w.id]);
   delete w.data.bayReason;
   delete w.data.bayFrom;
@@ -195,10 +200,11 @@ export async function resumeAt(fx: Fx, w: Wo, stationId: string): Promise<void> 
     w.position = stationId;
     w.state = "waiting";
     ev(fx, w, "wo.bay", { bay: null, from: null, station: stationId, text: "Back on the belt" });
-    return;
+    return true;
   }
-  await enterStation(fx, w, stationId);
+  if (!(await enterStation(fx, w, stationId))) return false;
   ev(fx, w, "wo.bay", { bay: null, from: null, station: stationId, text: "Back on the belt" });
+  return true;
 }
 
 /** Class override at Intake, with an audited reason. The conversation restarts under the new class and answers to questions that still apply are replayed. */

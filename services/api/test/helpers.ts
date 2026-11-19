@@ -83,10 +83,16 @@ export interface TestApp {
   session(personId: string, o?: { authAgeSec?: number; ip?: string }): Promise<{ cookie: string; csrf: string; id: string; headers: Record<string, string> }>;
 }
 
-export async function startApp(o: { config?: Partial<Config>; build?: Partial<BuildOptions>; seed?: boolean; seedNow?: number; /** Load the dev seed's audit history into the ledger (off by default so tests count only their own events). */ seedAudit?: boolean; /** Load the dev seed's demo eval suites, run history and trust ladder (off by default so tests count only their own rows). */ seedEvals?: boolean } = {}): Promise<TestApp> {
+export async function startApp(o: { config?: Partial<Config>; build?: Partial<BuildOptions>; seed?: boolean; seedNow?: number; /** Load the dev seed's audit history into the ledger (off by default so tests count only their own events). */ seedAudit?: boolean; /** Load the dev seed's demo eval suites, run history and trust ladder (off by default so tests count only their own rows). */ seedEvals?: boolean; /** Keep the dev seed's station WIP limits (they are zeroed so suites that pile orders on a station are not held back). */ keepWip?: boolean } = {}): Promise<TestApp> {
   const db = await createTestDb();
   const config = testConfig({ devSeed: o.seed !== false, ...o.config });
   const { orgId } = await bootstrapOrg(db.app, config, undefined, { seedNow: o.seedNow, seedAudit: o.seedAudit ?? false, seedEvals: o.seedEvals ?? false });
+  // Station WIP limits are enforced, and these suites pile many orders onto one station; the limits stay off unless a suite asks for them (wip-limits.test.ts sets its own).
+  if (!o.keepWip) {
+    await db.admin.query(`alter table flow_versions disable trigger user`);
+    await db.admin.query(`update flow_versions set doc = jsonb_set(doc, '{stations}', (select coalesce(jsonb_object_agg(k, case when jsonb_typeof(v) = 'object' then v || '{"wip": 0}'::jsonb else v end), '{}'::jsonb) from jsonb_each(doc->'stations') as e(k, v))) where doc ? 'stations'`);
+    await db.admin.query(`alter table flow_versions enable trigger user`);
+  }
   const app = await buildApp({ pool: db.app, config, orgId, logger: false, ...o.build });
   return {
     app, db, orgId, config,

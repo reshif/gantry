@@ -89,10 +89,13 @@ export async function createWorkOrder(fx: Fx, i: CreateInput): Promise<Created> 
     // No agent ran at Intake for an inherited brief: no history entry is invented.
     w.data.history = [];
     note(w, fx, by, `Created from epic ${i.childOf.parent}.`);
+    // An epic child enters Build through the WIP check: when Build is full it waits (at Intake, with the usual "Waiting: Build is full") until a place frees.
+    // While it waits it is parked and not counted, so it takes no Intake seat (the Intake limit bounds only send-backs and returns); it enters Build in the normal promotion order.
+    w.state = "parked";
     await enterStation(fx, w, "build", { project });
     await saveWo(fx.tx, fx.orgId, w);
   } else {
-    await enterStation(fx, w, "intake", { project });
+    await enterStation(fx, w, "intake", { project, noWip: true });
     await saveWo(fx.tx, fx.orgId, w);
   }
   return {

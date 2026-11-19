@@ -7,7 +7,7 @@ import { stationDef } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
 import type { Actor } from "../../core/command.js";
 import { conflict, invalid, refuse } from "../../core/errors.js";
-import { bayOf, ev, leaveBay, note, type Fx } from "./engine.js";
+import { bayOf, ev, note, type Fx } from "./engine.js";
 import { readSecurity } from "../../core/read/index.js";
 import { loadPolicyState } from "../../core/read/state.js";
 import { decideFor } from "../../core/decide.js";
@@ -65,8 +65,11 @@ export async function maybeResume(fx: Fx, w: Wo, by: string): Promise<boolean> {
   if (open > 0 || planOpen || assumptionsOpen > 0) return false;
   const back = String(waitingOn.station ?? w.data.bayFrom);
   delete w.data.waitingOn;
-  await leaveBay(fx, w);
-  await resumeAt(fx, w, back);
+  const entered = await resumeAt(fx, w, back);
+  if (!entered) {
+    note(w, fx, by, `Answered; ${stationDef(fx.catalog, back)?.name ?? back} is full, so the work order waits in its bay for a place.`);
+    return false;
+  }
   note(w, fx, by, `${stationDef(fx.catalog, back)?.name ?? back} runs again with the answers.`);
   return true;
 }
