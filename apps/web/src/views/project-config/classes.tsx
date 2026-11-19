@@ -8,6 +8,7 @@ import { Dialog } from "../../ui/Overlay";
 import { DataTable, type Col } from "../../ui/DataTable";
 import { Btn, Field, Input, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
+import { useUrlDialog } from "./url-dialog";
 import { useUI } from "../../ui/overlay-context";
 import { ClassChip, MiniBelt, focusLater, metricsOf, routeGatesOf, routeOf, useRes, type PView } from "../projects/kit";
 
@@ -135,7 +136,6 @@ function ClassDialog({ p, cat, c, close, onAdded }: { p: PView; cat: Catalog; c:
 }
 
 export function WorkClassesPanel({ p, cat, classes, changed, onEnable, onAdded }: { p: PView; cat: Catalog; /** The classes as the draft has them. */ classes: WorkClass[]; changed: ReadonlySet<string>; onEnable: (cid: string, on: boolean) => void; onAdded: (id: string) => void }) {
-  const ui = useUI();
   const res = useRes();
   const d = useCan("class.edit", { project: p.id });
   const fd = useCan("project.config", { project: p.id });
@@ -144,6 +144,7 @@ export function WorkClassesPanel({ p, cat, classes, changed, onEnable, onAdded }
   const m = metricsOf(p);
   const f = flowOf(cat, p);
   const on = classes.filter((c) => c.enabled !== false).length;
+  const openClass = useUrlDialog("class", (cid, close) => <ClassDialog p={p} cat={cat} c={cid ? (p.flow.classes.find((x) => x.id === cid) ?? classes.find((x) => x.id === cid) ?? null) : null} close={close} onAdded={cid ? () => undefined : onAdded} />);
   const cols: Array<Col<WorkClass>> = [
     { key: "c", label: "Class", render: (c) => <span>{chipOf(c)}{c.custom ? <span className="tag pcf-tag-custom">custom</span> : null}{changed.has(c.id) ? <span className="chip chip-warn">changed</span> : null}</span> },
     { key: "on", label: "On", render: (c) => {
@@ -186,10 +187,10 @@ export function WorkClassesPanel({ p, cat, classes, changed, onEnable, onAdded }
       );
     } },
     { key: "open", label: "Open", align: "end", render: (c) => <span className="mono">{String(m.byClass[c.id] ?? 0)}</span> },
-    { key: "edit", label: "", align: "end", render: (c) => <Btn small kind="ghost" id={`pcf-cl-edit-${c.id}`} aria={`Edit ${c.name}`} guard={d} label="Edit" onClick={() => ui.open((close) => <ClassDialog p={p} cat={cat} c={p.flow.classes.find((x) => x.id === c.id) ?? c} close={close} onAdded={() => undefined} />)} /> },
+    { key: "edit", label: "", align: "end", render: (c) => <Btn small kind="ghost" id={`pcf-cl-edit-${c.id}`} aria={`Edit ${c.name}`} guard={d} label="Edit" onClick={() => openClass(c.id)} /> },
   ];
   return (
-    <Panel title={`Work classes on ${p.name}`} flush id="flw-classes" tools={<Btn small icon="plus" id="pcf-add-class" guard={d} label="Add class" onClick={() => ui.open((close) => <ClassDialog p={p} cat={cat} c={null} close={close} onAdded={onAdded} />)} />}>
+    <Panel title={`Work classes on ${p.name}`} flush id="flw-classes" tools={<Btn small icon="plus" id="pcf-add-class" guard={d} label="Add class" onClick={() => openClass()} />}>
       <LockNote decision={d} what="Work classes" />
       <p className="small muted pcf-pad">{`${on} of ${classes.length} classes on. The class decides the route, which human gates apply, the SLA and how the Intake agent recognises it. The trust cap limits how far agents may run unattended for that class here; factory-wide ceilings still apply.`}</p>
       <DataTable id="pcf-cl-table" caption="Work classes" columns={cols} rows={classes} rowKey={(c) => c.id} />

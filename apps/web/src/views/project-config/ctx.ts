@@ -25,15 +25,15 @@ export const TABS: Array<[string, string]> = [
 ];
 /** Old `?tab=` ids (the pages that used to sit behind a More menu) and where a bookmark to one lands now. `sec` is the section to open (`?sec=`), `rule` opens the approver rule editor (`?rule=`). */
 export const LEGACY_TABS: Record<string, { tab: string; sec?: string; rule?: boolean }> = {
-  classes: { tab: "flow" },
+  classes: { tab: "flow", sec: "classes" },
   "flow-advanced": { tab: "flow", sec: "structure" },
   rules: { tab: "approvers", rule: true },
   spend: { tab: "budget" },
   archive: { tab: "line" },
   danger: { tab: "line" },
-  history: { tab: "overview" },
-  notifications: { tab: "overview" },
-  more: { tab: "overview" },
+  history: { tab: "overview", sec: "history" },
+  notifications: { tab: "overview", sec: "notifications" },
+  more: { tab: "overview", sec: "overlay" },
 };
 export const membersOf = (people: Person[], p: PView): Person[] => people.filter((x) => x.roles.some((g) => g.scope === p.id));
 export const rolesIn = (x: Person, pid: string): string[] => x.roles.filter((g) => g.scope === pid || g.scope === "factory").map((g) => g.role);

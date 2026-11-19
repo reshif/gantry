@@ -18,7 +18,7 @@ import { nextVersion } from "../govern/data";
 import { metricsOf, useRes, type PView } from "../projects/kit";
 import { flowFrom, type Tpl } from "../projects/templates-kit";
 import { ClassRoutes } from "./flow-routes";
-import { FlowStructure } from "./flow-structure";
+import { FlowStructure, StructureAdd } from "./flow-structure";
 import { WorkClassesPanel } from "./classes";
 import { useQueryParam } from "../projects/urlState";
 import type { PcProps } from "./ctx";
@@ -310,8 +310,8 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
           </ul>
         </Panel>
       </div>
-      <Panel title="Advanced: structure" id="flw-adv" tools={<Btn small kind="ghost" icon={structureOpen ? "down" : "chevron"} id="flw-adv-toggle" label={structureOpen ? "Hide" : "Show"} aria={`${structureOpen ? "Hide" : "Show"} advanced structure`} aria-expanded={structureOpen} aria-controls="flw-structure" onClick={() => setSecQ(structureOpen ? null : "structure")} />}>
-        {structureOpen ? <FlowStructure p={p} cat={cat} slots={slots} setSlots={setSlotsOv} /> : <p className="small muted">Add a station, gate or bay, move or remove stations, and set the coding slots.</p>}
+      <Panel title="Advanced: structure" id="flw-adv" tools={<span className="row"><StructureAdd p={p} cat={cat} /><Btn small kind="ghost" icon={structureOpen ? "down" : "chevron"} id="flw-adv-toggle" label={structureOpen ? "Hide" : "Show"} aria={`${structureOpen ? "Hide" : "Show"} advanced structure`} aria-expanded={structureOpen} aria-controls="flw-structure" onClick={() => setSecQ(structureOpen ? null : "structure")} /></span>}>
+        {structureOpen ? <FlowStructure p={p} cat={cat} slots={slots} setSlots={setSlotsOv} /> : <p className="small muted">Move or remove stations and set the coding slots.</p>}
       </Panel>
       <ClassRoutes p={pe} cat={cat} sel={s.flowCls} onSel={(id) => set({ flowCls: id })} decision={d} onToggle={toggleRoute} onEnable={enableClass} onReset={resetRoutes} />
       <WorkClassesPanel p={p} cat={cat} classes={classesEff} changed={changedCls} onEnable={enableClass} onAdded={(id) => set({ flowCls: id })} />

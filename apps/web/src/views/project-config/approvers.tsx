@@ -11,6 +11,7 @@ import { useUI } from "../../ui/overlay-context";
 import { NumInput, classOf, projectRoles, roleName, useRes, type PView } from "../projects/kit";
 import { membersOf, rolesIn, type PcProps } from "./ctx";
 import { HistoryList } from "./history";
+import { useUrlDialog } from "./url-dialog";
 
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
@@ -24,6 +25,36 @@ function eligibleOf(p: PView, people: Person[], rule: ApproverRule): Person[] {
     const roles = rolesIn(x, p.id);
     return rule.people.includes(x.id) || rule.roles.some((r) => roles.includes(r));
   });
+}
+
+/** Away and delegates for everyone who may approve a gate here: one click from the tab (Set away), not inside a rule editor. */
+export function AwayPanel({ p, cat, people }: Pick<PcProps, "p" | "cat" | "people">) {
+  const res = useRes();
+  const actor = useActors();
+  const d = useCan("approvers.edit", { project: p.id });
+  const [now] = useState(() => Date.now());
+  const name = (id: string) => actor(id).name.replace(" (agent)", "");
+  const who = membersOf(people, p).filter((x) => x.status === "active" && Object.values(p.approvers).some((r) => eligibleOf(p, people, r).some((e) => e.id === x.id)));
+  const setAway = useUrlDialog("away", (pid, close) => { const x = people.find((y) => y.id === pid); return x ? <AwayDialog p={p} cat={cat} person={x} people={people} close={close} /> : null; });
+  return (
+    <Panel title="Away and delegates" id="pcf-away">
+      {who.length ? (
+        <ul className="plain-list">
+          {who.map((x) => {
+            const isAway = !!x.away && x.away.to > now;
+            return (
+              <li key={x.id} className="pcf-deleg-row">
+                <span>{x.name}</span>
+                <span className={`small ${isAway ? "warn-text" : "muted"}`}>{isAway ? `away until ${fmt.istDate(x.away!.to)}, ${name(x.away!.delegate ?? "")} approves instead` : "present"}</span>
+                <Btn small kind="ghost" id={`pcf-away-${x.id}`} guard={d} label={isAway ? "Change" : "Set away"} aria={`${isAway ? "Change" : "Set"} away for ${x.name}`} onClick={() => setAway(x.id)} />
+                {isAway ? <Btn small kind="ghost" id={`pcf-away-clr-${x.id}`} guard={d} label="Clear" aria={`Clear away for ${x.name}`} onClick={async () => res(await ops.setAway(x.id, null, p.id))} /> : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : <p className="muted small">Nobody can approve a gate here yet.</p>}
+    </Panel>
+  );
 }
 
 function AwayDialog({ p, cat, person, people, close }: { p: PView; cat: Catalog; person: Person; people: Person[]; close: () => void }) {
@@ -62,7 +93,7 @@ function AwayDialog({ p, cat, person, people, close }: { p: PView; cat: Catalog;
 export function RulePanel({ p, cat, people, s, set, gid, onClose }: PcProps & { gid: string; onClose: () => void }) {
   const d = useCan("approvers.edit", { project: p.id });
   const g = flowOf(cat, p).gates.find((x) => x.id === gid);
-  if (!g) return null;
+  if (!g) return <Panel title="Gate not found" id="pcf-rule" tools={<Btn small kind="ghost" id="pcf-ap-close" label="Close" onClick={onClose} />}><p className="small">{`${gid} is not a gate in ${p.name}'s flow (it may have been removed). Pick a gate from the table above.`}</p></Panel>;
   if (g.mode === "auto") {
     return (
       <Panel title={`${g.label} ${g.name}`} id="pcf-rule" tools={<Btn small kind="ghost" id="pcf-ap-close" label="Close" onClick={onClose} />}>
@@ -79,7 +110,6 @@ export function RulePanel({ p, cat, people, s, set, gid, onClose }: PcProps & { 
 
 function RuleEditor({ p, cat, people, gate: g, s, set, d, locked, onClose }: PcProps & { gate: ReturnType<typeof flowOf>["gates"][number]; d: ReturnType<typeof useCan>; locked: boolean; onClose: () => void }) {
   const ui = useUI();
-  const res = useRes();
   const actor = useActors();
   const name = (id: string) => actor(id).name.replace(" (agent)", "");
   const gid = g.id;
@@ -132,7 +162,6 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked, onClose }: PcP
   const sc = s.scen;
   const paths = sc.path ? [sc.path] : [];
   const scConds = r.conditions.filter((c) => (c.when.type === "class" ? sc.cls === c.when.value : c.when.type === "risk" ? sc.risk === c.when.value : paths.some((x) => x.startsWith(c.when.value))));
-  const away = elig.filter((x) => x.away && x.away.to > now);
   const classesOn = p.flow.classes.filter((c) => c.enabled !== false);
   const sodId = "pcf-ap-sod";
   return (
@@ -269,23 +298,6 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked, onClose }: PcP
             <Field label="Fallback approver" htmlFor="pcf-ap-fallback">
               <Select id="pcf-ap-fallback" disabled={locked} options={[{ value: "", label: `Project owner (${name(p.owner)})` }, ...people2.map((x) => ({ value: x.id, label: x.name }))]} value={r.fallback || ""} onChange={(v) => upd((x) => { x.fallback = v || null; })} />
             </Field>
-          </div>
-          <div className="pcf-deleg">
-            <div className="small strong">Away and delegates</div>
-            <ul className="plain-list">
-              {elig.map((x) => {
-                const isAway = !!x.away && x.away.to > now;
-                return (
-                  <li key={x.id} className="pcf-deleg-row">
-                    <span>{x.name}</span>
-                    <span className={`small ${isAway ? "warn-text" : "muted"}`}>{isAway ? `away until ${fmt.istDate(x.away!.to)}, ${name(x.away!.delegate ?? "")} approves instead` : "present"}</span>
-                    <Btn small kind="ghost" id={`pcf-away-${x.id}`} guard={d} label={isAway ? "Change" : "Set away"} onClick={() => ui.open((close) => <AwayDialog p={p} cat={cat} person={x} people={people} close={close} />)} />
-                    {isAway ? <Btn small kind="ghost" id={`pcf-away-clr-${x.id}`} guard={d} label="Clear" onClick={async () => res(await ops.setAway(x.id, null, p.id))} /> : null}
-                  </li>
-                );
-              })}
-            </ul>
-            {away.length ? null : <p className="muted small">Nobody eligible is away.</p>}
           </div>
         </fieldset>
         <fieldset className="pcf-fs pcf-scen">
