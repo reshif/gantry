@@ -1,0 +1,8 @@
+# Code owners. Replace @reshif if another person or team should own these paths.
+/.github/ @reshif
+/deploy/ @reshif
+/runner/ @reshif
+/services/launcher/ @reshif
+/.gantry/ @reshif
+/CODEOWNERS @reshif
+/AGENTS.md @reshif
