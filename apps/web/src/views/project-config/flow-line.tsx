@@ -247,9 +247,9 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
           <span className="flw-ctl">
             <span className="small muted" id={`pcf-wip-l-${s.id}`}>WIP</span>
             <span className="flw-step" role="group" aria-labelledby={`pcf-wip-l-${s.id}`}>
-              <Btn small kind="ghost" label="−" aria={`Decrease WIP limit for ${s.name}`} id={`pcf-wip-dn-${s.id}`} disabled={!d.allowed || eff.wip <= 1} onClick={() => setStOv((o) => ({ ...o, [s.id]: { ...o[s.id], wip: Math.max(1, eff.wip - 1) } }))} />
-              <Input id={`pcf-wip-${s.id}`} type="number" className="mono pcf-num" min={1} max={30} aria-label={`${s.name} WIP limit`} value={eff.wip} disabled={!d.allowed}
-                onChange={(e) => { const v = Math.min(30, Math.max(1, parseInt(e.target.value, 10) || 1)); setStOv((o) => ({ ...o, [s.id]: { ...o[s.id], wip: v } })); }} />
+              <Btn small kind="ghost" label="−" aria={`Decrease WIP limit for ${s.name}`} id={`pcf-wip-dn-${s.id}`} disabled={!d.allowed || eff.wip <= 0} onClick={() => setStOv((o) => ({ ...o, [s.id]: { ...o[s.id], wip: Math.max(0, eff.wip - 1) } }))} />
+              <Input id={`pcf-wip-${s.id}`} type="number" className="mono pcf-num" min={0} max={30} aria-label={`${s.name} WIP limit`} aria-describedby="pcf-wip-hint" value={eff.wip} disabled={!d.allowed}
+                onChange={(e) => { const v = Math.min(30, Math.max(0, parseInt(e.target.value, 10) || 0)); setStOv((o) => ({ ...o, [s.id]: { ...o[s.id], wip: v } })); }} />
               <Btn small kind="ghost" label="+" aria={`Increase WIP limit for ${s.name}`} id={`pcf-wip-up-${s.id}`} disabled={!d.allowed || eff.wip >= 30} onClick={() => setStOv((o) => ({ ...o, [s.id]: { ...o[s.id], wip: Math.min(30, eff.wip + 1) } }))} />
             </span>
           </span>
@@ -373,6 +373,7 @@ export function FlowLine({ p, cat, people, set, s }: PcProps) {
       <DraftConflictBanner id="flw-conflict" conflict={conflict ? { keys: [] } : null} saved={conflict ?? undefined} onKeepMine={() => { setConflict(null); void save(); }} onDiscard={discard} />
       <div className="flw-cols">
         <Panel title="Stations">
+          <p className="small muted" id="pcf-wip-hint">Orders wait before a full station. 0 is no limit.</p>
           <ul className="flw-list" aria-label="Stations in order">{f.stations.map(stationRow)}</ul>
         </Panel>
         <Panel title="Gates">

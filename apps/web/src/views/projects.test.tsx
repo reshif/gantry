@@ -488,6 +488,19 @@ describe("Project config", () => {
     expect(patch.headers["if-match"]).toBe("7");
   });
 
+  it("flow tab: the WIP control says orders wait before a full station, and 0 is no limit (saved as 0)", async () => {
+    const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok() });
+    tab("flow-advanced");
+    mount(<ProjectConfigView />);
+    const hint = await byId("pcf-wip-hint");
+    expect(hint.textContent).toContain("Orders wait before a full station.");
+    expect((await byId("pcf-wip-spec")).getAttribute("aria-describedby")).toBe("pcf-wip-hint");
+    fireEvent.change(await byId("pcf-wip-spec"), { target: { value: "0" } });
+    expect((document.getElementById("pcf-wip-dn-spec") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(await byId("flw-save"));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({ path: "flow.stations.spec.wip", value: 0 }));
+  });
+
   it("flow tab: a save that is refused halfway says what was saved and what was not, and reloads (S-29)", async () => {
     let n = 0;
     const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => (++n === 1 ? ok() : { status: 409, body: { ok: false, msg: "This changed since you loaded it." } }) });

@@ -186,6 +186,8 @@ export const ops = {
   /** Retry with a higher limit: the next attempt only runs with these limits; the agent and the project keep theirs. */
   retryWithLimits: (woId: string, limits: { turns?: number; wallClockSeconds?: number; costUsd?: number }, reason?: string, v?: Versioned) =>
     run(["workOrders", "projects"], post(api(`work-orders/${enc(woId)}/retry-with-limits`), { limits, ...(reason ? { reason } : {}) }, opts(v))),
+  /** A Factory Admin moves a work order that waits for a full station in anyway, with a reason (audited by the server). */
+  wipOverride: (woId: string, reason: string, v?: Versioned) => run(["workOrders", "floor"], post(api(`work-orders/${enc(woId)}/wip-override`), { reason }, opts(v))),
 
   /* ===== stop controls ===== */
   haltRepo: (repoId: string, reason: string, via?: Via) =>

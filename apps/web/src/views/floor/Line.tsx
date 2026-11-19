@@ -6,7 +6,7 @@
  * Every figure comes from the floor model (floor/model.ts), which reads the floor, work-order, gate and agent data.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useFloorCtx, layoutFor, bayName } from "./kit";
+import { useFloorCtx, layoutFor, bayName, wipChip } from "./kit";
 import { dur, shortDur, revWord, approvalsAt, type Bal, type FloorModel, type StationModel } from "./model";
 
 export interface LineHandlers {
@@ -101,6 +101,8 @@ function layout(model: FloorModel, order: { top: string[]; bottom: string[] }) {
 /* ---------- pieces ---------- */
 
 function Balloon({ b, x, y, rev, h }: { b: Bal; x: number; y: number; rev: boolean; h: LineHandlers }) {
+  const ctx = useFloorCtx();
+  const wip = wipChip(ctx, b.w);
   const open = () => h.onWo(b.w.id);
   const late = b.kind === "gate" && b.age !== null && b.age > 24 * 3_600_000;
   return (
@@ -111,42 +113,46 @@ function Balloon({ b, x, y, rev, h }: { b: Bal; x: number; y: number; rev: boole
       role="button"
       data-wo={b.w.id}
       id={`floor-tok-${b.w.id}`}
-      aria-label={`${b.w.id} ${b.w.title}, ${revWord(b, () => b.w.bay ?? "")}${b.age !== null ? `, ${dur(b.age)}` : ""}`}
+      aria-label={`${b.w.id} ${b.w.title}, ${revWord(b, () => b.w.bay ?? "")}${b.age !== null ? `, ${dur(b.age)}` : ""}${wip ? `, ${wip}` : ""}`}
       onClick={(e) => { e.stopPropagation(); open(); }}
       onKeyDown={keyOn(open)}
       onMouseEnter={() => h.hover([b.w.id])}
       onMouseLeave={() => h.hover(null)}
     >
-      <title>{`${b.w.id} · ${b.w.title}`}</title>
+      <title>{`${b.w.id} · ${b.w.title}${wip ? ` · ${wip}` : ""}`}</title>
       {b.kind === "gate" ? <circle className="halo" r={13} /> : null}
       <circle className="sel" r={16.5} />
       <circle className="b" r={12} />
       <text className="n" y={0.5}>{b.n}</text>
       <text className={`age${late ? " late" : ""}`} y={25}>{b.age === null ? "✓" : shortDur(b.age)}</text>
       {rev ? <path className="rev" d="M9.5 -15.5L15 -6H4Z" /> : null}
+      {wip ? <path className="wipw" d="M9 -15h2.4v8H9zM13.2 -15h2.4v8h-2.4z" style={{ fill: "var(--warn)" }} /> : null}
     </g>
   );
 }
 
 function Gauge({ x, y, w, count, limit, labels }: { x: number; y: number; w: number; count: number; limit: number; labels: boolean }) {
-  const max = Math.max(limit, count, 1);
+  // A limit of 0 is no limit: no marker, nothing is ever over.
+  const unlimited = limit <= 0;
+  const lim = unlimited ? Math.max(count, 1) : limit;
+  const max = Math.max(lim, count, 1);
   const u = w / max;
   const cells: ReactNode[] = [];
   for (let i = 0; i < max; i++) {
-    if (i < count) cells.push(<rect key={i} x={x + i * u + 1} y={y} width={Math.max(1, u - 2)} height={8} className={i < limit ? "fp-cell" : "fp-cell over"} />);
+    if (i < count) cells.push(<rect key={i} x={x + i * u + 1} y={y} width={Math.max(1, u - 2)} height={8} className={i < lim ? "fp-cell" : "fp-cell over"} />);
     else cells.push(<rect key={i} x={x + i * u + 1} y={y} width={Math.max(1, u - 2)} height={8} className="fp-cell empty" />);
   }
   return (
     <g aria-hidden="true">
       <line x1={x} y1={y + 9} x2={x + w} y2={y + 9} className="fp-rule" />
       {cells}
-      {max <= 24 ? Array.from({ length: max + 1 }, (_, i) => <line key={`t${i}`} x1={x + i * u} y1={y + 9} x2={x + i * u} y2={y + (i === 0 || i === limit ? 15 : 12)} className={i === 0 || i === limit ? "fp-tick hi" : "fp-tick"} />) : null}
-      <line x1={x + limit * u} y1={y - 5} x2={x + limit * u} y2={y + 9} className={count > limit ? "fp-limit bad" : "fp-limit"} />
+      {max <= 24 ? Array.from({ length: max + 1 }, (_, i) => <line key={`t${i}`} x1={x + i * u} y1={y + 9} x2={x + i * u} y2={y + (i === 0 || i === lim ? 15 : 12)} className={i === 0 || i === lim ? "fp-tick hi" : "fp-tick"} />) : null}
+      <line x1={x + lim * u} y1={y - 5} x2={x + lim * u} y2={y + 9} className={count > lim ? "fp-limit bad" : "fp-limit"} />
       {labels ? (
         <>
           <text className="fp-t f" x={x} y={y + 26} fontSize={10}>0</text>
-          <text className="fp-t m" x={Math.min(x + w - 16, x + limit * u)} y={y + 26} fontSize={10} textAnchor={limit === max ? "end" : "middle"}>{`LIMIT ${limit}`}</text>
-          {count > limit ? <text className="fp-t bad b" x={x + w} y={y + 26} fontSize={10} textAnchor="end">{count}</text> : null}
+          <text className="fp-t m" x={Math.min(x + w - 16, x + lim * u)} y={y + 26} fontSize={10} textAnchor={lim === max ? "end" : "middle"}>{unlimited ? "NO LIMIT" : `LIMIT ${limit}`}</text>
+          {count > lim ? <text className="fp-t bad b" x={x + w} y={y + 26} fontSize={10} textAnchor="end">{count}</text> : null}
         </>
       ) : null}
     </g>
@@ -174,7 +180,7 @@ function Station({ p, h, bottleneck, revIds }: { p: Placed; h: LineHandlers; bot
         role="button"
         tabIndex={0}
         id={`floor-st-${st.s.id}`}
-        aria-label={`${st.s.name}: ${count} work order${count === 1 ? "" : "s"}, limit ${st.lim}${st.over ? ", over limit" : ""}, agent ${st.agent}, ${st.state.t.toLowerCase()}`}
+        aria-label={`${st.s.name}: ${st.live} work order${st.live === 1 ? "" : "s"}, limit ${st.lim || "none"}${st.over ? ", over limit" : ""}, agent ${st.agent}, ${st.state.t.toLowerCase()}`}
         onClick={open}
         onKeyDown={keyOn(open)}
       >
@@ -189,13 +195,13 @@ function Station({ p, h, bottleneck, revIds }: { p: Placed; h: LineHandlers; bot
         <text className={`fp-t b st ${tone}`} x={box.x + box.w - 10} y={box.y + 43.5} fontSize={10} textAnchor="end">{st.state.t}</text>
         <text className={tone === "idle" ? "fp-sn" : "fp-t m"} x={box.x + 10} y={box.y + 58} fontSize={10.5}>{capL.map((l, i) => <tspan key={i} x={box.x + 10} dy={i ? LH : 0}>{l}</tspan>)}</text>
         <text className="fp-t m" x={box.x + 10} y={box.y + 77 + sh} fontSize={10} letterSpacing=".1em">WIP</text>
-        <text className={`fp-t b${st.over ? " bad" : ""}`} x={box.x + 36} y={box.y + 77 + sh} fontSize={13}>{`${count} / ${st.lim}`}</text>
+        <text className={`fp-t b${st.over ? " bad" : ""}`} x={box.x + 36} y={box.y + 77 + sh} fontSize={13}>{`${st.live} / ${st.lim || "–"}`}</text>
         {st.over ? (
           <text className="fp-t bad b" x={box.x + box.w - 10} y={box.y + 77 + sh} fontSize={10} textAnchor="end">{`+${st.over} OVER`}</text>
-        ) : count ? (
+        ) : st.live && st.lim ? (
           <text className="fp-t m" x={box.x + box.w - 10} y={box.y + 77 + sh} fontSize={10} textAnchor="end">{`${Math.round(st.ratio * 100)}% FULL`}</text>
         ) : null}
-        <Gauge x={box.x + 12} y={box.y + 84 + sh} w={box.w - 24} count={count} limit={st.lim} labels />
+        <Gauge x={box.x + 12} y={box.y + 84 + sh} w={box.w - 24} count={st.live} limit={st.lim} labels />
         <line className="fp-dim" x1={box.x + 10} y1={dimY - 4} x2={box.x + 10} y2={dimY + 4} />
         <line className="fp-dim" x1={box.x + box.w - 10} y1={dimY - 4} x2={box.x + box.w - 10} y2={dimY + 4} />
         <line className="fp-dim" x1={box.x + 10} y1={dimY} x2={box.x + box.w - 10} y2={dimY} />
@@ -532,6 +538,7 @@ export function LineStack({ model, h }: { model: FloorModel; h: LineHandlers }) 
       <i>{b.n}</i>
       <span>{b.age === null ? "✓" : shortDur(b.age)}</span>
       {revIds.has(b.w.id) ? <u aria-label="revised in the last hour">▲</u> : null}
+      {wipChip(ctx, b.w) ? <u className="fp-wipw" aria-label={wipChip(ctx, b.w) ?? ""} title={wipChip(ctx, b.w) ?? ""}>⏸</u> : null}
     </div>
   );
   return (
@@ -546,7 +553,7 @@ export function LineStack({ model, h }: { model: FloorModel; h: LineHandlers }) 
               <div className="fp-stn-h"><b>{st.s.no}</b><span>{st.s.name}</span><em className={`st ${st.state.tone}`}>{st.state.t}</em></div>
               <div className="fp-stn-a">{st.agent}</div>
               <div className="fp-stn-c">{st.caption}</div>
-              <div className="fp-stn-g"><span className="mono">{`WIP ${st.items.length} / ${st.lim}`}</span><span className="fp-bar" aria-hidden="true"><i className={st.over ? "bad" : ""} style={{ width: `${Math.min(100, Math.round(st.ratio * 100))}%` }} /></span>{st.over ? <span className="mono bad">{`+${st.over} over`}</span> : null}</div>
+              <div className="fp-stn-g"><span className="mono">{`WIP ${st.live} / ${st.lim || "–"}`}</span><span className="fp-bar" aria-hidden="true"><i className={st.over ? "bad" : ""} style={{ width: `${Math.min(100, Math.round(st.ratio * 100))}%` }} /></span>{st.over ? <span className="mono bad">{`+${st.over} over`}</span> : null}</div>
               <div className={`fp-stn-w${st.oldestWait !== null ? " warn" : ""}`}>{st.oldestWait !== null ? `Oldest wait ${dur(st.oldestWait)}` : "No wait"}</div>
               {st.items.length ? <div className="fp-chips">{st.items.map(chip)}</div> : null}
             </div>

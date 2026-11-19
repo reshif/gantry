@@ -5,7 +5,7 @@
 import { gateLabelOf } from "../../lib/gate-label";
 import { createContext, useContext, useMemo } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { DAY, HOUR, MIN, WO_STATES, requiredFor, bayDef, classesOf, fmt, gateAfter, gateDef, gateForWO, gateKind, type Bay, type Catalog, type EventEntry, type Gate, type Project, type Repo, type StateAt, type WorkOrder } from "@gantry/domain";
+import { DAY, HOUR, MIN, WO_STATES, requiredFor, bayDef, classesOf, fmt, gateAfter, gateDef, gateForWO, gateKind, wipStatus, type Bay, type Catalog, type EventEntry, type Gate, type Project, type Repo, type StateAt, type WorkOrder } from "@gantry/domain";
 import { api, get } from "../../api/client";
 import { useRepos } from "../../api/queries";
 
@@ -143,9 +143,19 @@ export function gateHaveNeed(ctx: FloorCtxValue, w: WorkOrder, gid: string): { h
 }
 
 /** The label for the gate column of a card or row. */
+/** "Waiting: Verify is full (3/3)" on a work order that finished its station and waits for the next one, counted from the floor's own work orders. */
+export function wipChip(ctx: FloorCtxValue, w: WorkOrder): string | null {
+  const wait = w.wipWait ?? null;
+  if (!wait) return null;
+  const s = wipStatus(ctx.cat, ctx.project, ctx.wos, wait.station);
+  return `Waiting: ${ctx.cat.stations.find((x) => x.id === wait.station)?.name ?? wait.station} is full (${s.limit ? s.live : wait.live}/${s.limit || wait.limit})`;
+}
+
 export function gateText(ctx: FloorCtxValue, w: WorkOrder): { t: string; c: string } {
   if (w.state === "killed") return { t: "Killed", c: "kill" };
   if (w.bay) return { t: bayName(ctx.cat, w.bay), c: "park" };
+  const wip = wipChip(ctx, w);
+  if (wip) return { t: wip, c: "wait" };
   const g = gateForWO(ctx.cat, ctx.project, w);
   if (w.state === "waiting" && g) {
     const { have, need } = gateHaveNeed(ctx, w, g.id);
@@ -171,8 +181,9 @@ export function WoToken({ w, compact, idPrefix = "tok-", halted, onOpen }: { w: 
   const live = st !== "done" && st !== "killed";
   const time = st === "done" ? "done" : st === "killed" ? "killed" : fmt.dur(Math.max(0, ctx.now - (w.bay ? (w.bayAt ?? e?.startedAt ?? w.createdAt) : (e?.startedAt ?? w.createdAt))));
   const g = gateForWO(ctx.cat, ctx.project, w);
+  const wipNote = wipChip(ctx, w);
   const note =
-    st === "running" ? null : st === "waiting" && g ? `waiting at ${g.name}` : st === "parked" ? bayName(ctx.cat, w.bay ?? "") : st === "killed" ? "Killed" : st === "blocked" ? "Blocked" : st === "failed" ? "Check failed" : st === "done" ? (w.split ? "Split" : "Shipped") : "";
+    st === "running" ? null : wipNote ? wipNote : st === "waiting" && g ? `waiting at ${g.name}` : st === "parked" ? bayName(ctx.cat, w.bay ?? "") : st === "killed" ? "Killed" : st === "blocked" ? "Blocked" : st === "failed" ? "Check failed" : st === "done" ? (w.split ? "Split" : "Shipped") : "";
   const cls = classOf(ctx.cat, ctx.project, w.cls);
   return (
     <button
@@ -268,6 +279,8 @@ const WO_TONE: Record<string, string> = { running: "info", waiting: "warn", park
 export function WoChip({ w }: { w: FWo }) {
   const ctx = useFloorCtx();
   const g = waitingGateId(ctx, w);
+  const wip = wipChip(ctx, w);
+  if (wip) return <span className="chip warn">{wip}</span>;
   if (w.state === "waiting" && g) return <span className="chip warn">{`At ${gateLabelOf(null, g)}`}</span>;
   if (w.state === "parked") return <span className="chip plain">{`Parked · ${ctx.cat.bays.find((b) => b.id === w.bay)?.name ?? "bay"}`}</span>;
   return <span className={`chip ${WO_TONE[w.state] ?? "plain"}`}>{w.state}</span>;
