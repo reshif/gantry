@@ -191,7 +191,11 @@ d("worker process loops", () => {
     expect((await w.q(`select launcher_ok from worker_heartbeats`))[0].launcher_ok).toBe(true);
     // The scheduler also ran: a sweep job exists for the org.
     for (let i = 0; i < 100 && !(await w.jobs("reaper.sweep")).length; i++) await sleep(50);
-    expect((await w.jobs("reaper.sweep")).length).toBe(1);
+    // One sweep per minute bucket: a run that crosses a minute boundary legitimately makes a second one (seen on a slow CI runner), never two in one bucket.
+    const sweeps = await w.q(`select dedupe_key from jobs where kind = 'reaper.sweep'`);
+    expect(sweeps.length).toBeGreaterThanOrEqual(1);
+    expect(sweeps.length).toBeLessThanOrEqual(2);
+    expect(new Set(sweeps.map((r: { dedupe_key: string }) => r.dedupe_key)).size).toBe(sweeps.length);
     await w.worker.stop(5_000);
     expect((await w.q(`select count(*)::int as n from jobs where status = 'running'`))[0].n).toBe(0);
   });
