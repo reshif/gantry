@@ -57,10 +57,26 @@ describe("G-S8: the disk is watched continuously", () => {
     stop.mockClear();
     sizes = [vol("slow", 110), vol("fast", 5000)];
     expect(await m.diskTick()).toBe("fast");
-    expect(stop).toHaveBeenCalledWith("fast", { keepWorkspace: false });
+    expect(stop).toHaveBeenCalledWith("fast", { keepWorkspace: true });
     expect(log.mock.calls.map((c) => String(c[0])).join("\n")).toMatch(/host disk critically low/);
     expect(m.criticalStops.at(-1)?.runId).toBe("fast");
     log.mockRestore();
+  });
+
+  it("R4: sizes are tracked before the disk is critical, so the first critical tick stops the fastest grower, and keeps its workspace", async () => {
+    let sizes = [vol("slow", 100), vol("fast", 100)];
+    const docker = { df: async () => ({ Volumes: sizes }), listVolumes: async () => ({ Volumes: [] }) };
+    // soft zone: free is under twice the floor but above the hard floor (floor = 2 x free, hard = 0.5 x free)
+    const m = new RunManager(docker as never, load({ DISK_PROBE_PATH: "/", MIN_FREE_DISK_GB: "0.0000001" }));
+    const stop = vi.spyOn(m, "stop").mockResolvedValue({ ok: true } as never);
+    expect(await m.diskTick()).toBeUndefined(); // not critical: tracked only (every 12th tick in the healthy zone)
+    const crit = new RunManager(docker as never, load({ DISK_PROBE_PATH: "/", MIN_FREE_DISK_GB: "1000000" }));
+    const stop2 = vi.spyOn(crit, "stop").mockResolvedValue({ ok: true } as never);
+    (crit as unknown as { lastSizes: Map<string, number> }).lastSizes = new Map([["slow", 100], ["fast", 100]]);
+    sizes = [vol("slow", 120), vol("fast", 9000)];
+    expect(await crit.diskTick()).toBe("fast");
+    expect(stop2).toHaveBeenCalledWith("fast", { keepWorkspace: true });
+    expect(stop).not.toHaveBeenCalled();
   });
 
   it("the sockproxy allows the one read it needs for this, and only that path", () => {

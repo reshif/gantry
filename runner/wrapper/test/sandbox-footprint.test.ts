@@ -227,6 +227,20 @@ describe("S-91: a write-only agent cannot run commands through git config", () =
       expect(existsSync(join(d, "PWN_ENV"))).toBe(false);
     });
 
+    it("R5: key allow-list is anchored on whole keys, and signing options are refused", () => {
+      for (const block of ["[user]\n\tsigningkey = x\n", "[remote \"o\"]\n\tfoo = x\n\turl2 = x\n", "[branch \"b\"]\n\tmergeoptions = x\n", "[user]\n\tnamex = x\n"]) {
+        const d = repo();
+        appendFileSync(join(d, ".git", "config"), `\n${block}`);
+        expect(run(d, ["status"]).code, block).toBe(126);
+      }
+      const d = repo();
+      writeFileSync(join(d, "g"), "x\n");
+      run(d, ["add", "g"]);
+      for (const args of [["commit", "-S", "-qm", "x"], ["commit", "-qSm", "x"], ["commit", "--gpg-sign", "-qm", "x"], ["log", "--show-signature"], ["show", "--show-signature"]]) expect(run(d, args).code, args.join(" ")).toBe(126);
+      expect(run(d, ["log", "-S", "hi", "--oneline"]).code).toBe(0);
+      expect(run(d, ["commit", "-qm", "ok"]).code).toBe(0);
+    });
+
     it("G-S6: only the listed subcommands run", () => {
       const d = repo();
       for (const sub of ["config", "fetch", "push", "clone", "remote", "filter-branch", "submodule", "worktree"]) expect(run(d, [sub]).code, sub).toBe(126);

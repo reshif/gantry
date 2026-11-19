@@ -46,6 +46,8 @@ export interface RunInventoryEntry {
 export interface RunInventory {
   runs: RunInventoryEntry[];
   capacity: { max: number; networks: number };
+  /** Runs stopped because the host disk was critically low (most recent last), so the worker can say why they ended. */
+  criticalStops?: Array<{ runId: string; at: number; freeBytes: number }>;
 }
 
 const statusOf = (e: unknown): number | undefined => (typeof e === "object" && e !== null ? (e as { statusCode?: number }).statusCode : undefined);
@@ -241,6 +243,7 @@ export class RunManager {
   }
 
   private lastSizes = new Map<string, number>();
+  private tick = 0;
   private monitor: NodeJS.Timeout | undefined;
   private ticking = false;
   /** Called every few seconds (startDiskMonitor); exported for tests. Returns the run it stopped, if any. */
@@ -254,7 +257,11 @@ export class RunManager {
     } catch {
       return undefined; // the admission check fails closed on its own
     }
-    if (free >= d.hardFloorBytes) return undefined;
+    // Sizes are tracked continuously (R4): every tick when free space is within twice the floor, once a minute otherwise (the call walks every volume),
+    // so the first critical tick already knows who is growing.
+    this.tick++;
+    const critical = free < d.hardFloorBytes;
+    if (!critical && free >= d.minFreeBytes * 2 && this.tick % 12 !== 0) return undefined;
     // Critically low: stop the run whose workspace grew fastest since the last look (the biggest one when nothing grew).
     const df = (await (this.docker as unknown as { df: () => Promise<{ Volumes?: Array<{ Name: string; Labels?: Record<string, string> | null; UsageData?: { Size?: number } }> }> }).df().catch(() => undefined))?.Volumes ?? [];
     let best: { runId: string; growth: number; size: number } | undefined;
@@ -268,11 +275,12 @@ export class RunManager {
       if (!best || growth > best.growth || (growth === best.growth && size > best.size)) best = { runId: id, growth, size };
     }
     this.lastSizes = now;
-    if (!best) return undefined;
+    if (!critical || !best) return undefined;
     const gb = (n: number) => (n / 2 ** 30).toFixed(1);
     console.error(`launcher: host disk critically low (${gb(free)} GB free, hard floor ${gb(d.hardFloorBytes)} GB): stopping run ${best.runId} (workspace ${gb(best.size)} GB, grew ${gb(Math.max(0, best.growth))} GB since the last check)`);
     this.criticalStops.push({ runId: best.runId, at: Date.now(), freeBytes: free });
-    await this.stop(best.runId, { keepWorkspace: false }).catch(() => undefined);
+    // The workspace is kept as evidence (the worker's reaper reclaims it after an hour).
+    await this.stop(best.runId, { keepWorkspace: true }).catch(() => undefined);
     return best.runId;
   }
   /** Runs stopped for critically low host disk, so the status can say why they ended. */
@@ -460,6 +468,7 @@ export class RunManager {
       return ok({
         runs: [...runs.values()].sort((a, b) => a.runId.localeCompare(b.runId)),
         capacity: { max: this.cfg.maxConcurrentRuns, networks: networks.length },
+        criticalStops: this.criticalStops.slice(-50),
       });
     } catch (e) {
       return err({ kind: "docker", msg: messageOf(e) });

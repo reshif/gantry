@@ -30,8 +30,10 @@ esac
 
 for a in "$@"; do
   [ "$a" = "--" ] && break
+  # `git commit -S` signs through gpg.program (also inside a bundle of short flags); log's -S is a text search and stays allowed.
+  if [ "$sub" = commit ]; then case "$a" in --*) ;; -*S*) refuse "the option $a (signing) is not allowed" ;; esac; fi
   case "$a" in
-    --ou | --out* | --ext* | --text | --textc* | --git* | --work* | --exec* | --conf* | --upload-pack* | --receive-pack* | --gpg* | --sign* | --template* | --trailer-command*)
+    --ou | --out* | --ext* | --text | --textc* | --git* | --work* | --exec* | --conf* | --upload-pack* | --receive-pack* | --gpg* | --sign* | --show-sig* | --template* | --trailer-command*)
       refuse "the option $a is not allowed" ;;
   esac
 done
@@ -49,7 +51,7 @@ top=$(printf '%s\n' "$where" | sed -n 2p)
 
 # Only these repository config keys (lower-cased section and name, as git prints them); anything else refuses.
 listed=$("$REAL" -c safe.directory="$WS" config --list --show-scope --no-includes 2>/dev/null) || refuse "the repository config cannot be read"
-bad=$(printf '%s\n' "$listed" | grep -Ev '^(command|system|global)[[:space:]]' | grep -Eiv '^(local|worktree)[[:space:]]+(user\.[a-z]+=|core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|safecrlf|quotepath)=|extensions\.objectformat=|init\.defaultbranch=|safe\.directory=|remote\.[^=]*\.(url|fetch|pushurl)=|branch\.[^=]*\.(remote|merge)=)' | head -1)
+bad=$(printf '%s\n' "$listed" | grep -Ev '^(command|system|global)[[:space:]]' | grep -Eiv '^(local|worktree)[[:space:]]+(user\.(name|email)=|core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|safecrlf|quotepath)=|extensions\.objectformat=|init\.defaultbranch=|safe\.directory=|remote\.[A-Za-z0-9_-]+\.(url|fetch|pushurl)=|branch\.[A-Za-z0-9_./-]+\.(remote|merge)=)' | head -1)
 if [ -n "$bad" ]; then
   refuse "the repository config holds a key that is not on the allow-list (${bad#*[[:space:]]}); remove it from .git/config"
 fi
