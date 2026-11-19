@@ -77,7 +77,7 @@ const NEW = "~new";
 /* ---- 2. the mail server, and a test mail, before anything else changes */
 const resolveEnv = (v) => typeof v !== "string" ? v : v.replace(/\$\{([A-Z0-9_]+)(?::([^}]*))?\}/g, (_m, name, dflt) => process.env[name] ?? (dflt !== undefined ? dflt : `\u0000${name}`));
 const smtp = Object.fromEntries(Object.entries(want.smtpServer ?? {}).map(([k, v]) => [k, resolveEnv(v)]));
-const missing = Object.entries(smtp).filter(([, v]) => typeof v === "string" && v.includes("\u0000")).map(([k, v]) => String(v).replace(/[^A-Z0-9_]/g, ""));
+const missing = Object.entries(smtp).filter(([, v]) => typeof v === "string" && v.includes("\u0000")).map(([, v]) => String(v).replace(/[^A-Z0-9_]/g, ""));
 if (!smtp.host || !smtp.from || missing.length) {
   console.error(`the realm JSON's mail server is incomplete (${missing.length ? `set ${[...new Set(missing)].join(", ")} in this shell` : "no host or from address"}); nothing was changed`);
   process.exit(1);
@@ -123,7 +123,6 @@ for (const a of want.requiredActions ?? []) {
 log("browser flow");
 const flowsByAlias = new Map((want.authenticationFlows ?? []).map((f) => [f.alias, f]));
 const top = want.browserFlow;
-const fin = (alias) => alias; // final alias
 const created = [];
 async function buildFlow(alias, parentAlias, isTop) {
   const f = flowsByAlias.get(alias);
@@ -131,11 +130,11 @@ async function buildFlow(alias, parentAlias, isTop) {
   if (isTop) await api("POST", "/authentication/flows", { alias: tmp, description: f.description, providerId: "basic-flow", topLevel: true, builtIn: false });
   created.push(tmp);
   for (const e of [...f.authenticationExecutions].sort((a, b) => a.priority - b.priority)) {
-    let execId = null;
+    let _execId = null;
     if (e.authenticatorFlow) {
       const sub = flowsByAlias.get(e.flowAlias);
       const r = await api("POST", `/authentication/flows/${encodeURIComponent(tmp)}/executions/flow`, { alias: e.flowAlias + NEW, description: sub.description, provider: "registration-page-form", type: "basic-flow" });
-      execId = r.json?.id ?? null;
+      _execId = r.json?.id ?? null;
       if (!dry) await buildFlow(e.flowAlias, tmp, false);
       else await buildFlow(e.flowAlias, tmp, false);
     } else {

@@ -20,7 +20,8 @@
 //   node deploy/ci/migration-safety.mjs BASE_REV      compare this tree with BASE_REV (a git revision); exit 1 on a violation
 //   node deploy/ci/migration-safety.mjs --info        print {"latest":N,"lastContract":M,"files":K} for this tree (json)
 import { execFileSync, spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -99,8 +100,12 @@ export function classify(sql) {
   return { declared, reasons: uniq, additive, destructive: uniq.length > 0 };
 }
 
-/** Violations for the migrations `after` (name -> sql) against `before` (name -> sql, the base). */
-export function check(before, after) {
+/**
+ * Violations for the migrations `after` (name -> sql) against `before` (name -> sql, the base). `released` (name -> sha256) lists migrations
+ * already applied on deployed stacks before this policy existed (deploy/ci/migrations-released.txt): they are not judged as new, and an edit
+ * to one is refused exactly like an edit to a migration in the base (the runner checksums applied migrations).
+ */
+export function check(before, after, released = {}) {
   const problems = [];
   const names = Object.keys(after).sort();
   const nums = [];
@@ -117,7 +122,12 @@ export function check(before, after) {
     if (!(n in after)) problems.push(`${n}: an applied migration was removed`);
     else if (after[n] !== sql) problems.push(`${n}: an applied migration was edited (write a new migration instead)`);
   }
-  const fresh = names.filter((n) => !(n in before));
+  for (const [n, sum] of Object.entries(released)) {
+    if (n in before) continue;
+    if (!(n in after)) problems.push(`${n}: a released migration was removed`);
+    else if (sha256(after[n]) !== sum) problems.push(`${n}: a released migration was edited (write a new migration instead; the runner checksums applied migrations)`);
+  }
+  const fresh = names.filter((n) => !(n in before) && !(n in released));
   for (const n of fresh) {
     const c = classify(after[n]);
     if (c.destructive && !c.declared) problems.push(`${n}: ${c.reasons.join("; ")}. A migration like this is a contract migration: add the line "-- gantry:contract after <sha>" (the commit on main from which no code uses what it removes or tightens) and ship it one release after that commit. Otherwise make it an expand. NOTE: "after <sha>" is an assertion a reviewer must check (this tool cannot tell whether the code really stopped using it); the review of packages/db/migrations/** is required (CODEOWNERS).`);
@@ -149,6 +159,20 @@ export function ancestryProblems(root, base, files, fresh) {
   return out;
 }
 
+const sha256 = (text) => createHash("sha256").update(text).digest("hex");
+/** deploy/ci/migrations-released.txt: "<name> <sha256>" per line, migrations applied on deployed stacks before the expand/contract policy. */
+function readReleased(root) {
+  const p = join(root, "deploy/ci/migrations-released.txt");
+  if (!existsSync(p)) return {};
+  const out = {};
+  for (const line of readFileSync(p, "utf8").split("\n")) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    const [n, sum] = t.split(/\s+/);
+    if (n && sum) out[n] = sum;
+  }
+  return out;
+}
 const read = (dir) => Object.fromEntries(readdirSync(dir).filter((n) => n.endsWith(".sql")).map((n) => [n, readFileSync(join(dir, n), "utf8")]));
 function readBase(root, rev) {
   const git = (...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8", maxBuffer: 64 << 20 });
@@ -164,7 +188,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (!arg) { console.error("usage: migration-safety.mjs BASE_REV | --info"); process.exit(2); }
   const after = read(join(root, DIR));
   if (arg === "--info") { console.log(JSON.stringify(info(after))); process.exit(0); }
-  const { problems, fresh, contractFresh } = check(readBase(root, arg), after);
+  const { problems, fresh, contractFresh } = check(readBase(root, arg), after, readReleased(root));
   problems.push(...ancestryProblems(root, arg, after, fresh));
   console.log(`migrations: ${Object.keys(after).length} files, ${fresh.length} new against ${arg}`);
   for (const n of contractFresh) console.log(`::warning title=Contract migration::${n} is a contract migration: this release cannot be rolled back automatically past it, and it must ship one release after the code stopped using what it removes.`);

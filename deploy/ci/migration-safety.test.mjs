@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { check, classify, info } from "./migration-safety.mjs";
@@ -57,4 +58,14 @@ test("what does not tighten stays an expand", () => {
   for (const sql of ["alter table a add column x text not null default '';", "alter table a add column x text;", "create index on a (b);",
     "create table n (id int primary key, b int not null unique);\ncreate unique index on n (b);", "alter table a add constraint c check (b > 0) not valid;"])
     assert.ok(!classify(sql).destructive, sql);
+});
+
+test("a released migration (deploy/ci/migrations-released.txt) is not judged as new, and editing it is still refused", () => {
+  const sql = "drop index if exists old_idx;\n";
+  const sum = createHash("sha256").update(sql).digest("hex");
+  const after = { "0001_a.sql": sql };
+  assert.equal(check({}, after).problems.length, 1, "without the list it is a new contract migration");
+  assert.deepEqual(check({}, after, { "0001_a.sql": sum }).problems, [], "listed: already released, not new");
+  const edited = check({}, { "0001_a.sql": sql + "-- edit\n" }, { "0001_a.sql": sum }).problems;
+  assert.ok(edited.some((p) => /a released migration was edited/.test(p)), "an edit to a listed migration is refused");
 });

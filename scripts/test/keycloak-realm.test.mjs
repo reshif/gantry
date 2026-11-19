@@ -94,7 +94,7 @@ test("S-120: compose does not waive the second factor by default; production for
 test("S-125: the API container never gets the Keycloak master-admin password; the service-account secret is wired to it and to Keycloak", () => {
   for (const f of ["deploy/compose.yml", "deploy/compose.prod.yml"]) {
     const c = read(f);
-    for (const m of c.matchAll(/^  (gantry-api|gantry-worker|gantry-migrate):[\s\S]*?^(?=  \S)/gm)) assert.ok(!m[0].includes("keycloak_admin_password"), `${f}: ${m[1]} must not mount it`);
+    for (const m of c.matchAll(/^ {2}(gantry-api|gantry-worker|gantry-migrate):[\s\S]*?^(?= {2}\S)/gm)) assert.ok(!m[0].includes("keycloak_admin_password"), `${f}: ${m[1]} must not mount it`);
   }
   const dev = read("deploy/compose.yml");
   assert.match(dev, /gantry-api:[\s\S]*?secrets: \[[^\]]*idp_admin_client_secret/);
