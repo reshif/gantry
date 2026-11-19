@@ -17,7 +17,7 @@ import { api, get } from "../api/client";
 import { useHome, useMe, useProject, useProjects } from "../api/queries";
 import { assigneeOf, useProjectRepos } from "./floor/kit";
 import type { Page, WorkOrder } from "../api/types";
-import { Btn, Empty, Field, FilterBar, Panel, SearchBox, Segmented, Select, Stat, StatRow, Tabs, Toggle, ViewHead } from "../ui/primitives";
+import { Btn, Chip, Empty, Field, FilterBar, Panel, SearchBox, Segmented, Select, Stat, StatRow, Tabs, Toggle, ViewHead } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { Async } from "../ui/async";
 import { DataTable, type Col } from "../ui/SortTable";
@@ -229,7 +229,7 @@ export default function WorkOrdersView() {
       key: "needs",
       label: "Needs",
       sort: (w) => needsRank(needs(w), lastAt(w)),
-      render: (w) => { const n = needs(w); return n.kind === "none" ? <span className="muted">—</span> : <div className={`wo-needs${n.mine ? " is-mine" : ""}`} data-need={n.kind}><span className="wo-need-t">{n.text}</span>{n.sub ? <span className="sub">{n.sub}</span> : null}</div>; },
+      render: (w) => { const n = needs(w); return n.kind === "none" ? <span className="muted">—</span> : <div className={`wo-needs${n.mine ? " is-mine" : ""}`} data-need={n.kind}><span className="wo-need-t">{n.text}</span>{n.askedOf ? <span className="sub"><Chip text={n.askedOf} cls="warn" /></span> : null}{n.sub ? <span className="sub">{n.sub}</span> : null}</div>; },
     },
     { key: "age", label: "Last activity", sort: (w) => lastAt(w), render: (w) => <span style={{ whiteSpace: "nowrap" }} title={`Created ${agoShort(w.createdAt)}, via ${w.source}, by ${actor(w.requestedBy).name}`}>{agoShort(lastAt(w))}</span> },
     { key: "cost", label: "Cost", sort: (w) => costOf(w), align: "end", render: (w) => <span className="num" style={{ whiteSpace: "nowrap" }}>{costOf(w) ? `$${costOf(w).toFixed(2)}` : "—"}</span> },

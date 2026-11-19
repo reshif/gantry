@@ -5,7 +5,7 @@
  */
 import { gateLabelOf } from "../../lib/gate-label";
 import { bayDef, type Catalog, type WorkOrder } from "@gantry/domain";
-import type { Approval, Conversation, HomeFull } from "../home/data";
+import { splitAskedOf, type Approval, type Conversation, type HomeFull } from "../home/data";
 import { agoMs } from "./format";
 
 export type NeedKind = "question" | "gate" | "review" | "bay" | "stuck" | "running" | "waiting" | "none";
@@ -14,6 +14,8 @@ export interface Needs {
   text: string;
   /** A second quiet line (the reason behind the first). */
   sub?: string;
+  /** "Asked of <name> (deactivated)" when the server prefixed the question with whom it was asked of; `sub` is then the bare question. */
+  askedOf?: string;
   /** A person is wanted: sorts first, and the row offers the primary action. */
   mine: boolean;
   /** The gate id when `kind` is "gate". */
@@ -31,7 +33,7 @@ export function needsOf(w: WoWithReview, cat: Catalog, waiting: WaitingData, age
   if (w.state === "done" || w.state === "killed") return { kind: "none", text: "", mine: false };
   const station = cat.stations[w.station]?.name ?? "";
   const conv = waiting.conversations.find((c) => c.wo === w.id);
-  if (conv && !conv.gate && !conv.stuck && conv.question) return { kind: "question", text: station ? `${station} asks you` : "Asks you", sub: conv.question, mine: true };
+  if (conv && !conv.gate && !conv.stuck && conv.question) return { kind: "question", text: station ? `${station} asks you` : "Asks you", ...askedSub(conv.question), mine: true };
   const ap = waiting.approvals.find((a) => a.wo === w.id && a.gate);
   const gate = ap ?? (conv?.gate ? { gate: conv.gate.id, gateLabel: conv.gate.label, have: undefined, need: undefined } : null);
   if (gate) {
@@ -52,3 +54,8 @@ export function needsOf(w: WoWithReview, cat: Catalog, waiting: WaitingData, age
 
 /** Rows that need the viewer sort first (0), then the rest still moving (1), then nothing to do (2); oldest first inside a group. */
 export const needsRank = (n: Needs, at: number): number => (n.mine ? 0 : n.kind === "none" ? 2 : 1) * 1e13 + at;
+
+function askedSub(q: string): { sub: string; askedOf?: string } {
+  const a = splitAskedOf(q);
+  return a.askedOf ? { sub: a.text, askedOf: a.askedOf } : { sub: q };
+}

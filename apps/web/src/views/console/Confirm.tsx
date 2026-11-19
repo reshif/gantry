@@ -75,7 +75,7 @@ export function ProposalCard({ p, mid, serverId, onChange }: { p: Proposal; mid:
     }
   };
 
-  const retry = (): void => { setFail(null); setErr(""); setCur({ ...cur, status: "pending" }); };
+  const retry = (): void => { setFail(null); setErr(""); { const { result: _old, ...rest } = cur; void _old; setCur({ ...rest, status: "pending" }); } };
   const first = cur.entities[0];
   const openIt = first?.type === "wo" ? () => openRecord(first.id, first.project ?? null) : first?.type === "project" ? () => { setProject(first.id); navigate("floor"); } : cur.perm.project ? () => { setProject(cur.perm.project ?? ""); navigate("floor"); } : null;
   const steps = cur.steps.filter(Boolean);

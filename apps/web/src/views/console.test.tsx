@@ -359,6 +359,7 @@ describe("Console (legacy console.js on the real API)", () => {
       fireEvent.click(document.querySelector<HTMLElement>("[id^='con-cf-retry-']")!);
       await waitFor(() => expect(document.querySelector("[id^='con-cf-ok-']")).toBeTruthy());
       expect(document.querySelector(".ccard-confirm.is-pending")).toBeTruthy();
+      expect(document.querySelector(".ccard-confirm .perm.neg")).toBeNull();
     });
 
     it("a transient refusal (429) keeps the card pending so the same button retries it", async () => {

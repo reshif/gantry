@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG } from "@gantry/domain";
@@ -373,6 +375,10 @@ describe("MCP servers screen", () => {
     expect(note.textContent).toContain("Needs re-approval");
     expect(note.textContent).toContain("Discover its tools and approve them before switching it on");
     expect(document.getElementById("mcp-disabled-note")).toBeNull();
+    // The note wraps (F-11): the text takes its own row and the buttons sit in a wrapping row, so nothing runs past the panel at 320 px.
+    expect(note.querySelector(".mcp-reapproval-why")).toBeTruthy();
+    expect(note.querySelector(".mcp-reapproval-actions #mcp-reapproval-approve")).toBeTruthy();
+    expect(readFileSync(resolve(__dirname, "../styles/views/mcp.css"), "utf8")).toMatch(/#mcp-reapproval-note\s*\{\s*flex-wrap:\s*wrap/);
     fireEvent.click(await byId("mcp-reapproval-discover"));
     await waitFor(() => expect(calls.some((c) => c.path.endsWith("/mcp-new-0002/discover"))).toBe(true));
     fireEvent.click(await byId("mcp-dtab-scope"));

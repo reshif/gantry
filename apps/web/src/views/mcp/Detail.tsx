@@ -245,9 +245,11 @@ export function Detail({ srv, cat, projects, agents, repos, calls, actorName }: 
               <LockNote decision={perm} what="MCP server settings" />
               {srv.needsReapproval ? (
                 <div className="lock-note" role="status" id="mcp-reapproval-note">
-                  <span><strong>Needs re-approval.</strong> {REAPPROVAL_WHY}</span>
+                  <span className="mcp-reapproval-why"><strong>Needs re-approval.</strong> {REAPPROVAL_WHY}</span>
+                  <div className="mcp-reapproval-actions">
                   <Btn label="Discover its tools" icon="search" id="mcp-reapproval-discover" small guard={perm} onClick={() => void ops.rediscoverMCP(srv.id, v).then((r) => show(r))} />
                   <Btn label="Review and approve" id="mcp-reapproval-approve" small kind="primary" guard={perm} onClick={approve} />
+                  </div>
                 </div>
               ) : null}
               {srv.enabled === false && !srv.needsReapproval ? (
