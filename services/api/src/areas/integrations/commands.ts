@@ -143,11 +143,18 @@ export async function updateInstance(tx: Tx, a: Actor, dataKey: Buffer | null, i
     const missing = t.fields.filter((f) => f.type === "secret" && f.required !== false).filter((f) => !open(dataKey, row.id, enc, f.key)[f.key]);
     if (missing.length) throw invalid(`Add the ${missing[0]!.label.toLowerCase()} before switching it on.`);
   }
-  const nextMeta: Meta = { ...meta, projects, lastSync: a.now.getTime() };
+  // A change of settings or credentials was never tested: health goes back to "unknown" (shown as "Not tested yet") and the old test result is dropped.
+  const settingsChanged = !!b.config || Object.keys(incoming).length > 0;
+  const { lastTest, ...metaRest } = meta;
+  const nextMeta: Meta = { ...(settingsChanged ? metaRest : meta), projects, lastSync: a.now.getTime() };
+  // Switching off reads "offline"; switching on again returns to the last tested result, or "unknown" when it was never tested.
+  const wasTested = !settingsChanged && !!lastTest;
+  const switchedOn = b.connected === true && !row.enabled;
+  const health = settingsChanged ? "unknown" : b.connected === false ? "offline" : switchedOn ? (wasTested ? (lastTest!.ok ? "healthy" : "failing") : "unknown") : row.health === "offline" && enabled ? "unknown" : row.health;
   const name = b.name ?? row.name;
   await tx.query(
     `update integration_instances set name = $3, enabled = $4, config = $5::jsonb, secret_enc = $6, secret_mask = $7, health = $8, version = version + 1, updated_at = now() where org_id = $1 and id = $2`,
-    [a.orgId, row.id, name, enabled, json({ ...config, _meta: nextMeta }), enc, maskText, b.connected === false ? "offline" : b.connected === true ? "unknown" : row.health],
+    [a.orgId, row.id, name, enabled, json({ ...config, _meta: nextMeta }), enc, maskText, health],
   );
   const changed = Object.keys(b).filter((k) => k !== "via");
   const after = { name, config, projects, connected: enabled, ...(Object.keys(incoming).length ? { secretMask: maskText } : {}) };

@@ -55,12 +55,14 @@ export async function answerStationQuestion(tx: Tx, actor: Actor, woId: string, 
  * Returns whether it resumed.
  */
 export async function maybeResume(fx: Fx, w: Wo, by: string): Promise<boolean> {
-  const waitingOn = w.data.waitingOn as { station?: string; questions?: string[]; plan?: boolean } | undefined;
+  const waitingOn = w.data.waitingOn as { station?: string; questions?: string[]; plan?: boolean; assumptions?: string[] } | undefined;
   if (!waitingOn || bayOf(fx.catalog, w) !== "person") return false;
   const qs = waitingOn.questions ?? [];
   const open = qs.length ? (await fx.tx.query<{ n: number }>(`select count(*)::int as n from wo_questions where org_id = $1 and wo_id = $2 and id = any($3) and status = 'open'`, [fx.orgId, w.id, qs])).rows[0]!.n : 0;
   const planOpen = waitingOn.plan === true && planOf(w.data)?.status === "proposed";
-  if (open > 0 || planOpen) return false;
+  const as = waitingOn.assumptions ?? [];
+  const assumptionsOpen = as.length ? (await fx.tx.query<{ n: number }>(`select count(*)::int as n from wo_assumptions where org_id = $1 and wo_id = $2 and id = any($3) and status = 'open'`, [fx.orgId, w.id, as])).rows[0]!.n : 0;
+  if (open > 0 || planOpen || assumptionsOpen > 0) return false;
   const back = String(waitingOn.station ?? w.data.bayFrom);
   delete w.data.waitingOn;
   await leaveBay(fx, w);
@@ -116,8 +118,11 @@ export async function decideAssumption(tx: Tx, actor: Actor, woId: string, aid: 
   await tx.query(`update wo_assumptions set status = $4, note = $5, decided_by = $6, decided_at = $7, updated_at = $7 where org_id = $1 and wo_id = $2 and id = $3`, [fx.orgId, w.id, aid, b.status, text || null, by, fx.now]);
   ev(fx, w, "wo.assumption", { station: a.station, assumption: aid, status: b.status, text: (text || a.statement).slice(0, 200) });
   note(w, fx, by, b.status === "confirmed" ? `Confirmed an assumption: ${a.statement.slice(0, 160)}` : `Corrected an assumption: ${text.slice(0, 160)}`);
+  // The last assumption a parked station waited on resumes it, as the last answer does.
+  const resumed = await maybeResume(fx, w, by);
   await saveWo(tx, fx.orgId, w);
-  return done(fx, b.status === "confirmed" ? "Assumption confirmed." : "Correction recorded; later stations work from it.", w.project, { version: w.version });
+  const base = b.status === "confirmed" ? "Assumption confirmed" : "Correction recorded; later stations work from it";
+  return done(fx, resumed ? `${base}; ${stationDef(fx.catalog, String(w.data.bayFrom ?? w.position))?.name ?? "the station"} runs again.` : `${base}.`, w.project, { version: w.version, resumed });
 }
 
 /** A person decides an objection one agent raised about another's work: it stands (upheld) or the author is right (overruled). Audited; the decision travels with the handoff. */

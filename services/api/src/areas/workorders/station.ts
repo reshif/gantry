@@ -224,12 +224,17 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
     const plan = proposedPlan(out.researchPlan, sid, attemptId, now);
     if (plan) w.data.researchPlan = plan;
     const waiting = dl.questions.filter((q) => q.blocking);
-    w.data.waitingOn = { station: sid, attempt: attemptId, questions: waiting.map((q) => q.id), askOf: [...new Set(waiting.map((q) => q.askOf))], ...(plan ? { plan: true } : {}) };
-    const what = [waiting.length ? (waiting.length === 1 ? "an answer" : `${waiting.length} answers`) : "", plan ? "the research plan to be approved" : ""].filter(Boolean).join(" and ") || "a person";
+    // A station that stops with only assumptions has nothing else to wait for: the open assumptions are what it waits on, so confirming or correcting the last one resumes it (S-30).
+    const assumptionIds = !waiting.length && !plan && dl.assumptions
+      ? (await tx.query<{ id: string }>(`select id from wo_assumptions where org_id = $1 and wo_id = $2 and attempt_id = $3 and status = 'open' order by id`, [orgId, w.id, attemptId])).rows.map((x) => x.id)
+      : [];
+    w.data.waitingOn = { station: sid, attempt: attemptId, questions: waiting.map((q) => q.id), askOf: [...new Set(waiting.map((q) => q.askOf))], ...(plan ? { plan: true } : {}), ...(assumptionIds.length ? { assumptions: assumptionIds } : {}) };
+    const assumptionText = assumptionIds.length === 1 ? "1 assumption" : `${assumptionIds.length} assumptions`;
+    const what = [waiting.length ? (waiting.length === 1 ? "an answer" : `${waiting.length} answers`) : "", plan ? "the research plan to be approved" : "", assumptionIds.length ? `${assumptionText} to be confirmed` : ""].filter(Boolean).join(" and ") || "a person";
     // The runner's own default ("research: waiting for ...") says less than this; an agent's real summary is kept after it.
     const said = result.summary && !/^[a-z-]+: waiting for /.test(result.summary) ? ` ${clip(result.summary)}` : "";
     await postStationMessage(fx, w, sid, attemptId, `${name} is waiting for ${what}.${said}`, dl.questions, dl.assumptions, !!plan);
-    await needsPerson(fx, w, plan && !waiting.length ? `Waiting for the research plan at ${name}` : `Waiting for ${waiting.length === 1 ? "an answer" : `${waiting.length} answers`} at ${name}`);
+    await needsPerson(fx, w, assumptionIds.length ? `Waiting for you to confirm ${assumptionText} at ${name}` : plan && !waiting.length ? `Waiting for the research plan at ${name}` : waiting.length ? `Waiting for ${waiting.length === 1 ? "an answer" : `${waiting.length} answers`} at ${name}` : `Waiting for a decision at ${name}`);
     if (plan) ev(fx, w, "research.plan.proposed", { station: sid, text: plan.questions.join(" · ").slice(0, 300), hosts: plan.hosts, web: plan.web, budgetUsd: plan.budgetUsd }, { category: "flow" });
     ev(fx, w, "wo.question", { station: sid, text: waiting.map((q) => q.question).join(" · ").slice(0, 300) }, { category: "flow" });
     next = "person";

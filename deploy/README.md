@@ -83,3 +83,19 @@ Backups and the restore drill run locally too: `docker compose -f deploy/compose
 A new install starts with an empty organisation: built-in roles, the default role matrix and security settings, and nobody signed in. The first administrator is a username and an initial password you set: put `GANTRY_BOOTSTRAP_ADMIN_USERNAME` in `deploy/.env` and write the initial password into the file `deploy/secrets/bootstrap_admin_password` (at least 12 characters, not a default; `generate.sh` leaves it empty and never generates it). While the org has no Factory Admin, the API creates that user in the Keycloak `gantry` realm with a temporary password and the required actions to change it and set up an authenticator app (TOTP); the first sign-in by that user becomes Factory Admin, with the same second-factor requirement as every Factory Admin. A weak or missing password is refused and logged, and nothing is created. Once a Factory Admin exists, the settings do nothing and a changed secret never resets the account. `GANTRY_BOOTSTRAP_ADMIN_EMAIL` (first verified sign-in with that email) still works but is deprecated. People are otherwise created on first sign-in with no roles until an admin grants some.
 
 `GANTRY_DEV_SEED=true` loads the legacy demo organisation (20 people, 12 projects, 23 repos, policies and freezes) once, on the first start of an organisation that does not exist yet. It is for development and demos; the demo IP allow-list is not loaded. On a local stack (public URL on this machine) it also lists the seeded Keycloak users on the sign-in screen (password `gantry-dev`); without the seed there is no demo list. Keycloak imports the demo users (`deploy/keycloak/realm-gantry.json`) only when `GANTRY_DEV_SEED=true`; otherwise it imports `realm-gantry.empty.json`, the same realm with no users, and the first account is the bootstrap admin.
+
+## Operations
+
+### A Factory Admin locked out by the IP allow-list
+
+If the IP allow-list is on and the only Factory Admin is away from an allowed network, nothing in the app can help: the list is checked before sign-in. The operator, on the server host (never through the web or the API), can open a one-time recovery for that admin:
+
+```
+docker compose -f deploy/compose.yml exec gantry-api node dist/cli/allowlist-recovery.js --person <person id> --minutes 30
+```
+
+- It records a window for that admin's NEXT sign-in from any address. The window is used once and expires after 30 minutes by default (`--minutes`, 60 at most). It lets nobody else in, and it does not change the allow-list.
+- The admin still signs in with their second factor, and every step-up applies as usual. The session that sign-in creates may use the API from that one address for 30 minutes, which is time enough to confirm in the app whether the address joins the allow-list (`POST /api/v1/security/recovery/confirm`, step-up required; `GET /api/v1/security/recovery` says what is waiting). Without that confirmation the allow-list stays as it was.
+- The command refuses a person who is not an active Factory Admin, and an allow-list that is empty. A second run replaces the admin's earlier unused window.
+- Audited: `auth.allowlist_recovery.opened` (actor `operator`), `auth.allowlist_recovery.used` (the admin, with the address) and `auth.allowlist_recovery.address_added` or `.address_declined`, all in Audit under Auth.
+- No HTTP route opens a window. Nobody without shell access to the server host can use it.

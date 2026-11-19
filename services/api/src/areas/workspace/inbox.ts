@@ -40,7 +40,7 @@ export interface InboxItem {
   visibility: "private" | "project" | null;
   /** What the chat's answers cost; null for work-order and onboarding threads (their spend is the work order's budget, in the operator view). */
   spendUsd: number | null;
-  wo?: { cls: string; station: string; stationName: string; state: string; bay: string | null; gate: string | null; closed: boolean };
+  wo?: { cls: string; station: string; stationName: string; state: string; bay: string | null; gate: string | null; closed: boolean; askedOf?: string };
 }
 
 const clip = (s: string, n = 240): string => (s.length > n ? `${s.slice(0, n)}…` : s);
@@ -57,7 +57,7 @@ function primaryItem(w: WoSessionRow, me: string, pref: { pinned: boolean; archi
     // An open gate waits on this person when they may approve gates on the project (the gate's own rules, such as "not the author", still apply).
     waitingOn: w.waitingOn === "approver" && approves.has(w.project) ? "you" : w.waitingOn, unread: w.unread, latest: w.latest ? { ...w.latest, text: clip(w.latest.text) } : null, updatedAt: w.latest?.at ?? w.createdAt,
     archived: pref?.archived ? "me" : auto ? "auto" : null, pinned: !!pref?.pinned, mine: w.requestedBy === me, shared: true, owner: null, visibility: "project", spendUsd: null,
-    wo: { cls: w.cls, station: w.station, stationName: w.stationName, state: w.state, bay: w.bay, gate: w.gate, closed: w.closed },
+    wo: { cls: w.cls, station: w.station, stationName: w.stationName, state: w.state, bay: w.bay, gate: w.gate, closed: w.closed, ...(w.askedOf ? { askedOf: w.askedOf } : {}) },
   };
 }
 
