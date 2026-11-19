@@ -17,6 +17,8 @@ concurrency:
 jobs:
   release:
     name: Tag the signed images and draft the release
+    # Off until continuous delivery is switched on (repository variable GANTRY_CD_ENABLED=true): there are no signed images to tag before that.
+    if: vars.GANTRY_CD_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

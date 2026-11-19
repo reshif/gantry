@@ -17,7 +17,8 @@ concurrency:
 jobs:
   rescan:
     name: Rescan ${{ matrix.name }}
-    if: ${{ !github.event.repository.fork }}
+    # Off until continuous delivery is switched on (repository variable GANTRY_CD_ENABLED=true): there is no live release to rescan before that.
+    if: ${{ vars.GANTRY_CD_ENABLED == 'true' && !github.event.repository.fork }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

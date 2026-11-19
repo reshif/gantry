@@ -32,12 +32,13 @@ permissions:
 jobs:
   plan:
     name: Plan the release
+    # Off until a self-hosted production runner exists (repository variable GANTRY_CD_ENABLED=true turns it on).
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      vars.GANTRY_CD_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
+       github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

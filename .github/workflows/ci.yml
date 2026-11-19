@@ -268,8 +268,9 @@ jobs:
   publish:
     name: Publish image ${{ matrix.name }}
     needs: [checks, deploy-config]
-    # Only a push to main of this repository publishes (never a pull request, the queue, the schedule or a fork).
-    if: github.event_name == 'push' && !github.event.repository.fork
+    # Only a push to main of this repository publishes (never a pull request, the queue, the schedule or a fork),
+    # and only once continuous delivery is switched on (repository variable GANTRY_CD_ENABLED=true; off: CI runs the tests only).
+    if: vars.GANTRY_CD_ENABLED == 'true' && github.event_name == 'push' && !github.event.repository.fork
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     permissions:
@@ -364,7 +365,7 @@ jobs:
   release-manifest:
     name: Signed release manifest
     needs: [checks, audit, deploy-config, migrations, publish]
-    if: github.event_name == 'push' && !github.event.repository.fork
+    if: vars.GANTRY_CD_ENABLED == 'true' && github.event_name == 'push' && !github.event.repository.fork
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

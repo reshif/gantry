@@ -278,6 +278,9 @@ Migrations only go forward, and an applied migration is never edited (CI checks 
 
 ## CI and releases
 
+**Today CI runs the tests only.** Continuous delivery (image publishing, the signed release manifest, `deploy.yml`, `release.yml` and the daily `rescan.yml`) is switched off, because there is no self-hosted production runner yet. Every CD job carries `if: vars.GANTRY_CD_ENABLED == 'true'`; with the repository variable unset they are skipped and nothing is published or deployed. What still runs on GitHub-hosted runners for every pull request, the merge queue and pushes to main: lint, typecheck, tests (with Postgres), build and bundle budget, the AGENTS.md gates, the dependency audit and licences, Dockerfile/compose/Caddy/shell checks, the workflow policy, migration safety and the upgrade-from-base test, every image build (not pushed), and the Playwright e2e suite. To turn delivery on later: register the runner (labels `self-hosted,linux,gantry-prod`), apply `deploy/ci/github-settings.sh`, then set `GANTRY_CD_ENABLED=true`.
+
+
 `.github/workflows/ci.yml` runs on every pull request and every push to `main`:
 
 - lint, typecheck, every test suite against Postgres, and the build
