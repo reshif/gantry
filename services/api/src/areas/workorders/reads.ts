@@ -179,8 +179,8 @@ export async function readRecord(db: Queryable, orgId: string, woId: string) {
   const [instances, votes, decisions, attempts, results, stays, runs, events, request, prs, commits] = await Promise.all([
     q<{ id: string; gate_id: string; station: string | null; status: string; closed_reason: string | null; flow_version: number; rule_version: number | null; policy_version: number | null; head_sha: string | null; basis: Data; opened_at: Date; closed_at: Date | null }>(
       `select id, gate_id, station, status, closed_reason, flow_version, rule_version, policy_version, head_sha, basis, opened_at, closed_at from gate_instances where org_id = $1 and wo_id = $2 order by opened_at, id`),
-    q<{ gate_instance_id: string; voter: string; vote: string; comment: string; at: Date; via: string; role_id: string | null }>(
-      `select v.gate_instance_id, v.voter, v.vote, v.comment, v.at, v.via, v.role_id from gate_votes v join gate_instances g on g.org_id = v.org_id and g.id = v.gate_instance_id where v.org_id = $1 and g.wo_id = $2 order by v.at, v.id`),
+    q<{ gate_instance_id: string; voter: string; vote: string; comment: string; at: Date; via: string; role_id: string | null; for_person: string | null }>(
+      `select v.gate_instance_id, v.voter, v.vote, v.comment, v.at, v.via, v.role_id, v.for_person from gate_votes v join gate_instances g on g.org_id = v.org_id and g.id = v.gate_instance_id where v.org_id = $1 and g.wo_id = $2 order by v.at, v.id`),
     q<Record<string, unknown>>(`select gate_instance_id, decision, decided_by, rule, flow_version, gate_rule_version, policy_version, trust_level, role_assignment_id, tuple_id, agent_version, skill_versions, instruction_hash, model_id, commit_sha, detail, at from gate_decisions where org_id = $1 and wo_id = $2 order by at, id`),
     q<{ id: string; station: string; visit: number; fencing: string; state: string; outcome: string | null; started_at: Date | null; ended_at: Date | null; tuple_id: string | null; data: Data }>(
       `select id, station, visit, fencing::text, state, outcome, started_at, ended_at, tuple_id, data from attempts where org_id = $1 and wo_id = $2 order by created_at, id`),
@@ -197,7 +197,7 @@ export async function readRecord(db: Queryable, orgId: string, woId: string) {
   const gates = instances.map((i) => ({
     id: i.id, gate: i.gate_id, station: i.station, status: i.status, closedReason: i.closed_reason, headSha: i.head_sha, openedAt: iso(i.opened_at), closedAt: iso(i.closed_at),
     pinned: { flowVersion: i.flow_version, ruleVersion: i.rule_version, policyVersion: i.policy_version }, basis: i.basis,
-    votes: votes.filter((v) => v.gate_instance_id === i.id).map((v) => ({ by: v.voter, vote: v.vote, comment: v.comment, at: iso(v.at), via: v.via, role: v.role_id })),
+    votes: votes.filter((v) => v.gate_instance_id === i.id).map((v) => ({ by: v.voter, vote: v.vote, comment: v.comment, at: iso(v.at), via: v.via, role: v.role_id, ...(v.for_person ? { forPerson: v.for_person } : {}) })),
     decision: decisions.find((d) => d.gate_instance_id === i.id) ?? null,
   }));
   const totals = woTotals(wo);

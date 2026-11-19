@@ -56,6 +56,7 @@ export function templateBodyFromProject(draft: FlowDraft, project: Project): Omi
     classesSkip,
     mcp: project.mcp.slice(),
     approverPreset: project.regulated ? "strict" : "standard",
+    approvers: JSON.parse(JSON.stringify(project.approvers)) as Project["approvers"],
     notify: "standard",
     order: project.flow.order.filter(builtSt),
     bays: project.flow.bays.filter((id) => draft.catalog.bays.some((b) => b.id === id && !b.custom)),

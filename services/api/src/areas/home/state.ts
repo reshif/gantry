@@ -29,8 +29,8 @@ export async function loadHomeWorkOrders(db: Queryable, orgId: string, catalog: 
       [orgId, since],
     ),
     db.query<{ id: string; wo_id: string; gate_id: string; opened_at: Date }>(`select id, wo_id, gate_id, opened_at from gate_instances where org_id = $1 and status = 'open'`, [orgId]),
-    db.query<{ gate_instance_id: string; voter: string; vote: string; at: Date }>(
-      `select v.gate_instance_id, v.voter, v.vote, v.at from gate_votes v join gate_instances g on g.org_id = v.org_id and g.id = v.gate_instance_id where v.org_id = $1 and g.status = 'open'`, [orgId]),
+    db.query<{ gate_instance_id: string; voter: string; vote: string; at: Date; for_person: string | null }>(
+      `select v.gate_instance_id, v.voter, v.vote, v.at, v.for_person from gate_votes v join gate_instances g on g.org_id = v.org_id and g.id = v.gate_instance_id where v.org_id = $1 and g.status = 'open'`, [orgId]),
     db.query<{ wo_id: string; status: string; data: unknown }>(`select wo_id, status, data from conversations where org_id = $1 and wo_id is not null and status = 'open'`, [orgId]),
   ]);
   const gatesBy = new Map<string, typeof gates.rows>();
@@ -48,7 +48,7 @@ export async function loadHomeWorkOrders(db: Queryable, orgId: string, catalog: 
       since = Math.max(since, opened);
       g[gi.gate_id] = {
         status: "waiting",
-        approvals: votes.rows.filter((v) => v.gate_instance_id === gi.id && v.vote === "approve").map((v) => ({ by: v.voter, at: ms(v.at) ?? 0 })) as never,
+        approvals: votes.rows.filter((v) => v.gate_instance_id === gi.id && v.vote === "approve").map((v) => ({ by: v.voter, at: ms(v.at) ?? 0, ...(v.for_person ? { for: v.for_person } : {}) })) as never,
         rejections: [], checks: [], waitingSince: opened,
       };
     }

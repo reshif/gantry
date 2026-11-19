@@ -22,7 +22,7 @@ export function done(fx: Fx, msg: string, project: string | null, extra: Record<
 }
 
 export function person(actor: Actor, what = "This"): string {
-  if (!actor.personId) throw refuse("denied", `${what} is for signed-in people.`);
+  if (!actor.personId) throw refuse("denied", /\b(is|are)$/.test(what) ? `${what} for signed-in people.` : `${what} is for signed-in people.`);
   return actor.personId;
 }
 
