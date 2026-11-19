@@ -6,7 +6,7 @@
  * GET /projects/{id}/floor; every control is a command through the API.
  */
 import { useEffect, useState } from "react";
-import { fmt } from "@gantry/domain";
+import { flowOf, fmt } from "@gantry/domain";
 import { useCan, useCanMany } from "../api/can";
 import { makeStopActions } from "../shell/stopActions";
 import { useUI } from "../ui/overlay-context";
@@ -22,7 +22,7 @@ import { PartsList, type PartsSort } from "./floor/Parts";
 import { buildModel, dur, type FloorModel } from "./floor/model";
 import type { LineHandlers } from "./floor/Line";
 import { useDrawers } from "./floor/Drawers";
-import { FloorCtx, WoChip, isLive, stationIdx, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
+import { FloorCtx, WoChip, isLive, stationIdx, useFloorCtx, useFloorState, type FloorCtxValue, type FWo } from "./floor/kit";
 import { useQueryParam } from "./floor/urlState";
 import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
@@ -84,7 +84,9 @@ function LineControl() {
   const p = ctx.project;
   const killed = !!me?.factory.killed;
   const halted = !!me?.projects.find((x) => x.id === p.id)?.halted;
-  const checks = useCanMany([{ action: halted ? "line.resume" : "line.halt", project: p.id }, { action: killed ? "restore.factory" : "kill.factory" }, { action: "line.halt", project: p.id }, { action: "line.resume", project: p.id }]);
+  // S-42: a killed project is restored here (Halt is refused by the server on it, so it is not offered)
+  const projKilled = !!(p.killed ?? me?.projects.find((x) => x.id === p.id)?.killed);
+  const checks = useCanMany([{ action: halted ? "line.resume" : "line.halt", project: p.id }, { action: killed ? "restore.factory" : "kill.factory" }, { action: "line.halt", project: p.id }, { action: "line.resume", project: p.id }, { action: "restore.project", project: p.id }]);
   if (!me) return null;
   const stop = makeStopActions(ui, me);
   const guardOf = (i: number) => (ctx.replay ? REPLAY_LOCK : checks[i]?.pending ? undefined : checks[i]);
@@ -97,9 +99,11 @@ function LineControl() {
       onClick={(e) =>
         ui.menu(e.currentTarget as HTMLElement, null, [
           { head: "Line control" },
-          { label: halted ? "Resume line" : "Halt line (pause the project)", icon: halted ? "right" : "pause", guard: guardOf(0), onClick: () => (halted ? void stop.resume(p.id) : stop.halt(p.id)) },
-          ...(ctx.repos.length ? [{ head: "Pause one repo" }] : []),
-          ...ctx.repos.map((r) => ({ label: r.halted ? `Resume ${r.name}` : `Pause ${r.name}`, icon: r.halted ? "right" : "pause", guard: guardOf(r.halted ? 3 : 2), onClick: () => (r.halted ? void stop.resumeRepo(r.id) : stop.haltRepo(r.id, p.id)) })),
+          ...(projKilled
+            ? [{ label: checks[4]?.override ? "Restore project with a reason" : "Restore project", icon: "right", guard: guardOf(4), onClick: () => stop.restore("project", p.id) }]
+            : [{ label: halted ? "Resume line" : "Halt line (pause the project)", icon: halted ? "right" : "pause", guard: guardOf(0), onClick: () => (halted ? void stop.resume(p.id) : stop.halt(p.id)) }]),
+          ...(ctx.repos.length && !projKilled ? [{ head: "Pause one repo" }] : []),
+          ...(projKilled ? [] : ctx.repos).map((r) => ({ label: r.halted ? `Resume ${r.name}` : `Pause ${r.name}`, icon: r.halted ? "right" : "pause", guard: guardOf(r.halted ? 3 : 2), onClick: () => (r.halted ? void stop.resumeRepo(r.id) : stop.haltRepo(r.id, p.id)) })),
           { head: "Whole factory" },
           { label: killed ? (checks[1]?.override ? "Restore with a reason" : "Restore factory") : "Emergency stop", icon: "stop", guard: guardOf(1), onClick: () => (killed ? stop.restore("factory", null) : stop.kill("factory", null)) },
         ])
@@ -147,30 +151,41 @@ function Header({ view, onView, model, parts, onParts, focus, onFocus, replaying
   );
 }
 
+function BoardCol({ id, title, list, needs }: { id: string; title: string; list: FWo[]; needs: Set<string> }) {
+  const ctx = useFloorCtx();
+  return (
+    <div className="col" data-station={id}>
+      <h3><span>{title}</span><span>{list.length}</span></h3>
+      <div className="cards">
+        {list.length ? list.map((w) => (
+          <a key={w.id} className={`card${needs.has(w.id) ? " need" : ""}`} data-wo={w.id} id={`floor-tok-${w.id}`} href={hashFor("record", w.id, ctx.project.id)}>
+            <div className="row"><span className="mono small">{w.id}</span><span className="spacer" /><WoChip w={w} /></div>
+            <div>{w.title}</div>
+            <div className="small muted">{`${ctx.project.name} · ${w.priority}`}</div>
+          </a>
+        )) : <div className="small muted">Empty</div>}
+      </div>
+    </div>
+  );
+}
+
 function BoardPanel({ model, focus }: { model: FloorModel; focus: boolean }) {
   const ctx = useFloorCtx();
   const needs = new Set([...model.groups.flatMap((g) => g.wos.map((w) => w.id)), ...model.all.filter((b) => b.kind === "stuck" || b.kind === "gate").map((b) => b.w.id)]);
   const line = ctx.project.flow.order.map((id) => ctx.cat.stations.find((s) => s.id === id)).filter((s): s is NonNullable<typeof s> => !!s && !!ctx.project.flow.stations[s.id]?.enabled);
+  const bays = flowOf(ctx.cat, ctx.project).bays.filter((b) => b.id !== "declined");
+  const killedList = ctx.wos.filter((w) => w.state === "killed" && w.bay !== "declined");
   return (
     <Panel title="Board" flush>
       <div className={`board board-fit${focus ? " is-focus" : ""}`} id="floor-board">
-        {line.map((s) => {
-          const list = ctx.wos.filter((w) => w.station === stationIdx(ctx.cat, s.id) && !w.bay && isLive(w));
-          return (
-            <div key={s.id} className="col" data-station={s.id}>
-              <h3><span>{`${s.no} ${s.name}`}</span><span>{list.length}</span></h3>
-              <div className="cards">
-                {list.length ? list.map((w) => (
-                  <a key={w.id} className={`card${needs.has(w.id) ? " need" : ""}`} data-wo={w.id} id={`floor-tok-${w.id}`} href={hashFor("record", w.id, ctx.project.id)}>
-                    <div className="row"><span className="mono small">{w.id}</span><span className="spacer" /><WoChip w={w} /></div>
-                    <div>{w.title}</div>
-                    <div className="small muted">{`${ctx.project.name} · ${w.priority}`}</div>
-                  </a>
-                )) : <div className="small muted">Empty</div>}
-              </div>
-            </div>
-          );
-        })}
+        {line.map((s) => (
+          <BoardCol key={s.id} id={s.id} title={`${s.no} ${s.name}`} list={ctx.wos.filter((w) => w.station === stationIdx(ctx.cat, s.id) && !w.bay && isLive(w))} needs={needs} />
+        ))}
+        {/* S-41: orders parked in a bay and killed ones are on the Board too, as columns after the stations (declined orders stay out, as in the Parts list and the ticker) */}
+        {bays.map((b) => (
+          <BoardCol key={b.id} id={`bay-${b.id}`} title={`Bay · ${b.name}`} list={ctx.wos.filter((w) => w.bay === b.id && w.state !== "killed" && w.state !== "done")} needs={needs} />
+        ))}
+        {killedList.length ? <BoardCol id="killed" title="Killed" list={killedList} needs={needs} /> : null}
       </div>
     </Panel>
   );
@@ -200,12 +215,15 @@ function FloorBody({ projectId }: { projectId: string }) {
       <Header view={view} onView={setView} model={model} parts={parts} onParts={() => setParts(parts ? null : "open")} focus={focus} onFocus={() => setFocus(focus ? null : "1")} replaying={!!rp} onReplay={(on) => (on ? enter() : exit())} />
       {rp ? <ReplayBar rp={rp} playing={playing} setPlaying={setPlaying} onExit={exit} /> : null}
       {view === "board" ? (
+        <>
+          <NeedBar model={model} h={{ ...h, route: null }} onMore={() => { setParts("open"); setSort(null); }} />
         <div className={`fp-main${showParts ? " has-parts" : ""}`}>
           <div className="fp-left">
             <BoardPanel model={model} focus={focus} />
           </div>
           {showParts ? <PartsList model={model} sort={sort} onSort={(s) => setSort(s === "group" ? null : s)} onClose={() => setParts(null)} h={{ ...h, route: null }} /> : null}
         </div>
+        </>
       ) : (
         <>
           <NeedBar model={model} h={{ ...h, route: null }} onMore={() => { setParts("open"); setSort(null); }} />

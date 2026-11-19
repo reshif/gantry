@@ -347,6 +347,32 @@ describe("Floor: prototype drawers and links", () => {
     expect(await screen.findByText("Emergency stop the factory")).toBeTruthy();
   });
 
+  it("S-41: Board shows every order in a bay and every killed one, and the waiting-on-you bar", async () => {
+    const wos = WOS.map((w, i) => (i === 0 ? { ...w, state: "killed", bay: null } : w));
+    mockApi({ "GET /api/v1/projects/payments/floor": () => ({ body: floorRead({ workOrders: wos }) }) });
+    window.location.hash = "#/p/payments/floor?view=board";
+    mount(<FloorView />);
+    await screen.findAllByText("PAY");
+    const shown = new Set(Array.from(document.querySelectorAll("#floor-board [data-wo]")).map((e) => (e as HTMLElement).dataset.wo));
+    const expected = wos.filter((w) => w.state !== "done" && w.bay !== "declined");
+    expect(expected.some((w) => w.bay)).toBe(true);
+    for (const w of expected) expect(shown.has(w.id), w.id).toBe(true);
+    expect(document.querySelector('#floor-board [data-station="killed"] [data-wo]')?.getAttribute("data-wo")).toBe(wos[0]?.id);
+    expect(document.getElementById("floor-need")).toBeTruthy();
+    window.location.hash = "";
+  });
+
+  it("S-42: Line control on a killed project offers Restore project (step-up dialog) and no Halt", async () => {
+    const killed = { ...PAYMENTS, killed: { by: "p-asha", at: NOW, reason: "test", inFlight: "cancel" } };
+    mockApi({ "GET /api/v1/projects/payments/floor": () => ({ body: floorRead({ project: killed }) }) }, { me: { projects: [killed] } });
+    mount(<FloorView />);
+    fireEvent.click(await screen.findByRole("button", { name: /Line control/ }));
+    expect(screen.queryByRole("menuitem", { name: /Halt line/ })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /^Pause / })).toBeNull();
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Restore project/ }));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+  });
+
   it("keeps the view in the URL only: Board does not survive a remount without ?view=board", async () => {
     mockApi();
     window.location.hash = "#/p/payments/floor";
