@@ -157,3 +157,25 @@ export async function setProposalStatus(tx: Tx, orgId: string, person: string, m
   await tx.query(`update console_messages set data = $3::jsonb, updated_at = clock_timestamp() where org_id = $1 and id = $2`, [orgId, messageId, JSON.stringify({ ...row.data, proposals })]);
   return true;
 }
+
+/** The stored card of a message the person may act on (their own thread, or one shared with them), or null. */
+export async function readProposal(db: Pick<Tx, "query">, orgId: string, person: string, messageId: string, proposalId: string): Promise<Record<string, any> | null> {
+  const r = await db.query<{ data: { proposals?: Array<Record<string, unknown>> } }>(
+    `select m.data from console_messages m join console_threads t on t.org_id = m.org_id and t.id = m.thread_id where m.org_id = $1 and m.id = $2 and m.role = 'assistant'
+        and (t.person_id = $3 or exists (select 1 from thread_members tm where tm.org_id = t.org_id and tm.thread_id = t.id and tm.person_id = $3))`,
+    [orgId, messageId, person],
+  );
+  return (r.rows[0]?.data.proposals ?? []).find((x) => x.id === proposalId) ?? null;
+}
+
+/** Writes what the server learned from running a card: its outcome, the result text, and what a refusal still needs. Never taken from the browser. */
+export async function recordProposalOutcome(tx: Tx, orgId: string, person: string, messageId: string, proposalId: string, o: { status: "done" | "failed"; result: string; needs?: string; refusal?: { code: number; rule?: unknown; overrideKind?: string } }): Promise<boolean> {
+  const ok = await setProposalStatus(tx, orgId, person, messageId, proposalId, o.status, o.result);
+  if (!ok) return false;
+  const row = (await tx.query<{ data: { proposals?: Array<Record<string, unknown>> } }>(`select data from console_messages where org_id = $1 and id = $2 for update`, [orgId, messageId])).rows[0]!;
+  const p = (row.data.proposals ?? []).find((x) => x.id === proposalId)!;
+  if (o.needs) p.needs = o.needs.slice(0, 300); else delete p.needs;
+  if (o.refusal) p.refusal = o.refusal; else delete p.refusal;
+  await tx.query(`update console_messages set data = $3::jsonb where org_id = $1 and id = $2`, [orgId, messageId, JSON.stringify(row.data)]);
+  return true;
+}

@@ -39,6 +39,9 @@ export interface Proposal {
   entities: Cited[];
   status: "pending" | "done" | "failed" | "dismissed";
   result?: string;
+  /** What a refused card still needs (the server's own `needs` line) and the rule that refused it; written by the server when it ran the card. */
+  needs?: string;
+  refusal?: { code: number; rule?: unknown; overrideKind?: string };
 }
 
 export interface ToolCtx {
