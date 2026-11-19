@@ -19,7 +19,7 @@ import { command, decide, policyState, refuse, type CommandSpec } from "../core/
 import { loadFlow, stateWithPinned } from "../areas/workorders/model.js";
 import { actionForGate, approveGate, parseGateId, rejectGate, requireGatePin } from "../areas/workorders/gates.js";
 import { addFollowup, decline, editBrief, postMessage, reclassify, submitWO } from "../areas/workorders/intake.js";
-import { dryRunMove, moveWO, park, reassign, retry, sendBack, setRecordSummary, unpark } from "../areas/workorders/moves.js";
+import { dryRunMove, moveWO, park, reassign, retry, retryWithLimits, sendBack, setRecordSummary, unpark } from "../areas/workorders/moves.js";
 import { setWoCap } from "../areas/workorders/budget.js";
 import { keyCreator } from "../areas/apikeys/store.js";
 import { woVersion, readWoRow } from "../areas/workorders/model.js";
@@ -75,6 +75,7 @@ const BriefEditBody = z.looseObject({
   reason: z.string().trim().max(500).optional(),
 });
 const ReclassifyBody = z.looseObject({ cls: z.string().min(1).max(60), reason: Reason });
+const RetryLimitsBody = z.looseObject({ limits: z.record(z.string(), z.number().nullable().optional()), reason: z.string().trim().max(300).optional(), via: Via });
 const ReasonBody = z.looseObject({ reason: Reason.default(""), via: Via });
 const MoveBody = z.looseObject({ target: z.string().min(1).max(100), reason: Reason.optional(), dry_run: z.boolean().optional(), via: Via });
 const SendBackBody = z.looseObject({ toStation: z.string().min(1).max(100), note: Reason.default(""), via: Via });
@@ -417,6 +418,13 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/v1/work-orders/:id/retry", async (req) => {
     const { id } = Id.parse(req.params);
     return command(req, spec(id, "wo.sendback", await scopeOf(req, id)), (tx, a) => retry(tx, a, id));
+  });
+
+  /** Retry with a higher limit: a one-off raise for the next attempt only. Needs the right to change limits (project.config); a Factory Admin's reason (5+ characters) overrides a freeze and is audited. */
+  app.post("/api/v1/work-orders/:id/retry-with-limits", async (req) => {
+    const { id } = Id.parse(req.params);
+    const b = RetryLimitsBody.parse(req.body);
+    return command(req, { ...spec(id, "project.config", await scopeOf(req, id)), ...(b.reason && b.reason.length >= 5 ? { overrideReason: b.reason } : {}) }, (tx, a) => retryWithLimits(tx, a, id, { limits: b.limits, reason: b.reason }));
   });
 
   /** The work order's spending cap. Needs the project configuration right (the one PUT /budgets/{project} uses); a raise lifts the work order's budget halt. */

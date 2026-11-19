@@ -196,9 +196,13 @@ export async function startAttempt(fx: Fx, w: Wo, stationId: string): Promise<At
   await fx.tx.query(`update attempts set state = 'superseded', ended_at = $4, updated_at = now(), version = version + 1 where org_id = $1 and wo_id = $2 and station = $3 and state in ('queued','running')`, [fx.orgId, w.id, stationId, fx.now]);
   const visit = Number((await fx.tx.query(`select coalesce(max(visit), 0) + 1 as v from attempts where org_id = $1 and wo_id = $2 and station = $3`, [fx.orgId, w.id, stationId])).rows[0].v);
   const id = `ATT-${w.id}-${stationId}-${visit}`;
+  // A one-off limit raise a person approved applies to this attempt only: it moves from the work order onto the attempt, and is gone for the next one.
+  const pending = w.data.limitRaise as { station?: string } | undefined;
+  const raise = pending && (!pending.station || pending.station === stationId) ? pending : null;
+  if (raise) delete w.data.limitRaise;
   const { rows } = await fx.tx.query<{ fencing: string }>(
     `insert into attempts (org_id, id, wo_id, station, visit, state, data) values ($1,$2,$3,$4,$5,'queued',$6::jsonb) returning fencing`,
-    [fx.orgId, id, w.id, stationId, visit, JSON.stringify({ agent: openEntry(w)?.agent ?? stationDef(fx.catalog, stationId)?.agent ?? "" })],
+    [fx.orgId, id, w.id, stationId, visit, JSON.stringify({ agent: openEntry(w)?.agent ?? stationDef(fx.catalog, stationId)?.agent ?? "", ...(raise ? { limitRaise: raise } : {}) })],
   );
   const fencing = Number(rows[0]!.fencing);
   fx.jobs.push(job("attempt.dispatch", { woId: w.id, station: stationId, attemptId: id, fencing }, { dedupeKey: `attempt:${id}` }));
@@ -322,6 +326,9 @@ export async function enterStation(fx: Fx, w: Wo, stationId: string, o: { projec
   delete w.data.bayAt;
   delete w.data.bayCause;
   delete w.data.failPhase;
+  delete w.data.limitStop;
+  // A pending raise is for the next attempt at its own station only.
+  if (w.data.limitRaise && (w.data.limitRaise as { station?: string }).station !== stationId) w.data.limitRaise = undefined;
   w.data.blockReason = null;
   w.data.failReason = null;
   if (stationId === "intake") {
@@ -666,7 +673,9 @@ export { bayOf, stationIdOf };
 /* ----------------------------------------------------------------------------------- shared helpers for the commands */
 
 /** Cancels the work order's live attempts (send-back, park, decline, stop). The run tokens are revoked in the same transaction, so the edge refuses the run on its next call and the reaper removes the sandbox. */
-export async function cancelAttempts(fx: Fx, w: Pick<Wo, "id">, reason: string): Promise<number> {
+export async function cancelAttempts(fx: Fx, w: Pick<Wo, "id"> & { data?: Record<string, unknown> }, reason: string): Promise<number> {
+  // A pending one-off limit raise belongs to the attempt the person's retry starts; a send-back, redo, park, decline or any other cancel drops it.
+  if (w.data) w.data.limitRaise = undefined;
   const r = await fx.tx.query(
     `update attempts set state = 'cancelled', outcome = $4, ended_at = $3, updated_at = now(), version = version + 1 where org_id = $1 and wo_id = $2 and state in ('queued','running')`,
     [fx.orgId, w.id, fx.now, reason],

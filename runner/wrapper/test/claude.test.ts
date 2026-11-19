@@ -70,6 +70,13 @@ describe("claude invocation (flags unverified against a live CLI)", () => {
     expect(inv.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("0");
   });
 
+  it("hands the harness whatever turn limit the spec carries, so a raised limit (an agent's 500, a one-off retry) is what it stops at", () => {
+    const spec = RunSpec.parse({ adapter: "claude", station: "build", model: "m", limits: { turns: 500, wallClockSeconds: 14400, costUsd: 12.5 } });
+    const big = buildClaudeInvocation(spec, env, RELAY, { PATH: "/usr/bin" });
+    expect(big.args[big.args.indexOf("--max-turns") + 1]).toBe("500");
+    expect(spec.limits).toEqual({ turns: 500, wallClockSeconds: 14400, costUsd: 12.5 });
+  });
+
   it("passes limits, model, tools and composed instructions explicitly", () => {
     expect(flag("--max-turns")).toBe("12");
     expect(flag("--model")).toBe("claude-sonnet-4-5-20250929");
