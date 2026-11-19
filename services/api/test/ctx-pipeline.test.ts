@@ -41,7 +41,7 @@ d("agent context pipeline (S-140 to S-146)", () => {
   it("S-140: a push to the default branch becomes a base fact that moves repo_config.baseSha, and a new work order seeds from it", async () => {
     await q(`insert into repo_config (org_id, repo_id, default_branch, data) values ($1,'payments-api','main','{}'::jsonb) on conflict (org_id, repo_id) do update set data = jsonb_set(repo_config.data,'{baseSha}',to_jsonb($2::text))`, [t.orgId, A]);
     await w.insertWo("wo-ctx-1", { state: "done", position: "done" });
-    const push = (over: Record<string, unknown> = {}) => factsFromWebhook("push", { ref: "refs/heads/main", after: M, repository: { full_name: "acme/payments-api", default_branch: "main" }, ...over });
+    const push = (over: Record<string, unknown> = {}) => factsFromWebhook("push", { ref: "refs/heads/main", before: A, after: M, repository: { full_name: "acme/payments-api", default_branch: "main" }, ...over });
     // not the default branch, a deleted ref and an empty head are not the base
     expect(push({ ref: "refs/heads/feature" })).toEqual({ ignore: "push is not to the default branch" });
     expect(push({ ref: "refs/tags/v1" })).toEqual({ ignore: "push is not to the default branch" });
@@ -258,7 +258,7 @@ d("agent context pipeline (S-140 to S-146)", () => {
   });
 
   it("G-X2: a push delivered late does not take baseSha back or mark it fresh; a clean step forward does move it", async () => {
-    await q(`insert into repo_config (org_id, repo_id, default_branch, data) values ($1,'payments-api','main','{}'::jsonb) on conflict (org_id, repo_id) do update set data = $2::jsonb`, [t.orgId, JSON.stringify({ baseSha: A })]);
+    await q(`insert into repo_config (org_id, repo_id, default_branch, data) values ($1,'payments-api','main','{}'::jsonb) on conflict (org_id, repo_id) do update set data = $2::jsonb`, [t.orgId, JSON.stringify({ baseSha: M })]); // M is the stored commit, with no time known: only a push whose before is M is a clean step
     const M2 = "e".repeat(40);
     const push = (after: string, before: string, ts: string) => (factsFromWebhook("push", { ref: "refs/heads/main", before, after, head_commit: { timestamp: ts }, repository: { full_name: "acme/payments-api", default_branch: "main" } }) as { facts: never }).facts;
     const apply = (facts: never, now: string) => withTx(t.db.app, (tx) => applyFacts(tx, t.orgId, facts, { now: new Date(now) }));
@@ -303,5 +303,30 @@ d("agent context pipeline (S-140 to S-146)", () => {
     expect(riskTagsFor(["CONTRIBUTING.md"])).toEqual(["repo-conventions"]);
     expect(riskTagsFor(["docs/CONTRIBUTING.md"])).toEqual(["repo-conventions"]);
     expect(riskTagsFor(["README.md"])).toEqual([]);
+  });
+
+  it("G-X6: a base cannot move back: a hook with no before and no time, a late hook after a poll, a late hook after a dispatch refresh", async () => {
+    const M1 = "1".repeat(40), M2 = "2".repeat(40), M3 = "3".repeat(40);
+    const cfg = async () => (await q(`select data from repo_config where repo_id = 'payments-api'`))[0].data;
+    const reset = () => q(`update repo_config set data = '{}'::jsonb where repo_id = 'payments-api'`);
+    const hook = (sha: string, before: string | null, ts: string | null) => (factsFromWebhook("push", { ref: "refs/heads/main", after: sha, ...(before ? { before } : {}), ...(ts ? { head_commit: { timestamp: ts } } : {}), repository: { full_name: "acme/payments-api", default_branch: "main" } }) as { facts: never }).facts;
+    const ap = (f: never, at: string) => withTx(t.db.app, (tx) => applyFacts(tx, t.orgId, f, { now: new Date(at) }));
+    // a: neither before nor time, with a base stored: not forward
+    await reset();
+    await ap(hook(M2, M1, "2026-11-19T10:00:00Z"), "2026-11-19T10:01:00Z");
+    await ap(hook(M1, null, null), "2026-11-19T10:02:00Z");
+    expect((await cfg()).baseSha).toBe(M2);
+    // b: a poll sets M3 with its commit time; the late hook for M2 does not take it back
+    await reset();
+    await ap(hook(M2, M1, "2026-11-19T10:00:00Z"), "2026-11-19T10:01:00Z");
+    await ap({ ...(hook(M3, M2, "2026-11-19T10:05:00Z") as object), source: "poll" } as never, "2026-11-19T10:06:00Z");
+    await ap(hook(M2, M1, "2026-11-19T10:00:00Z"), "2026-11-19T10:07:00Z");
+    expect((await cfg()).baseSha).toBe(M3);
+    // b2: a poll with no commit time clears it; a late hook (before is not the stored commit) is refused, a clean step is accepted
+    await ap({ ...(hook(M3, M2, null) as object), source: "poll" } as never, "2026-11-19T10:08:00Z");
+    await ap(hook(M2, M1, "2026-11-19T10:00:00Z"), "2026-11-19T10:09:00Z");
+    expect((await cfg()).baseSha).toBe(M3);
+    await ap(hook(A, M3, "2026-11-19T10:10:00Z"), "2026-11-19T10:11:00Z");
+    expect((await cfg()).baseSha).toBe(A);
   });
 });

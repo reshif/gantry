@@ -58,12 +58,13 @@ export async function applyFacts(tx: Tx, orgId: string, f: GithubFacts, o: { now
     // A poll reads the branch tip as it is, so it is always the truth. A push is a clean step when its `before` is the stored commit, or newer than the stored commit by time.
     const cur = (await tx.query<{ sha: string | null; at: string | null }>(`select data->>'baseSha' as sha, data->>'baseCommittedAt' as at from repo_config where org_id = $1 and repo_id = $2`, [orgId, repo.id])).rows[0];
     const b = f.base;
-    const forward = f.source !== "hook" || !cur?.sha || cur.sha === b.sha || b.before === cur.sha || (b.committedAt ? !cur.at || Date.parse(b.committedAt) > Date.parse(cur.at) : !b.before);
+    // When the stored commit time is unknown only a clean step (`before` is the stored commit) is forward; a hook with no `before` and no time is not (G-X6).
+    const forward = f.source !== "hook" || !cur?.sha || cur.sha === b.sha || b.before === cur.sha || (!!cur.at && !!b.committedAt && Date.parse(b.committedAt) > Date.parse(cur.at));
     if (forward) {
       await tx.query(
         `update repo_config set data = (data || jsonb_build_object('baseSha', $3::text, 'baseBranch', $4::text, 'baseAt', $5::text)) - 'baseCommittedAt' || case when $6::text is null then '{}'::jsonb else jsonb_build_object('baseCommittedAt', $6::text) end, updated_at = now()
           where org_id = $1 and repo_id = $2`,
-        [orgId, repo.id, b.sha, b.branch, (o.now ?? new Date()).toISOString(), f.source === "hook" ? (b.committedAt ?? null) : null],
+        [orgId, repo.id, b.sha, b.branch, (o.now ?? new Date()).toISOString(), b.committedAt ?? null],
       );
     }
   }

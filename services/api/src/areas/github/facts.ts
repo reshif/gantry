@@ -94,7 +94,7 @@ export const GithubFacts = z.object({
   base: z.object({
     branch: z.string().min(1).max(300),
     sha: z.string().regex(/^[0-9a-f]{40}$/),
-    /** From a push: the commit the branch pointed at before it, and when the new head was committed. A late delivery is told apart from a newer one by these. */
+    /** The tip commit time (a push's head commit, or what the poll read from GitHub), when known. From a push: the commit the branch pointed at before it, and when the new head was committed. A late delivery is told apart from a newer one by these. */
     before: z.string().regex(/^[0-9a-f]{40}$/).optional(),
     committedAt: z.string().max(40).optional(),
   }).optional(),

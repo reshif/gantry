@@ -129,7 +129,7 @@ export async function resolveSeedCommit(db: Queryable, orgId: string, woId: stri
 }
 
 export interface FreshenDeps {
-  broker: { defaultHead(repo: string): Promise<{ ok: true; branch: string; sha: string } | { ok: false; code: string; msg: string }> };
+  broker: { defaultHead(repo: string): Promise<{ ok: true; branch: string; sha: string; committedAt?: string } | { ok: false; code: string; msg: string }> };
   now: () => Date;
   staleMs: number;
 }
@@ -148,8 +148,8 @@ export async function chooseSeedCommit(db: Queryable, orgId: string, woId: strin
   const head = await d.broker.defaultHead(repo.full).catch((e: unknown) => ({ ok: false as const, code: "unreachable", msg: e instanceof Error ? e.message : String(e) }));
   if (!head.ok) return { ...stored, why: `The recorded base commit${at ? ` (from ${at})` : " (no time recorded)"}; asking GitHub for the default branch head failed (${head.code}: ${head.msg.slice(0, 160)}).` };
   await db.query(
-    `update repo_config set data = data || jsonb_build_object('baseSha', $3::text, 'baseBranch', $4::text, 'baseAt', $5::text), updated_at = now() where org_id = $1 and repo_id = $2`,
-    [orgId, repo.id, head.sha, head.branch, d.now().toISOString()],
+    `update repo_config set data = (data || jsonb_build_object('baseSha', $3::text, 'baseBranch', $4::text, 'baseAt', $5::text)) - 'baseCommittedAt' || case when $6::text is null then '{}'::jsonb else jsonb_build_object('baseCommittedAt', $6::text) end, updated_at = now() where org_id = $1 and repo_id = $2`,
+    [orgId, repo.id, head.sha, head.branch, d.now().toISOString(), head.committedAt ?? null],
   );
   return { commit: head.sha, source: "default_head", why: `The default branch ${head.branch} head, read from GitHub at dispatch because the recorded base commit was ${at ? `${Math.round(age / 60_000)} min old` : "of unknown age"}${head.sha === stored.commit ? " (unchanged)" : ` (it was ${stored.commit.slice(0, 12)})`}.` };
 }

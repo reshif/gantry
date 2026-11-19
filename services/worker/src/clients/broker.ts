@@ -91,7 +91,7 @@ export interface BrokerClient {
   /** Seeds the run's workspace; answers the repository context (convention files at the commit) the broker read while it had the checkout. Null when an older broker does not send one. */
   seed(b: { repo: string; commit: string; volume: string; baseBranch?: string }): Promise<SeedOutcome>;
   /** The repository's default branch and its head commit as GitHub has them now (not a stored value). A refusal is a value: the caller keeps what it has and records why. */
-  defaultHead(repo: string): Promise<{ ok: true; branch: string; sha: string } | { ok: false; code: string; msg: string }>;
+  defaultHead(repo: string): Promise<{ ok: true; branch: string; sha: string; committedAt?: string } | { ok: false; code: string; msg: string }>;
   publish(b: PublishRequest): Promise<PublishOutcome>;
   gateCheck(b: { woId: string; repo: string; headSha: string; state: "passing" | "failing" | "pending"; summary?: string }): Promise<{ ok: boolean; skipped?: string }>;
   convertToDraft(b: { woId: string; repo: string; number: number }): Promise<{ ok: boolean; skipped?: string }>;
@@ -143,8 +143,8 @@ export function brokerClient(base: string, token: string, fetchImpl?: typeof fet
       return { repoContext: rc.success ? rc.data : null, baseRepoContext: brc.success ? brc.data : null, conventionChanges: cc.success ? cc.data : null, base, baseBranch: base && typeof r.body.baseBranch === "string" ? r.body.baseBranch : null };
     },
     async defaultHead(repo) {
-      const r = await call<{ branch?: unknown; sha?: unknown }>("GET", `/v1/default-head?repo=${encodeURIComponent(repo)}`, undefined, 30_000);
-      if (ok(r) && typeof r.body.branch === "string" && typeof r.body.sha === "string" && /^[0-9a-f]{40}$/.test(r.body.sha)) return { ok: true, branch: r.body.branch, sha: r.body.sha };
+      const r = await call<{ branch?: unknown; sha?: unknown; committedAt?: unknown }>("GET", `/v1/default-head?repo=${encodeURIComponent(repo)}`, undefined, 30_000);
+      if (ok(r) && typeof r.body.branch === "string" && typeof r.body.sha === "string" && /^[0-9a-f]{40}$/.test(r.body.sha)) return { ok: true, branch: r.body.branch, sha: r.body.sha, ...(typeof r.body.committedAt === "string" && Number.isFinite(Date.parse(r.body.committedAt)) ? { committedAt: r.body.committedAt } : {}) };
       if (ok(r)) return { ok: false, code: "bad_answer", msg: "The broker answered without a branch head." };
       return refusal(r) ?? { ok: false, code: codeOf(r), msg: msgOf(r) };
     },

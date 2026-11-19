@@ -51,6 +51,17 @@ d("agent context pipeline", () => {
     await w.drain();
     expect(w.broker.calls.filter((c) => c.op === "default-head")).toHaveLength(1);
   });
+  it("G-X6c: the dispatch refresh replaces the stored commit time with the new head's (or clears it), so an older hook time cannot outlive the commit", async () => {
+    await repo(A, new Date(Date.now() - 3600_000).toISOString());
+    await w.q(`update repo_config set data = data || '{"baseCommittedAt":"2026-11-19T09:00:00.000Z"}'::jsonb where repo_id = 'payments-api'`);
+    w.broker.defaultHead = { branch: "main", sha: M };
+    await w.workOrderAt("WO-CX6C");
+    await w.drain();
+    const cfg = (await w.q(`select data from repo_config where repo_id = 'payments-api'`))[0].data;
+    expect(cfg.baseSha).toBe(M);
+    expect(cfg.baseCommittedAt).toBeUndefined();
+  });
+
 
   it("S-140: a recorded commit that is stale and cannot be refreshed is used, with the reason on the run; a pull request head is never replaced", async () => {
     await repo(A, new Date(Date.now() - 3600_000).toISOString());
