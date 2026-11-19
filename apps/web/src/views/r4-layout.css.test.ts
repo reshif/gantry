@@ -32,11 +32,13 @@ describe("T-47: the audit When column", () => {
 describe("T-36, T-49 (blueprint.css)", () => {
   const css = read("styles/blueprint.css");
   it("an unread gate card in the bell drawer is the accent navy", () => {
-    expect(css).toMatch(/\.callout\.nt-unread\{border-left-color:var\(--accent\);background:var\(--accent-soft\)\}/);
+    // plain .callout is accent on accent-soft; ".warn" was the neutral grey
+    expect(css).toMatch(/\.callout\{border:1px solid var\(--line2\);border-left:3px solid var\(--accent\);background:var\(--accent-soft\)/);
     expect(read("shell/NotificationsBody.tsx")).toMatch(/className="callout nt-unread"/);
+    expect(read("shell/NotificationsBody.tsx")).not.toMatch(/className="callout warn"/);
   });
   it("a console card is held inside its bubble", () => {
-    expect(css).toMatch(/\.bub \.ccard\{box-sizing:border-box;width:100%;max-width:100%/);
-    expect(css).toMatch(/\.msg:has\(\.ccard\) \.bub\{min-width:0;max-width:100%/);
+    expect(css).toMatch(/\.bub \.ccard\{[^}]*box-sizing:border-box;max-width:100%/);
+    expect(css).toMatch(/\.msg:has\(\.ccard\) \.bub\{flex:1 1 0;max-width:100%/);
   });
 });

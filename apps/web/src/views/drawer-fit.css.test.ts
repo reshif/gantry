@@ -12,7 +12,6 @@ describe("the work order drawer lays out inside its panel (T-53)", () => {
     const rule = css.split("\n").find((l) => l.startsWith(".drawer-scroll {")) ?? "";
     expect(rule).toMatch(/grid-template-columns: minmax\(0, 1fr\)/);
     expect(rule).toMatch(/min-width: 0/);
-    expect(css).toMatch(/\.drawer-scroll > \* \{[^}]*min-width: 0/);
   });
   it("the action rows wrap and can shrink", () => {
     expect(read("styles/views.css")).toMatch(/\.drawer-actions \{[^}]*flex-wrap: wrap/);

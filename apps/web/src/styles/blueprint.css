@@ -560,13 +560,7 @@ textarea.input{height:auto;min-height:84px}
 .md-vcard .md-vhead .chip{flex:none}
 .md-vcard .md-kv dt,.md-vcard .md-kv dd{margin:0}
 /* T-49: proposal cards stay inside the agent bubble that introduces them; a card the person may not run shows a locked, quiet button */
-.msg:has(.ccard) .bub{flex:1 1 0}
-.bub .ccard{grid-template-columns:minmax(0,1fr);min-width:0}
+.msg:has(.ccard) .bub{flex:1 1 0;max-width:100%;overflow-x:hidden}
+.bub .ccard{grid-template-columns:minmax(0,1fr);min-width:0;box-sizing:border-box;max-width:100%}
 .bub .ccard .input{min-width:0;width:100%;box-sizing:border-box}
 .btn.con-cf-locked{border-style:dashed;color:var(--ink3);opacity:1}
-/* T-49 (round 4): a card never extends past, or starts left of, the bubble that holds it. */
-.bub .ccard{box-sizing:border-box;width:100%;max-width:100%;margin:0}
-.msg:has(.ccard){min-width:0;max-width:100%}
-.msg:has(.ccard) .bub{min-width:0;max-width:100%;overflow-x:hidden}
-/* T-36: an unread gate request in the bell drawer is the precision navy (accent), not the neutral warn grey. */
-.callout.nt-unread{border-left-color:var(--accent);background:var(--accent-soft)}
