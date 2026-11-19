@@ -2,6 +2,8 @@
 # unreachable (apk add git fails). The binaries come from alpine/git, which is the same Alpine release (musl), so they run as-is.
 #   docker build --build-arg INSTALL_GIT=false -f services/github/Dockerfile -t gantry-github-nogit:dev .
 #   docker build -f services/github/test/e2e/Dockerfile -t gantry-github:dev services/github/test/e2e
+# Test-only helper image: it must track the Alpine release the runtime image uses, so it is not pinned (hadolint DL3007 accepted here only).
+# hadolint ignore=DL3007
 FROM alpine/git:latest AS git
 FROM gantry-github-nogit:dev
 USER root
