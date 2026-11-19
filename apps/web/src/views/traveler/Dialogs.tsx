@@ -135,12 +135,22 @@ export function RetryLimitDialog({ woId, onClose, decision }: { woId: string; on
   const [busy, setBusy] = useState(false);
   if (!wo || !cat) return null;
   const stop = wo.limitStop;
-  const { value, errors } = parseLimits(t);
+  const parsed = parseLimits(t);
+  const { value } = parsed;
+  // A retry can only raise. The limit the run stopped on is known (used 40 of 40), so a value not above it is refused here, before it is sent; the server checks the rest.
+  const errors: typeof parsed.errors = { ...parsed.errors };
+  if (stop) {
+    if (stop.limit === "turns" && value.turns !== undefined && value.turns <= stop.max) errors.turns = `Must be more than ${stop.max}.`;
+    if (stop.limit === "time" && value.wallClockSeconds !== undefined && value.wallClockSeconds <= stop.max) errors.minutes = `Must be more than ${Math.round((stop.max / 60) * 10) / 10} minutes.`;
+    if (stop.limit === "cost" && value.costUsd !== undefined && value.costUsd <= stop.max) errors.costUsd = `Must be more than ${stop.max} dollars.`;
+  }
   const set = (k: keyof LimitText) => (e: React.ChangeEvent<HTMLInputElement>) => setT((x) => ({ ...x, [k]: e.target.value }));
   const submit = async () => {
     if (busy) return;
     if (Object.keys(errors).length) { setErr("Fix the limits marked above."); return; }
     if (!Object.keys(value).length) { setErr("Give at least one higher limit for the next attempt."); return; }
+    const raised = stop ? (stop.limit === "turns" ? value.turns : stop.limit === "time" ? value.wallClockSeconds : value.costUsd) : undefined;
+    if (stop && raised === undefined) { setErr(`The run stopped on its ${stop.limit} limit: raise that one for the next attempt.`); return; }
     setBusy(true);
     const r = await ops.retryWithLimits(wo.id, value, reason.trim() || undefined, { ifMatch: wo.version });
     setBusy(false);

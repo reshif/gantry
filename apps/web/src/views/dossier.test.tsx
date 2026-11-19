@@ -273,6 +273,24 @@ describe("Retry with a higher limit", () => {
     expect(post.headers["if-match"]).toBe("7");
   });
 
+  it("T-59: an equal or lower value for the limit that stopped the run is refused at the field, before anything is sent", async () => {
+    const calls = await open();
+    fireEvent.click(await screen.findByRole("button", { name: "Retry with a higher limit" }, { timeout: 4000 }));
+    await byIdDz("rl-turns");
+    for (const v of ["40", "30"]) {
+      fireEvent.change(document.getElementById("rl-turns")!, { target: { value: v } });
+      fireEvent.click(screen.getByRole("button", { name: "Retry with higher limit" }));
+      expect(await screen.findByText("Must be more than 40.")).toBeTruthy();
+    }
+    expect(calls.some((c) => c.method === "POST" && c.path === `/api/v1/work-orders/${W.id}/retry-with-limits`)).toBe(false);
+    // raising only another field does not lift the limit that stopped the run
+    fireEvent.change(document.getElementById("rl-turns")!, { target: { value: "" } });
+    fireEvent.change(document.getElementById("rl-min")!, { target: { value: "90" } });
+    fireEvent.click(screen.getByRole("button", { name: "Retry with higher limit" }));
+    expect(await screen.findByText(/raise that one for the next attempt/)).toBeTruthy();
+    expect(calls.some((c) => c.method === "POST" && c.path === `/api/v1/work-orders/${W.id}/retry-with-limits`)).toBe(false);
+  });
+
   it("is not offered when the work order did not stop on a limit, and is locked for someone who may not change limits", async () => {
     await open({}, travelerOf(W, { state: "failed", failReason: "Tests failed." }));
     expect(screen.queryByRole("button", { name: "Retry with a higher limit" })).toBeNull();
